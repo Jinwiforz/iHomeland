@@ -416,7 +416,7 @@ output.json
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -540,21 +540,3 @@ playground.xcworkspace
 *.moved-aside
 *.xcuserstate
 *.xcscmblueprint
-
-### iHomeland workspace
-/.agents/
-/.codex/
-/client/[Ll]ibrary/
-/client/[Tt]emp/
-/client/[Oo]bj/
-/client/[Ll]ogs/
-/client/[Uu]ser[Ss]ettings/
-/client/[Bb]uild/
-/client/[Bb]uilds/
-/client/.vscode/
-/client/.vsconfig
-/client/*.slnx
-/server/.gocache/
-/server/.gomodcache/
-/server/.env.local
-/.tools/

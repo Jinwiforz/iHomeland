@@ -1,20 +1,34 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  项目：iHomeland
+  领域：面向未来 Unity 或 Godot 客户端的在线游戏项目。
+  默认语言：所有面向项目成员的文档、说明、总结、OpenSpec artifacts 和设计讨论默认使用中文；代码标识符、协议字段、命令和路径保留英文。
+  早期后端范围：外围后台、大厅、轻量匹配、自定义房间、小中规模房间服、实时网关和自研房间逻辑。
+  未来范围警告：不得将早期技术栈视为完整《英雄联盟》级或《魔兽争霸》级核心战斗服架构。
+  技术栈：Go、Gin、WebSocket/TCP、Protobuf、Redis、MySQL、gRPC、slog 或 zap、Docker、自研房间逻辑。
+  架构风格：保持传输层、房间逻辑、持久化、协议和运维边界清晰、可测试、可演进。
+  Go 命名规则：包名小写短名，不使用下划线；文件名小写蛇形；导出标识符 PascalCase；非导出标识符 camelCase；ID、URL、HTTP、RPC、TCP、JSON、SQL 等缩写保持一致。
+  代码质量规则：代码必须正确、清晰、优雅、精确、可测试、可维护；避免过度设计；关键路径必须有测试和必要注释。
+  注释规则：注释默认使用中文；导出的 Go 标识符必须有 Go doc；复杂状态机、协议兼容、幂等、重连、权限和一致性逻辑必须解释设计意图、边界和不变量。
+  协议规则：客户端与服务端实时通信使用 Protobuf envelope，并显式管理协议版本。
+  持久化规则：MySQL 是持久数据事实来源；Redis 是短期运行态数据，必须有过期或重建路径。
+  规划规则：实现权威高频 MOBA/RTS 战斗模拟前，必须先创建单独 OpenSpec change。
+  Change 范围规则：一个 OpenSpec change 只解决一个明确问题；长期路线写入 docs/roadmap.md；设计决策写入 design.md；系统行为写入 specs/；实现动作写入 tasks.md。
+  文档规则：不要创建兼容入口、重复索引或无实际职责的说明文档；新增文档必须有明确 owner、用途和维护场景。
+  第一里程碑：自定义房间大厅。暂不实现匹配系统、MOBA/RTS 高频战斗模拟、独立 battle server、跨服、观战和回放。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - 明确写出本 change 做什么和不做什么。
+    - 不要把长期路线写成单个 change 的目标。
+  design:
+    - 记录关键决策、替代方案、风险和边界。
+    - 如果设计会扩大第一里程碑范围，必须明确说明并拆分 change。
+  tasks:
+    - 只写可执行、可验收的动作。
+    - 不写空泛目标，不写纯决策项。
+    - 单个任务应能在一次短工作会话内完成。
+  specs:
+    - 每个 requirement 必须有至少一个 scenario。
+    - 只记录长期系统行为，不记录一次性实现步骤。
