@@ -15,10 +15,20 @@ tools/       开发、生成、构建和运维辅助工具
 
 ```text
 server/
+  README.md
+  go.mod
+  go.sum
+  version.json
   cmd/
     server/
       main.go
+  config/
+    local.yaml
+  scripts/
+    run.bat
+    test.bat
   internal/
+    app/
     config/
     logger/
     ops/
@@ -30,7 +40,7 @@ server/
 
 ### `cmd/server`
 
-应用入口，只做启动编排：
+服务端二进制入口，只做启动编排：
 
 - 加载配置
 - 初始化 logger
@@ -38,9 +48,37 @@ server/
 - 注册 HTTP 和 WebSocket
 - 启动和优雅关闭服务
 
+### `config`
+
+服务端本地配置目录。`config/local.yaml` 用于本地开发默认配置，环境变量只作为临时覆盖或部署覆盖。
+
+### `README.md`
+
+服务端模块说明，包含本地运行、测试、配置覆盖和模块内开发约束。根目录 README 只描述项目整体架构和文档入口，不承载服务端具体命令。
+
+### `scripts`
+
+服务端辅助脚本目录，例如本地测试、生成、检查和构建脚本。该目录不承载业务代码，也不与根目录 `tools/` 的跨模块工具职责重叠。
+
+### `go.mod` 和 `go.sum`
+
+服务端 Go module 文件归属 `server/`，避免将服务端依赖和缓存扩散到仓库根目录。
+
+### `version.json`
+
+服务端版本元数据文件，由 `/version` 接口读取。根目录 `release.json` 表示整体发布版本，`client/version.json` 表示客户端版本。
+
 ### `internal/config`
 
 配置结构、默认值、加载和校验。
+
+### `internal/app`
+
+应用组装层：
+
+- 连接配置、日志和基础运维路由
+- 创建 HTTP server
+- 保持启动编排之外的依赖组装逻辑
 
 ### `internal/logger`
 
@@ -88,6 +126,8 @@ server/
 ### `internal/protocol`
 
 协议注册、消息 ID 映射和生成代码适配。`.proto` 源文件优先放在 `shared/proto/`。
+
+`gateway`、`room`、`storage`、`protocol` 的完整实现由后续 OpenSpec change 分别推进；当前服务端基础只保证 HTTP 控制面可运行。
 
 ## 文档结构
 

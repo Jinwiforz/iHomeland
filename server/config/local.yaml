@@ -1,0 +1,6 @@
+httpAddr: "127.0.0.1:8080"
+logLevel: "info"
+protocolVersion: 0
+releasePath: "../release.json"
+serverVersionPath: "version.json"
+clientVersionPath: "../client/version.json"

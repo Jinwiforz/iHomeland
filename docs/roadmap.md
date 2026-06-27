@@ -46,9 +46,9 @@
 
 不做：不实现服务端功能，不生成大量业务代码。
 
-## 后续 OpenSpec Change 拆分
-
 ### add-server-foundation
+
+状态：已实现，待归档。
 
 目标：初始化 Go 服务端骨架。
 
@@ -64,6 +64,7 @@
 - `/readyz`
 - `/version`
 - 基础测试
+- 本地运行和测试脚本
 
 不做：
 
@@ -71,6 +72,8 @@
 - 不做房间业务
 - 不接入 Redis/MySQL 真实业务数据
 - 不拆分 gRPC 服务
+
+## 后续 OpenSpec Change 拆分
 
 ### add-protocol-envelope
 

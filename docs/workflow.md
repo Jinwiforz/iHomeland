@@ -40,16 +40,19 @@
 - 实现需要先做多个未确定技术决策。
 - 回滚时无法清楚判断影响范围。
 
-第一阶段推荐 change 顺序：
+第一阶段已完成 change：
 
 1. `add-server-foundation`
-2. `add-protocol-envelope`
-3. `add-local-infra`
-4. `add-websocket-gateway`
-5. `add-room-lobby`
-6. `add-persistence-boundaries`
-7. `document-client-integration`
-8. `add-internal-service-boundaries`
+
+第一阶段后续推荐 change 顺序：
+
+1. `add-protocol-envelope`
+2. `add-local-infra`
+3. `add-websocket-gateway`
+4. `add-room-lobby`
+5. `add-persistence-boundaries`
+6. `document-client-integration`
+7. `add-internal-service-boundaries`
 
 ## 任务编写规则
 

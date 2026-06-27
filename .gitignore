@@ -127,6 +127,10 @@ go.work.sum
 # env file
 .env
 
+# Local Go caches used by sandboxed tooling
+server/.gocache/
+server/.gomodcache/
+
 ### Java
 # Compiled class file
 *.class

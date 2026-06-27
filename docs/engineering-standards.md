@@ -32,6 +32,8 @@ iHomeland/
     cmd/
       server/
         main.go
+    config/
+      local.yaml
     internal/
       config/
       logger/
@@ -40,6 +42,9 @@ iHomeland/
       room/
       storage/
       protocol/
+    scripts/
+      run.bat
+      test.bat
   shared/
     proto/
   tools/
