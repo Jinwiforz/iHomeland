@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package ihomeland.realtime.v1;
+
+import "google/protobuf/any.proto";
+
+option go_package = "ihomeland/server/internal/protocol/pb/realtime/v1;pb";
+
+// MessageID 定义第一阶段实时协议的稳定消息编号。
+// 已发布编号不得复用；废弃消息必须在文档中标记并保留编号。
+enum MessageID {
+  MESSAGE_ID_UNSPECIFIED = 0;
+
+  // 系统与网关消息号段：1-999。
+  MESSAGE_ID_HEARTBEAT_REQUEST = 1;
+  MESSAGE_ID_HEARTBEAT_RESPONSE = 2;
+  MESSAGE_ID_ERROR_RESPONSE = 3;
+  MESSAGE_ID_PROTOCOL_VERSION_UNSUPPORTED = 4;
+}
+
+// ErrorCode 定义可跨端识别的稳定错误码。
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_PROTOCOL_VERSION_UNSUPPORTED = 1;
+  ERROR_CODE_MESSAGE_ID_UNSUPPORTED = 2;
+  ERROR_CODE_PAYLOAD_INVALID = 3;
+  ERROR_CODE_REQUEST_ID_REQUIRED = 4;
+}
+
+// Envelope 是 WebSocket 与后续 TCP 共用的实时消息信封。
+message Envelope {
+  // protocol_version 是客户端与服务端显式协商和校验的协议版本。
+  uint32 protocol_version = 1;
+
+  // message_id 是稳定消息编号，用于跨语言路由、日志排查和兼容管理。
+  MessageID message_id = 2;
+
+  // request_id 用于关联请求、响应和错误；需要响应的消息必须填写。
+  string request_id = 3;
+
+  // sequence 是单连接内递增序列号，用于基础顺序排查和重复消息识别。
+  uint64 sequence = 4;
+
+  // timestamp_ms 是发送方生成 envelope 时的 Unix 毫秒时间戳。
+  int64 timestamp_ms = 5;
+
+  // payload 承载实际 Protobuf 消息；消息类型必须与 message_id 注册表一致。
+  google.protobuf.Any payload = 6;
+}
+
+// HeartbeatRequest 是客户端到服务端的基础心跳请求。
+message HeartbeatRequest {
+  int64 client_time_ms = 1;
+}
+
+// HeartbeatResponse 是服务端对心跳请求的响应。
+message HeartbeatResponse {
+  int64 client_time_ms = 1;
+  int64 server_time_ms = 2;
+}
+
+// ErrorResponse 是服务端返回给客户端的结构化错误响应。
+message ErrorResponse {
+  ErrorCode code = 1;
+  string message = 2;
+  string detail = 3;
+}
+
+// ProtocolVersionUnsupported 描述服务端支持的协议版本范围。
+message ProtocolVersionUnsupported {
+  uint32 client_version = 1;
+  uint32 min_supported_version = 2;
+  uint32 max_supported_version = 3;
+}

@@ -11,6 +11,21 @@ shared/      跨端共享协议和生成配置
 tools/       开发、生成、构建和运维辅助工具
 ```
 
+## 共享协议结构
+
+```text
+shared/
+  proto/
+    README.md
+    realtime/
+      v1/
+        envelope.proto
+```
+
+### `shared/proto`
+
+跨端 Protobuf 源文件目录。客户端和服务端都以这里的 schema 作为实时通信契约，生成代码不得手工修改。
+
 ## 服务端目标结构
 
 ```text
@@ -33,9 +48,10 @@ server/
     logger/
     ops/
     gateway/
+    protocol/
+      pb/
     room/
     storage/
-    protocol/
 ```
 
 ### `cmd/server`
@@ -58,7 +74,7 @@ server/
 
 ### `scripts`
 
-服务端辅助脚本目录，例如本地测试、生成、检查和构建脚本。该目录不承载业务代码，也不与根目录 `tools/` 的跨模块工具职责重叠。
+服务端辅助脚本目录，例如本地运行、测试、检查和构建脚本。该目录不承载业务代码，也不与根目录 `tools/` 的跨模块工具职责重叠。
 
 ### `go.mod` 和 `go.sum`
 
@@ -125,7 +141,7 @@ server/
 
 ### `internal/protocol`
 
-协议注册、消息 ID 映射和生成代码适配。`.proto` 源文件优先放在 `shared/proto/`。
+协议注册、消息 ID 映射、版本校验、envelope 编解码和生成代码适配。`.proto` 源文件放在 `shared/proto/`，生成代码归属 `internal/protocol/pb/`。
 
 `gateway`、`room`、`storage`、`protocol` 的完整实现由后续 OpenSpec change 分别推进；当前服务端基础只保证 HTTP 控制面可运行。
 
@@ -156,3 +172,15 @@ openspec/
 ```
 
 `openspec/specs/` 是长期行为契约。`openspec/changes/` 是一次次拟议变更，完成后归档并同步到主 specs。
+
+## 工具结构
+
+```text
+tools/
+  proto/
+    generate.bat
+```
+
+### `tools/proto`
+
+跨端协议生成工具目录。协议源文件位于 `shared/proto/`，当前生成 Go 服务端代码，后续 Unity 或 Godot 生成入口也归属此处。

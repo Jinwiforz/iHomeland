@@ -12,6 +12,7 @@
 - `/healthz`
 - `/readyz`
 - `/version`
+- Protobuf envelope 基础协议适配
 - 优雅关闭
 - 基础单元测试
 
@@ -25,6 +26,7 @@ server/
   internal/config/   配置结构、默认值、加载和校验
   internal/logger/   项目级日志适配
   internal/ops/      健康检查、就绪检查、版本接口
+  internal/protocol/ 协议适配和生成代码
   scripts/           服务端辅助脚本
   go.mod
   go.sum
@@ -71,6 +73,30 @@ ok   ihomeland/server/internal/app
 ok   ihomeland/server/internal/config
 ?    ihomeland/server/internal/logger [no test files]
 ok   ihomeland/server/internal/ops
+ok   ihomeland/server/internal/protocol
+?    ihomeland/server/internal/protocol/pb/realtime/v1 [no test files]
+```
+
+## 协议生成
+
+需要本机可用 `protoc` 和 `protoc-gen-go`。
+
+执行：
+
+```powershell
+..\tools\proto\generate.bat
+```
+
+协议源文件位于：
+
+```text
+..\shared\proto
+```
+
+生成代码归属：
+
+```text
+internal\protocol\pb
 ```
 
 ## 配置覆盖

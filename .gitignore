@@ -130,6 +130,7 @@ go.work.sum
 # Local Go caches used by sandboxed tooling
 server/.gocache/
 server/.gomodcache/
+.tools/
 
 ### Java
 # Compiled class file

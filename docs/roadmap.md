@@ -48,7 +48,7 @@
 
 ### add-server-foundation
 
-状态：已实现，待归档。
+状态：已归档。
 
 目标：初始化 Go 服务端骨架。
 
@@ -73,9 +73,9 @@
 - 不接入 Redis/MySQL 真实业务数据
 - 不拆分 gRPC 服务
 
-## 后续 OpenSpec Change 拆分
-
 ### add-protocol-envelope
+
+状态：已归档。
 
 目标：建立 Protobuf 实时消息信封。
 
@@ -89,7 +89,9 @@
 - 序列号
 - 心跳消息
 - 错误响应
-- Go 生成脚本
+- 跨端协议生成脚本
+- Go 服务端生成代码
+- 服务端协议适配包
 - Unity/Godot 输出路径预留
 - 协议兼容文档
 
@@ -97,6 +99,8 @@
 
 - 不实现 WebSocket 网关
 - 不实现房间业务
+
+## 后续 OpenSpec Change 拆分
 
 ### add-local-infra
 

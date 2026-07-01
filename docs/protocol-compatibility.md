@@ -25,14 +25,48 @@
 
 ## Envelope 建议字段
 
-```text
-protocol_version
-message_id
-request_id
-sequence
-timestamp_ms
-payload
-```
+实时通信 envelope 必须包含：
+
+- `protocol_version`：客户端与服务端显式校验的协议版本。
+- `message_id`：稳定消息编号，用于跨语言路由、日志排查和兼容管理。
+- `request_id`：请求、响应和错误的关联 ID；需要响应的消息必须填写。
+- `sequence`：单连接内递增序列号，用于基础顺序排查和重复消息识别。
+- `timestamp_ms`：发送方生成消息时的 Unix 毫秒时间戳。
+- `payload`：实际 Protobuf 消息。
+
+WebSocket 和后续 TCP 必须复用同一 envelope schema。
+
+## Message ID 规则
+
+第一阶段号段：
+
+- `1-999`：系统和网关消息。
+- `1000-1999`：账号或会话消息。
+- `2000-2999`：房间大厅消息。
+- `3000-3999`：匹配相关消息。
+- `9000+`：实验或保留消息，发布前必须迁移到正式号段。
+
+当前系统消息：
+
+- `1`：`HeartbeatRequest`
+- `2`：`HeartbeatResponse`
+- `3`：`ErrorResponse`
+- `4`：`ProtocolVersionUnsupported`
+
+每个 message id 必须有 owner。已发布 message id 不得复用；废弃消息必须保留编号并记录迁移策略。
+
+## 错误响应规则
+
+服务端拒绝或无法处理 envelope 时必须返回结构化错误响应。
+
+当前基础错误码：
+
+- `PROTOCOL_VERSION_UNSUPPORTED`
+- `MESSAGE_ID_UNSUPPORTED`
+- `PAYLOAD_INVALID`
+- `REQUEST_ID_REQUIRED`
+
+需要响应的请求失败时，错误响应必须回传相同 `request_id`。
 
 ## 版本拒绝策略
 
