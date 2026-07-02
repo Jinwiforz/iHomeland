@@ -1,0 +1,37 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ihomeland-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${IHOMELAND_MYSQL_ROOT_PASSWORD:-ihomeland_root}
+      MYSQL_DATABASE: ${IHOMELAND_MYSQL_DATABASE:-ihomeland}
+      MYSQL_USER: ${IHOMELAND_MYSQL_USER:-ihomeland}
+      MYSQL_PASSWORD: ${IHOMELAND_MYSQL_PASSWORD:-ihomeland_dev}
+    ports:
+      - "${IHOMELAND_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - ihomeland_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7.2
+    container_name: ihomeland-redis
+    ports:
+      - "${IHOMELAND_REDIS_PORT:-6379}:6379"
+    volumes:
+      - ihomeland_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  ihomeland_mysql_data:
+  ihomeland_redis_data:

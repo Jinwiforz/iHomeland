@@ -10,7 +10,7 @@
 - 结构化日志
 - Gin HTTP server
 - `/healthz`
-- `/readyz`
+- `/readyz`，包含本地 MySQL 和 Redis 依赖状态
 - `/version`
 - Protobuf envelope 基础协议适配
 - 优雅关闭
@@ -35,6 +35,22 @@ server/
 
 ## 本地运行
 
+先在仓库根目录启动本地基础设施：
+
+```powershell
+.\server\scripts\start-local-infra.bat
+```
+
+该脚本使用 `server/compose.yaml` 启动 MySQL 和 Redis，并等待容器健康检查通过。停止本地基础设施：
+
+```powershell
+.\server\scripts\stop-local-infra.bat
+```
+
+停止脚本默认保留开发数据卷；需要清理数据时手动执行带 volume 删除的 Docker Compose 命令。
+
+启动服务端：
+
 执行：
 
 ```powershell
@@ -50,6 +66,16 @@ config/local.yaml
 日常开发优先修改 `config/local.yaml`。环境变量只用于临时覆盖配置，不作为默认开发入口。
 
 运行过程中产生的 Go 工具链缓存应保留在 `server/` 内。
+
+本地服务启动后可从仓库根目录验证基础设施和基础接口：
+
+```powershell
+.\server\scripts\verify-local.bat
+```
+
+验证脚本只检查服务端实际配置会连接的地址：`IHOMELAND_MYSQL_ADDR`、`IHOMELAND_REDIS_ADDR` 指向的 TCP 地址是否可连接，并请求 `/healthz`、`/readyz` 和 `/version`。未设置地址时默认检查 `127.0.0.1:3306` 和 `127.0.0.1:6379`。
+
+因此 Docker 和本机安装的 MySQL、Redis 可以二选一使用；关键是服务端配置指向的端口必须可连接。Docker 容器是否 healthy 由 `start-local-infra.bat` 负责检查，`verify-local.bat` 不关心依赖是由 Docker 还是本机服务提供。不要让 Docker 和本机安装同时占用同一端口。
 
 ## 本地测试
 
@@ -110,6 +136,10 @@ internal\protocol\pb
 - `IHOMELAND_RELEASE_PATH`
 - `IHOMELAND_SERVER_VERSION_PATH`
 - `IHOMELAND_CLIENT_VERSION_PATH`
+- `IHOMELAND_MYSQL_ADDR`
+- `IHOMELAND_MYSQL_DATABASE`
+- `IHOMELAND_MYSQL_USER`
+- `IHOMELAND_REDIS_ADDR`
 
 除临时调试、CI 或部署场景外，不建议把这些环境变量作为日常启动方式。
 

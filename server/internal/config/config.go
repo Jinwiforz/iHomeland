@@ -21,6 +21,10 @@ const (
 	defaultReleasePath       = "../release.json"
 	defaultServerVersionPath = "version.json"
 	defaultClientVersionPath = "../client/version.json"
+	defaultMySQLAddr         = "127.0.0.1:3306"
+	defaultMySQLDatabase     = "ihomeland"
+	defaultMySQLUser         = "ihomeland"
+	defaultRedisAddr         = "127.0.0.1:6379"
 )
 
 const (
@@ -31,6 +35,10 @@ const (
 	envReleasePath       = "IHOMELAND_RELEASE_PATH"
 	envServerVersionPath = "IHOMELAND_SERVER_VERSION_PATH"
 	envClientVersionPath = "IHOMELAND_CLIENT_VERSION_PATH"
+	envMySQLAddr         = "IHOMELAND_MYSQL_ADDR"
+	envMySQLDatabase     = "IHOMELAND_MYSQL_DATABASE"
+	envMySQLUser         = "IHOMELAND_MYSQL_USER"
+	envRedisAddr         = "IHOMELAND_REDIS_ADDR"
 )
 
 // Config 描述服务端启动所需配置。
@@ -42,6 +50,20 @@ type Config struct {
 	ReleasePath       string
 	ServerVersionPath string
 	ClientVersionPath string
+	MySQL             MySQLConfig
+	Redis             RedisConfig
+}
+
+// MySQLConfig 描述本地 MySQL 基础设施连接配置。
+type MySQLConfig struct {
+	Addr     string
+	Database string
+	User     string
+}
+
+// RedisConfig 描述本地 Redis 基础设施连接配置。
+type RedisConfig struct {
+	Addr string
 }
 
 // Default 返回本地开发可直接使用的默认配置。
@@ -54,6 +76,14 @@ func Default() Config {
 		ReleasePath:       defaultReleasePath,
 		ServerVersionPath: defaultServerVersionPath,
 		ClientVersionPath: defaultClientVersionPath,
+		MySQL: MySQLConfig{
+			Addr:     defaultMySQLAddr,
+			Database: defaultMySQLDatabase,
+			User:     defaultMySQLUser,
+		},
+		Redis: RedisConfig{
+			Addr: defaultRedisAddr,
+		},
 	}
 }
 
@@ -84,6 +114,14 @@ type fileConfig struct {
 	ReleasePath       string `yaml:"releasePath"`
 	ServerVersionPath string `yaml:"serverVersionPath"`
 	ClientVersionPath string `yaml:"clientVersionPath"`
+	MySQL             struct {
+		Addr     string `yaml:"addr"`
+		Database string `yaml:"database"`
+		User     string `yaml:"user"`
+	} `yaml:"mysql"`
+	Redis struct {
+		Addr string `yaml:"addr"`
+	} `yaml:"redis"`
 }
 
 func applyFile(cfg *Config) error {
@@ -122,6 +160,18 @@ func applyFile(cfg *Config) error {
 	if strings.TrimSpace(fileCfg.ClientVersionPath) != "" {
 		cfg.ClientVersionPath = fileCfg.ClientVersionPath
 	}
+	if strings.TrimSpace(fileCfg.MySQL.Addr) != "" {
+		cfg.MySQL.Addr = fileCfg.MySQL.Addr
+	}
+	if strings.TrimSpace(fileCfg.MySQL.Database) != "" {
+		cfg.MySQL.Database = fileCfg.MySQL.Database
+	}
+	if strings.TrimSpace(fileCfg.MySQL.User) != "" {
+		cfg.MySQL.User = fileCfg.MySQL.User
+	}
+	if strings.TrimSpace(fileCfg.Redis.Addr) != "" {
+		cfg.Redis.Addr = fileCfg.Redis.Addr
+	}
 
 	return nil
 }
@@ -149,6 +199,18 @@ func applyEnv(cfg *Config) error {
 	if value := strings.TrimSpace(os.Getenv(envClientVersionPath)); value != "" {
 		cfg.ClientVersionPath = value
 	}
+	if value := strings.TrimSpace(os.Getenv(envMySQLAddr)); value != "" {
+		cfg.MySQL.Addr = value
+	}
+	if value := strings.TrimSpace(os.Getenv(envMySQLDatabase)); value != "" {
+		cfg.MySQL.Database = value
+	}
+	if value := strings.TrimSpace(os.Getenv(envMySQLUser)); value != "" {
+		cfg.MySQL.User = value
+	}
+	if value := strings.TrimSpace(os.Getenv(envRedisAddr)); value != "" {
+		cfg.Redis.Addr = value
+	}
 	return nil
 }
 
@@ -174,6 +236,28 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.ClientVersionPath) == "" {
 		return errors.New("client version path is required")
+	}
+	if err := validateHostPort("mysql addr", c.MySQL.Addr); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.MySQL.Database) == "" {
+		return errors.New("mysql database is required")
+	}
+	if strings.TrimSpace(c.MySQL.User) == "" {
+		return errors.New("mysql user is required")
+	}
+	if err := validateHostPort("redis addr", c.Redis.Addr); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateHostPort(name string, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if _, _, err := net.SplitHostPort(value); err != nil {
+		return fmt.Errorf("invalid %s %q: %w", name, value, err)
 	}
 	return nil
 }

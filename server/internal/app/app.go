@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ihomeland/server/internal/config"
+	"ihomeland/server/internal/infra"
 	"ihomeland/server/internal/ops"
 )
 
@@ -22,7 +23,7 @@ func NewHTTPServer(cfg config.Config, log *slog.Logger) (*http.Server, error) {
 		Release: cfg.ReleasePath,
 		Server:  cfg.ServerVersionPath,
 		Client:  cfg.ClientVersionPath,
-	}, log)
+	}, infra.NewTCPChecker(cfg), log)
 
 	return &http.Server{
 		Addr:    cfg.HTTPAddr,

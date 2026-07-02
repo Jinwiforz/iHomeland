@@ -27,7 +27,7 @@ iHomeland 是一个计划使用 Go 服务端搭配 Unity 或 Godot 客户端开�
 client/      客户端工程或客户端版本信息
 docs/        项目文档、架构、路线图、规范
 openspec/    需求、设计、规格和变更任务
-server/      Go 服务端模块
+server/      Go 服务端模块和本地服务端基础设施配置
 shared/      跨端共享协议和生成配置
 tools/       开发、生成、构建和运维辅助工具
 ```
@@ -47,12 +47,15 @@ tools/       开发、生成、构建和运维辅助工具
 ## 模块入口
 
 - 服务端开发、运行、测试和配置说明见 `server/README.md`
+- 本地 MySQL/Redis 可以使用 Docker Compose，也可以使用本机安装服务；验证以服务端实际配置地址是否可连接为准
 - 架构或跨模块变更必须先通过 OpenSpec change 描述清楚，再进入实现
 
 ## OpenSpec
 
 当前主要长期规格位于：
 
+- `openspec/specs/server-foundation/spec.md`
+- `openspec/specs/local-infra/spec.md`
 - `openspec/specs/protocol/spec.md`
 - `openspec/specs/gateway/spec.md`
 - `openspec/specs/room/spec.md`

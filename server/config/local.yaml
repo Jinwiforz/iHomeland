@@ -4,3 +4,9 @@ protocolVersion: 0
 releasePath: "../release.json"
 serverVersionPath: "version.json"
 clientVersionPath: "../client/version.json"
+mysql:
+  addr: "127.0.0.1:3306"
+  database: "ihomeland"
+  user: "ihomeland"
+redis:
+  addr: "127.0.0.1:6379"

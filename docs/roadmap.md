@@ -100,25 +100,31 @@
 - 不实现 WebSocket 网关
 - 不实现房间业务
 
-## 后续 OpenSpec Change 拆分
-
 ### add-local-infra
+
+状态：已归档。
 
 目标：建立本地开发环境。
 
 范围：
 
-- `docker-compose.yml`
-- Redis
-- MySQL
-- `.env.example`
-- migration 目录
-- Redis key namespace 文档
+- `server/compose.yaml`
+- Docker Compose 本地 MySQL、Redis
+- `server/.env.example`
+- `server/config/local.yaml` 本地依赖配置
+- MySQL、Redis TCP 依赖探测
+- `/readyz` 输出本地依赖状态
+- 本地启动、停止和验证脚本
+- 支持 Docker Compose 与本机安装 MySQL/Redis 两种本地依赖来源
 
 不做：
 
 - 不做生产部署
 - 不设计完整数据库 schema
+- 不创建业务 Redis key
+- 不接入房间持久化读写
+
+## 后续 OpenSpec Change 拆分
 
 ### add-websocket-gateway
 

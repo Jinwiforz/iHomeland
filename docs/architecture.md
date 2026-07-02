@@ -72,7 +72,7 @@ Redis 用于短期运行态数据：
 - lock
 - rate limit
 
-第一里程碑可以先使用内存 repository 验证房间逻辑，Redis 和 MySQL 在 `add-local-infra` 与 `add-persistence-boundaries` 中逐步接入。
+第一里程碑可以先使用内存 repository 验证房间逻辑。本地 MySQL 和 Redis 基础设施已经由 `local-infra` 规格约束，可通过 Docker Compose 或本机安装服务提供；业务读写接入仍由后续 `add-persistence-boundaries` 推进。
 
 ### Future Battle Server
 

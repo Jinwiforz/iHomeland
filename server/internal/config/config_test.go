@@ -19,6 +19,18 @@ func TestDefault(t *testing.T) {
 	if cfg.ProtocolVersion != defaultProtocolVersion {
 		t.Fatalf("ProtocolVersion = %d, want %d", cfg.ProtocolVersion, defaultProtocolVersion)
 	}
+	if cfg.MySQL.Addr != defaultMySQLAddr {
+		t.Fatalf("MySQL.Addr = %q, want %q", cfg.MySQL.Addr, defaultMySQLAddr)
+	}
+	if cfg.MySQL.Database != defaultMySQLDatabase {
+		t.Fatalf("MySQL.Database = %q, want %q", cfg.MySQL.Database, defaultMySQLDatabase)
+	}
+	if cfg.MySQL.User != defaultMySQLUser {
+		t.Fatalf("MySQL.User = %q, want %q", cfg.MySQL.User, defaultMySQLUser)
+	}
+	if cfg.Redis.Addr != defaultRedisAddr {
+		t.Fatalf("Redis.Addr = %q, want %q", cfg.Redis.Addr, defaultRedisAddr)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -28,6 +40,10 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv(envReleasePath, "testdata/release.json")
 	t.Setenv(envServerVersionPath, "testdata/server.json")
 	t.Setenv(envClientVersionPath, "testdata/client.json")
+	t.Setenv(envMySQLAddr, "127.0.0.1:33306")
+	t.Setenv(envMySQLDatabase, "ihomeland_test")
+	t.Setenv(envMySQLUser, "ihomeland_test")
+	t.Setenv(envRedisAddr, "127.0.0.1:36379")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -46,6 +62,18 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.ReleasePath != "testdata/release.json" {
 		t.Fatalf("ReleasePath = %q", cfg.ReleasePath)
 	}
+	if cfg.MySQL.Addr != "127.0.0.1:33306" {
+		t.Fatalf("MySQL.Addr = %q", cfg.MySQL.Addr)
+	}
+	if cfg.MySQL.Database != "ihomeland_test" {
+		t.Fatalf("MySQL.Database = %q", cfg.MySQL.Database)
+	}
+	if cfg.MySQL.User != "ihomeland_test" {
+		t.Fatalf("MySQL.User = %q", cfg.MySQL.User)
+	}
+	if cfg.Redis.Addr != "127.0.0.1:36379" {
+		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
+	}
 }
 
 func TestLoadFromEnvReadsConfigFile(t *testing.T) {
@@ -57,6 +85,12 @@ protocolVersion: 9
 releasePath: "../test-release.json"
 serverVersionPath: "test-server.json"
 clientVersionPath: "../test-client.json"
+mysql:
+  addr: "127.0.0.1:33306"
+  database: "ihomeland_file"
+  user: "ihomeland_file"
+redis:
+  addr: "127.0.0.1:36379"
 `)
 	if err := os.WriteFile(configPath, content, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -77,16 +111,36 @@ clientVersionPath: "../test-client.json"
 	if cfg.ProtocolVersion != 9 {
 		t.Fatalf("ProtocolVersion = %d", cfg.ProtocolVersion)
 	}
+	if cfg.MySQL.Addr != "127.0.0.1:33306" {
+		t.Fatalf("MySQL.Addr = %q", cfg.MySQL.Addr)
+	}
+	if cfg.MySQL.Database != "ihomeland_file" {
+		t.Fatalf("MySQL.Database = %q", cfg.MySQL.Database)
+	}
+	if cfg.MySQL.User != "ihomeland_file" {
+		t.Fatalf("MySQL.User = %q", cfg.MySQL.User)
+	}
+	if cfg.Redis.Addr != "127.0.0.1:36379" {
+		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
+	}
 }
 
 func TestLoadFromEnvAllowsEnvironmentOverride(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "local.yaml")
-	content := []byte(`httpAddr: "127.0.0.1:9091"`)
+	content := []byte(`
+httpAddr: "127.0.0.1:9091"
+mysql:
+  addr: "127.0.0.1:33306"
+redis:
+  addr: "127.0.0.1:36379"
+`)
 	if err := os.WriteFile(configPath, content, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
 	t.Setenv(envConfigPath, configPath)
 	t.Setenv(envHTTPAddr, "127.0.0.1:9092")
+	t.Setenv(envMySQLAddr, "127.0.0.1:33307")
+	t.Setenv(envRedisAddr, "127.0.0.1:36380")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -95,6 +149,12 @@ func TestLoadFromEnvAllowsEnvironmentOverride(t *testing.T) {
 
 	if cfg.HTTPAddr != "127.0.0.1:9092" {
 		t.Fatalf("HTTPAddr = %q", cfg.HTTPAddr)
+	}
+	if cfg.MySQL.Addr != "127.0.0.1:33307" {
+		t.Fatalf("MySQL.Addr = %q", cfg.MySQL.Addr)
+	}
+	if cfg.Redis.Addr != "127.0.0.1:36380" {
+		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
 	}
 }
 
@@ -112,6 +172,37 @@ func TestValidateRejectsInvalidHTTPAddr(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want error")
+	}
+}
+
+func TestValidateRejectsInvalidInfraAddr(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{
+			name: "mysql",
+			mutate: func(cfg *Config) {
+				cfg.MySQL.Addr = "not-an-addr"
+			},
+		},
+		{
+			name: "redis",
+			mutate: func(cfg *Config) {
+				cfg.Redis.Addr = "not-an-addr"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			tt.mutate(&cfg)
+
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want error")
+			}
+		})
 	}
 }
 

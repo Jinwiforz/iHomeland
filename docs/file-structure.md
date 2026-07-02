@@ -6,7 +6,7 @@
 client/      客户端工程或客户端版本信息
 docs/        项目文档、架构、路线图、规范
 openspec/    需求、设计、规格和变更任务
-server/      Go 服务端代码
+server/      Go 服务端代码和本地服务端基础设施配置
 shared/      跨端共享协议和生成配置
 tools/       开发、生成、构建和运维辅助工具
 ```
@@ -31,6 +31,8 @@ shared/
 ```text
 server/
   README.md
+  .env.example
+  compose.yaml
   go.mod
   go.sum
   version.json
@@ -42,9 +44,13 @@ server/
   scripts/
     run.bat
     test.bat
+    start-local-infra.bat
+    stop-local-infra.bat
+    verify-local.bat
   internal/
     app/
     config/
+    infra/
     logger/
     ops/
     gateway/
@@ -68,6 +74,12 @@ server/
 
 服务端本地配置目录。`config/local.yaml` 用于本地开发默认配置，环境变量只作为临时覆盖或部署覆盖。
 
+配置中包含服务端 HTTP 地址、版本文件路径、MySQL 地址和 Redis 地址。本地依赖既可以由 Docker Compose 提供，也可以由本机安装服务提供；服务端只依赖配置地址，不直接依赖 Docker。
+
+### `.env.example` 和 `compose.yaml`
+
+服务端本地基础设施配置文件。`.env.example` 只提供本地示例值，不包含真实密钥；`compose.yaml` 用于通过 Docker Compose 启动本地 MySQL 和 Redis。它们归属 `server/`，因为 MySQL、Redis 是服务端开发依赖。
+
 ### `README.md`
 
 服务端模块说明，包含本地运行、测试、配置覆盖和模块内开发约束。根目录 README 只描述项目整体架构和文档入口，不承载服务端具体命令。
@@ -75,6 +87,12 @@ server/
 ### `scripts`
 
 服务端辅助脚本目录，例如本地运行、测试、检查和构建脚本。该目录不承载业务代码，也不与根目录 `tools/` 的跨模块工具职责重叠。
+
+- `run.bat`：启动 Go 服务端。
+- `test.bat`：运行服务端 Go 测试。
+- `start-local-infra.bat`：使用 `server/compose.yaml` 启动本地 MySQL、Redis，并等待 Docker healthcheck 通过。
+- `stop-local-infra.bat`：停止 Docker Compose 本地基础设施，默认保留开发数据卷。
+- `verify-local.bat`：检查服务端实际配置的 MySQL、Redis 地址是否可连接，并验证 `/healthz`、`/readyz`、`/version`。
 
 ### `go.mod` 和 `go.sum`
 
@@ -87,6 +105,10 @@ server/
 ### `internal/config`
 
 配置结构、默认值、加载和校验。
+
+### `internal/infra`
+
+本地基础设施依赖探测。当前通过 TCP 探测 MySQL 和 Redis 配置地址是否可连接，用于 `/readyz` 和本地验证。
 
 ### `internal/app`
 
@@ -164,6 +186,8 @@ docs/
 openspec/
   config.yaml
   specs/
+    server-foundation/
+    local-infra/
     protocol/
     gateway/
     room/
