@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"ihomeland/server/internal/config"
+	"ihomeland/server/internal/gateway"
 	"ihomeland/server/internal/infra"
 	"ihomeland/server/internal/ops"
 )
@@ -19,11 +20,19 @@ func NewHTTPServer(cfg config.Config, log *slog.Logger) (*http.Server, error) {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
+	gatewayServer, err := gateway.NewServer(gateway.Config{
+		IdleTimeout: cfg.Gateway.IdleTimeout,
+	}, log, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	ops.RegisterRoutes(router, ops.VersionPaths{
 		Release: cfg.ReleasePath,
 		Server:  cfg.ServerVersionPath,
 		Client:  cfg.ClientVersionPath,
 	}, infra.NewTCPChecker(cfg), log)
+	gateway.RegisterRoutes(router, gatewayServer)
 
 	return &http.Server{
 		Addr:    cfg.HTTPAddr,

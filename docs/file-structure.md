@@ -135,7 +135,8 @@ server/
 
 实时网关：
 
-- WebSocket/TCP 连接
+- WebSocket 连接
+- 后续 TCP 连接
 - Protobuf envelope 编解码
 - session 管理
 - 心跳和超时
@@ -165,7 +166,7 @@ server/
 
 协议注册、消息 ID 映射、版本校验、envelope 编解码和生成代码适配。`.proto` 源文件放在 `shared/proto/`，生成代码归属 `internal/protocol/pb/`。
 
-`gateway`、`room`、`storage`、`protocol` 的完整实现由后续 OpenSpec change 分别推进；当前服务端基础只保证 HTTP 控制面可运行。
+`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room`、`storage` 的完整实现由后续 OpenSpec change 分别推进；TCP 传输也由后续 change 决定是否接入。
 
 ## 文档结构
 

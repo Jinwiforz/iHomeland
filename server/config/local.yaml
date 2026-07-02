@@ -10,3 +10,5 @@ mysql:
   user: "ihomeland"
 redis:
   addr: "127.0.0.1:6379"
+gateway:
+  idleTimeout: "30s"

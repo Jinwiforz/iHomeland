@@ -9,7 +9,7 @@ iHomeland 是一个计划使用 Go 服务端搭配 Unity 或 Godot 客户端开�
 当前阶段允许推进：
 
 - 服务端基础设施、配置、日志、健康检查和版本接口
-- WebSocket / TCP 实时连接能力
+- WebSocket 实时连接基础能力，TCP 传输由后续 change 评估
 - Protobuf 协议 envelope 和协议兼容规则
 - 自定义房间的创建、加入、准备、退出、房主转移和断线重连
 - Redis、MySQL、gRPC、Docker 等后续基础能力

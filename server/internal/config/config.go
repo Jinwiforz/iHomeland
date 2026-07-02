@@ -9,36 +9,39 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultConfigPath        = "config/local.yaml"
-	defaultHTTPAddr          = ":8080"
-	defaultLogLevel          = "info"
-	defaultProtocolVersion   = 0
-	defaultReleasePath       = "../release.json"
-	defaultServerVersionPath = "version.json"
-	defaultClientVersionPath = "../client/version.json"
-	defaultMySQLAddr         = "127.0.0.1:3306"
-	defaultMySQLDatabase     = "ihomeland"
-	defaultMySQLUser         = "ihomeland"
-	defaultRedisAddr         = "127.0.0.1:6379"
+	defaultConfigPath         = "config/local.yaml"
+	defaultHTTPAddr           = ":8080"
+	defaultLogLevel           = "info"
+	defaultProtocolVersion    = 0
+	defaultReleasePath        = "../release.json"
+	defaultServerVersionPath  = "version.json"
+	defaultClientVersionPath  = "../client/version.json"
+	defaultMySQLAddr          = "127.0.0.1:3306"
+	defaultMySQLDatabase      = "ihomeland"
+	defaultMySQLUser          = "ihomeland"
+	defaultRedisAddr          = "127.0.0.1:6379"
+	defaultGatewayIdleTimeout = 30 * time.Second
 )
 
 const (
-	envConfigPath        = "IHOMELAND_CONFIG"
-	envHTTPAddr          = "IHOMELAND_HTTP_ADDR"
-	envLogLevel          = "IHOMELAND_LOG_LEVEL"
-	envProtocolVersion   = "IHOMELAND_PROTOCOL_VERSION"
-	envReleasePath       = "IHOMELAND_RELEASE_PATH"
-	envServerVersionPath = "IHOMELAND_SERVER_VERSION_PATH"
-	envClientVersionPath = "IHOMELAND_CLIENT_VERSION_PATH"
-	envMySQLAddr         = "IHOMELAND_MYSQL_ADDR"
-	envMySQLDatabase     = "IHOMELAND_MYSQL_DATABASE"
-	envMySQLUser         = "IHOMELAND_MYSQL_USER"
-	envRedisAddr         = "IHOMELAND_REDIS_ADDR"
+	envConfigPath         = "IHOMELAND_CONFIG"
+	envHTTPAddr           = "IHOMELAND_HTTP_ADDR"
+	envLogLevel           = "IHOMELAND_LOG_LEVEL"
+	envProtocolVersion    = "IHOMELAND_PROTOCOL_VERSION"
+	envReleasePath        = "IHOMELAND_RELEASE_PATH"
+	envServerVersionPath  = "IHOMELAND_SERVER_VERSION_PATH"
+	envClientVersionPath  = "IHOMELAND_CLIENT_VERSION_PATH"
+	envMySQLAddr          = "IHOMELAND_MYSQL_ADDR"
+	envMySQLDatabase      = "IHOMELAND_MYSQL_DATABASE"
+	envMySQLUser          = "IHOMELAND_MYSQL_USER"
+	envRedisAddr          = "IHOMELAND_REDIS_ADDR"
+	envGatewayIdleTimeout = "IHOMELAND_GATEWAY_IDLE_TIMEOUT"
 )
 
 // Config 描述服务端启动所需配置。
@@ -52,6 +55,7 @@ type Config struct {
 	ClientVersionPath string
 	MySQL             MySQLConfig
 	Redis             RedisConfig
+	Gateway           GatewayConfig
 }
 
 // MySQLConfig 描述本地 MySQL 基础设施连接配置。
@@ -64,6 +68,11 @@ type MySQLConfig struct {
 // RedisConfig 描述本地 Redis 基础设施连接配置。
 type RedisConfig struct {
 	Addr string
+}
+
+// GatewayConfig 描述实时网关连接生命周期配置。
+type GatewayConfig struct {
+	IdleTimeout time.Duration
 }
 
 // Default 返回本地开发可直接使用的默认配置。
@@ -83,6 +92,9 @@ func Default() Config {
 		},
 		Redis: RedisConfig{
 			Addr: defaultRedisAddr,
+		},
+		Gateway: GatewayConfig{
+			IdleTimeout: defaultGatewayIdleTimeout,
 		},
 	}
 }
@@ -122,6 +134,9 @@ type fileConfig struct {
 	Redis struct {
 		Addr string `yaml:"addr"`
 	} `yaml:"redis"`
+	Gateway struct {
+		IdleTimeout string `yaml:"idleTimeout"`
+	} `yaml:"gateway"`
 }
 
 func applyFile(cfg *Config) error {
@@ -172,6 +187,13 @@ func applyFile(cfg *Config) error {
 	if strings.TrimSpace(fileCfg.Redis.Addr) != "" {
 		cfg.Redis.Addr = fileCfg.Redis.Addr
 	}
+	if strings.TrimSpace(fileCfg.Gateway.IdleTimeout) != "" {
+		timeout, err := time.ParseDuration(fileCfg.Gateway.IdleTimeout)
+		if err != nil {
+			return fmt.Errorf("parse gateway idle timeout: %w", err)
+		}
+		cfg.Gateway.IdleTimeout = timeout
+	}
 
 	return nil
 }
@@ -211,6 +233,13 @@ func applyEnv(cfg *Config) error {
 	if value := strings.TrimSpace(os.Getenv(envRedisAddr)); value != "" {
 		cfg.Redis.Addr = value
 	}
+	if value := strings.TrimSpace(os.Getenv(envGatewayIdleTimeout)); value != "" {
+		timeout, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", envGatewayIdleTimeout, err)
+		}
+		cfg.Gateway.IdleTimeout = timeout
+	}
 	return nil
 }
 
@@ -248,6 +277,9 @@ func (c Config) Validate() error {
 	}
 	if err := validateHostPort("redis addr", c.Redis.Addr); err != nil {
 		return err
+	}
+	if c.Gateway.IdleTimeout <= 0 {
+		return errors.New("gateway idle timeout must be positive")
 	}
 	return nil
 }

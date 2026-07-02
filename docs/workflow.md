@@ -45,14 +45,14 @@
 1. `add-server-foundation`
 2. `add-protocol-envelope`
 3. `add-local-infra`
+4. `add-websocket-gateway`
 
 第一阶段后续推荐 change 顺序：
 
-1. `add-websocket-gateway`
-2. `add-room-lobby`
-3. `add-persistence-boundaries`
-4. `document-client-integration`
-5. `add-internal-service-boundaries`
+1. `add-room-lobby`
+2. `add-persistence-boundaries`
+3. `document-client-integration`
+4. `add-internal-service-boundaries`
 
 ## 任务编写规则
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefault(t *testing.T) {
@@ -31,6 +32,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Redis.Addr != defaultRedisAddr {
 		t.Fatalf("Redis.Addr = %q, want %q", cfg.Redis.Addr, defaultRedisAddr)
 	}
+	if cfg.Gateway.IdleTimeout != defaultGatewayIdleTimeout {
+		t.Fatalf("Gateway.IdleTimeout = %s, want %s", cfg.Gateway.IdleTimeout, defaultGatewayIdleTimeout)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -44,6 +48,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv(envMySQLDatabase, "ihomeland_test")
 	t.Setenv(envMySQLUser, "ihomeland_test")
 	t.Setenv(envRedisAddr, "127.0.0.1:36379")
+	t.Setenv(envGatewayIdleTimeout, "45s")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -74,6 +79,9 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.Redis.Addr != "127.0.0.1:36379" {
 		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
 	}
+	if cfg.Gateway.IdleTimeout != 45*time.Second {
+		t.Fatalf("Gateway.IdleTimeout = %s", cfg.Gateway.IdleTimeout)
+	}
 }
 
 func TestLoadFromEnvReadsConfigFile(t *testing.T) {
@@ -91,6 +99,8 @@ mysql:
   user: "ihomeland_file"
 redis:
   addr: "127.0.0.1:36379"
+gateway:
+  idleTimeout: "20s"
 `)
 	if err := os.WriteFile(configPath, content, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -122,6 +132,9 @@ redis:
 	}
 	if cfg.Redis.Addr != "127.0.0.1:36379" {
 		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
+	}
+	if cfg.Gateway.IdleTimeout != 20*time.Second {
+		t.Fatalf("Gateway.IdleTimeout = %s", cfg.Gateway.IdleTimeout)
 	}
 }
 
@@ -166,9 +179,26 @@ func TestLoadFromEnvRejectsInvalidProtocolVersionEnv(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvRejectsInvalidGatewayIdleTimeoutEnv(t *testing.T) {
+	t.Setenv(envGatewayIdleTimeout, "not-a-duration")
+
+	if _, err := LoadFromEnv(); err == nil {
+		t.Fatal("LoadFromEnv() error = nil, want error")
+	}
+}
+
 func TestValidateRejectsInvalidHTTPAddr(t *testing.T) {
 	cfg := Default()
 	cfg.HTTPAddr = "not-an-addr"
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want error")
+	}
+}
+
+func TestValidateRejectsInvalidGatewayIdleTimeout(t *testing.T) {
+	cfg := Default()
+	cfg.Gateway.IdleTimeout = 0
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want error")

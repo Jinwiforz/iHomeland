@@ -124,9 +124,9 @@
 - 不创建业务 Redis key
 - 不接入房间持久化读写
 
-## 后续 OpenSpec Change 拆分
-
 ### add-websocket-gateway
+
+状态：已归档。
 
 目标：实现实时网关基础能力。
 
@@ -146,6 +146,8 @@
 - 不实现房间业务
 - 不实现 TCP
 - 不接入 battle server
+
+## 后续 OpenSpec Change 拆分
 
 ### add-room-lobby
 
