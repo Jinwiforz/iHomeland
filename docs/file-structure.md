@@ -151,7 +151,7 @@ server/
 - 权限
 - 成员和座位
 - 重连资格
-- 房间事件
+- 房间大厅服务和内存 repository
 
 ### `internal/storage`
 
@@ -166,7 +166,7 @@ server/
 
 协议注册、消息 ID 映射、版本校验、envelope 编解码和生成代码适配。`.proto` 源文件放在 `shared/proto/`，生成代码归属 `internal/protocol/pb/`。
 
-`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room`、`storage` 的完整实现由后续 OpenSpec change 分别推进；TCP 传输也由后续 change 决定是否接入。
+`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room` 已具备第一阶段自定义房间大厅的内存实现，包括创建、加入、准备、退出、房主转移、断线保留和重连恢复。`storage` 的业务读写边界由后续 OpenSpec change 推进；TCP 传输也由后续 change 决定是否接入。
 
 ## 文档结构
 

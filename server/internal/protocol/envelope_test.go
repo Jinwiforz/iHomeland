@@ -78,6 +78,75 @@ func TestSystemMessageRegistry(t *testing.T) {
 	}
 }
 
+func TestRoomMessageRegistry(t *testing.T) {
+	messages := RoomMessages()
+	if len(messages) != 13 {
+		t.Fatalf("room messages = %d, want 13", len(messages))
+	}
+
+	seen := map[MessageID]bool{}
+	for _, msg := range messages {
+		if seen[msg.ID] {
+			t.Fatalf("duplicate message id: %d", msg.ID)
+		}
+		seen[msg.ID] = true
+		if msg.Owner != "room" {
+			t.Fatalf("message %s owner = %q, want room", msg.Name, msg.Owner)
+		}
+		if !IsRoomMessageID(msg.ID) {
+			t.Fatalf("message id %d is outside room range", msg.ID)
+		}
+	}
+
+	for _, id := range []MessageID{
+		MessageIDCreateRoomRequest,
+		MessageIDCreateRoomResponse,
+		MessageIDJoinRoomRequest,
+		MessageIDJoinRoomResponse,
+		MessageIDSetReadyRequest,
+		MessageIDSetReadyResponse,
+		MessageIDLeaveRoomRequest,
+		MessageIDLeaveRoomResponse,
+		MessageIDTransferHostRequest,
+		MessageIDTransferHostResponse,
+		MessageIDReconnectRoomRequest,
+		MessageIDReconnectRoomResponse,
+		MessageIDRoomSnapshotPushed,
+	} {
+		if !seen[id] {
+			t.Fatalf("message id %d is missing from registry", id)
+		}
+	}
+}
+
+func TestBuildAndDecodeRoomEnvelope(t *testing.T) {
+	envelope, err := BuildEnvelope(BuildOptions{
+		ProtocolVersion: MaxSupportedVersion,
+		MessageID:       MessageIDCreateRoomRequest,
+		RequestID:       "req-room",
+		Sequence:        1,
+	}, &pb.CreateRoomRequest{
+		PlayerId: "player-1",
+		RoomName: "test room",
+		Capacity: 4,
+	})
+	if err != nil {
+		t.Fatalf("BuildEnvelope returned error: %v", err)
+	}
+
+	decoded, err := DecodeEnvelope(envelope, true)
+	if err != nil {
+		t.Fatalf("DecodeEnvelope returned error: %v", err)
+	}
+	request, ok := decoded.(*pb.CreateRoomRequest)
+	if !ok {
+		t.Fatalf("decoded message type = %T, want *pb.CreateRoomRequest", decoded)
+	}
+	if request.GetPlayerId() != "player-1" {
+		t.Fatalf("PlayerId = %q, want player-1", request.GetPlayerId())
+	}
+}
+
 func TestRequestIDRequired(t *testing.T) {
 	envelope, err := BuildEnvelope(BuildOptions{
 		ProtocolVersion: MaxSupportedVersion,

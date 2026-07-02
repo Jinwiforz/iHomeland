@@ -147,9 +147,9 @@
 - 不实现 TCP
 - 不接入 battle server
 
-## 后续 OpenSpec Change 拆分
-
 ### add-room-lobby
+
+状态：已归档。
 
 目标：实现第一个游戏业务功能“自定义房间大厅”。
 
@@ -173,6 +173,8 @@
 - 不做匹配系统
 - 不做完整持久化
 - 不做高频战斗模拟
+
+## 后续 OpenSpec Change 拆分
 
 ### add-persistence-boundaries
 

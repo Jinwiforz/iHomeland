@@ -16,6 +16,21 @@ enum MessageID {
   MESSAGE_ID_HEARTBEAT_RESPONSE = 2;
   MESSAGE_ID_ERROR_RESPONSE = 3;
   MESSAGE_ID_PROTOCOL_VERSION_UNSUPPORTED = 4;
+
+  // 房间大厅消息号段：2000-2999。
+  MESSAGE_ID_CREATE_ROOM_REQUEST = 2000;
+  MESSAGE_ID_CREATE_ROOM_RESPONSE = 2001;
+  MESSAGE_ID_JOIN_ROOM_REQUEST = 2002;
+  MESSAGE_ID_JOIN_ROOM_RESPONSE = 2003;
+  MESSAGE_ID_SET_READY_REQUEST = 2004;
+  MESSAGE_ID_SET_READY_RESPONSE = 2005;
+  MESSAGE_ID_LEAVE_ROOM_REQUEST = 2006;
+  MESSAGE_ID_LEAVE_ROOM_RESPONSE = 2007;
+  MESSAGE_ID_TRANSFER_HOST_REQUEST = 2008;
+  MESSAGE_ID_TRANSFER_HOST_RESPONSE = 2009;
+  MESSAGE_ID_RECONNECT_ROOM_REQUEST = 2010;
+  MESSAGE_ID_RECONNECT_ROOM_RESPONSE = 2011;
+  MESSAGE_ID_ROOM_SNAPSHOT_PUSHED = 2012;
 }
 
 // ErrorCode 定义可跨端识别的稳定错误码。
@@ -71,4 +86,120 @@ message ProtocolVersionUnsupported {
   uint32 client_version = 1;
   uint32 min_supported_version = 2;
   uint32 max_supported_version = 3;
+}
+
+// RoomState 描述房间生命周期状态。
+enum RoomState {
+  ROOM_STATE_UNSPECIFIED = 0;
+  ROOM_STATE_OPEN = 1;
+  ROOM_STATE_CLOSED = 2;
+}
+
+// RoomMemberConnectionState 描述房间成员连接状态。
+enum RoomMemberConnectionState {
+  ROOM_MEMBER_CONNECTION_STATE_UNSPECIFIED = 0;
+  ROOM_MEMBER_CONNECTION_STATE_ONLINE = 1;
+  ROOM_MEMBER_CONNECTION_STATE_DISCONNECTED = 2;
+}
+
+// RoomTeam 描述第一阶段房间阵营。
+enum RoomTeam {
+  ROOM_TEAM_UNSPECIFIED = 0;
+  ROOM_TEAM_A = 1;
+  ROOM_TEAM_B = 2;
+}
+
+// RoomMemberSnapshot 描述客户端刷新大厅 UI 所需的成员状态。
+message RoomMemberSnapshot {
+  string player_id = 1;
+  uint32 seat = 2;
+  RoomTeam team = 3;
+  bool ready = 4;
+  bool host = 5;
+  RoomMemberConnectionState connection_state = 6;
+  int64 reconnect_deadline_ms = 7;
+}
+
+// RoomSnapshot 描述客户端刷新大厅 UI 所需的房间状态。
+message RoomSnapshot {
+  string room_id = 1;
+  string name = 2;
+  RoomState state = 3;
+  string host_player_id = 4;
+  uint32 capacity = 5;
+  repeated RoomMemberSnapshot members = 6;
+}
+
+// CreateRoomRequest 是创建自定义房间请求。
+message CreateRoomRequest {
+  string player_id = 1;
+  string room_name = 2;
+  uint32 capacity = 3;
+}
+
+// CreateRoomResponse 是创建自定义房间响应。
+message CreateRoomResponse {
+  RoomSnapshot room = 1;
+}
+
+// JoinRoomRequest 是加入自定义房间请求。
+message JoinRoomRequest {
+  string player_id = 1;
+  string room_id = 2;
+}
+
+// JoinRoomResponse 是加入自定义房间响应。
+message JoinRoomResponse {
+  RoomSnapshot room = 1;
+}
+
+// SetReadyRequest 是设置准备状态请求。
+message SetReadyRequest {
+  string player_id = 1;
+  string room_id = 2;
+  bool ready = 3;
+}
+
+// SetReadyResponse 是设置准备状态响应。
+message SetReadyResponse {
+  RoomSnapshot room = 1;
+}
+
+// LeaveRoomRequest 是退出房间请求。
+message LeaveRoomRequest {
+  string player_id = 1;
+  string room_id = 2;
+}
+
+// LeaveRoomResponse 是退出房间响应。
+message LeaveRoomResponse {
+  RoomSnapshot room = 1;
+}
+
+// TransferHostRequest 是转移房主请求。
+message TransferHostRequest {
+  string player_id = 1;
+  string room_id = 2;
+  string target_player_id = 3;
+}
+
+// TransferHostResponse 是转移房主响应。
+message TransferHostResponse {
+  RoomSnapshot room = 1;
+}
+
+// ReconnectRoomRequest 是断线后恢复房间身份请求。
+message ReconnectRoomRequest {
+  string player_id = 1;
+  string room_id = 2;
+}
+
+// ReconnectRoomResponse 是断线后恢复房间身份响应。
+message ReconnectRoomResponse {
+  RoomSnapshot room = 1;
+}
+
+// RoomSnapshotPushed 是服务端主动推送的房间快照。
+message RoomSnapshotPushed {
+  RoomSnapshot room = 1;
 }

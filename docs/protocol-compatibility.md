@@ -53,6 +53,24 @@ WebSocket 和后续 TCP 必须复用同一 envelope schema。
 - `3`：`ErrorResponse`
 - `4`：`ProtocolVersionUnsupported`
 
+当前房间大厅消息：
+
+- `2000`：`CreateRoomRequest`
+- `2001`：`CreateRoomResponse`
+- `2002`：`JoinRoomRequest`
+- `2003`：`JoinRoomResponse`
+- `2004`：`SetReadyRequest`
+- `2005`：`SetReadyResponse`
+- `2006`：`LeaveRoomRequest`
+- `2007`：`LeaveRoomResponse`
+- `2008`：`TransferHostRequest`
+- `2009`：`TransferHostResponse`
+- `2010`：`ReconnectRoomRequest`
+- `2011`：`ReconnectRoomResponse`
+- `2012`：`RoomSnapshotPushed`
+
+房间大厅消息 owner 为 `room`。本轮新增消息不破坏既有系统消息；客户端接入房间大厅时需要使用 `RoomSnapshot` 刷新房间 UI，并在请求中携带 `player_id` 和 envelope `request_id`。
+
 每个 message id 必须有 owner。已发布 message id 不得复用；废弃消息必须保留编号并记录迁移策略。
 
 ## 错误响应规则

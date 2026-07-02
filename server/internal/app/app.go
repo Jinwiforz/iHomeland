@@ -11,6 +11,7 @@ import (
 	"ihomeland/server/internal/gateway"
 	"ihomeland/server/internal/infra"
 	"ihomeland/server/internal/ops"
+	"ihomeland/server/internal/room"
 )
 
 // NewHTTPServer 创建已注册基础控制面接口的 HTTP server。
@@ -20,9 +21,10 @@ func NewHTTPServer(cfg config.Config, log *slog.Logger) (*http.Server, error) {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
+	roomService := room.NewService(room.NewMemoryRepository(), room.Config{})
 	gatewayServer, err := gateway.NewServer(gateway.Config{
 		IdleTimeout: cfg.Gateway.IdleTimeout,
-	}, log, nil)
+	}, log, newRoomDispatcher(roomService))
 	if err != nil {
 		return nil, err
 	}

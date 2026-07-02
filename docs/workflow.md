@@ -46,13 +46,13 @@
 2. `add-protocol-envelope`
 3. `add-local-infra`
 4. `add-websocket-gateway`
+5. `add-room-lobby`
 
 第一阶段后续推荐 change 顺序：
 
-1. `add-room-lobby`
-2. `add-persistence-boundaries`
-3. `document-client-integration`
-4. `add-internal-service-boundaries`
+1. `add-persistence-boundaries`
+2. `document-client-integration`
+3. `add-internal-service-boundaries`
 
 ## 任务编写规则
 

@@ -64,6 +64,11 @@ type Dispatcher interface {
 	Dispatch(ctx context.Context, req DispatchRequest) (*pb.Envelope, error)
 }
 
+// DisconnectObserver 接收连接关闭通知，用于业务模块维护在线状态。
+type DisconnectObserver interface {
+	OnDisconnect(ctx context.Context, session SessionSnapshot)
+}
+
 // Server 管理 WebSocket 连接生命周期和基础系统消息。
 type Server struct {
 	cfg        Config
@@ -124,6 +129,7 @@ func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {
 	session := s.registerSession(r.RemoteAddr)
 	closeReason := CloseReasonClientClosed
 	defer func() {
+		s.notifyDisconnect(r.Context(), session)
 		s.unregisterSession(session.connectionID, closeReason)
 		s.log.Info(
 			"websocket connection closed",
@@ -169,6 +175,14 @@ func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (s *Server) notifyDisconnect(ctx context.Context, session *Session) {
+	observer, ok := s.dispatcher.(DisconnectObserver)
+	if !ok {
+		return
+	}
+	observer.OnDisconnect(ctx, s.snapshot(session))
 }
 
 // SessionCount 返回当前注册的连接级 session 数量，供测试和诊断使用。

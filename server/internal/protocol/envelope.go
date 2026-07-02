@@ -20,11 +20,24 @@ var (
 	ErrRequestIDRequired = errors.New("request id required")
 )
 
-var systemMessageTypes = map[MessageID]func() proto.Message{
+var messageTypes = map[MessageID]func() proto.Message{
 	MessageIDHeartbeatRequest:           func() proto.Message { return &pb.HeartbeatRequest{} },
 	MessageIDHeartbeatResponse:          func() proto.Message { return &pb.HeartbeatResponse{} },
 	MessageIDErrorResponse:              func() proto.Message { return &pb.ErrorResponse{} },
 	MessageIDProtocolVersionUnsupported: func() proto.Message { return &pb.ProtocolVersionUnsupported{} },
+	MessageIDCreateRoomRequest:          func() proto.Message { return &pb.CreateRoomRequest{} },
+	MessageIDCreateRoomResponse:         func() proto.Message { return &pb.CreateRoomResponse{} },
+	MessageIDJoinRoomRequest:            func() proto.Message { return &pb.JoinRoomRequest{} },
+	MessageIDJoinRoomResponse:           func() proto.Message { return &pb.JoinRoomResponse{} },
+	MessageIDSetReadyRequest:            func() proto.Message { return &pb.SetReadyRequest{} },
+	MessageIDSetReadyResponse:           func() proto.Message { return &pb.SetReadyResponse{} },
+	MessageIDLeaveRoomRequest:           func() proto.Message { return &pb.LeaveRoomRequest{} },
+	MessageIDLeaveRoomResponse:          func() proto.Message { return &pb.LeaveRoomResponse{} },
+	MessageIDTransferHostRequest:        func() proto.Message { return &pb.TransferHostRequest{} },
+	MessageIDTransferHostResponse:       func() proto.Message { return &pb.TransferHostResponse{} },
+	MessageIDReconnectRoomRequest:       func() proto.Message { return &pb.ReconnectRoomRequest{} },
+	MessageIDReconnectRoomResponse:      func() proto.Message { return &pb.ReconnectRoomResponse{} },
+	MessageIDRoomSnapshotPushed:         func() proto.Message { return &pb.RoomSnapshotPushed{} },
 }
 
 // BuildOptions 描述构造 envelope 所需的稳定元数据。
@@ -41,7 +54,7 @@ func BuildEnvelope(opts BuildOptions, msg proto.Message) (*pb.Envelope, error) {
 	if msg == nil {
 		return nil, ErrPayloadInvalid
 	}
-	newMessage, ok := systemMessageTypes[opts.MessageID]
+	newMessage, ok := messageTypes[opts.MessageID]
 	if !ok {
 		return nil, fmt.Errorf("%w: %d", ErrMessageIDUnsupported, opts.MessageID)
 	}
@@ -79,7 +92,7 @@ func DecodeEnvelope(envelope *pb.Envelope, requestIDRequired bool) (proto.Messag
 	}
 
 	id := MessageID(envelope.GetMessageId())
-	newMessage, ok := systemMessageTypes[id]
+	newMessage, ok := messageTypes[id]
 	if !ok {
 		return nil, fmt.Errorf("%w: %d", ErrMessageIDUnsupported, id)
 	}

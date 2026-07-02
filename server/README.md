@@ -15,6 +15,7 @@
 - Protobuf envelope 基础协议适配
 - WebSocket 实时入口 `/ws`
 - WebSocket 连接级 session、心跳响应、协议版本拒绝、结构化错误响应和空闲超时清理
+- 自定义房间大厅基础能力：创建房间、加入房间、准备/取消准备、退出房间、房主转移、断线保留和重连恢复
 - 优雅关闭
 - 基础单元测试
 
@@ -30,6 +31,7 @@ server/
   internal/logger/   项目级日志适配
   internal/ops/      健康检查、就绪检查、版本接口
   internal/protocol/ 协议适配和生成代码
+  internal/room/     自定义房间大厅模型、状态机和服务
   scripts/           服务端辅助脚本
   go.mod
   go.sum
@@ -106,9 +108,12 @@ ok   ihomeland/server/internal/infra
 ok   ihomeland/server/internal/ops
 ok   ihomeland/server/internal/protocol
 ?    ihomeland/server/internal/protocol/pb/realtime/v1 [no test files]
+ok   ihomeland/server/internal/room
 ```
 
 `internal/gateway` 测试会启动临时 HTTP server，并用 Go WebSocket 测试客户端连接 `/ws`，覆盖连接注册、心跳响应、协议版本拒绝、非法 payload、缺失 request id、未知 message id、非二进制消息和空闲超时清理。
+
+`internal/room` 测试覆盖房间创建、加入、重复加入、准备、退出、房主转移、断线保留和重连恢复。`internal/app` 中的房间网关测试会用 Go WebSocket 测试客户端发送房间大厅 Protobuf envelope，验证服务端请求响应链路。
 
 ## 协议生成
 
