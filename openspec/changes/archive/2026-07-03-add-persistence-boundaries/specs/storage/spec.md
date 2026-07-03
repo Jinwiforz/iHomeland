@@ -1,13 +1,4 @@
-# Storage 规格
-
-## Requirements
-
-### Requirement: MySQL 是持久事实来源
-需要跨进程、跨 Redis 丢失后仍然存在的数据必须存储在 MySQL 或后续明确的持久化系统中。
-
-#### Scenario: Redis 数据丢失
-- **WHEN** Redis 中的运行态数据被清空
-- **THEN** 玩家进度、房间摘要和对局摘要等持久数据仍可从 MySQL 恢复
+## ADDED Requirements
 
 ### Requirement: Storage 必须提供房间大厅持久化边界
 服务端必须通过 storage interface 为房间大厅提供持久化和运行态缓存边界，业务状态机不得直接依赖 Redis 或 MySQL 客户端。
@@ -42,13 +33,6 @@
 - **WHEN** 新需求需要背包、经济或完整战绩
 - **THEN** 必须创建单独 OpenSpec change，不得混入 persistence boundaries
 
-### Requirement: Redis 只保存短期运行态数据
-Redis 必须用于 session、presence、room index、reconnect token、queue、lock、rate limit 等短期运行态数据。
-
-#### Scenario: 新增 Redis key
-- **WHEN** 新增 Redis key
-- **THEN** 文档必须记录 owner、用途、TTL 或重建路径
-
 ### Requirement: Redis key 必须有 owner、TTL 或重建路径
 所有新增 Redis key 必须记录 owner、用途、TTL、value 结构、重建来源和清理触发条件。
 
@@ -72,11 +56,7 @@ Redis 只能保存 session、presence、room index、reconnect token、lock、ra
 - **THEN** 数据必须写入 MySQL 或后续明确的持久化系统，不能只写 Redis
 
 ### Requirement: 可重试写入必须幂等
-可能被重试的持久化写入必须具备幂等保护。
-
-#### Scenario: 对局摘要重复提交
-- **WHEN** 对局摘要提交因瞬时错误被重试
-- **THEN** 存储层只产生一份有效记录
+storage 层中可能被重试的写入必须具备幂等保护，避免重复房间摘要、重复对局摘要或重复事件。
 
 #### Scenario: 房间摘要重复写入
 - **WHEN** 保存房间摘要因瞬时错误被重试

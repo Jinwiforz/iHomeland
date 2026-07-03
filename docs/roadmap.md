@@ -174,25 +174,44 @@
 - 不做完整持久化
 - 不做高频战斗模拟
 
-## 后续 OpenSpec Change 拆分
-
 ### add-persistence-boundaries
+
+状态：已归档。
 
 目标：定义并接入第一阶段需要的 Redis/MySQL 边界。
 
-不做：不做完整账号、背包、经济、战绩系统。
+范围：
 
-### add-internal-service-boundaries
+- `server/internal/storage` repository/cache interface
+- fake/in-memory storage adapter
+- Redis key builder 和 TTL 常量
+- 第一阶段 MySQL migration 入口
+- MySQL room summary repository 骨架和参数校验
+- Redis presence、room index、reconnect token cache 骨架和参数校验
+- room service 通过接口保存房间摘要
+- 断线和重连通过 reconnect token cache 管理短期资格
+- storage、room fake storage 集成测试
+- Redis key、架构、文件结构和服务端 README 文档更新
 
-目标：在确实需要拆分时，将进程内接口升级为 gRPC 边界。
+不做：
 
-不做：第一阶段默认不急着拆服务。
+- 不做完整账号、背包、经济、战绩系统
+- 不启用生产级 Redis/MySQL 真实读写
+- 不实现多进程房间一致性或 battle server 持久化
+
+## 后续 OpenSpec Change 拆分
 
 ### document-client-integration
 
 目标：文档化 Unity/Godot 协议生成、传输抽象和客户端连接流程。
 
 不做：不在服务端实现引擎专用逻辑。
+
+### add-internal-service-boundaries
+
+目标：在确实需要拆分时，将进程内接口升级为 gRPC 边界。
+
+不做：第一阶段默认不急着拆服务。
 
 ## Battle Server 进入条件
 

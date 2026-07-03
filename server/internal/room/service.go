@@ -3,9 +3,12 @@ package room
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"ihomeland/server/internal/storage"
 )
 
 const (
@@ -18,6 +21,8 @@ type Service struct {
 	now          func() time.Time
 	reconnectTTL time.Duration
 	nextRoomID   uint64
+	summaryRepo  storage.RoomSummaryRepository
+	reconnects   storage.ReconnectTokenCache
 
 	mu          sync.Mutex
 	connections map[string]connectionBinding
@@ -30,7 +35,9 @@ type connectionBinding struct {
 
 // Config 描述房间服务配置。
 type Config struct {
-	ReconnectTTL time.Duration
+	ReconnectTTL          time.Duration
+	RoomSummaryRepository storage.RoomSummaryRepository
+	ReconnectTokenCache   storage.ReconnectTokenCache
 }
 
 // CreateRoomRequest 描述创建房间输入。
@@ -82,6 +89,8 @@ func NewService(repo Repository, cfg Config) *Service {
 		repo:         repo,
 		now:          time.Now,
 		reconnectTTL: reconnectTTL,
+		summaryRepo:  cfg.RoomSummaryRepository,
+		reconnects:   cfg.ReconnectTokenCache,
 		connections:  make(map[string]connectionBinding),
 	}
 }
@@ -99,6 +108,9 @@ func (s *Service) CreateRoom(ctx context.Context, req CreateRoomRequest) (*Snaps
 	if err := s.repo.Create(room); err != nil {
 		return nil, err
 	}
+	if err := s.saveRoomSummary(ctx, roomSummaryFromRoom(room)); err != nil {
+		return nil, err
+	}
 	return room.Snapshot(), nil
 }
 
@@ -111,6 +123,9 @@ func (s *Service) JoinRoom(ctx context.Context, req JoinRoomRequest) (*Snapshot,
 	err := s.repo.Update(req.RoomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.Join(req.PlayerID, s.now())
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
 		return err
 	})
 	return snapshot, err
@@ -125,6 +140,9 @@ func (s *Service) SetReady(ctx context.Context, req SetReadyRequest) (*Snapshot,
 	err := s.repo.Update(req.RoomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.SetReady(req.PlayerID, req.Ready, s.now())
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
 		return err
 	})
 	return snapshot, err
@@ -139,6 +157,9 @@ func (s *Service) LeaveRoom(ctx context.Context, req LeaveRoomRequest) (*Snapsho
 	err := s.repo.Update(req.RoomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.Leave(req.PlayerID, s.now())
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
 		return err
 	})
 	return snapshot, err
@@ -153,6 +174,9 @@ func (s *Service) TransferHost(ctx context.Context, req TransferHostRequest) (*S
 	err := s.repo.Update(req.RoomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.TransferHost(req.PlayerID, req.TargetPlayerID, s.now())
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
 		return err
 	})
 	return snapshot, err
@@ -167,6 +191,12 @@ func (s *Service) ReconnectMember(ctx context.Context, req ReconnectMemberReques
 	err := s.repo.Update(req.RoomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.Reconnect(req.PlayerID, s.now())
+		if err == nil {
+			err = s.deleteReconnectToken(ctx, req.RoomID, req.PlayerID)
+		}
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
 		return err
 	})
 	return snapshot, err
@@ -207,7 +237,69 @@ func (s *Service) DisconnectMember(ctx context.Context, roomID string, playerID 
 	err := s.repo.Update(roomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.Disconnect(playerID, deadline, now)
+		if err == nil {
+			err = s.setReconnectToken(ctx, storage.ReconnectToken{
+				RoomID:   roomID,
+				PlayerID: strings.TrimSpace(playerID),
+				Deadline: deadline,
+				IssuedAt: now,
+			})
+		}
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
 		return err
 	})
 	return snapshot, err
+}
+
+func (s *Service) saveRoomSummary(ctx context.Context, summary storage.RoomSummary) error {
+	repo := s.summaryRepository()
+	if repo == nil {
+		return nil
+	}
+	return repo.SaveRoomSummary(ctx, summary)
+}
+
+func (s *Service) setReconnectToken(ctx context.Context, token storage.ReconnectToken) error {
+	cache := s.reconnectTokenCache()
+	if cache == nil {
+		return nil
+	}
+	return cache.SetReconnectToken(ctx, token, s.reconnectTTL)
+}
+
+func (s *Service) deleteReconnectToken(ctx context.Context, roomID string, playerID string) error {
+	cache := s.reconnectTokenCache()
+	if cache == nil {
+		return nil
+	}
+	return cache.DeleteReconnectToken(ctx, roomID, playerID)
+}
+
+func (s *Service) summaryRepository() storage.RoomSummaryRepository {
+	return s.summaryRepo
+}
+
+func (s *Service) reconnectTokenCache() storage.ReconnectTokenCache {
+	return s.reconnects
+}
+
+func roomSummaryFromRoom(room *Room) storage.RoomSummary {
+	closedAt := time.Time{}
+	if room.State == RoomStateClosed {
+		closedAt = room.UpdatedAt
+	}
+	return storage.RoomSummary{
+		RoomID:         room.ID,
+		Name:           room.Name,
+		HostPlayerID:   room.HostPlayerID,
+		State:          string(room.State),
+		Capacity:       room.Capacity,
+		MemberCount:    len(room.Members),
+		IdempotencyKey: room.ID,
+		CreatedAt:      room.CreatedAt,
+		UpdatedAt:      room.UpdatedAt,
+		ClosedAt:       closedAt,
+	}
 }

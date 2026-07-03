@@ -47,12 +47,12 @@
 3. `add-local-infra`
 4. `add-websocket-gateway`
 5. `add-room-lobby`
+6. `add-persistence-boundaries`
 
 第一阶段后续推荐 change 顺序：
 
-1. `add-persistence-boundaries`
-2. `document-client-integration`
-3. `add-internal-service-boundaries`
+1. `document-client-integration`
+2. `add-internal-service-boundaries`
 
 ## 任务编写规则
 

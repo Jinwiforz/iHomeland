@@ -157,16 +157,19 @@ server/
 
 存储适配：
 
-- MySQL repository
-- Redis cache/session/index
-- 事务边界
-- 幂等处理
+- repository/cache interface
+- fake/in-memory adapter
+- MySQL room summary repository 骨架
+- Redis runtime cache 骨架
+- Redis key builder 和 TTL 常量
+- MySQL migration 文件
+- 幂等处理和恢复边界
 
 ### `internal/protocol`
 
 协议注册、消息 ID 映射、版本校验、envelope 编解码和生成代码适配。`.proto` 源文件放在 `shared/proto/`，生成代码归属 `internal/protocol/pb/`。
 
-`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room` 已具备第一阶段自定义房间大厅的内存实现，包括创建、加入、准备、退出、房主转移、断线保留和重连恢复。`storage` 的业务读写边界由后续 OpenSpec change 推进；TCP 传输也由后续 change 决定是否接入。
+`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room` 已具备第一阶段自定义房间大厅的内存实现，包括创建、加入、准备、退出、房主转移、断线保留和重连恢复。`storage` 已具备第一阶段持久化/运行态边界、fake adapter、Redis key builder、MySQL 迁移入口和 adapter 骨架；真实 Redis/MySQL client 绑定与生产级恢复流程由后续 change 继续推进。TCP 传输也由后续 change 决定是否接入。
 
 ## 文档结构
 

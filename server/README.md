@@ -16,6 +16,7 @@
 - WebSocket 实时入口 `/ws`
 - WebSocket 连接级 session、心跳响应、协议版本拒绝、结构化错误响应和空闲超时清理
 - 自定义房间大厅基础能力：创建房间、加入房间、准备/取消准备、退出房间、房主转移、断线保留和重连恢复
+- storage 边界：repository/cache interface、fake adapter、Redis key builder、MySQL 第一阶段迁移和 adapter 骨架
 - 优雅关闭
 - 基础单元测试
 
@@ -32,6 +33,7 @@ server/
   internal/ops/      健康检查、就绪检查、版本接口
   internal/protocol/ 协议适配和生成代码
   internal/room/     自定义房间大厅模型、状态机和服务
+  internal/storage/  持久化和运行态缓存边界
   scripts/           服务端辅助脚本
   go.mod
   go.sum
@@ -82,6 +84,19 @@ config/local.yaml
 
 因此 Docker 和本机安装的 MySQL、Redis 可以二选一使用；关键是服务端配置指向的端口必须可连接。Docker 容器是否 healthy 由 `start-local-infra.bat` 负责检查，`verify-local.bat` 不关心依赖是由 Docker 还是本机服务提供。不要让 Docker 和本机安装同时占用同一端口。
 
+`/readyz` 和 `verify-local.bat` 只表示依赖地址可达，不等同于房间摘要、重连资格或 Redis 丢失恢复已经通过。业务恢复能力需要通过 `internal/storage` 和 `internal/room` 的单元测试，或后续明确的 Redis/MySQL 集成测试验证。
+
+## Storage 边界
+
+`internal/storage` 定义第一阶段房间大厅需要的持久化和运行态接口：
+
+- `RoomSummaryRepository`：保存/读取 MySQL 房间摘要事实。
+- `PresenceCache`：保存玩家在线状态运行态。
+- `RoomIndexCache`：保存房间索引缓存。
+- `ReconnectTokenCache`：保存断线重连短期资格。
+
+默认业务路径仍可使用内存 repository；room service 通过接口接入 storage，不直接依赖 Redis/MySQL client。测试使用 `storage.NewFakeStore()`，所以不需要启动 MySQL 或 Redis 也能验证状态机、幂等摘要写入和重连 token 管理。
+
 ## 本地测试
 
 执行：
@@ -109,11 +124,14 @@ ok   ihomeland/server/internal/ops
 ok   ihomeland/server/internal/protocol
 ?    ihomeland/server/internal/protocol/pb/realtime/v1 [no test files]
 ok   ihomeland/server/internal/room
+ok   ihomeland/server/internal/storage
 ```
 
 `internal/gateway` 测试会启动临时 HTTP server，并用 Go WebSocket 测试客户端连接 `/ws`，覆盖连接注册、心跳响应、协议版本拒绝、非法 payload、缺失 request id、未知 message id、非二进制消息和空闲超时清理。
 
 `internal/room` 测试覆盖房间创建、加入、重复加入、准备、退出、房主转移、断线保留和重连恢复。`internal/app` 中的房间网关测试会用 Go WebSocket 测试客户端发送房间大厅 Protobuf envelope，验证服务端请求响应链路。
+
+`internal/storage` 测试覆盖 fake adapter 幂等写入、重连 token 覆盖语义、Redis key/TTL 和 migration 文件命名。room service 与 fake storage 的集成测试验证房间摘要和短期重连资格通过 storage interface 写入。
 
 ## 协议生成
 

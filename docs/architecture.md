@@ -72,7 +72,14 @@ Redis 用于短期运行态数据：
 - lock
 - rate limit
 
-第一里程碑可以先使用内存 repository 验证房间逻辑。本地 MySQL 和 Redis 基础设施已经由 `local-infra` 规格约束，可通过 Docker Compose 或本机安装服务提供；业务读写接入仍由后续 `add-persistence-boundaries` 推进。
+第一里程碑默认仍可使用内存 repository 验证房间状态机；持久化边界由 `server/internal/storage` 提供接口、fake adapter、Redis key builder、MySQL 迁移入口和真实 adapter 骨架。Room service 只能依赖 storage repository/cache interface，不能直接依赖 Redis 或 MySQL client。
+
+当前 storage 边界约束：
+
+- MySQL 只保存第一阶段最小持久事实或摘要：玩家基础资料占位、房间摘要和后续对局摘要预留。
+- Redis 只保存短期运行态：session、presence、room index、reconnect token、lock 和 rate limit。
+- Redis key 必须记录 owner、用途、TTL、value、重建来源和清理触发。
+- `/readyz` 只证明 MySQL/Redis 地址可连接，不证明业务恢复路径已经通过；业务恢复能力由 storage/room 测试或后续明确集成测试验证。
 
 ### Future Battle Server
 
@@ -108,8 +115,8 @@ Room Service
   v
 Storage Adapter
   |
-  +-- Redis, later
-  +-- MySQL, later
+  +-- Redis runtime cache
+  +-- MySQL persistent summaries
 ```
 
 ## 设计约束

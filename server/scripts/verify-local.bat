@@ -69,6 +69,8 @@ echo.
 echo [3/3] Summary
 if "%EXIT_CODE%"=="0" (
     echo [OK] Local service verification passed.
+    echo [INFO] This verifies dependency reachability and HTTP health only.
+    echo [INFO] Run server\scripts\test.bat for storage boundary and business recovery tests.
 ) else (
     echo [FAIL] Local service verification failed.
 )
