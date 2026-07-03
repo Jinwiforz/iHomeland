@@ -1,10 +1,10 @@
 # iHomeland
 
-iHomeland 是一个计划使用 Go 服务端搭配 Unity 或 Godot 客户端开发的在线游戏项目。
+iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游戏项目。
 
 项目第一阶段聚焦“自定义房间大厅”：先建立外围后台、实时网关、自研房间逻辑和小中规模房间服能力。后续如果进入 MOBA/RTS 核心战斗服，需要单独设计高频权威战斗服务器架构，不直接把当前房间服扩展成《英雄联盟》级别的核心战斗服。
 
-当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。持久化边界、客户端接入文档和后续服务拆分仍按 OpenSpec change 继续推进。
+当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。持久化边界和 Unity 客户端接入文档已经建立，后续服务拆分仍按 OpenSpec change 继续推进。
 
 ## 项目边界
 
@@ -26,7 +26,7 @@ iHomeland 是一个计划使用 Go 服务端搭配 Unity 或 Godot 客户端开�
 ## 顶层目录
 
 ```text
-client/      客户端工程或客户端版本信息
+client/      Unity 客户端工程或客户端版本信息
 docs/        项目文档、架构、路线图、规范
 openspec/    需求、设计、规格和变更任务
 server/      Go 服务端模块和本地服务端基础设施配置
@@ -42,6 +42,7 @@ tools/       开发、生成、构建和运维辅助工具
 - `docs/workflow.md`：项目流程规范
 - `docs/roadmap.md`：路线图和 change 拆分
 - `docs/file-structure.md`：文件结构规划
+- `docs/client-integration.md`：Unity 客户端接入说明
 - `docs/protocol-compatibility.md`：协议兼容规则
 - `docs/redis-keys.md`：Redis key 规则
 - `openspec/specs/`：长期行为契约
@@ -62,3 +63,4 @@ tools/       开发、生成、构建和运维辅助工具
 - `openspec/specs/gateway/spec.md`
 - `openspec/specs/room/spec.md`
 - `openspec/specs/storage/spec.md`
+- `openspec/specs/client-integration/spec.md`

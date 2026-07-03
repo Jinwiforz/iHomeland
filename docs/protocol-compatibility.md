@@ -36,6 +36,8 @@
 
 WebSocket 和后续 TCP 必须复用同一 envelope schema。
 
+Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送需要响应的请求时，`protocol_version`、`message_id`、`request_id`、`sequence` 和 `payload` 必须完整设置；收到响应时，客户端必须用 `request_id` 关联本地请求，并按 `message_id` 解码 payload。
+
 ## Message ID 规则
 
 第一阶段号段：
@@ -99,6 +101,8 @@ WebSocket 和后续 TCP 必须复用同一 envelope schema。
 - 服务端返回 `PROTOCOL_VERSION_UNSUPPORTED`
 - 客户端应提示版本不匹配
 
+Unity 客户端收到 `PROTOCOL_VERSION_UNSUPPORTED` 后，应停止继续发送业务请求，提示版本不匹配，并保留服务端返回的支持范围用于排查。
+
 ## 文档要求
 
 每次协议变更必须说明：
@@ -107,3 +111,5 @@ WebSocket 和后续 TCP 必须复用同一 envelope schema。
 - 是否破坏兼容
 - 客户端升级要求
 - 服务端拒绝策略是否变化
+
+Unity 客户端接入、生成和联调要求见 `docs/client-integration.md`。

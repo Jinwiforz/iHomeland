@@ -14,4 +14,8 @@ shared/proto/realtime/v1/envelope.proto
 tools\proto\generate.bat
 ```
 
-Unity 或 Godot 的具体生成目录和接入方式由后续 `document-client-integration` change 决定。
+Unity C# 代码必须从 `shared/proto/` 生成，生成代码不得手工修改。具体输出目录由 Unity 工程结构决定，接入规则见：
+
+```text
+docs/client-integration.md
+```

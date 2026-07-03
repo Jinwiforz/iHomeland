@@ -10,7 +10,7 @@
 
 ## 项目边界
 
-iHomeland 是 Go 后端搭配 Unity 或 Godot 客户端的在线游戏项目。
+iHomeland 是 Go 后端搭配 Unity 客户端的在线游戏项目。
 
 第一阶段技术栈：
 

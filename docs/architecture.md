@@ -8,11 +8,11 @@ iHomeland 第一阶段采用“单进程优先、边界清晰、后续可拆分�
 
 ## 逻辑组件
 
-### Client
+### Unity Client
 
-客户端未来可选择 Unity 或 Godot。客户端只依赖 Protobuf 协议和传输抽象，不要求服务端包含任何引擎专用逻辑。
+第一阶段客户端使用 Unity。Unity 客户端只依赖 Protobuf 协议和传输抽象，不要求服务端包含任何引擎专用逻辑。
 
-客户端职责：
+Unity 客户端职责：
 
 - 建立 WebSocket 或后续 TCP 连接
 - 发送和接收 Protobuf envelope
@@ -101,7 +101,7 @@ Redis 用于短期运行态数据：
 ## 第一阶段服务边界
 
 ```text
-Client(Unity/Godot)
+Unity Client
   |
   | WebSocket + Protobuf envelope
   v

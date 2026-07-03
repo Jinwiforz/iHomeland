@@ -3,7 +3,7 @@
 ## 当前顶层目录
 
 ```text
-client/      客户端工程或客户端版本信息
+client/      Unity 客户端工程或客户端版本信息
 docs/        项目文档、架构、路线图、规范
 openspec/    需求、设计、规格和变更任务
 server/      Go 服务端代码和本地服务端基础设施配置
@@ -24,7 +24,7 @@ shared/
 
 ### `shared/proto`
 
-跨端 Protobuf 源文件目录。客户端和服务端都以这里的 schema 作为实时通信契约，生成代码不得手工修改。
+跨端 Protobuf 源文件目录。Unity 客户端和服务端都以这里的 schema 作为实时通信契约，生成代码不得手工修改。
 
 ## 服务端目标结构
 
@@ -100,7 +100,7 @@ server/
 
 ### `version.json`
 
-服务端版本元数据文件，由 `/version` 接口读取。根目录 `release.json` 表示整体发布版本，`client/version.json` 表示客户端版本。
+服务端版本元数据文件，由 `/version` 接口读取。根目录 `release.json` 表示整体发布版本，`client/version.json` 表示 Unity 客户端版本。
 
 ### `internal/config`
 
@@ -211,4 +211,4 @@ tools/
 
 ### `tools/proto`
 
-跨端协议生成工具目录。协议源文件位于 `shared/proto/`，当前生成 Go 服务端代码，后续 Unity 或 Godot 生成入口也归属此处。
+跨端协议生成工具目录。协议源文件位于 `shared/proto/`，当前生成 Go 服务端代码；Unity C# 生成入口由客户端工程 change 补充，归属此处或 `client/` 内明确的生成脚本目录。

@@ -51,7 +51,7 @@
 
 第一阶段后续推荐 change 顺序：
 
-1. `document-client-integration`
+1. `document-client-integration`（进行中）
 2. `add-internal-service-boundaries`
 
 ## 任务编写规则
