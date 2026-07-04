@@ -5,6 +5,10 @@ title iHomeland - Server Tests
 for %%I in ("%CD%") do set "START_DIR=%%~fI"
 for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
 for %%I in ("%~dp0..") do set "SERVER_ROOT=%%~fI"
+for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
+
+if exist "%ProgramFiles%\Go\bin\go.exe" set "PATH=%ProgramFiles%\Go\bin;%PATH%"
+if exist "%USERPROFILE%\go\bin\go.exe" set "PATH=%USERPROFILE%\go\bin;%PATH%"
 
 echo.
 echo =======================
@@ -53,7 +57,23 @@ echo Go cache   : %GOCACHE%
 echo Mod cache  : %GOMODCACHE%
 echo.
 
-echo [1/1] Running go test ./... %*
+echo [1/2] Generating protocol code...
+call "%PROJECT_ROOT%\tools\proto\generate.bat"
+if errorlevel 1 (
+    set "EXIT_CODE=1"
+    echo.
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Write-Host '[FAIL] Protocol generation failed.' -ForegroundColor Red"
+    goto :finish
+)
+
+pushd "%SERVER_ROOT%" >nul 2>nul
+if errorlevel 1 (
+    call :fail "failed to return to server root: %SERVER_ROOT%"
+    goto :finish
+)
+
+echo.
+echo [2/2] Running go test ./... %*
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$lines = & go test ./... %* 2>&1; $code = $LASTEXITCODE; foreach ($line in $lines) { $text = [string]$line; if ($text -match '^(ok|\?|FAIL)\s+(.+?)(\s+\(cached\)|\s+\[no test files\])?$') { if ($matches[1] -eq 'ok') { Write-Host $matches[1] -NoNewline -ForegroundColor Green } elseif ($matches[1] -eq '?') { Write-Host $matches[1] -NoNewline -ForegroundColor DarkYellow } else { Write-Host $matches[1] -NoNewline -ForegroundColor Red }; Write-Host ('    ' + $matches[2]) -NoNewline; if ($matches[3]) { Write-Host $matches[3] -ForegroundColor DarkGray } else { Write-Host '' } } elseif ($text -match '^--- FAIL:') { Write-Host $text -ForegroundColor Red } else { Write-Host $text } }; exit $code"
 set "EXIT_CODE=%ERRORLEVEL%"
 

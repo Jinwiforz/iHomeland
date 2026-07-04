@@ -42,13 +42,35 @@ server/
 
 ## 本地运行
 
-先在仓库根目录启动本地基础设施：
+首次在新机器运行时，先在仓库根目录初始化本机配置并诊断端口。默认 `--auto` 会优先探测本机安装的 MySQL/Redis 是否可连；如果不可连，则生成 Docker 本地依赖配置：
+
+```powershell
+.\server\scripts\setup-local-env.bat
+```
+
+也可以显式选择模式：
+
+```powershell
+.\server\scripts\setup-local-env.bat --docker
+.\server\scripts\setup-local-env.bat --native
+```
+
+该脚本会生成或修复 `server/.env.local`，并检查所选模式需要的 Docker、端口占用和 Windows TCP excluded port range；Go 不可用时只给出提示，不阻塞依赖配置生成。`server/.env.local` 不提交到 Git；日常优先用该脚本生成配置，不建议修改 Windows 系统端口保留表。
+
+本地默认宿主机端口使用项目专用端口：
+
+```text
+MySQL: 127.0.0.1:33306
+Redis: 127.0.0.1:36379
+```
+
+然后启动本地基础设施：
 
 ```powershell
 .\server\scripts\start-local-infra.bat
 ```
 
-该脚本使用 `server/compose.yaml` 启动 MySQL 和 Redis，并等待容器健康检查通过。停止本地基础设施：
+该脚本会加载 `server/.env.local`，使用 `server/compose.yaml` 启动 MySQL 和 Redis，并等待容器健康检查通过。停止本地基础设施：
 
 ```powershell
 .\server\scripts\stop-local-infra.bat
@@ -70,7 +92,7 @@ server/
 config/local.yaml
 ```
 
-日常开发优先修改 `config/local.yaml`。环境变量只用于临时覆盖配置，不作为默认开发入口。
+日常开发优先使用 `setup-local-env.bat` 生成 `server/.env.local`，保持 Docker 端口映射、服务端连接地址和验证脚本一致。`config/local.yaml` 保留服务端默认配置示例；环境变量只用于临时覆盖配置，不作为默认开发入口。
 
 运行过程中产生的 Go 工具链缓存应保留在 `server/` 内。
 
@@ -80,9 +102,9 @@ config/local.yaml
 .\server\scripts\verify-local.bat
 ```
 
-验证脚本只检查服务端实际配置会连接的地址：`IHOMELAND_MYSQL_ADDR`、`IHOMELAND_REDIS_ADDR` 指向的 TCP 地址是否可连接，并请求 `/healthz`、`/readyz` 和 `/version`。未设置地址时默认检查 `127.0.0.1:3306` 和 `127.0.0.1:6379`。
+验证脚本会加载 `server/.env.local`，只检查服务端实际配置会连接的地址：`IHOMELAND_MYSQL_ADDR`、`IHOMELAND_REDIS_ADDR` 指向的 TCP 地址是否可连接，并请求 `/healthz`、`/readyz` 和 `/version`。未设置地址时默认检查 `127.0.0.1:33306` 和 `127.0.0.1:36379`。
 
-因此 Docker 和本机安装的 MySQL、Redis 可以二选一使用；关键是服务端配置指向的端口必须可连接。Docker 容器是否 healthy 由 `start-local-infra.bat` 负责检查，`verify-local.bat` 不关心依赖是由 Docker 还是本机服务提供。不要让 Docker 和本机安装同时占用同一端口。
+因此 Docker 和本机安装的 MySQL、Redis 可以二选一使用；关键是服务端配置指向的端口必须可连接。Docker 容器是否 healthy 由 `start-local-infra.bat` 负责检查，`verify-local.bat` 不关心依赖是由 Docker 还是本机服务提供。不要让 Docker 和本机安装同时占用同一端口；如果端口冲突，优先修改 `server/.env.local` 中的项目端口。
 
 `/readyz` 和 `verify-local.bat` 只表示依赖地址可达，不等同于房间摘要、重连资格或 Redis 丢失恢复已经通过。业务恢复能力需要通过 `internal/storage` 和 `internal/room` 的单元测试，或后续明确的 Redis/MySQL 集成测试验证。
 
@@ -105,11 +127,14 @@ config/local.yaml
 .\scripts\test.bat
 ```
 
-测试缓存保留在 `server/.gocache` 和 `server/.gomodcache`。测试入口执行：
+测试缓存保留在 `server/.gocache` 和 `server/.gomodcache`。测试入口会先确保项目本地 Protobuf 工具链可用，再重新生成协议代码并执行 Go 测试：
 
 ```powershell
+..\tools\proto\generate.bat
 go test ./...
 ```
+
+协议生成代码属于可再生成产物，不提交到 Git。`scripts\test.bat` 固定按上述顺序执行，保证测试使用当前 `shared/proto/` 生成出的 Go 代码。
 
 预期结果应包含：
 
@@ -135,12 +160,16 @@ ok   ihomeland/server/internal/storage
 
 ## 协议生成
 
-需要本机可用 `protoc` 和 `protoc-gen-go`。
-
-执行：
+协议生成由项目本地工具链管理，工具位于 `.tools\protoc\bin\protoc.exe` 和 `.tools\go\bin\protoc-gen-go.exe`。`tools\proto\generate.bat` 会在生成前确保工具链就绪。
 
 ```powershell
 ..\tools\proto\generate.bat
+```
+
+需要单独刷新协议工具链时，执行：
+
+```powershell
+..\tools\proto\setup.bat
 ```
 
 协议源文件位于：
@@ -154,6 +183,8 @@ ok   ihomeland/server/internal/storage
 ```text
 internal\protocol\pb
 ```
+
+该目录由 `tools\proto\generate.bat` 生成，并被 `.gitignore` 忽略。协议工具和下载缓存位于 `.tools/`，同样不提交到 Git；协议源文件仍以 `shared/proto/` 为准。
 
 ## 配置覆盖
 

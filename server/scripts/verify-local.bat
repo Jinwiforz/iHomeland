@@ -5,6 +5,8 @@ title iHomeland - Verify Local Environment
 for %%I in ("%CD%") do set "START_DIR=%%~fI"
 for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
 for %%I in ("%~dp0..\..") do set "REPO_ROOT=%%~fI"
+for %%I in ("%~dp0..") do set "SERVER_ROOT=%%~fI"
+set "LOCAL_ENV_PATH=%SERVER_ROOT%\.env.local"
 
 echo.
 echo =====================================
@@ -14,16 +16,22 @@ echo.
 
 pushd "%REPO_ROOT%"
 
+call "%SCRIPT_DIR%\load-local-env.bat" "%LOCAL_ENV_PATH%"
+if errorlevel 1 (
+    call :fail "failed to load local environment."
+    goto :finish
+)
+
 set "INFRA_FAILED=0"
 
 if "%IHOMELAND_MYSQL_ADDR%"=="" (
-    set "MYSQL_ADDR=127.0.0.1:3306"
+    set "MYSQL_ADDR=127.0.0.1:33306"
 ) else (
     set "MYSQL_ADDR=%IHOMELAND_MYSQL_ADDR%"
 )
 
 if "%IHOMELAND_REDIS_ADDR%"=="" (
-    set "REDIS_ADDR=127.0.0.1:6379"
+    set "REDIS_ADDR=127.0.0.1:36379"
 ) else (
     set "REDIS_ADDR=%IHOMELAND_REDIS_ADDR%"
 )

@@ -154,45 +154,51 @@ Unity 客户端执行房间操作成功后，必须使用服务端返回的 `Roo
 
 ## 本地联调步骤
 
-1. 启动服务端本地依赖：
+1. 初始化本机环境配置并诊断端口：
+
+```powershell
+.\server\scripts\setup-local-env.bat
+```
+
+2. 启动服务端本地依赖：
 
 ```powershell
 .\server\scripts\start-local-infra.bat
 ```
 
-2. 启动服务端：
+3. 启动服务端：
 
 ```powershell
-cd G:\Jinwiforz\iHomeland\server
+cd D:\Jinwiforz\iHomeland\server
 .\scripts\run.bat
 ```
 
-3. 检查基础接口：
+4. 检查基础接口：
 
 ```powershell
 .\server\scripts\verify-local.bat
 ```
 
-4. Unity 客户端请求 `/version`，确认版本响应可解析。
+5. Unity 客户端请求 `/version`，确认版本响应可解析。
 
-5. Unity 客户端连接 `ws://127.0.0.1:8080/ws`。
+6. Unity 客户端连接 `ws://127.0.0.1:8080/ws`。
 
-6. 发送 `HeartbeatRequest`，确认收到 `HeartbeatResponse`。
+7. 发送 `HeartbeatRequest`，确认收到 `HeartbeatResponse`。
 
-7. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
+8. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
 
-8. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
+9. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
 
-9. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+10. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
 
-10. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
+11. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
 
 ## 当前验收边界
 
 在 Unity 工程创建前，服务端侧通过 Go 测试验证 `/ws`、envelope、心跳、错误响应和房间大厅链路：
 
 ```powershell
-cd G:\Jinwiforz\iHomeland\server
+cd D:\Jinwiforz\iHomeland\server
 go test ./...
 ```
 

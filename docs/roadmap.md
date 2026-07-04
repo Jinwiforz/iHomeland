@@ -203,17 +203,35 @@
 
 ### document-client-integration
 
-状态：进行中。
+状态：已归档。
 
 目标：文档化 Unity 协议生成、传输抽象和客户端连接流程。
 
 不做：不在服务端实现引擎专用逻辑。
 
+### create-unity-client-skeleton
+
+目标：创建最小 Unity 客户端工程骨架，明确目录、版本文件、项目设置和启动场景。
+
+不做：不实现完整 UI、美术资源、登录系统或战斗玩法。
+
+### add-unity-protobuf-generation
+
+目标：为 Unity 客户端补齐 C# Protobuf 生成脚本、输出目录和生成代码管理规则。
+
+不做：不手写协议结构，不改变现有 `.proto` 语义。
+
+### add-unity-websocket-smoke-test
+
+目标：实现 Unity 侧最小实时联调：连接 `/ws`、发送心跳、接收响应，并为后续房间大厅 UI 接入验证链路。
+
+不做：不实现完整房间界面、不做复杂重连 UI、不引入 battle server。
+
 ### add-internal-service-boundaries
 
 目标：在确实需要拆分时，将进程内接口升级为 gRPC 边界。
 
-不做：第一阶段默认不急着拆服务。
+不做：在 Unity 客户端最小联调完成前，不急着拆服务。
 
 ## Battle Server 进入条件
 

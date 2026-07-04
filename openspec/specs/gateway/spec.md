@@ -1,30 +1,34 @@
 # Gateway 规格
 
+## Purpose
+
+定义实时网关连接入口、WebSocket 会话、心跳、协议错误和消息分发边界的长期行为契约，确保传输层不承载业务状态机。
+
 ## Requirements
 
 ### Requirement: 网关负责连接和协议入口
-网关必须负责连接生命周期、envelope 编解码、协议版本校验、心跳、超时和消息分发。
+MUST:网关必须负责连接生命周期、envelope 编解码、协议版本校验、心跳、超时和消息分发。
 
 #### Scenario: 客户端建立连接
 - **WHEN** 客户端连接网关
 - **THEN** 网关创建连接级 session 并准备接收 envelope 消息
 
 ### Requirement: 网关不得承载复杂业务状态机
-网关不得直接维护房间状态机或修改房间内部状态，必须通过业务服务接口调用。
+MUST:网关不得直接维护房间状态机或修改房间内部状态，必须通过业务服务接口调用。
 
 #### Scenario: 客户端请求加入房间
 - **WHEN** 网关收到加入房间消息
 - **THEN** 网关将请求转发给 room service 接口处理
 
 ### Requirement: 连接必须有心跳和清理机制
-网关必须支持心跳、空闲超时、断开日志和资源清理。
+MUST:网关必须支持心跳、空闲超时、断开日志和资源清理。
 
 #### Scenario: 客户端心跳超时
 - **WHEN** 客户端超过配置时间未发送心跳
 - **THEN** 网关关闭连接并清理 session
 
 ### Requirement: 网关必须提供 WebSocket 实时入口
-网关必须提供一个 WebSocket endpoint 作为第一阶段默认实时传输入口，并且该入口必须只接收二进制 Protobuf envelope 消息。
+MUST:网关必须提供一个 WebSocket endpoint 作为第一阶段默认实时传输入口，并且该入口必须只接收二进制 Protobuf envelope 消息。
 
 #### Scenario: 客户端通过 WebSocket 建立实时连接
 - **WHEN** 客户端请求网关 WebSocket endpoint 并完成升级
@@ -35,7 +39,7 @@
 - **THEN** 网关返回或记录协议错误并按策略关闭连接
 
 ### Requirement: 网关必须维护连接级 session 生命周期
-网关必须为每个 WebSocket 连接维护单进程内的连接级 session，session 至少记录 connection id、远端地址、协议版本、建立时间、最后活跃时间和关闭原因，并且连接关闭时必须清理。
+MUST:网关必须为每个 WebSocket 连接维护单进程内的连接级 session，session 至少记录 connection id、远端地址、协议版本、建立时间、最后活跃时间和关闭原因，并且连接关闭时必须清理。
 
 #### Scenario: 连接注册
 - **WHEN** WebSocket 连接建立成功
@@ -46,7 +50,7 @@
 - **THEN** 网关注销 session、释放连接资源并记录关闭原因
 
 ### Requirement: 网关必须校验 envelope 和协议版本
-网关收到 WebSocket 消息后必须先解析 Protobuf envelope，再校验协议版本、message id、request id 和 payload，无法处理时必须返回结构化错误响应。
+MUST:网关收到 WebSocket 消息后必须先解析 Protobuf envelope，再校验协议版本、message id、request id 和 payload，无法处理时必须返回结构化错误响应。
 
 #### Scenario: 客户端协议版本不受支持
 - **WHEN** 客户端发送协议版本低于或高于服务端支持范围的 envelope
@@ -61,7 +65,7 @@
 - **THEN** 网关返回 `MESSAGE_ID_UNSUPPORTED` 结构化错误响应
 
 ### Requirement: 网关必须处理协议心跳和空闲超时
-网关必须处理基础心跳请求、返回心跳响应、更新连接最后活跃时间，并在超过配置的空闲时间后关闭连接。
+MUST:网关必须处理基础心跳请求、返回心跳响应、更新连接最后活跃时间，并在超过配置的空闲时间后关闭连接。
 
 #### Scenario: 客户端发送心跳
 - **WHEN** 客户端发送 `HeartbeatRequest` envelope
@@ -72,7 +76,7 @@
 - **THEN** 网关关闭连接、清理 session 并记录超时原因
 
 ### Requirement: 网关必须通过接口分发业务消息
-网关不得直接修改房间状态或承载房间状态机；除系统消息外的业务消息必须通过明确的分发接口交给业务模块处理。
+MUST:网关不得直接修改房间状态或承载房间状态机；除系统消息外的业务消息必须通过明确的分发接口交给业务模块处理。
 
 #### Scenario: 收到后续房间业务消息
 - **WHEN** 网关收到已注册的房间业务 message id

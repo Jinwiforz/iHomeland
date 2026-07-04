@@ -48,11 +48,16 @@
 4. `add-websocket-gateway`
 5. `add-room-lobby`
 6. `add-persistence-boundaries`
+7. `document-client-integration`
 
 第一阶段后续推荐 change 顺序：
 
-1. `document-client-integration`（进行中）
-2. `add-internal-service-boundaries`
+1. `create-unity-client-skeleton`
+2. `add-unity-protobuf-generation`
+3. `add-unity-websocket-smoke-test`
+4. `add-internal-service-boundaries`
+
+后端内部服务拆分应排在 Unity 最小客户端联调之后。没有客户端工程时，优先推进客户端骨架、协议生成和 smoke test；不优先推进 gRPC、中心服或游戏服拆分。
 
 ## 任务编写规则
 

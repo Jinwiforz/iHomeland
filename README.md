@@ -4,7 +4,7 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 
 项目第一阶段聚焦“自定义房间大厅”：先建立外围后台、实时网关、自研房间逻辑和小中规模房间服能力。后续如果进入 MOBA/RTS 核心战斗服，需要单独设计高频权威战斗服务器架构，不直接把当前房间服扩展成《英雄联盟》级别的核心战斗服。
 
-当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。持久化边界和 Unity 客户端接入文档已经建立，后续服务拆分仍按 OpenSpec change 继续推进。
+当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。持久化边界和 Unity 客户端接入文档已经建立，下一步优先创建 Unity 客户端骨架、补齐 Unity 协议生成和最小 WebSocket 联调。
 
 ## 项目边界
 
@@ -50,7 +50,9 @@ tools/       开发、生成、构建和运维辅助工具
 ## 模块入口
 
 - 服务端开发、运行、测试和配置说明见 `server/README.md`
-- 本地 MySQL/Redis 可以使用 Docker Compose，也可以使用本机安装服务；验证以服务端实际配置地址是否可连接为准
+- Unity 客户端接入、协议生成和最小联调说明见 `docs/client-integration.md`
+- 本地 MySQL/Redis 推荐先运行 `server/scripts/setup-local-env.bat` 生成本机配置；脚本支持自动选择 Docker 或本机安装服务，验证以服务端实际配置地址是否可连接为准
+- 服务端测试入口会自动准备项目本地 Protobuf 生成工具链，并在测试前重新生成协议代码
 - 架构或跨模块变更必须先通过 OpenSpec change 描述清楚，再进入实现
 
 ## OpenSpec

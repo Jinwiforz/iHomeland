@@ -5,6 +5,7 @@ title iHomeland - Start Local Infrastructure
 for %%I in ("%CD%") do set "START_DIR=%%~fI"
 for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
 for %%I in ("%~dp0..") do set "SERVER_ROOT=%%~fI"
+set "LOCAL_ENV_PATH=%SERVER_ROOT%\.env.local"
 
 echo.
 echo ========================================
@@ -13,6 +14,14 @@ echo ========================================
 echo.
 
 pushd "%SERVER_ROOT%"
+
+call "%SCRIPT_DIR%\load-local-env.bat" "%LOCAL_ENV_PATH%"
+if errorlevel 1 (
+    call :fail "failed to load local environment."
+    goto :finish
+)
+if not defined IHOMELAND_MYSQL_PORT set "IHOMELAND_MYSQL_PORT=33306"
+if not defined IHOMELAND_REDIS_PORT set "IHOMELAND_REDIS_PORT=36379"
 
 where docker >nul 2>nul
 if errorlevel 1 (
@@ -26,6 +35,8 @@ if not exist "%SERVER_ROOT%\compose.yaml" (
 )
 
 echo [1/3] Starting MySQL and Redis with docker compose...
+echo [INFO] MySQL host port: %IHOMELAND_MYSQL_PORT%
+echo [INFO] Redis host port: %IHOMELAND_REDIS_PORT%
 docker compose -f "%SERVER_ROOT%\compose.yaml" up -d
 if errorlevel 1 (
     call :fail "docker compose up failed."

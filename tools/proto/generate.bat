@@ -15,6 +15,7 @@ for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 set "SERVER_ROOT=%PROJECT_ROOT%\server"
 set "PROTO_ROOT=%PROJECT_ROOT%\shared\proto"
 set "LOCAL_PROTOC=%PROJECT_ROOT%\.tools\protoc\bin\protoc.exe"
+set "LOCAL_PROTOC_GEN_GO=%PROJECT_ROOT%\.tools\go\bin\protoc-gen-go.exe"
 set "PROTO_FILE=shared\proto\realtime\v1\envelope.proto"
 set "GO_OUT=server\internal\protocol\pb"
 set "GO_FILE=%GO_OUT%\realtime\v1\envelope.pb.go"
@@ -25,6 +26,20 @@ echo %C_INFO%[proto] output dir:  %C_RESET% %PROJECT_ROOT%\%GO_OUT%
 echo.
 
 pushd "%PROJECT_ROOT%" || goto fail_pushd
+
+set "NEED_PROTO_TOOLS="
+if not exist "%LOCAL_PROTOC%" set "NEED_PROTO_TOOLS=1"
+if not exist "%LOCAL_PROTOC_GEN_GO%" set "NEED_PROTO_TOOLS=1"
+
+if defined NEED_PROTO_TOOLS (
+    echo %C_WARN%[proto] project-local protocol tools are incomplete, preparing them now.%C_RESET%
+    call "%PROJECT_ROOT%\tools\proto\setup.bat"
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        echo %C_ERR%[proto] ERROR: failed to prepare project-local protocol tools.%C_RESET%
+        goto finish
+    )
+)
 
 set "PROTOC=protoc"
 if exist "%LOCAL_PROTOC%" (
@@ -39,18 +54,25 @@ echo %C_INFO%[proto] checking protoc...%C_RESET%
 if errorlevel 1 (
     set "EXIT_CODE=1"
     echo %C_ERR%[proto] ERROR: protoc is required.%C_RESET%
-    echo %C_ERR%[proto] Install protoc or place it at .tools\protoc\bin\protoc.exe.%C_RESET%
+    echo %C_ERR%[proto] Run tools\proto\setup.bat to install project-local protocol tools.%C_RESET%
     goto finish
 )
 
 echo %C_INFO%[proto] checking protoc-gen-go...%C_RESET%
-where protoc-gen-go
+set "PROTOC_GEN_GO_DIR="
+if exist "%LOCAL_PROTOC_GEN_GO%" (
+    for %%I in ("%LOCAL_PROTOC_GEN_GO%") do set "PROTOC_GEN_GO_DIR=%%~dpI"
+    echo %C_INFO%[proto] using local protoc-gen-go:%C_RESET% %LOCAL_PROTOC_GEN_GO%
+)
+if defined PROTOC_GEN_GO_DIR set "PATH=%PROTOC_GEN_GO_DIR%;%PATH%"
+where protoc-gen-go >nul 2>nul
 if errorlevel 1 (
     set "EXIT_CODE=1"
     echo %C_ERR%[proto] ERROR: protoc-gen-go is required.%C_RESET%
-    echo %C_ERR%[proto] Run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.1%C_RESET%
+    echo %C_ERR%[proto] Run tools\proto\setup.bat to install project-local protocol tools.%C_RESET%
     goto finish
 )
+where protoc-gen-go
 
 if not exist "%PROTO_FILE%" (
     set "EXIT_CODE=1"

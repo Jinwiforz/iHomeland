@@ -5,6 +5,7 @@ title iHomeland - Run Server
 for %%I in ("%CD%") do set "START_DIR=%%~fI"
 for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
 for %%I in ("%~dp0..") do set "SERVER_ROOT=%%~fI"
+set "LOCAL_ENV_PATH=%SERVER_ROOT%\.env.local"
 
 echo.
 echo ===========================
@@ -13,6 +14,12 @@ echo ===========================
 echo.
 
 pushd "%SERVER_ROOT%"
+
+call "%SCRIPT_DIR%\load-local-env.bat" "%LOCAL_ENV_PATH%"
+if errorlevel 1 (
+    call :fail "failed to load local environment."
+    goto :finish
+)
 
 where go >nul 2>nul
 if errorlevel 1 (
@@ -26,6 +33,9 @@ set "GOSUMDB=off"
 
 echo [INFO] Server root: %SERVER_ROOT%
 echo [INFO] HTTP default: 127.0.0.1:8080
+if defined IHOMELAND_HTTP_ADDR echo [INFO] HTTP configured: %IHOMELAND_HTTP_ADDR%
+if defined IHOMELAND_MYSQL_ADDR echo [INFO] MySQL configured: %IHOMELAND_MYSQL_ADDR%
+if defined IHOMELAND_REDIS_ADDR echo [INFO] Redis configured: %IHOMELAND_REDIS_ADDR%
 echo [INFO] Press Ctrl+C to stop the server.
 echo.
 
