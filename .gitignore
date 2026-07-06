@@ -65,6 +65,7 @@ client/Recordings/
 client/*.csproj
 client/*.unityproj
 client/*.sln
+client/*.slnx
 client/*.suo
 client/*.tmp
 client/*.pidb

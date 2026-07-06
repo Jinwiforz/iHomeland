@@ -8,15 +8,15 @@ namespace App.UI
 {
     public sealed class LoadingPage : UIPanel
     {
-        [Header("UI References")] [SerializeField]
-        private Slider progressSlider;
-
+        [Header("UI References")]
+        [SerializeField] private Slider progressSlider;
         [SerializeField] private TMP_Text progressText;
         [SerializeField] private TMP_Text messageText;
         [SerializeField] private TMP_Text versionText;
         [SerializeField] private CanvasGroup canvasGroup;
 
-        [Header("Animation")] [SerializeField] private float fadeInDuration = 0.2f;
+        [Header("Animation")]
+        [SerializeField] private float fadeInDuration = 0.2f;
         [SerializeField] private float fadeOutDuration = 0.2f;
 
         private float _progress;
@@ -25,8 +25,12 @@ namespace App.UI
         protected override void OnInitialize()
         {
             EnsureCanvasGroup();
-            SetProgress(0f);
-            SetMessage("Loading...");
+
+            canvasGroup.alpha = 0f;
+            canvasGroup.blocksRaycasts = true;
+            canvasGroup.interactable = false;
+
+            ResetProgress();
             SetVersion(AppConfig.Version);
 
             AppRoot.Instance.Log.Info<LoadingPage>("Initialize.");
@@ -43,8 +47,8 @@ namespace App.UI
 
         protected override void OnShow()
         {
-            SetProgress(_progress);
-            SetMessage(_message);
+            ApplyProgress(_progress);
+            ApplyMessage();
 
             AppRoot.Instance.Log.Info<LoadingPage>("Show.");
         }
@@ -66,27 +70,41 @@ namespace App.UI
         public void SetProgress(float progress)
         {
             _progress = Mathf.Clamp01(progress);
+            ApplyProgress(_progress);
+        }
 
-            if (progressSlider != null)
+        public IEnumerator SetProgressSmooth(float targetProgress, float duration)
+        {
+            float startProgress = _progress;
+            float endProgress = Mathf.Clamp01(targetProgress);
+
+            if (duration <= 0f)
             {
-                progressSlider.value = _progress;
+                SetProgress(endProgress);
+                yield break;
             }
 
-            if (progressText != null)
+            float time = 0f;
+
+            while (time < duration)
             {
-                int percent = Mathf.RoundToInt(_progress * 100f);
-                progressText.text = $"{percent}%";
+                time += Time.unscaledDeltaTime;
+
+                float t = Mathf.Clamp01(time / duration);
+                float value = Mathf.SmoothStep(startProgress, endProgress, t);
+
+                SetProgress(value);
+
+                yield return null;
             }
+
+            SetProgress(endProgress);
         }
 
         public void SetMessage(string message)
         {
             _message = string.IsNullOrWhiteSpace(message) ? "Loading..." : message;
-
-            if (messageText != null)
-            {
-                messageText.text = _message;
-            }
+            ApplyMessage();
         }
 
         public void SetVersion(string version)
@@ -109,6 +127,30 @@ namespace App.UI
         {
             SetProgress(0f);
             SetMessage("Loading...");
+        }
+
+        private void ApplyProgress(float progress)
+        {
+            float value = Mathf.Clamp01(progress);
+
+            if (progressSlider != null)
+            {
+                progressSlider.value = value;
+            }
+
+            if (progressText != null)
+            {
+                int percent = Mathf.RoundToInt(value * 100f);
+                progressText.text = $"{percent}%";
+            }
+        }
+
+        private void ApplyMessage()
+        {
+            if (messageText != null)
+            {
+                messageText.text = _message;
+            }
         }
 
         private void EnsureCanvasGroup()
@@ -141,7 +183,7 @@ namespace App.UI
 
             while (time < duration)
             {
-                time += Time.deltaTime;
+                time += Time.unscaledDeltaTime;
 
                 float progress = Mathf.Clamp01(time / duration);
 

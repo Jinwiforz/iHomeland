@@ -128,6 +128,16 @@ namespace App.Systems
             return !string.IsNullOrWhiteSpace(pageName) && _pages.ContainsKey(pageName);
         }
 
+        public void BringPageToFront(string pageName)
+        {
+            if (!TryGetPage(pageName, out UIPanel page))
+            {
+                return;
+            }
+
+            page.transform.SetAsLastSibling();
+        }
+
         public bool TryGetPage(string pageName, out UIPanel page)
         {
             page = null;
