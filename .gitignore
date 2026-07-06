@@ -16,11 +16,12 @@ $RECYCLE.BIN/
 ## IDEs and editors
 .idea/
 .vs/
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
+
+# Local AI / Agent tooling
+.agents/
+.codex/
+
 *.suo
 *.user
 *.userprefs
