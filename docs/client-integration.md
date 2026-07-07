@@ -2,7 +2,15 @@
 
 本文档说明第一阶段 Unity 客户端如何接入 iHomeland 服务端。它的 owner 是 `client-integration`，维护场景包括协议生成、实时连接、房间大厅联调和客户端接入验收。
 
-当前范围只覆盖自定义房间大厅：版本检查、WebSocket 连接、Protobuf envelope、心跳、错误响应、创建房间、加入房间、准备、退出、房主转移和断线重连。本文档不创建 Unity 工程，不规定具体 Unity 第三方包，不实现登录、匹配、battle server、观战、回放或完整 UI。
+当前范围覆盖第一里程碑端到端接入：版本检查、账号会话、WebSocket 连接、Protobuf envelope、心跳、错误响应、创建房间、加入房间、准备、退出、房主转移和断线重连。本文档不规定具体 Unity 第三方包，不实现匹配、battle server、观战、回放或完整经济系统。
+
+当前 Unity 客户端已经具备基础页面和场景流转：
+
+```text
+MainScene -> LoadingPage -> LoginPage -> HomePage -> LoadingPage -> BattleScene
+```
+
+该链路中的注册、登录、登出和会话恢复已经接入服务端账号会话；`Start Game` 后续应进入房间大厅流程，而不是直接推进正式战斗模块。
 
 ## 协议来源
 
@@ -24,7 +32,14 @@ shared/proto/realtime/v1/envelope.proto
 - Unity 生成代码不得手工修改。
 - Unity 工程不得复制一份独立 `.proto` 作为长期来源。
 - `.proto` 变化后，Unity 侧必须重新生成 C# 协议代码。
-- 生成输出目录由后续 Unity 工程结构确定，建议归属 `client/` 内的生成代码目录。
+- 项目只保留一个协议生成入口：`tools/proto/generate.bat`。
+- 运行 `tools/proto/generate.bat` 必须同时刷新服务端 Go 代码和 Unity C# 代码。
+
+Unity C# 生成输出目录：
+
+```text
+client/Assets/App/Scripts/Protocol/Pb/Realtime/V1/
+```
 
 ## 版本检查
 
@@ -50,6 +65,21 @@ ws://{host}/ws
 - 业务消息必须编码为 Protobuf `Envelope`。
 - 不得使用文本帧承载业务消息。
 - 连接断开后，客户端应停止发送业务请求，并根据 UI 状态提示重连或返回大厅入口。
+
+## 账号会话
+
+Unity 客户端进入房间大厅前必须先完成服务端登录或会话恢复。
+
+账号会话规则：
+
+- `LoginPage` 提交注册或登录请求后，必须等待服务端成功响应，才能进入 `HomePage`。
+- 登录成功后，客户端保存服务端返回的 `PlayerProfile`、`session_token` 和 `expires_at_ms`。
+- 客户端把 `session_token` 视为不透明字符串，不解析 token 内容。
+- 登出成功后，客户端清理本地账号状态和 token，并返回 `LoginPage`。
+- 启动时如存在本地 token，客户端可以尝试恢复会话；恢复失败必须清理 token 并显示登录入口。
+- 未登录状态下不得发送创房、进房、退房、房主转移等房间大厅请求。
+
+账号协议 message id 归属 `account`，使用 `1000-1999` 号段；具体消息以 `shared/proto/realtime/v1/envelope.proto` 为准。
 
 ## Envelope 规则
 
@@ -132,7 +162,7 @@ Unity 客户端必须读取：
 | 重连恢复房间身份 | `2010 ReconnectRoomRequest` | `2011 ReconnectRoomResponse` |
 | 房间快照推送 | 无 | `2012 RoomSnapshotPushed` |
 
-房间大厅请求必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。
+在账号会话接入完成前，房间大厅请求仍必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。账号会话接入后，客户端房间流程应优先使用服务端确认的当前玩家身份；服务端侧房间请求去除显式 `player_id` 的调整由后续房间大厅客户端接入 change 处理。
 
 ## UI 状态来源
 
@@ -169,7 +199,7 @@ Unity 客户端执行房间操作成功后，必须使用服务端返回的 `Roo
 3. 启动服务端：
 
 ```powershell
-cd D:\Jinwiforz\iHomeland\server
+cd G:\Jinwiforz\iHomeland\server
 .\scripts\run.bat
 ```
 
@@ -185,21 +215,28 @@ cd D:\Jinwiforz\iHomeland\server
 
 7. 发送 `HeartbeatRequest`，确认收到 `HeartbeatResponse`。
 
-8. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
+8. 发送 `RegisterRequest` 或 `LoginRequest`，确认收到玩家资料、session token 和过期时间。
 
-9. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
+9. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
 
-10. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+10. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
 
-11. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
+11. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+
+12. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
 
 ## 当前验收边界
 
-在 Unity 工程创建前，服务端侧通过 Go 测试验证 `/ws`、envelope、心跳、错误响应和房间大厅链路：
+当前服务端侧通过 Go 测试验证 `/ws`、envelope、心跳、错误响应和房间大厅链路：
 
 ```powershell
-cd D:\Jinwiforz\iHomeland\server
+cd G:\Jinwiforz\iHomeland\server
 go test ./...
 ```
 
-Unity 工程创建后，必须补充 Unity 侧协议生成脚本和客户端联调验证。
+Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem` 和真实 `AccountSystem` 注册/登录/登出链路。后续仍需补充房间大厅 UI 和客户端联调验证。
+
+当前暂未自动化验证的 Unity 项：
+
+- Unity 编辑器中执行注册失败、注册成功、登录失败、登录成功、登出和恢复失败路径。
+- 后续房间大厅客户端接入 change：`add-unity-room-lobby-flow`。

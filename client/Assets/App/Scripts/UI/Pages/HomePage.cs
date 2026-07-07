@@ -72,6 +72,14 @@ namespace App.UI
 
         private void OnClickStartGame()
         {
+            if (AppRoot.Instance.Account == null || !AppRoot.Instance.Account.IsLoggedIn)
+            {
+                SetMessage("Please login first.");
+                AppRoot.Instance.UI.OpenPage(AppPages.LoginPage);
+                Close();
+                return;
+            }
+
             if (_isStartingGame)
             {
                 return;
@@ -126,11 +134,18 @@ namespace App.UI
             AppRoot.Instance.Log.Info<HomePage>("Setting clicked.");
         }
 
-        private void OnClickQuit()
+        private async void OnClickQuit()
         {
-            SetMessage("Quit clicked.");
-            AppRoot.Instance.Log.Info<HomePage>("Quit clicked.");
-            Application.Quit();
+            SetMessage("Logging out...");
+            AppRoot.Instance.Log.Info<HomePage>("Logout clicked.");
+
+            if (AppRoot.Instance.Account != null)
+            {
+                await AppRoot.Instance.Account.LogoutAsync();
+            }
+
+            AppRoot.Instance.UI.OpenPage(AppPages.LoginPage);
+            Close();
         }
 
         private void SetMessage(string message)

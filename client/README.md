@@ -2,6 +2,14 @@
 
 本目录是 iHomeland 的 Unity 客户端工程根目录。
 
+当前客户端已经具备基础运行链路：
+
+```text
+MainScene -> LoadingPage -> LoginPage -> HomePage -> LoadingPage -> BattleScene
+```
+
+该链路目前用于验证 AppRoot、Systems、UI 页面和场景切换。`AccountSystem` 已通过 `NetworkSystem` 接入服务端注册、登录和登出；`Start Game` 后续应进入房间大厅流程，第一里程碑完成前不推进正式战斗模块。
+
 ## 当前结构
 
 ```text

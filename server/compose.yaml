@@ -6,7 +6,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${IHOMELAND_MYSQL_ROOT_PASSWORD:-ihomeland_root}
       MYSQL_DATABASE: ${IHOMELAND_MYSQL_DATABASE:-ihomeland}
       MYSQL_USER: ${IHOMELAND_MYSQL_USER:-ihomeland}
-      MYSQL_PASSWORD: ${IHOMELAND_MYSQL_PASSWORD:-ihomeland_dev}
+      MYSQL_PASSWORD: ${IHOMELAND_MYSQL_PASSWORD:-ihomeland}
     ports:
       - "${IHOMELAND_MYSQL_PORT:-33306}:3306"
     volumes:

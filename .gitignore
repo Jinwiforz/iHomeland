@@ -42,8 +42,6 @@ go.work.sum
 
 ## Generated protocol output
 server/internal/protocol/pb/
-client/Assets/Generated/
-!client/Assets/Generated/.gitkeep
 
 ## Server build/runtime output
 server/bin/
@@ -90,3 +88,10 @@ client/[Cc]rash[Rr]eports/
 !client/Packages/manifest.json
 !client/Packages/packages-lock.json
 !client/ProjectSettings/**
+
+## Generated protocol Unity metadata
+client/Assets/App/Scripts/Protocol.meta
+client/Assets/App/Scripts/Protocol/Pb.meta
+client/Assets/App/Scripts/Protocol/Pb/
+client/Assets/App/Scripts/Generated.meta
+client/Assets/App/Scripts/Generated/

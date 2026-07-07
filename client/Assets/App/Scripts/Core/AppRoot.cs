@@ -17,6 +17,8 @@ namespace App.Core
 
         public AudioSystem Audio { get; private set; }
 
+        public NetworkSystem Network { get; private set; }
+
         public AccountSystem Account { get; private set; }
 
         public bool IsInitialized { get; private set; }
@@ -56,6 +58,7 @@ namespace App.Core
             Scene.Tick(deltaTime);
             UI.Tick(deltaTime);
             Audio.Tick(deltaTime);
+            Network.Tick(deltaTime);
             Account.Tick(deltaTime);
         }
 
@@ -86,6 +89,7 @@ namespace App.Core
             Scene = gameObject.AddComponent<SceneSystem>();
             UI = gameObject.AddComponent<UISystem>();
             Audio = gameObject.AddComponent<AudioSystem>();
+            Network = gameObject.AddComponent<NetworkSystem>();
             Account = gameObject.AddComponent<AccountSystem>();
         }
 
@@ -103,6 +107,7 @@ namespace App.Core
             Scene.Initialize(this);
             UI.Initialize(this);
             Audio.Initialize(this);
+            Network.Initialize(this);
             Account.Initialize(this);
 
             IsInitialized = true;
@@ -120,6 +125,7 @@ namespace App.Core
             Log.Info<AppRoot>("App shutdown started.");
 
             Account.Shutdown();
+            Network.Shutdown();
             Audio.Shutdown();
             UI.Shutdown();
             Scene.Shutdown();

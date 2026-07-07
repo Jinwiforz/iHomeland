@@ -6,6 +6,26 @@
 
 本架构目标是让项目在早期保持简单，同时为后续扩展 UI、音频、资源加载、场景切换、网络、战斗、ECS 等模块预留清晰边界。
 
+当前 Unity 工程已经跑通基础应用链路：
+
+```text
+MainScene
+  ↓
+LoadingPage
+  ↓
+LoginPage
+  ↓
+HomePage
+  ↓
+Start Game
+  ↓
+LoadingPage
+  ↓
+BattleScene
+```
+
+该链路用于验证外层生命周期、UI 打开关闭和场景切换。第一里程碑仍以“自定义房间大厅”为目标，`Start Game` 后续应改为进入房间大厅或创建/加入房间流程；在 battle server 设计完成前，不把 `BattleScene` 扩展成正式高频战斗模块。
+
 ---
 
 ## 2. 总体设计理念
@@ -64,6 +84,7 @@ AssetSystem
 SceneSystem
 UISystem
 AudioSystem
+AccountSystem
 NetworkSystem
 SaveSystem
 BattleSystem
@@ -365,6 +386,43 @@ Assets/App/Resources/UI/Pages/HomePage.prefab
 ```
 
 音频系统负责音频能力，不建议散落到各个业务脚本中直接创建 `AudioSource`。
+
+---
+
+### 7.8 AccountSystem
+
+账号系统。
+
+职责：
+
+```text
+维护当前登录状态
+发起注册、登录、登出和会话恢复
+保存服务端返回的玩家资料和 session 过期时间
+在会话失效时清理本地账号状态
+为房间大厅流程提供当前玩家身份
+```
+
+`AccountSystem` 的状态必须以服务端响应为准。客户端表单校验只用于提前提示空账号、空密码等输入问题，不得把本地校验成功视为已登录。
+
+---
+
+### 7.9 NetworkSystem
+
+网络系统。
+
+职责：
+
+```text
+请求版本接口
+管理 WebSocket 连接
+收发 Protobuf envelope
+维护 request_id 和 pending request
+发送心跳并处理空闲或断线状态
+分发结构化错误和业务响应
+```
+
+账号、房间和后续联机模块应通过 `NetworkSystem` 发送请求，不应各自直接持有 WebSocket 连接。
 
 ---
 

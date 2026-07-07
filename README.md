@@ -4,7 +4,9 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 
 项目第一阶段聚焦“自定义房间大厅”：先建立外围后台、实时网关、自研房间逻辑和小中规模房间服能力。后续如果进入 MOBA/RTS 核心战斗服，需要单独设计高频权威战斗服务器架构，不直接把当前房间服扩展成《英雄联盟》级别的核心战斗服。
 
-当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。持久化边界和 Unity 客户端接入文档已经建立，下一步优先创建 Unity 客户端骨架、补齐 Unity 协议生成和最小 WebSocket 联调。
+当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、注册、登录、登出、会话恢复、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。Unity 客户端已经具备基础应用链路：`MainScene -> LoadingPage -> LoginPage -> HomePage -> LoadingPage -> BattleScene`，账号注册、登录、登出和会话恢复已经通过真实 WebSocket 账号协议接入服务端。
+
+下一步优先推进 Unity 房间大厅端到端接入，将 `Start Game` 调整为进入创房、进房、退房、房主转移等大厅流程。第一里程碑完成前暂不推进战斗模块。
 
 ## 项目边界
 
@@ -14,6 +16,7 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 - WebSocket 实时连接基础能力，TCP 传输由后续 change 评估
 - Protobuf 协议 envelope 和协议兼容规则
 - 自定义房间的创建、加入、准备、退出、房主转移和断线重连
+- 第一阶段账号会话、注册、登录登出和房间大厅所需玩家身份
 - Redis、MySQL、gRPC、Docker 等后续基础能力
 
 当前阶段暂不实现：
@@ -21,6 +24,7 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 - 匹配系统
 - MOBA/RTS 高频权威战斗模拟
 - 独立 battle server
+- 从 HomePage 直接进入正式战斗玩法
 - 跨服、观战、回放和完整经济系统
 
 ## 顶层目录
@@ -63,6 +67,9 @@ tools/       开发、生成、构建和运维辅助工具
 - `openspec/specs/local-infra/spec.md`
 - `openspec/specs/protocol/spec.md`
 - `openspec/specs/gateway/spec.md`
+- `openspec/specs/account-session/spec.md`
 - `openspec/specs/room/spec.md`
 - `openspec/specs/storage/spec.md`
 - `openspec/specs/client-integration/spec.md`
+
+当前 active change 以 `openspec list` 为准；已完成 change 归档在 `openspec/changes/archive/`。

@@ -16,9 +16,23 @@ Unity 客户端职责：
 
 - 建立 WebSocket 或后续 TCP 连接
 - 发送和接收 Protobuf envelope
+- 通过账号会话完成注册、登录、登出、会话恢复和玩家身份持有
 - 处理心跳、断线、重连和协议错误
 - 展示房间大厅、成员、座位、阵营和准备状态
 - 后续根据 battle server 设计接入战斗同步
+
+当前客户端已经具备基础 UI 和场景链路：
+
+```text
+MainScene
+  -> LoadingPage
+  -> LoginPage
+  -> HomePage
+  -> LoadingPage
+  -> BattleScene
+```
+
+该链路目前只表示客户端外层生命周期已经跑通，不代表第一里程碑可以直接进入战斗。后续 `Start Game` 应先接入账号会话和房间大厅流程，在第一里程碑完成前不得把正式玩法推进到 battle server 或高频战斗模拟。
 
 ### Gateway
 
@@ -30,6 +44,7 @@ Unity 客户端职责：
 - 解码和编码 Protobuf envelope
 - 校验协议版本
 - 维护连接级 session
+- 绑定账号会话确认后的玩家身份
 - 处理心跳、空闲超时和断开清理
 - 将业务消息分发到 room、account、match 等模块接口
 
@@ -50,6 +65,20 @@ Unity 客户端职责：
 
 房间服务第一阶段运行在服务端进程内，通过 Go interface 被 gateway 调用。暂不拆分独立 gRPC 服务。
 
+### Account Service
+
+账号服务是房间大厅端到端接入前的身份边界。
+
+账号服务职责：
+
+- 校验第一阶段注册和登录请求
+- 生成或查询稳定玩家身份
+- 签发、恢复和失效 session token
+- 将登录结果返回给 gateway 绑定连接身份
+- 为客户端 `AccountSystem` 提供真实登录和登出状态来源
+
+账号服务第一阶段运行在服务端进程内，通过 Go interface 被 gateway/app 组合调用。暂不实现密码找回、第三方登录、好友、背包、经济或完整权限系统。
+
 ### Storage
 
 存储层分为 MySQL 和 Redis。
@@ -57,6 +86,7 @@ Unity 客户端职责：
 MySQL 用于持久事实数据：
 
 - 玩家基础资料
+- 第一阶段账号基础资料
 - 房间摘要
 - 对局摘要
 - 配置快照
@@ -65,6 +95,7 @@ MySQL 用于持久事实数据：
 Redis 用于短期运行态数据：
 
 - session
+- account session
 - presence
 - room index
 - reconnect token
@@ -72,12 +103,12 @@ Redis 用于短期运行态数据：
 - lock
 - rate limit
 
-第一里程碑默认仍可使用内存 repository 验证房间状态机；持久化边界由 `server/internal/storage` 提供接口、fake adapter、Redis key builder、MySQL 迁移入口和真实 adapter 骨架。Room service 只能依赖 storage repository/cache interface，不能直接依赖 Redis 或 MySQL client。
+账号会话 runtime 使用真实 MySQL/Redis：玩家账号资料写入 MySQL `account_player`，短期 session token 写入 Redis `ih:{env}:account:session:{sessionToken}`。第一里程碑的 room service 仍可使用进程内 repository 验证房间状态机；房间摘要、presence、room index 和 reconnect token 的真实持久化由后续房间存储 change 推进。Room service 只能依赖 storage repository/cache interface，不能直接依赖 Redis 或 MySQL client。
 
 当前 storage 边界约束：
 
-- MySQL 只保存第一阶段最小持久事实或摘要：玩家基础资料占位、房间摘要和后续对局摘要预留。
-- Redis 只保存短期运行态：session、presence、room index、reconnect token、lock 和 rate limit。
+- MySQL 保存第一阶段最小账号事实，并预留房间摘要和后续对局摘要。
+- Redis 保存账号 session 等短期运行态，并预留 presence、room index、reconnect token、lock 和 rate limit。
 - Redis key 必须记录 owner、用途、TTL、value、重建来源和清理触发。
 - `/readyz` 只证明 MySQL/Redis 地址可连接，不证明业务恢复路径已经通过；业务恢复能力由 storage/room 测试或后续明确集成测试验证。
 
@@ -108,6 +139,9 @@ Unity Client
 Gateway
   |
   | Go interface, in-process adapter
+  +--> Account Service
+  |
+  | authenticated session
   v
 Room Service
   |

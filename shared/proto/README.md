@@ -8,13 +8,15 @@
 shared/proto/realtime/v1/envelope.proto
 ```
 
-服务端 Go 代码生成入口：
+跨端协议生成入口：
 
 ```bat
 tools\proto\generate.bat
 ```
 
-Unity C# 代码必须从 `shared/proto/` 生成，生成代码不得手工修改。具体输出目录由 Unity 工程结构决定，接入规则见：
+项目只保留这一个协议生成入口。运行该脚本会同时刷新服务端 Go 代码和 Unity C# 代码。
+
+Unity C# 代码必须从 `shared/proto/` 生成，生成代码不得手工修改，也不得提交到 Git。具体输出目录和接入规则见：
 
 ```text
 docs/client-integration.md

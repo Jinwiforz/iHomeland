@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -15,10 +16,11 @@ import (
 	"ihomeland/server/internal/config"
 	"ihomeland/server/internal/protocol"
 	pb "ihomeland/server/internal/protocol/pb/realtime/v1"
+	"ihomeland/server/internal/storage"
 )
 
 func TestRoomLobbyWebSocketFlow(t *testing.T) {
-	server, err := NewHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewHTTPServer() error = %v", err)
 	}
@@ -79,7 +81,7 @@ func TestRoomLobbyWebSocketFlow(t *testing.T) {
 }
 
 func TestRoomLobbyReconnectWebSocketFlow(t *testing.T) {
-	server, err := NewHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewHTTPServer() error = %v", err)
 	}
@@ -106,6 +108,94 @@ func TestRoomLobbyReconnectWebSocketFlow(t *testing.T) {
 	}
 }
 
+func TestAccountSessionWebSocketFlow(t *testing.T) {
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewHTTPServer() error = %v", err)
+	}
+	testServer := httptest.NewServer(server.Handler)
+	defer testServer.Close()
+
+	conn := dialAppGateway(t, testServer)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	registerResponse := sendRoomEnvelope[*pb.RegisterResponse](t, conn, protocol.MessageIDRegisterRequest, "req-register", &pb.RegisterRequest{
+		Account:     "tester",
+		Password:    "secret",
+		DisplayName: "测试玩家",
+	})
+	if registerResponse.GetPlayer().GetPlayerId() == "" {
+		t.Fatal("registered player id is empty")
+	}
+	if registerResponse.GetSessionToken() == "" {
+		t.Fatal("session token is empty")
+	}
+
+	currentResponse := sendRoomEnvelope[*pb.GetCurrentPlayerResponse](t, conn, protocol.MessageIDGetCurrentPlayerRequest, "req-current", &pb.GetCurrentPlayerRequest{})
+	if !currentResponse.GetAuthenticated() {
+		t.Fatal("current player authenticated = false, want true")
+	}
+	if currentResponse.GetPlayer().GetPlayerId() != registerResponse.GetPlayer().GetPlayerId() {
+		t.Fatalf("current player id = %q, want %q", currentResponse.GetPlayer().GetPlayerId(), registerResponse.GetPlayer().GetPlayerId())
+	}
+
+	logoutResponse := sendRoomEnvelope[*pb.LogoutResponse](t, conn, protocol.MessageIDLogoutRequest, "req-logout", &pb.LogoutRequest{
+		SessionToken: registerResponse.GetSessionToken(),
+	})
+	if !logoutResponse.GetSuccess() {
+		t.Fatal("logout success = false, want true")
+	}
+
+	currentResponse = sendRoomEnvelope[*pb.GetCurrentPlayerResponse](t, conn, protocol.MessageIDGetCurrentPlayerRequest, "req-current-after-logout", &pb.GetCurrentPlayerRequest{})
+	if currentResponse.GetAuthenticated() {
+		t.Fatal("current player authenticated = true after logout, want false")
+	}
+}
+
+func TestAccountDuplicateRegisterReturnsError(t *testing.T) {
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewHTTPServer() error = %v", err)
+	}
+	testServer := httptest.NewServer(server.Handler)
+	defer testServer.Close()
+
+	conn := dialAppGateway(t, testServer)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	_ = sendRoomEnvelope[*pb.RegisterResponse](t, conn, protocol.MessageIDRegisterRequest, "req-register", &pb.RegisterRequest{
+		Account:  "tester",
+		Password: "secret",
+	})
+
+	response := sendEnvelope(t, conn, protocol.MessageIDRegisterRequest, "req-register-duplicate", &pb.RegisterRequest{
+		Account:  "tester",
+		Password: "secret",
+	})
+	if response.GetMessageId() != pb.MessageID_MESSAGE_ID_ERROR_RESPONSE {
+		t.Fatalf("message id = %v, want error response", response.GetMessageId())
+	}
+	decoded, err := protocol.DecodeEnvelope(response, true)
+	if err != nil {
+		t.Fatalf("DecodeEnvelope() error = %v", err)
+	}
+	errorResponse, ok := decoded.(*pb.ErrorResponse)
+	if !ok {
+		t.Fatalf("decoded response = %T, want *pb.ErrorResponse", decoded)
+	}
+	if errorResponse.GetCode() != pb.ErrorCode_ERROR_CODE_ACCOUNT_ALREADY_EXISTS {
+		t.Fatalf("error code = %v, want account already exists", errorResponse.GetCode())
+	}
+}
+
+func newTestHTTPServer(cfg config.Config, log *slog.Logger) (*http.Server, error) {
+	store := storage.NewFakeStore()
+	return newHTTPServer(cfg, log, serverDependencies{
+		playerProfiles:  store,
+		accountSessions: store,
+	})
+}
+
 func dialAppGateway(t *testing.T, testServer *httptest.Server) *websocket.Conn {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -119,6 +209,20 @@ func dialAppGateway(t *testing.T, testServer *httptest.Server) *websocket.Conn {
 }
 
 func sendRoomEnvelope[T proto.Message](t *testing.T, conn *websocket.Conn, messageID protocol.MessageID, requestID string, message proto.Message) T {
+	t.Helper()
+	responseEnvelope := sendEnvelope(t, conn, messageID, requestID, message)
+	decoded, err := protocol.DecodeEnvelope(responseEnvelope, true)
+	if err != nil {
+		t.Fatalf("DecodeEnvelope() error = %v", err)
+	}
+	typed, ok := decoded.(T)
+	if !ok {
+		t.Fatalf("decoded response = %T", decoded)
+	}
+	return typed
+}
+
+func sendEnvelope(t *testing.T, conn *websocket.Conn, messageID protocol.MessageID, requestID string, message proto.Message) *pb.Envelope {
 	t.Helper()
 	envelope, err := protocol.BuildEnvelope(protocol.BuildOptions{
 		ProtocolVersion: protocol.MaxSupportedVersion,
@@ -150,15 +254,7 @@ func sendRoomEnvelope[T proto.Message](t *testing.T, conn *websocket.Conn, messa
 	if err := proto.Unmarshal(responseData, responseEnvelope); err != nil {
 		t.Fatalf("proto.Unmarshal() error = %v", err)
 	}
-	decoded, err := protocol.DecodeEnvelope(responseEnvelope, true)
-	if err != nil {
-		t.Fatalf("DecodeEnvelope() error = %v", err)
-	}
-	typed, ok := decoded.(T)
-	if !ok {
-		t.Fatalf("decoded response = %T", decoded)
-	}
-	return typed
+	return responseEnvelope
 }
 
 func memberReady(snapshot *pb.RoomSnapshot, playerID string) bool {

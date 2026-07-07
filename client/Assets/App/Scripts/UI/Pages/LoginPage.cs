@@ -1,4 +1,5 @@
 using App.Core;
+using App.Systems;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -11,6 +12,7 @@ namespace App.UI
         [SerializeField] private TMP_InputField accountInput;
         [SerializeField] private TMP_InputField passwordInput;
         [SerializeField] private Button loginButton;
+        [SerializeField] private Button registerButton;
         [SerializeField] private TMP_Text messageText;
 
         protected override void OnInitialize()
@@ -18,6 +20,11 @@ namespace App.UI
             if (loginButton != null)
             {
                 loginButton.onClick.AddListener(OnClickLogin);
+            }
+
+            if (registerButton != null)
+            {
+                registerButton.onClick.AddListener(OnClickRegister);
             }
 
             AppRoot.Instance.Log.Info<LoginPage>("Initialize.");
@@ -41,9 +48,24 @@ namespace App.UI
             {
                 loginButton.onClick.RemoveListener(OnClickLogin);
             }
+
+            if (registerButton != null)
+            {
+                registerButton.onClick.RemoveListener(OnClickRegister);
+            }
         }
 
-        private void OnClickLogin()
+        private async void OnClickLogin()
+        {
+            await SubmitAccountOperation(true);
+        }
+
+        private async void OnClickRegister()
+        {
+            await SubmitAccountOperation(false);
+        }
+
+        private async System.Threading.Tasks.Task SubmitAccountOperation(bool login)
         {
             string account = accountInput == null ? string.Empty : accountInput.text;
             string password = passwordInput == null ? string.Empty : passwordInput.text;
@@ -55,20 +77,25 @@ namespace App.UI
                 return;
             }
 
-            bool success = AppRoot.Instance.Account.TryLogin(account, password, out string message);
+            SetButtonsInteractable(false);
+            SetMessage(login ? "Logging in..." : "Registering...");
 
-            SetMessage(message);
+            AccountOperationResult result = login
+                ? await AppRoot.Instance.Account.LoginAsync(account, password)
+                : await AppRoot.Instance.Account.RegisterAsync(account, password);
 
-            if (!success)
+            SetMessage(result.Message);
+            SetButtonsInteractable(true);
+
+            if (!result.Success)
             {
-                AppRoot.Instance.Log.Warning<LoginPage>($"Login failed. Reason: {message}");
+                AppRoot.Instance.Log.Warning<LoginPage>($"{(login ? "Login" : "Register")} failed. {result.ToDiagnosticLine()}");
                 return;
             }
 
-            AppRoot.Instance.Log.Info<LoginPage>($"Login success. Account: {account}");
+            AppRoot.Instance.Log.Info<LoginPage>($"{(login ? "Login" : "Register")} success. Account: {account}");
 
             AppRoot.Instance.UI.OpenPage(AppPages.HomePage);
-
             Close();
         }
 
@@ -77,6 +104,19 @@ namespace App.UI
             if (messageText != null)
             {
                 messageText.text = message;
+            }
+        }
+
+        private void SetButtonsInteractable(bool interactable)
+        {
+            if (loginButton != null)
+            {
+                loginButton.interactable = interactable;
+            }
+
+            if (registerButton != null)
+            {
+                registerButton.interactable = interactable;
             }
         }
     }

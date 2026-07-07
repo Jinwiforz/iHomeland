@@ -33,6 +33,26 @@ type RoomSummary struct {
 	ClosedAt       time.Time
 }
 
+// PlayerProfile 是 MySQL 中保存的第一阶段玩家账号事实。
+type PlayerProfile struct {
+	PlayerID     string
+	AccountName  string
+	PasswordHash string
+	DisplayName  string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// AccountSession 描述短期账号会话 token。
+type AccountSession struct {
+	SessionToken string
+	PlayerID     string
+	AccountName  string
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
+	ConnectionID string
+}
+
 // Presence 描述玩家当前连接运行态。
 type Presence struct {
 	PlayerID     string
@@ -65,6 +85,20 @@ type ReconnectToken struct {
 type RoomSummaryRepository interface {
 	SaveRoomSummary(ctx context.Context, summary RoomSummary) error
 	GetRoomSummary(ctx context.Context, roomID string) (RoomSummary, error)
+}
+
+// PlayerProfileRepository 保存和读取玩家账号基础资料。
+type PlayerProfileRepository interface {
+	CreatePlayerProfile(ctx context.Context, profile PlayerProfile) error
+	GetPlayerProfileByAccount(ctx context.Context, accountName string) (PlayerProfile, error)
+	GetPlayerProfileByID(ctx context.Context, playerID string) (PlayerProfile, error)
+}
+
+// AccountSessionCache 保存短期账号会话 token。
+type AccountSessionCache interface {
+	SetAccountSession(ctx context.Context, session AccountSession, ttl time.Duration) error
+	GetAccountSession(ctx context.Context, sessionToken string) (AccountSession, error)
+	DeleteAccountSession(ctx context.Context, sessionToken string) error
 }
 
 // PresenceCache 保存玩家在线状态缓存。
@@ -108,6 +142,20 @@ func validateRoomSummary(summary RoomSummary) error {
 		return ErrInvalidArgument
 	}
 	if strings.TrimSpace(summary.IdempotencyKey) == "" {
+		return ErrInvalidArgument
+	}
+	return nil
+}
+
+func validatePlayerProfile(profile PlayerProfile) error {
+	if validateID(profile.PlayerID) != nil || strings.TrimSpace(profile.AccountName) == "" || strings.TrimSpace(profile.PasswordHash) == "" {
+		return ErrInvalidArgument
+	}
+	return nil
+}
+
+func validateAccountSession(session AccountSession) error {
+	if validateID(session.SessionToken) != nil || validateID(session.PlayerID) != nil || strings.TrimSpace(session.AccountName) == "" || session.ExpiresAt.IsZero() {
 		return ErrInvalidArgument
 	}
 	return nil

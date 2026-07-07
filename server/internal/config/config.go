@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultConfigPath         = "config/local.yaml"
+	defaultEnv                = "dev"
 	defaultHTTPAddr           = ":8080"
 	defaultLogLevel           = "info"
 	defaultProtocolVersion    = 0
@@ -25,12 +26,18 @@ const (
 	defaultMySQLAddr          = "127.0.0.1:33306"
 	defaultMySQLDatabase      = "ihomeland"
 	defaultMySQLUser          = "ihomeland"
+	defaultMySQLMaxOpenConns  = 16
+	defaultMySQLMaxIdleConns  = 8
+	defaultMySQLConnMaxLife   = 30 * time.Minute
 	defaultRedisAddr          = "127.0.0.1:36379"
+	defaultRedisDB            = 0
+	defaultRedisDialTimeout   = 5 * time.Second
 	defaultGatewayIdleTimeout = 30 * time.Second
 )
 
 const (
 	envConfigPath         = "IHOMELAND_CONFIG"
+	envName               = "IHOMELAND_ENV"
 	envHTTPAddr           = "IHOMELAND_HTTP_ADDR"
 	envLogLevel           = "IHOMELAND_LOG_LEVEL"
 	envProtocolVersion    = "IHOMELAND_PROTOCOL_VERSION"
@@ -40,13 +47,21 @@ const (
 	envMySQLAddr          = "IHOMELAND_MYSQL_ADDR"
 	envMySQLDatabase      = "IHOMELAND_MYSQL_DATABASE"
 	envMySQLUser          = "IHOMELAND_MYSQL_USER"
+	envMySQLPassword      = "IHOMELAND_MYSQL_PASSWORD"
+	envMySQLMaxOpenConns  = "IHOMELAND_MYSQL_MAX_OPEN_CONNS"
+	envMySQLMaxIdleConns  = "IHOMELAND_MYSQL_MAX_IDLE_CONNS"
+	envMySQLConnMaxLife   = "IHOMELAND_MYSQL_CONN_MAX_LIFETIME"
 	envRedisAddr          = "IHOMELAND_REDIS_ADDR"
+	envRedisPassword      = "IHOMELAND_REDIS_PASSWORD"
+	envRedisDB            = "IHOMELAND_REDIS_DB"
+	envRedisDialTimeout   = "IHOMELAND_REDIS_DIAL_TIMEOUT"
 	envGatewayIdleTimeout = "IHOMELAND_GATEWAY_IDLE_TIMEOUT"
 )
 
 // Config 描述服务端启动所需配置。
 type Config struct {
 	ConfigPath        string
+	Env               string
 	HTTPAddr          string
 	LogLevel          string
 	ProtocolVersion   int
@@ -60,14 +75,21 @@ type Config struct {
 
 // MySQLConfig 描述本地 MySQL 基础设施连接配置。
 type MySQLConfig struct {
-	Addr     string
-	Database string
-	User     string
+	Addr            string
+	Database        string
+	User            string
+	Password        string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
 }
 
 // RedisConfig 描述本地 Redis 基础设施连接配置。
 type RedisConfig struct {
-	Addr string
+	Addr        string
+	Password    string
+	DB          int
+	DialTimeout time.Duration
 }
 
 // GatewayConfig 描述实时网关连接生命周期配置。
@@ -79,6 +101,7 @@ type GatewayConfig struct {
 func Default() Config {
 	return Config{
 		ConfigPath:        defaultConfigPath,
+		Env:               defaultEnv,
 		HTTPAddr:          defaultHTTPAddr,
 		LogLevel:          defaultLogLevel,
 		ProtocolVersion:   defaultProtocolVersion,
@@ -86,12 +109,17 @@ func Default() Config {
 		ServerVersionPath: defaultServerVersionPath,
 		ClientVersionPath: defaultClientVersionPath,
 		MySQL: MySQLConfig{
-			Addr:     defaultMySQLAddr,
-			Database: defaultMySQLDatabase,
-			User:     defaultMySQLUser,
+			Addr:            defaultMySQLAddr,
+			Database:        defaultMySQLDatabase,
+			User:            defaultMySQLUser,
+			MaxOpenConns:    defaultMySQLMaxOpenConns,
+			MaxIdleConns:    defaultMySQLMaxIdleConns,
+			ConnMaxLifetime: defaultMySQLConnMaxLife,
 		},
 		Redis: RedisConfig{
-			Addr: defaultRedisAddr,
+			Addr:        defaultRedisAddr,
+			DB:          defaultRedisDB,
+			DialTimeout: defaultRedisDialTimeout,
 		},
 		Gateway: GatewayConfig{
 			IdleTimeout: defaultGatewayIdleTimeout,
@@ -120,6 +148,7 @@ func LoadFromEnv() (Config, error) {
 }
 
 type fileConfig struct {
+	Env               string `yaml:"env"`
 	HTTPAddr          string `yaml:"httpAddr"`
 	LogLevel          string `yaml:"logLevel"`
 	ProtocolVersion   *int   `yaml:"protocolVersion"`
@@ -127,12 +156,19 @@ type fileConfig struct {
 	ServerVersionPath string `yaml:"serverVersionPath"`
 	ClientVersionPath string `yaml:"clientVersionPath"`
 	MySQL             struct {
-		Addr     string `yaml:"addr"`
-		Database string `yaml:"database"`
-		User     string `yaml:"user"`
+		Addr            string `yaml:"addr"`
+		Database        string `yaml:"database"`
+		User            string `yaml:"user"`
+		Password        string `yaml:"password"`
+		MaxOpenConns    *int   `yaml:"maxOpenConns"`
+		MaxIdleConns    *int   `yaml:"maxIdleConns"`
+		ConnMaxLifetime string `yaml:"connMaxLifetime"`
 	} `yaml:"mysql"`
 	Redis struct {
-		Addr string `yaml:"addr"`
+		Addr        string `yaml:"addr"`
+		Password    string `yaml:"password"`
+		DB          *int   `yaml:"db"`
+		DialTimeout string `yaml:"dialTimeout"`
 	} `yaml:"redis"`
 	Gateway struct {
 		IdleTimeout string `yaml:"idleTimeout"`
@@ -160,6 +196,9 @@ func applyFile(cfg *Config) error {
 	if strings.TrimSpace(fileCfg.HTTPAddr) != "" {
 		cfg.HTTPAddr = fileCfg.HTTPAddr
 	}
+	if strings.TrimSpace(fileCfg.Env) != "" {
+		cfg.Env = strings.ToLower(fileCfg.Env)
+	}
 	if strings.TrimSpace(fileCfg.LogLevel) != "" {
 		cfg.LogLevel = strings.ToLower(fileCfg.LogLevel)
 	}
@@ -184,8 +223,37 @@ func applyFile(cfg *Config) error {
 	if strings.TrimSpace(fileCfg.MySQL.User) != "" {
 		cfg.MySQL.User = fileCfg.MySQL.User
 	}
+	if fileCfg.MySQL.Password != "" {
+		cfg.MySQL.Password = fileCfg.MySQL.Password
+	}
+	if fileCfg.MySQL.MaxOpenConns != nil {
+		cfg.MySQL.MaxOpenConns = *fileCfg.MySQL.MaxOpenConns
+	}
+	if fileCfg.MySQL.MaxIdleConns != nil {
+		cfg.MySQL.MaxIdleConns = *fileCfg.MySQL.MaxIdleConns
+	}
+	if strings.TrimSpace(fileCfg.MySQL.ConnMaxLifetime) != "" {
+		timeout, err := time.ParseDuration(fileCfg.MySQL.ConnMaxLifetime)
+		if err != nil {
+			return fmt.Errorf("parse mysql conn max lifetime: %w", err)
+		}
+		cfg.MySQL.ConnMaxLifetime = timeout
+	}
 	if strings.TrimSpace(fileCfg.Redis.Addr) != "" {
 		cfg.Redis.Addr = fileCfg.Redis.Addr
+	}
+	if fileCfg.Redis.Password != "" {
+		cfg.Redis.Password = fileCfg.Redis.Password
+	}
+	if fileCfg.Redis.DB != nil {
+		cfg.Redis.DB = *fileCfg.Redis.DB
+	}
+	if strings.TrimSpace(fileCfg.Redis.DialTimeout) != "" {
+		timeout, err := time.ParseDuration(fileCfg.Redis.DialTimeout)
+		if err != nil {
+			return fmt.Errorf("parse redis dial timeout: %w", err)
+		}
+		cfg.Redis.DialTimeout = timeout
 	}
 	if strings.TrimSpace(fileCfg.Gateway.IdleTimeout) != "" {
 		timeout, err := time.ParseDuration(fileCfg.Gateway.IdleTimeout)
@@ -201,6 +269,9 @@ func applyFile(cfg *Config) error {
 func applyEnv(cfg *Config) error {
 	if value := strings.TrimSpace(os.Getenv(envHTTPAddr)); value != "" {
 		cfg.HTTPAddr = value
+	}
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		cfg.Env = strings.ToLower(value)
 	}
 	if value := strings.TrimSpace(os.Getenv(envLogLevel)); value != "" {
 		cfg.LogLevel = strings.ToLower(value)
@@ -230,8 +301,49 @@ func applyEnv(cfg *Config) error {
 	if value := strings.TrimSpace(os.Getenv(envMySQLUser)); value != "" {
 		cfg.MySQL.User = value
 	}
+	if value := os.Getenv(envMySQLPassword); value != "" {
+		cfg.MySQL.Password = value
+	}
+	if value := strings.TrimSpace(os.Getenv(envMySQLMaxOpenConns)); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", envMySQLMaxOpenConns, err)
+		}
+		cfg.MySQL.MaxOpenConns = parsed
+	}
+	if value := strings.TrimSpace(os.Getenv(envMySQLMaxIdleConns)); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", envMySQLMaxIdleConns, err)
+		}
+		cfg.MySQL.MaxIdleConns = parsed
+	}
+	if value := strings.TrimSpace(os.Getenv(envMySQLConnMaxLife)); value != "" {
+		timeout, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", envMySQLConnMaxLife, err)
+		}
+		cfg.MySQL.ConnMaxLifetime = timeout
+	}
 	if value := strings.TrimSpace(os.Getenv(envRedisAddr)); value != "" {
 		cfg.Redis.Addr = value
+	}
+	if value := os.Getenv(envRedisPassword); value != "" {
+		cfg.Redis.Password = value
+	}
+	if value := strings.TrimSpace(os.Getenv(envRedisDB)); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", envRedisDB, err)
+		}
+		cfg.Redis.DB = parsed
+	}
+	if value := strings.TrimSpace(os.Getenv(envRedisDialTimeout)); value != "" {
+		timeout, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", envRedisDialTimeout, err)
+		}
+		cfg.Redis.DialTimeout = timeout
 	}
 	if value := strings.TrimSpace(os.Getenv(envGatewayIdleTimeout)); value != "" {
 		timeout, err := time.ParseDuration(value)
@@ -247,6 +359,9 @@ func applyEnv(cfg *Config) error {
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.HTTPAddr) == "" {
 		return errors.New("http addr is required")
+	}
+	if strings.TrimSpace(c.Env) == "" {
+		return errors.New("env is required")
 	}
 	if _, _, err := net.SplitHostPort(c.HTTPAddr); err != nil {
 		return fmt.Errorf("invalid http addr %q: %w", c.HTTPAddr, err)
@@ -275,8 +390,23 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.MySQL.User) == "" {
 		return errors.New("mysql user is required")
 	}
+	if c.MySQL.MaxOpenConns <= 0 {
+		return errors.New("mysql max open conns must be positive")
+	}
+	if c.MySQL.MaxIdleConns < 0 || c.MySQL.MaxIdleConns > c.MySQL.MaxOpenConns {
+		return errors.New("mysql max idle conns must be between 0 and max open conns")
+	}
+	if c.MySQL.ConnMaxLifetime <= 0 {
+		return errors.New("mysql conn max lifetime must be positive")
+	}
 	if err := validateHostPort("redis addr", c.Redis.Addr); err != nil {
 		return err
+	}
+	if c.Redis.DB < 0 {
+		return errors.New("redis db must be non-negative")
+	}
+	if c.Redis.DialTimeout <= 0 {
+		return errors.New("redis dial timeout must be positive")
 	}
 	if c.Gateway.IdleTimeout <= 0 {
 		return errors.New("gateway idle timeout must be positive")

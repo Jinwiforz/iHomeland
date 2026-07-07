@@ -16,7 +16,8 @@
 - WebSocket 实时入口 `/ws`
 - WebSocket 连接级 session、心跳响应、协议版本拒绝、结构化错误响应和空闲超时清理
 - 自定义房间大厅基础能力：创建房间、加入房间、准备/取消准备、退出房间、房主转移、断线保留和重连恢复
-- storage 边界：repository/cache interface、fake adapter、Redis key builder、MySQL 第一阶段迁移和 adapter 骨架
+- storage 边界：repository/cache interface、测试用 fake adapter、Redis key builder、MySQL 第一阶段迁移、账号 MySQL repository 和账号 Redis session cache
+- 账号会话能力已接入服务端注册、登录、登出、会话恢复和 gateway 身份绑定；Unity 客户端已具备 C# Protobuf 生成代码、Google.Protobuf runtime 和账号 WebSocket envelope 调用入口
 - 优雅关闭
 - 基础单元测试
 
@@ -29,6 +30,7 @@ server/
   internal/app/      应用组装层
   internal/config/   配置结构、默认值、加载和校验
   internal/gateway/  WebSocket 实时网关和连接级 session
+  internal/account/  第一阶段账号会话、注册、登录登出和玩家身份
   internal/logger/   项目级日志适配
   internal/ops/      健康检查、就绪检查、版本接口
   internal/protocol/ 协议适配和生成代码
@@ -108,6 +110,16 @@ config/local.yaml
 
 `/readyz` 和 `verify-local.bat` 只表示依赖地址可达，不等同于房间摘要、重连资格或 Redis 丢失恢复已经通过。业务恢复能力需要通过 `internal/storage` 和 `internal/room` 的单元测试，或后续明确的 Redis/MySQL 集成测试验证。
 
+本地 MySQL 建库、授权、迁移和 Redis 排障命令统一沉淀在：
+
+```text
+../docs/local-data-commands.md
+scripts/mysql-local-dev.sql
+../docs/redis-local-dev-commands.md
+```
+
+如果本机调试遇到 `Unknown database 'ihomeland'`，先按 `../docs/local-data-commands.md` 执行本地 MySQL 初始化命令。
+
 ## Storage 边界
 
 `internal/storage` 定义第一阶段房间大厅需要的持久化和运行态接口：
@@ -117,7 +129,9 @@ config/local.yaml
 - `RoomIndexCache`：保存房间索引缓存。
 - `ReconnectTokenCache`：保存断线重连短期资格。
 
-默认业务路径仍可使用内存 repository；room service 通过接口接入 storage，不直接依赖 Redis/MySQL client。测试使用 `storage.NewFakeStore()`，所以不需要启动 MySQL 或 Redis 也能验证状态机、幂等摘要写入和重连 token 管理。
+账号业务 runtime 已使用真实 MySQL 和 Redis：玩家基础资料写入 `account_player`，账号 session 写入 `ih:{env}:account:session:{sessionToken}`。服务端启动时会连接并 ping MySQL/Redis，失败则拒绝启动。
+
+room service 当前仍使用进程内 repository 验证第一里程碑房间状态机；房间摘要、presence、room index 和 reconnect token 的真实持久化由后续房间存储 change 推进。测试使用 `storage.NewFakeStore()`，所以不需要启动 MySQL 或 Redis 也能验证状态机、幂等摘要写入和重连 token 管理。
 
 ## 本地测试
 
@@ -134,7 +148,7 @@ config/local.yaml
 go test ./...
 ```
 
-协议生成代码属于可再生成产物，不提交到 Git。`scripts\test.bat` 固定按上述顺序执行，保证测试使用当前 `shared/proto/` 生成出的 Go 代码。
+协议生成代码属于可再生成产物。Go 生成代码和 Unity C# 生成代码都不提交到 Git；需要时通过 `tools\proto\generate.bat` 重新生成。`scripts\test.bat` 固定按上述顺序执行，保证测试使用当前 `shared/proto/` 生成出的 Go 代码。
 
 预期结果应包含：
 
@@ -156,11 +170,11 @@ ok   ihomeland/server/internal/storage
 
 `internal/room` 测试覆盖房间创建、加入、重复加入、准备、退出、房主转移、断线保留和重连恢复。`internal/app` 中的房间网关测试会用 Go WebSocket 测试客户端发送房间大厅 Protobuf envelope，验证服务端请求响应链路。
 
-`internal/storage` 测试覆盖 fake adapter 幂等写入、重连 token 覆盖语义、Redis key/TTL 和 migration 文件命名。room service 与 fake storage 的集成测试验证房间摘要和短期重连资格通过 storage interface 写入。
+`internal/storage` 测试覆盖 fake adapter 幂等写入、账号 MySQL repository、账号 Redis session cache、重连 token 覆盖语义、Redis key/TTL 和 migration 文件命名。room service 与 fake storage 的集成测试验证房间摘要和短期重连资格通过 storage interface 写入。
 
 ## 协议生成
 
-协议生成由项目本地工具链管理，工具位于 `.tools\protoc\bin\protoc.exe` 和 `.tools\go\bin\protoc-gen-go.exe`。`tools\proto\generate.bat` 会在生成前确保工具链就绪。
+协议生成由项目本地工具链管理，工具位于 `.tools\protoc\bin\protoc.exe` 和 `.tools\go\bin\protoc-gen-go.exe`。`tools\proto\generate.bat` 是唯一生成入口，会在生成前确保工具链就绪，并同时生成服务端 Go 代码和 Unity C# 代码。
 
 ```powershell
 ..\tools\proto\generate.bat
@@ -178,19 +192,26 @@ ok   ihomeland/server/internal/storage
 ..\shared\proto
 ```
 
-生成代码归属：
+服务端 Go 生成代码归属：
 
 ```text
 internal\protocol\pb
 ```
 
-该目录由 `tools\proto\generate.bat` 生成，并被 `.gitignore` 忽略。协议工具和下载缓存位于 `.tools/`，同样不提交到 Git；协议源文件仍以 `shared/proto/` 为准。
+Unity C# 生成代码归属：
+
+```text
+..\client\Assets\App\Scripts\Protocol\Pb\Realtime\V1
+```
+
+`internal\protocol\pb` 和 `..\client\Assets\App\Scripts\Protocol\Pb` 由 `tools\proto\generate.bat` 生成，并被 `.gitignore` 忽略。协议工具和下载缓存位于 `.tools/`，同样不提交到 Git；协议源文件仍以 `shared/proto/` 为准。
 
 ## 配置覆盖
 
 服务端支持以下环境变量用于临时覆盖配置：
 
 - `IHOMELAND_CONFIG`
+- `IHOMELAND_ENV`
 - `IHOMELAND_HTTP_ADDR`
 - `IHOMELAND_LOG_LEVEL`
 - `IHOMELAND_PROTOCOL_VERSION`
@@ -200,7 +221,14 @@ internal\protocol\pb
 - `IHOMELAND_MYSQL_ADDR`
 - `IHOMELAND_MYSQL_DATABASE`
 - `IHOMELAND_MYSQL_USER`
+- `IHOMELAND_MYSQL_PASSWORD`
+- `IHOMELAND_MYSQL_MAX_OPEN_CONNS`
+- `IHOMELAND_MYSQL_MAX_IDLE_CONNS`
+- `IHOMELAND_MYSQL_CONN_MAX_LIFETIME`
 - `IHOMELAND_REDIS_ADDR`
+- `IHOMELAND_REDIS_PASSWORD`
+- `IHOMELAND_REDIS_DB`
+- `IHOMELAND_REDIS_DIAL_TIMEOUT`
 - `IHOMELAND_GATEWAY_IDLE_TIMEOUT`
 
 除临时调试、CI 或部署场景外，不建议把这些环境变量作为日常启动方式。
@@ -209,6 +237,7 @@ internal\protocol\pb
 
 - 新增服务端代码应保持在 `server/` 内。
 - 不得在项目根目录生成 `go.mod`、`go.sum`、`.gocache` 或 `.gomodcache`。
+- MySQL 和 Redis 的本地建库、授权、迁移、检查、清理和排障命令必须沉淀到 `server/scripts/` 或根目录 `docs/`，不得只保留在聊天记录或个人笔记中。
 - 业务逻辑不得直接依赖 Gin handler、WebSocket connection 或 TCP socket。
 - 导出的 Go 类型、函数、接口、常量和错误必须有中文 Go doc。
 - 状态机、协议兼容、幂等、重连、权限和一致性逻辑必须写清设计意图与边界。

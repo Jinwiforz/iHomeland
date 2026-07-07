@@ -17,6 +17,18 @@ enum MessageID {
   MESSAGE_ID_ERROR_RESPONSE = 3;
   MESSAGE_ID_PROTOCOL_VERSION_UNSUPPORTED = 4;
 
+  // 账号会话消息号段：1000-1999。
+  MESSAGE_ID_REGISTER_REQUEST = 1000;
+  MESSAGE_ID_REGISTER_RESPONSE = 1001;
+  MESSAGE_ID_LOGIN_REQUEST = 1002;
+  MESSAGE_ID_LOGIN_RESPONSE = 1003;
+  MESSAGE_ID_LOGOUT_REQUEST = 1004;
+  MESSAGE_ID_LOGOUT_RESPONSE = 1005;
+  MESSAGE_ID_RESUME_SESSION_REQUEST = 1006;
+  MESSAGE_ID_RESUME_SESSION_RESPONSE = 1007;
+  MESSAGE_ID_GET_CURRENT_PLAYER_REQUEST = 1008;
+  MESSAGE_ID_GET_CURRENT_PLAYER_RESPONSE = 1009;
+
   // 房间大厅消息号段：2000-2999。
   MESSAGE_ID_CREATE_ROOM_REQUEST = 2000;
   MESSAGE_ID_CREATE_ROOM_RESPONSE = 2001;
@@ -40,6 +52,10 @@ enum ErrorCode {
   ERROR_CODE_MESSAGE_ID_UNSUPPORTED = 2;
   ERROR_CODE_PAYLOAD_INVALID = 3;
   ERROR_CODE_REQUEST_ID_REQUIRED = 4;
+  ERROR_CODE_ACCOUNT_ALREADY_EXISTS = 5;
+  ERROR_CODE_ACCOUNT_CREDENTIAL_INVALID = 6;
+  ERROR_CODE_SESSION_INVALID = 7;
+  ERROR_CODE_UNAUTHENTICATED = 8;
 }
 
 // Envelope 是 WebSocket 与后续 TCP 共用的实时消息信封。
@@ -86,6 +102,72 @@ message ProtocolVersionUnsupported {
   uint32 client_version = 1;
   uint32 min_supported_version = 2;
   uint32 max_supported_version = 3;
+}
+
+// PlayerProfile 描述客户端进入在线流程所需的玩家基础资料。
+message PlayerProfile {
+  string player_id = 1;
+  string account = 2;
+  string display_name = 3;
+}
+
+// RegisterRequest 是第一阶段账号注册请求。
+message RegisterRequest {
+  string account = 1;
+  string password = 2;
+  string display_name = 3;
+}
+
+// RegisterResponse 是第一阶段账号注册响应。
+message RegisterResponse {
+  PlayerProfile player = 1;
+  string session_token = 2;
+  int64 expires_at_ms = 3;
+}
+
+// LoginRequest 是第一阶段账号登录请求。
+message LoginRequest {
+  string account = 1;
+  string password = 2;
+}
+
+// LoginResponse 是第一阶段账号登录响应。
+message LoginResponse {
+  PlayerProfile player = 1;
+  string session_token = 2;
+  int64 expires_at_ms = 3;
+}
+
+// LogoutRequest 是第一阶段账号登出请求。
+message LogoutRequest {
+  string session_token = 1;
+}
+
+// LogoutResponse 是第一阶段账号登出响应。
+message LogoutResponse {
+  bool success = 1;
+}
+
+// ResumeSessionRequest 是第一阶段会话恢复请求。
+message ResumeSessionRequest {
+  string session_token = 1;
+}
+
+// ResumeSessionResponse 是第一阶段会话恢复响应。
+message ResumeSessionResponse {
+  PlayerProfile player = 1;
+  string session_token = 2;
+  int64 expires_at_ms = 3;
+}
+
+// GetCurrentPlayerRequest 查询当前连接绑定的玩家身份。
+message GetCurrentPlayerRequest {
+}
+
+// GetCurrentPlayerResponse 返回当前连接绑定的玩家身份。
+message GetCurrentPlayerResponse {
+  PlayerProfile player = 1;
+  bool authenticated = 2;
 }
 
 // RoomState 描述房间生命周期状态。

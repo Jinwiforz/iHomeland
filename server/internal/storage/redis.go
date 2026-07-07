@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -17,6 +19,110 @@ type RedisClient interface {
 type RedisRuntimeCache struct {
 	client RedisClient
 	keys   RedisKeys
+}
+
+// RedisAccountSessionCache 是账号 session token 的 Redis cache adapter。
+type RedisAccountSessionCache struct {
+	client RedisClient
+	keys   RedisKeys
+}
+
+// NewRedisAccountSessionCache 创建 Redis 账号 session cache。
+func NewRedisAccountSessionCache(client RedisClient, keys RedisKeys) (*RedisAccountSessionCache, error) {
+	if client == nil || keys.Env() == "" {
+		return nil, ErrInvalidArgument
+	}
+	return &RedisAccountSessionCache{client: client, keys: keys}, nil
+}
+
+// SetAccountSession 写入短期账号 session，TTL 必须由 account service 根据过期时间传入。
+func (c *RedisAccountSessionCache) SetAccountSession(ctx context.Context, session AccountSession, ttl time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateAccountSession(session); err != nil {
+		return err
+	}
+	if err := validateTTL(ttl); err != nil {
+		return err
+	}
+	key, err := c.keys.AccountSession(session.SessionToken)
+	if err != nil {
+		return err
+	}
+	value, err := json.Marshal(accountSessionValue{
+		SessionToken: session.SessionToken,
+		PlayerID:     session.PlayerID,
+		AccountName:  session.AccountName,
+		IssuedAtMs:   session.IssuedAt.UnixMilli(),
+		ExpiresAtMs:  session.ExpiresAt.UnixMilli(),
+		ConnectionID: session.ConnectionID,
+	})
+	if err != nil {
+		return fmt.Errorf("%w: encode account session: %v", ErrInvalidArgument, err)
+	}
+	if err := c.client.Set(ctx, key, value, ttl); err != nil {
+		return fmt.Errorf("%w: set account session: %v", ErrUnavailable, err)
+	}
+	return nil
+}
+
+// GetAccountSession 读取并解码账号 session；Redis miss 映射为 ErrNotFound。
+func (c *RedisAccountSessionCache) GetAccountSession(ctx context.Context, sessionToken string) (AccountSession, error) {
+	if err := ctx.Err(); err != nil {
+		return AccountSession{}, err
+	}
+	key, err := c.keys.AccountSession(sessionToken)
+	if err != nil {
+		return AccountSession{}, err
+	}
+	data, err := c.client.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return AccountSession{}, ErrNotFound
+		}
+		return AccountSession{}, fmt.Errorf("%w: get account session: %v", ErrUnavailable, err)
+	}
+	var value accountSessionValue
+	if err := json.Unmarshal(data, &value); err != nil {
+		return AccountSession{}, fmt.Errorf("%w: decode account session: %v", ErrInvalidArgument, err)
+	}
+	session := AccountSession{
+		SessionToken: value.SessionToken,
+		PlayerID:     value.PlayerID,
+		AccountName:  value.AccountName,
+		IssuedAt:     time.UnixMilli(value.IssuedAtMs),
+		ExpiresAt:    time.UnixMilli(value.ExpiresAtMs),
+		ConnectionID: value.ConnectionID,
+	}
+	if err := validateAccountSession(session); err != nil {
+		return AccountSession{}, err
+	}
+	return session, nil
+}
+
+// DeleteAccountSession 删除账号 session；删除不存在的 key 保持幂等。
+func (c *RedisAccountSessionCache) DeleteAccountSession(ctx context.Context, sessionToken string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	key, err := c.keys.AccountSession(sessionToken)
+	if err != nil {
+		return err
+	}
+	if err := c.client.Del(ctx, key); err != nil {
+		return fmt.Errorf("%w: delete account session: %v", ErrUnavailable, err)
+	}
+	return nil
+}
+
+type accountSessionValue struct {
+	SessionToken string `json:"session_token"`
+	PlayerID     string `json:"player_id"`
+	AccountName  string `json:"account_name"`
+	IssuedAtMs   int64  `json:"issued_at_ms"`
+	ExpiresAtMs  int64  `json:"expires_at_ms"`
+	ConnectionID string `json:"connection_id"`
 }
 
 // NewRedisRuntimeCache 创建 Redis 运行态 cache。

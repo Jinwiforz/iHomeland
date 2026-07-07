@@ -11,6 +11,8 @@ const (
 
 	// SessionConnectionTTL 是连接会话 key 的默认 TTL。
 	SessionConnectionTTL = 30 * time.Minute
+	// AccountSessionTTL 是账号 session token key 的默认 TTL。
+	AccountSessionTTL = 24 * time.Hour
 	// PresencePlayerTTL 是玩家在线状态 key 的默认 TTL。
 	PresencePlayerTTL = 2 * time.Minute
 	// RoomIndexTTL 是房间索引 key 的默认 TTL。
@@ -45,6 +47,11 @@ func (k RedisKeys) Env() string {
 // SessionConnection 返回连接会话 key。
 func (k RedisKeys) SessionConnection(connectionID string) (string, error) {
 	return k.build("session", "connection", connectionID)
+}
+
+// AccountSession 返回账号 session token key。
+func (k RedisKeys) AccountSession(sessionToken string) (string, error) {
+	return k.build("account", "session", sessionToken)
 }
 
 // PresencePlayer 返回玩家在线状态 key。

@@ -183,7 +183,8 @@
 范围：
 
 - `server/internal/storage` repository/cache interface
-- fake/in-memory storage adapter
+- 测试用 fake/in-memory storage adapter
+- 账号资料 MySQL repository 和账号 session Redis cache
 - Redis key builder 和 TTL 常量
 - 第一阶段 MySQL migration 入口
 - MySQL room summary repository 骨架和参数校验
@@ -196,7 +197,7 @@
 不做：
 
 - 不做完整账号、背包、经济、战绩系统
-- 不启用生产级 Redis/MySQL 真实读写
+- 不在该 change 内启用账号 runtime 的真实 Redis/MySQL 读写；该事项已并入 `add-account-session`
 - 不实现多进程房间一致性或 battle server 持久化
 
 ## 后续 OpenSpec Change 拆分
@@ -211,21 +212,67 @@
 
 ### create-unity-client-skeleton
 
+状态：已由当前客户端基础链路覆盖，后续如需归档可补建文档型 change。
+
 目标：创建最小 Unity 客户端工程骨架，明确目录、版本文件、项目设置和启动场景。
+
+当前现状：
+
+- 已有 `MainScene`
+- 已有 `LoadingPage`
+- 已有 `LoginPage`
+- 已有 `HomePage`
+- 已有 `BattleScene`
+- 已有 `AppRoot`、`AppBootstrap`、基础 Systems 和 UI 页面打开流程
+- `AccountSystem` 已改为通过 `NetworkSystem` 调用服务端账号协议
+- `HomePage.Start Game` 当前直接加载 `BattleScene`
 
 不做：不实现完整 UI、美术资源、登录系统或战斗玩法。
 
+### add-account-session
+
+状态：已归档。
+
+目标：实现第一阶段完整注册、登录登出、会话恢复、gateway 身份绑定、最小玩家资料和 Unity `AccountSystem` 真实服务端接入。
+
+产出：
+
+- 服务端账号协议、account service、gateway 身份绑定和 storage 边界已实现。
+- 账号 runtime 已接入真实 MySQL `account_player` 和 Redis `ih:{env}:account:session:{sessionToken}`；fake/in-memory storage 只保留给单元测试。
+- 服务端启动时会创建并 ping MySQL/Redis client，依赖不可用时拒绝启动，关闭时释放连接池。
+- Unity C# Protobuf 生成代码和 Google.Protobuf runtime 已接入。
+- Unity `NetworkSystem`、`AccountSystem`、`LoginPage` 和 `HomePage` 已改为真实账号链路。
+- Unity 编辑器已完成启动、注册、登录、登出和恢复失败路径手动验证。
+
+不做：不实现密码找回、第三方登录、好友、背包、经济、匹配或 battle server。
+
 ### add-unity-protobuf-generation
+
+状态：已并入 `add-account-session`。
 
 目标：为 Unity 客户端补齐 C# Protobuf 生成脚本、输出目录和生成代码管理规则。
 
-不做：不手写协议结构，不改变现有 `.proto` 语义。
+当前约束：项目只保留 `tools/proto/generate.bat` 一个协议生成入口，该脚本同时生成服务端 Go 代码和 Unity C# 代码。
+
+不做：不手写协议结构，不改变现有 `.proto` 语义，不新增第二个客户端专用生成脚本。
 
 ### add-unity-websocket-smoke-test
 
-目标：实现 Unity 侧最小实时联调：连接 `/ws`、发送心跳、接收响应，并为后续房间大厅 UI 接入验证链路。
+目标：实现 Unity 侧最小实时联调：连接 `/ws`、发送心跳、接收响应、发送账号登录请求，并为后续房间大厅 UI 接入验证链路。
 
 不做：不实现完整房间界面、不做复杂重连 UI、不引入 battle server。
+
+### add-unity-room-lobby-flow
+
+目标：接入已有服务端房间模块，让 Unity 客户端支持创房、进房、准备/取消准备、退房、房主转移、断线重连恢复和房间快照刷新。
+
+不做：不实现匹配系统，不进入正式战斗模拟，不引入独立 battle server。
+
+### add-room-start-gate
+
+目标：在房间大厅内定义“开始游戏”的第一阶段闸门：只校验房主、成员准备状态和房间状态，并决定是否允许从大厅进入后续占位场景。
+
+不做：不实现高频战斗同步、服务端权威模拟、观战、回放或战斗结算。
 
 ### add-internal-service-boundaries
 

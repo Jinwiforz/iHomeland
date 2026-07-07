@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -10,6 +11,9 @@ import (
 // FakeStore 是无网络依赖的 storage adapter，供业务和 storage 单元测试使用。
 type FakeStore struct {
 	mu              sync.Mutex
+	playerProfiles  map[string]PlayerProfile
+	playersByID     map[string]string
+	accountSessions map[string]AccountSession
 	roomSummaries   map[string]RoomSummary
 	presences       map[string]Presence
 	roomIndexes     map[string]RoomIndexEntry
@@ -20,10 +24,119 @@ type FakeStore struct {
 func NewFakeStore() *FakeStore {
 	return &FakeStore{
 		roomSummaries:   make(map[string]RoomSummary),
+		playerProfiles:  make(map[string]PlayerProfile),
+		playersByID:     make(map[string]string),
+		accountSessions: make(map[string]AccountSession),
 		presences:       make(map[string]Presence),
 		roomIndexes:     make(map[string]RoomIndexEntry),
 		reconnectTokens: make(map[string]ReconnectToken),
 	}
+}
+
+// CreatePlayerProfile 创建玩家账号基础资料，账号名和玩家 ID 必须唯一。
+func (s *FakeStore) CreatePlayerProfile(ctx context.Context, profile PlayerProfile) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validatePlayerProfile(profile); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	accountName := normalizeAccountName(profile.AccountName)
+	if _, ok := s.playerProfiles[accountName]; ok {
+		return fmt.Errorf("%w: account already exists", ErrConflict)
+	}
+	if _, ok := s.playersByID[profile.PlayerID]; ok {
+		return fmt.Errorf("%w: player id already exists", ErrConflict)
+	}
+	profile.AccountName = accountName
+	s.playerProfiles[accountName] = profile
+	s.playersByID[profile.PlayerID] = accountName
+	return nil
+}
+
+// GetPlayerProfileByAccount 按账号名读取玩家资料。
+func (s *FakeStore) GetPlayerProfileByAccount(ctx context.Context, accountName string) (PlayerProfile, error) {
+	if err := ctx.Err(); err != nil {
+		return PlayerProfile{}, err
+	}
+	accountName = normalizeAccountName(accountName)
+	if accountName == "" {
+		return PlayerProfile{}, ErrInvalidArgument
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	profile, ok := s.playerProfiles[accountName]
+	if !ok {
+		return PlayerProfile{}, ErrNotFound
+	}
+	return profile, nil
+}
+
+// GetPlayerProfileByID 按玩家 ID 读取玩家资料。
+func (s *FakeStore) GetPlayerProfileByID(ctx context.Context, playerID string) (PlayerProfile, error) {
+	if err := ctx.Err(); err != nil {
+		return PlayerProfile{}, err
+	}
+	if err := validateID(playerID); err != nil {
+		return PlayerProfile{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	accountName, ok := s.playersByID[playerID]
+	if !ok {
+		return PlayerProfile{}, ErrNotFound
+	}
+	return s.playerProfiles[accountName], nil
+}
+
+// SetAccountSession 写入账号 session，同一 token 重试写入会覆盖同一 key。
+func (s *FakeStore) SetAccountSession(ctx context.Context, session AccountSession, ttl time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateAccountSession(session); err != nil {
+		return err
+	}
+	if err := validateTTL(ttl); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accountSessions[session.SessionToken] = session
+	return nil
+}
+
+// GetAccountSession 读取账号 session。
+func (s *FakeStore) GetAccountSession(ctx context.Context, sessionToken string) (AccountSession, error) {
+	if err := ctx.Err(); err != nil {
+		return AccountSession{}, err
+	}
+	if err := validateID(sessionToken); err != nil {
+		return AccountSession{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.accountSessions[strings.TrimSpace(sessionToken)]
+	if !ok {
+		return AccountSession{}, ErrNotFound
+	}
+	return session, nil
+}
+
+// DeleteAccountSession 删除账号 session，重复删除保持幂等。
+func (s *FakeStore) DeleteAccountSession(ctx context.Context, sessionToken string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateID(sessionToken); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.accountSessions, strings.TrimSpace(sessionToken))
+	return nil
 }
 
 // SaveRoomSummary 幂等保存房间摘要，同一 room id 只保留一份最新摘要。
@@ -172,4 +285,8 @@ func (s *FakeStore) DeleteReconnectToken(ctx context.Context, roomID string, pla
 
 func reconnectTokenMapKey(roomID string, playerID string) string {
 	return roomID + "\x00" + playerID
+}
+
+func normalizeAccountName(accountName string) string {
+	return strings.ToLower(strings.TrimSpace(accountName))
 }

@@ -43,6 +43,73 @@ func TestFakeStoreRoomSummaryIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFakeStorePlayerProfileCreateAndLookup(t *testing.T) {
+	store := NewFakeStore()
+	ctx := context.Background()
+	now := time.Now()
+	profile := PlayerProfile{
+		PlayerID:     "player-1",
+		AccountName:  "Tester",
+		PasswordHash: "hash",
+		DisplayName:  "Tester",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := store.CreatePlayerProfile(ctx, profile); err != nil {
+		t.Fatalf("CreatePlayerProfile failed: %v", err)
+	}
+	if err := store.CreatePlayerProfile(ctx, profile); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate CreatePlayerProfile error = %v, want ErrConflict", err)
+	}
+	got, err := store.GetPlayerProfileByAccount(ctx, "tester")
+	if err != nil {
+		t.Fatalf("GetPlayerProfileByAccount failed: %v", err)
+	}
+	if got.PlayerID != "player-1" {
+		t.Fatalf("PlayerID = %q, want player-1", got.PlayerID)
+	}
+	got, err = store.GetPlayerProfileByID(ctx, "player-1")
+	if err != nil {
+		t.Fatalf("GetPlayerProfileByID failed: %v", err)
+	}
+	if got.AccountName != "tester" {
+		t.Fatalf("AccountName = %q, want tester", got.AccountName)
+	}
+}
+
+func TestFakeStoreAccountSessionOverwritesAndDeletes(t *testing.T) {
+	store := NewFakeStore()
+	ctx := context.Background()
+	session := AccountSession{
+		SessionToken: "token-1",
+		PlayerID:     "player-1",
+		AccountName:  "tester",
+		IssuedAt:     time.Now(),
+		ExpiresAt:    time.Now().Add(AccountSessionTTL),
+		ConnectionID: "conn-1",
+	}
+	if err := store.SetAccountSession(ctx, session, AccountSessionTTL); err != nil {
+		t.Fatalf("SetAccountSession failed: %v", err)
+	}
+	session.ConnectionID = "conn-2"
+	if err := store.SetAccountSession(ctx, session, AccountSessionTTL); err != nil {
+		t.Fatalf("overwrite SetAccountSession failed: %v", err)
+	}
+	got, err := store.GetAccountSession(ctx, "token-1")
+	if err != nil {
+		t.Fatalf("GetAccountSession failed: %v", err)
+	}
+	if got.ConnectionID != "conn-2" {
+		t.Fatalf("ConnectionID = %q, want conn-2", got.ConnectionID)
+	}
+	if err := store.DeleteAccountSession(ctx, "token-1"); err != nil {
+		t.Fatalf("DeleteAccountSession failed: %v", err)
+	}
+	if _, err := store.GetAccountSession(ctx, "token-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetAccountSession after delete error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestFakeStoreReconnectTokenOverwritesSameKey(t *testing.T) {
 	store := NewFakeStore()
 	ctx := context.Background()
@@ -81,6 +148,7 @@ func TestRedisKeysAndTTLs(t *testing.T) {
 		want string
 	}{
 		{name: "session", got: func() (string, error) { return keys.SessionConnection("conn-1") }, want: "ih:dev:session:connection:conn-1"},
+		{name: "account session", got: func() (string, error) { return keys.AccountSession("token-1") }, want: "ih:dev:account:session:token-1"},
 		{name: "presence", got: func() (string, error) { return keys.PresencePlayer("player-1") }, want: "ih:dev:presence:player:player-1"},
 		{name: "room index", got: func() (string, error) { return keys.RoomIndex("room-1") }, want: "ih:dev:room:index:room-1"},
 		{name: "reconnect", got: func() (string, error) { return keys.RoomReconnect("room-1", "player-1") }, want: "ih:dev:room:reconnect:room-1:player-1"},
@@ -98,7 +166,7 @@ func TestRedisKeysAndTTLs(t *testing.T) {
 			}
 		})
 	}
-	if SessionConnectionTTL <= PresencePlayerTTL || ReconnectTokenTTL <= 0 || RoomLockTTL <= 0 || GatewayRateTTL <= 0 || RoomIndexTTL <= 0 {
+	if AccountSessionTTL <= SessionConnectionTTL || SessionConnectionTTL <= PresencePlayerTTL || ReconnectTokenTTL <= 0 || RoomLockTTL <= 0 || GatewayRateTTL <= 0 || RoomIndexTTL <= 0 {
 		t.Fatalf("unexpected ttl constants")
 	}
 	if _, err := NewRedisKeys(""); !errors.Is(err, ErrInvalidArgument) {
@@ -127,15 +195,21 @@ func TestMigrationFilesExistAndFollowNaming(t *testing.T) {
 	}
 	foundUp := false
 	foundDown := false
+	foundAccountUp := false
+	foundAccountDown := false
 	for _, entry := range entries {
 		switch entry.Name() {
 		case "0001_room_lobby_summary.up.sql":
 			foundUp = true
 		case "0001_room_lobby_summary.down.sql":
 			foundDown = true
+		case "0002_account_session.up.sql":
+			foundAccountUp = true
+		case "0002_account_session.down.sql":
+			foundAccountDown = true
 		}
 	}
-	if !foundUp || !foundDown {
-		t.Fatalf("migration files found up=%v down=%v, want both", foundUp, foundDown)
+	if !foundUp || !foundDown || !foundAccountUp || !foundAccountDown {
+		t.Fatalf("migration files found room up=%v room down=%v account up=%v account down=%v, want all", foundUp, foundDown, foundAccountUp, foundAccountDown)
 	}
 }

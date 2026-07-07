@@ -49,15 +49,16 @@
 5. `add-room-lobby`
 6. `add-persistence-boundaries`
 7. `document-client-integration`
+8. `add-account-session`
 
 第一阶段后续推荐 change 顺序：
 
-1. `create-unity-client-skeleton`
-2. `add-unity-protobuf-generation`
-3. `add-unity-websocket-smoke-test`
+1. `add-unity-websocket-smoke-test`
+2. `add-unity-room-lobby-flow`
+3. `add-room-start-gate`
 4. `add-internal-service-boundaries`
 
-后端内部服务拆分应排在 Unity 最小客户端联调之后。没有客户端工程时，优先推进客户端骨架、协议生成和 smoke test；不优先推进 gRPC、中心服或游戏服拆分。
+当前 Unity 客户端基础链路和真实账号会话链路已经存在，后续优先补齐房间大厅 UI 接入和最小自动化联调。协议生成只保留 `tools/proto/generate.bat` 一个入口，必须双端生成。后端内部服务拆分应排在 Unity 房间大厅联调之后；不优先推进 gRPC、中心服或游戏服拆分。
 
 ## 任务编写规则
 
@@ -104,6 +105,7 @@
 - 文档说明与代码或规格一致。
 - 关键路径有测试或明确说明暂未测试原因。
 - 没有新增无 owner 的表、Redis key、协议消息或服务接口。
+- 没有只存在于聊天记录中的 MySQL/Redis 建库、授权、迁移、检查、清理或排障命令；被采纳的命令必须进入项目文档或脚本。
 - 没有留下无说明的 TODO、魔法值、静默失败或吞错逻辑。
 
 归档前必须满足：
@@ -123,6 +125,7 @@
 - 健康检查和版本接口
 - WebSocket 连接
 - Protobuf envelope
+- 注册、登录、登出和会话恢复
 - 创建、加入、退出房间
 - 准备和取消准备
 - 房主转移

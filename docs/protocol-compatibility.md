@@ -38,6 +38,8 @@ WebSocket 和后续 TCP 必须复用同一 envelope schema。
 
 Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送需要响应的请求时，`protocol_version`、`message_id`、`request_id`、`sequence` 和 `payload` 必须完整设置；收到响应时，客户端必须用 `request_id` 关联本地请求，并按 `message_id` 解码 payload。
 
+客户端建立 WebSocket 后必须定时发送 `HeartbeatRequest`，间隔应小于服务端 gateway `IdleTimeout`。心跳必须复用普通请求响应通道，避免同一连接出现多个并发接收者；服务端收到心跳后返回 `HeartbeatResponse`，客户端可用 `client_time_ms` 计算 RTT，并用 `server_time_ms` 记录服务端时间观测值。
+
 ## Message ID 规则
 
 第一阶段号段：
@@ -54,6 +56,21 @@ Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送
 - `2`：`HeartbeatResponse`
 - `3`：`ErrorResponse`
 - `4`：`ProtocolVersionUnsupported`
+
+当前规划中的账号会话消息：
+
+- `1000`：`RegisterRequest`
+- `1001`：`RegisterResponse`
+- `1002`：`LoginRequest`
+- `1003`：`LoginResponse`
+- `1004`：`LogoutRequest`
+- `1005`：`LogoutResponse`
+- `1006`：`ResumeSessionRequest`
+- `1007`：`ResumeSessionResponse`
+- `1008`：`GetCurrentPlayerRequest`
+- `1009`：`GetCurrentPlayerResponse`
+
+账号会话消息 owner 为 `account`。注册、登录和恢复成功响应必须返回服务端确认的玩家资料、session token 和过期时间；登出成功后服务端必须失效当前会话并清理 gateway session 身份。
 
 当前房间大厅消息：
 
@@ -79,12 +96,20 @@ Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送
 
 服务端拒绝或无法处理 envelope 时必须返回结构化错误响应。
 
+`ErrorResponse` 字段语义：
+
+- `code`：给程序分支判断使用，必须稳定、枚举化，不承载动态上下文。
+- `message`：给日志和必要的 UI 提示使用的简短可读摘要，应稳定且便于搜索。
+- `detail`：给开发调试使用的具体诊断信息，可以包含动态上下文，客户端不得依赖它做业务分支。
+
 当前基础错误码：
 
 - `PROTOCOL_VERSION_UNSUPPORTED`
 - `MESSAGE_ID_UNSUPPORTED`
 - `PAYLOAD_INVALID`
 - `REQUEST_ID_REQUIRED`
+
+账号会话接入后，账号已存在、账号凭据非法、未登录、session 过期和权限不足必须复用结构化错误响应；当前账号错误码包括 `ACCOUNT_ALREADY_EXISTS`、`ACCOUNT_CREDENTIAL_INVALID`、`SESSION_INVALID` 和 `UNAUTHENTICATED`。
 
 需要响应的请求失败时，错误响应必须回传相同 `request_id`。
 

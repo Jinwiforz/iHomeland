@@ -16,13 +16,17 @@ set "SERVER_ROOT=%PROJECT_ROOT%\server"
 set "PROTO_ROOT=%PROJECT_ROOT%\shared\proto"
 set "LOCAL_PROTOC=%PROJECT_ROOT%\.tools\protoc\bin\protoc.exe"
 set "LOCAL_PROTOC_GEN_GO=%PROJECT_ROOT%\.tools\go\bin\protoc-gen-go.exe"
+set "LOCAL_PROTOC_INCLUDE=%PROJECT_ROOT%\.tools\protoc\include"
 set "PROTO_FILE=shared\proto\realtime\v1\envelope.proto"
 set "GO_OUT=server\internal\protocol\pb"
 set "GO_FILE=%GO_OUT%\realtime\v1\envelope.pb.go"
+set "CS_OUT=client\Assets\App\Scripts\Protocol\Pb\Realtime\V1"
+set "CS_FILE=%CS_OUT%\Envelope.cs"
 
 echo %C_INFO%[proto] project root:%C_RESET% %PROJECT_ROOT%
 echo %C_INFO%[proto] proto root:  %C_RESET% %PROTO_ROOT%
-echo %C_INFO%[proto] output dir:  %C_RESET% %PROJECT_ROOT%\%GO_OUT%
+echo %C_INFO%[proto] Go output:   %C_RESET% %PROJECT_ROOT%\%GO_OUT%
+echo %C_INFO%[proto] C# output:   %C_RESET% %PROJECT_ROOT%\%CS_OUT%
 echo.
 
 pushd "%PROJECT_ROOT%" || goto fail_pushd
@@ -90,10 +94,21 @@ if not exist "%GO_OUT%" (
     )
 )
 
+if not exist "%CS_OUT%" (
+    echo %C_INFO%[proto] creating output dir:%C_RESET% %CS_OUT%
+    mkdir "%CS_OUT%"
+    if errorlevel 1 (
+        set "EXIT_CODE=1"
+        echo %C_ERR%[proto] ERROR: failed to create output dir:%C_RESET% %CS_OUT%
+        goto finish
+    )
+)
+
 echo.
 echo %C_INFO%[proto] generating Go code...%C_RESET%
 "%PROTOC%" ^
   --proto_path=shared\proto ^
+  --proto_path="%LOCAL_PROTOC_INCLUDE%" ^
   --go_out=%GO_OUT% ^
   --go_opt=paths=source_relative ^
   %PROTO_FILE%
@@ -110,8 +125,29 @@ if not exist "%GO_FILE%" (
     goto finish
 )
 
+echo.
+echo %C_INFO%[proto] generating Unity C# code...%C_RESET%
+"%PROTOC%" ^
+  --proto_path=shared\proto ^
+  --proto_path="%LOCAL_PROTOC_INCLUDE%" ^
+  --csharp_out=%CS_OUT% ^
+  %PROTO_FILE%
+
+if errorlevel 1 (
+    set "EXIT_CODE=1"
+    echo %C_ERR%[proto] ERROR: Unity C# protoc generation failed.%C_RESET%
+    goto finish
+)
+
+if not exist "%CS_FILE%" (
+    set "EXIT_CODE=1"
+    echo %C_ERR%[proto] ERROR: expected output not found:%C_RESET% %CS_FILE%
+    goto finish
+)
+
 set "EXIT_CODE=0"
 echo %C_OK%[proto] generated:%C_RESET% %GO_FILE%
+echo %C_OK%[proto] generated:%C_RESET% %CS_FILE%
 echo %C_OK%[proto] done.%C_RESET%
 
 :finish

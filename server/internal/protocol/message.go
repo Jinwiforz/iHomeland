@@ -16,6 +16,27 @@ const (
 	// MessageIDProtocolVersionUnsupported 是协议版本不兼容响应。
 	MessageIDProtocolVersionUnsupported MessageID = 4
 
+	// MessageIDRegisterRequest 是账号注册请求。
+	MessageIDRegisterRequest MessageID = 1000
+	// MessageIDRegisterResponse 是账号注册响应。
+	MessageIDRegisterResponse MessageID = 1001
+	// MessageIDLoginRequest 是账号登录请求。
+	MessageIDLoginRequest MessageID = 1002
+	// MessageIDLoginResponse 是账号登录响应。
+	MessageIDLoginResponse MessageID = 1003
+	// MessageIDLogoutRequest 是账号登出请求。
+	MessageIDLogoutRequest MessageID = 1004
+	// MessageIDLogoutResponse 是账号登出响应。
+	MessageIDLogoutResponse MessageID = 1005
+	// MessageIDResumeSessionRequest 是账号会话恢复请求。
+	MessageIDResumeSessionRequest MessageID = 1006
+	// MessageIDResumeSessionResponse 是账号会话恢复响应。
+	MessageIDResumeSessionResponse MessageID = 1007
+	// MessageIDGetCurrentPlayerRequest 是查询当前玩家身份请求。
+	MessageIDGetCurrentPlayerRequest MessageID = 1008
+	// MessageIDGetCurrentPlayerResponse 是查询当前玩家身份响应。
+	MessageIDGetCurrentPlayerResponse MessageID = 1009
+
 	// MessageIDCreateRoomRequest 是创建房间请求。
 	MessageIDCreateRoomRequest MessageID = 2000
 	// MessageIDCreateRoomResponse 是创建房间响应。
@@ -58,6 +79,14 @@ const (
 	ErrorCodePayloadInvalid ErrorCode = 3
 	// ErrorCodeRequestIDRequired 表示请求缺少必需的 request id。
 	ErrorCodeRequestIDRequired ErrorCode = 4
+	// ErrorCodeAccountAlreadyExists 表示注册账号已存在。
+	ErrorCodeAccountAlreadyExists ErrorCode = 5
+	// ErrorCodeAccountCredentialInvalid 表示账号凭据无效。
+	ErrorCodeAccountCredentialInvalid ErrorCode = 6
+	// ErrorCodeSessionInvalid 表示账号 session 无效或已过期。
+	ErrorCodeSessionInvalid ErrorCode = 7
+	// ErrorCodeUnauthenticated 表示请求缺少已登录身份。
+	ErrorCodeUnauthenticated ErrorCode = 8
 )
 
 // MessageDescriptor 描述一个可路由协议消息的稳定注册信息。
@@ -75,6 +104,22 @@ func SystemMessages() []MessageDescriptor {
 		{ID: MessageIDHeartbeatResponse, Name: "HeartbeatResponse", Owner: "protocol", Comment: "服务端对心跳请求的响应"},
 		{ID: MessageIDErrorResponse, Name: "ErrorResponse", Owner: "protocol", Comment: "服务端结构化错误响应"},
 		{ID: MessageIDProtocolVersionUnsupported, Name: "ProtocolVersionUnsupported", Owner: "protocol", Comment: "协议版本不兼容响应"},
+	}
+}
+
+// AccountMessages 返回第一阶段账号会话消息注册表。
+func AccountMessages() []MessageDescriptor {
+	return []MessageDescriptor{
+		{ID: MessageIDRegisterRequest, Name: "RegisterRequest", Owner: "account", Comment: "客户端账号注册请求"},
+		{ID: MessageIDRegisterResponse, Name: "RegisterResponse", Owner: "account", Comment: "服务端账号注册响应"},
+		{ID: MessageIDLoginRequest, Name: "LoginRequest", Owner: "account", Comment: "客户端账号登录请求"},
+		{ID: MessageIDLoginResponse, Name: "LoginResponse", Owner: "account", Comment: "服务端账号登录响应"},
+		{ID: MessageIDLogoutRequest, Name: "LogoutRequest", Owner: "account", Comment: "客户端账号登出请求"},
+		{ID: MessageIDLogoutResponse, Name: "LogoutResponse", Owner: "account", Comment: "服务端账号登出响应"},
+		{ID: MessageIDResumeSessionRequest, Name: "ResumeSessionRequest", Owner: "account", Comment: "客户端恢复账号会话请求"},
+		{ID: MessageIDResumeSessionResponse, Name: "ResumeSessionResponse", Owner: "account", Comment: "服务端恢复账号会话响应"},
+		{ID: MessageIDGetCurrentPlayerRequest, Name: "GetCurrentPlayerRequest", Owner: "account", Comment: "客户端查询当前玩家身份请求"},
+		{ID: MessageIDGetCurrentPlayerResponse, Name: "GetCurrentPlayerResponse", Owner: "account", Comment: "服务端查询当前玩家身份响应"},
 	}
 }
 
@@ -100,6 +145,11 @@ func RoomMessages() []MessageDescriptor {
 // IsSystemMessageID 判断 id 是否属于系统与网关消息号段。
 func IsSystemMessageID(id MessageID) bool {
 	return id >= 1 && id <= 999
+}
+
+// IsAccountMessageID 判断 id 是否属于账号会话消息号段。
+func IsAccountMessageID(id MessageID) bool {
+	return id >= 1000 && id <= 1999
 }
 
 // IsRoomMessageID 判断 id 是否属于房间大厅消息号段。

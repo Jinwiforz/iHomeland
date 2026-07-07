@@ -66,6 +66,7 @@ namespace App.Systems
 
         protected override void OnInitialize()
         {
+            ConfigureUnityStackTrace();
             CreateLogFile();
 
             if (CaptureUnityLogs)
@@ -174,6 +175,11 @@ namespace App.Systems
                 return;
             }
 
+            if (level != AppLogLevel.Error)
+            {
+                stackTrace = string.Empty;
+            }
+
             LogEntry entry = new LogEntry(DateTime.Now, level, tag, message, stackTrace);
 
             AddToMemory(entry);
@@ -240,6 +246,16 @@ namespace App.Systems
             }
         }
 
+        private static void ConfigureUnityStackTrace()
+        {
+            // Debug/Info/Warning 面向运行状态观察，默认不打印调用栈；Error/Exception 才保留定位信息。
+            Application.SetStackTraceLogType(LogType.Log, StackTraceLogType.None);
+            Application.SetStackTraceLogType(LogType.Warning, StackTraceLogType.None);
+            Application.SetStackTraceLogType(LogType.Error, StackTraceLogType.ScriptOnly);
+            Application.SetStackTraceLogType(LogType.Assert, StackTraceLogType.ScriptOnly);
+            Application.SetStackTraceLogType(LogType.Exception, StackTraceLogType.Full);
+        }
+
         private void WriteToFile(LogEntry entry)
         {
             if (!EnableFileLog || _writer == null)
@@ -295,8 +311,9 @@ namespace App.Systems
             }
 
             AppLogLevel level = ConvertUnityLogType(type);
+            string capturedStackTrace = level == AppLogLevel.Error ? stackTrace : string.Empty;
 
-            Write(level, "Unity", condition, stackTrace, false);
+            Write(level, "Unity", condition, capturedStackTrace, false);
         }
 
         private static AppLogLevel ConvertUnityLogType(LogType type)

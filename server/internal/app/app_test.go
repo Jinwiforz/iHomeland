@@ -11,7 +11,7 @@ import (
 )
 
 func TestNewHTTPServer(t *testing.T) {
-	server, err := NewHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("NewHTTPServer() error = %v", err)
 	}

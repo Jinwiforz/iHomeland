@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Threading.Tasks;
 using App.UI;
 using UnityEngine;
 
@@ -147,22 +148,31 @@ namespace App.Core
         {
             AppRoot.Instance.Log.Info<AppBootstrap>("Check account.");
 
-            // TODO:
-            // 这里以后放真实账号检查逻辑。
-            // 例如读取本地 token，尝试自动登录。
-            yield return null;
+            Task restoreTask = AppRoot.Instance.Account.RestoreSessionAsync();
+            while (!restoreTask.IsCompleted)
+            {
+                yield return null;
+            }
+
+            if (restoreTask.IsFaulted)
+            {
+                AppRoot.Instance.Log.Warning<AppBootstrap>("Restore account task failed.");
+            }
         }
 
         private IEnumerator PrepareLoginRoutine()
         {
             AppRoot.Instance.Log.Info<AppBootstrap>("Prepare login page.");
 
-            // 当前阶段可以先确保 LoginPage prefab 能被创建。
-            UIPanel loginPage = AppRoot.Instance.UI.OpenPage(AppPages.LoginPage);
+            string pageName = AppRoot.Instance.Account != null && AppRoot.Instance.Account.IsLoggedIn
+                ? AppPages.HomePage
+                : AppPages.LoginPage;
+
+            UIPanel loginPage = AppRoot.Instance.UI.OpenPage(pageName);
 
             if (loginPage == null)
             {
-                AppRoot.Instance.Log.Error<AppBootstrap>("Open LoginPage failed.");
+                AppRoot.Instance.Log.Error<AppBootstrap>($"Open {pageName} failed.");
                 yield break;
             }
 

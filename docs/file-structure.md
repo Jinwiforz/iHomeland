@@ -43,6 +43,7 @@ server/
   config/
     local.yaml
   scripts/
+    mysql-local-dev.sql
     run.bat
     test.bat
     setup-local-env.bat
@@ -57,6 +58,7 @@ server/
     logger/
     ops/
     gateway/
+    account/
     protocol/
       pb/
     room/
@@ -77,7 +79,7 @@ server/
 
 服务端本地配置目录。`config/local.yaml` 用于本地开发默认配置，环境变量只作为临时覆盖或部署覆盖。
 
-配置中包含服务端 HTTP 地址、版本文件路径、MySQL 地址和 Redis 地址。本地依赖既可以由 Docker Compose 提供，也可以由本机安装服务提供；服务端只依赖配置地址，不直接依赖 Docker。
+配置中包含服务端 HTTP 地址、版本文件路径、环境名、MySQL 地址/账号/密码/连接池和 Redis 地址/密码/DB/超时。本地依赖既可以由 Docker Compose 提供，也可以由本机安装服务提供；服务端只依赖配置地址，不直接依赖 Docker。
 
 ### `.env.example`、`.env.local` 和 `compose.yaml`
 
@@ -91,6 +93,7 @@ server/
 
 服务端辅助脚本目录，例如本地运行、测试、检查和构建脚本。该目录不承载业务代码，也不与根目录 `tools/` 的跨模块工具职责重叠。
 
+- `mysql-local-dev.sql`：本地 MySQL 建库、授权和第一阶段 migration 执行命令，只用于本地开发。
 - `run.bat`：启动 Go 服务端。
 - `test.bat`：运行服务端 Go 测试。
 - `setup-local-env.bat`：按 `--auto`、`--docker` 或 `--native` 生成 `server/.env.local`，并诊断所选模式需要的 Docker、端口占用和 Windows TCP excluded port range；Go 不可用时只提示，不阻塞依赖配置生成。
@@ -147,6 +150,18 @@ server/
 - 心跳和超时
 - 消息分发
 
+### `internal/account`
+
+第一阶段账号会话：
+
+- 注册、登录和登出
+- 会话恢复
+- 当前玩家身份查询
+- 玩家基础资料查询或创建
+- session token 签发、恢复和失效
+
+账号模块为房间大厅提供身份基础，不承载密码找回、第三方登录、好友、背包、经济或完整权限系统。
+
 ### `internal/room`
 
 房间业务：
@@ -163,18 +178,20 @@ server/
 存储适配：
 
 - repository/cache interface
-- fake/in-memory adapter
+- 测试用 fake/in-memory adapter
+- MySQL account player repository
+- Redis account session cache
 - MySQL room summary repository 骨架
-- Redis runtime cache 骨架
+- Redis room runtime cache 骨架
 - Redis key builder 和 TTL 常量
 - MySQL migration 文件
 - 幂等处理和恢复边界
 
 ### `internal/protocol`
 
-协议注册、消息 ID 映射、版本校验、envelope 编解码和生成代码适配。`.proto` 源文件放在 `shared/proto/`，生成代码本地输出到 `internal/protocol/pb/`，该目录属于可再生成产物，不提交到 Git。
+协议注册、消息 ID 映射、版本校验、envelope 编解码和生成代码适配。`.proto` 源文件放在 `shared/proto/`，服务端生成代码本地输出到 `server/internal/protocol/pb/`，客户端生成代码本地输出到 `client/Assets/App/Scripts/Protocol/Pb/`。两个目录都属于可再生成产物，不提交到 Git。
 
-`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room` 已具备第一阶段自定义房间大厅的内存实现，包括创建、加入、准备、退出、房主转移、断线保留和重连恢复。`storage` 已具备第一阶段持久化/运行态边界、fake adapter、Redis key builder、MySQL 迁移入口和 adapter 骨架；真实 Redis/MySQL client 绑定与生产级恢复流程由后续 change 继续推进。TCP 传输也由后续 change 决定是否接入。
+`gateway` 已具备第一阶段 WebSocket 基础入口、连接级 session、心跳、空闲超时、协议错误响应和分发边界。`room` 已具备第一阶段自定义房间大厅的内存实现，包括创建、加入、准备、退出、房主转移、断线保留和重连恢复。`storage` 已具备账号资料 MySQL repository、账号 session Redis cache、测试用 fake adapter、Redis key builder、MySQL 迁移入口和房间 adapter 骨架；房间 Redis/MySQL 正式持久化由后续 change 继续推进。TCP 传输也由后续 change 决定是否接入。
 
 ## 文档结构
 
@@ -182,10 +199,12 @@ server/
 docs/
   architecture.md              总体架构
   engineering-standards.md     工程标准
+  local-data-commands.md       本地 MySQL/Redis 命令入口
   workflow.md                  项目流程规范
   roadmap.md                   路线图和 change 拆分
   file-structure.md            文件结构规划
   protocol-compatibility.md    协议兼容规则
+  redis-local-dev-commands.md  本地 Redis 命令参考
   redis-keys.md                Redis key 规则
 ```
 
@@ -197,6 +216,7 @@ openspec/
   specs/
     server-foundation/
     local-infra/
+    account-session/
     protocol/
     gateway/
     room/
@@ -217,4 +237,4 @@ tools/
 
 ### `tools/proto`
 
-跨端协议生成工具目录。`setup.bat` 准备项目本地 `protoc` 和 `protoc-gen-go`，输出到 `.tools/`；`generate.bat` 优先使用这些本地工具生成 Go 服务端代码。协议源文件位于 `shared/proto/`；Unity C# 生成入口由客户端工程 change 补充，归属此处或 `client/` 内明确的生成脚本目录。所有协议生成输出都应视为可再生成产物，默认不提交到 Git。
+跨端协议生成工具目录。`setup.bat` 准备项目本地 `protoc` 和 `protoc-gen-go`，输出到 `.tools/`；`generate.bat` 是唯一协议生成入口，必须同时生成 Go 服务端代码和 Unity C# 代码。协议源文件位于 `shared/proto/`。生成代码不得手工修改；Go 与 Unity C# 生成输出都不提交到 Git。

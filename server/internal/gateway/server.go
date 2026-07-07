@@ -51,12 +51,16 @@ type SessionSnapshot struct {
 	ProtocolVersion uint32
 	CreatedAt       time.Time
 	LastActiveAt    time.Time
+	PlayerID        string
+	SessionToken    string
 }
 
 // DispatchRequest 描述交给业务模块处理的实时消息。
 type DispatchRequest struct {
-	Session  SessionSnapshot
-	Envelope *pb.Envelope
+	Session       SessionSnapshot
+	Envelope      *pb.Envelope
+	BindIdentity  func(playerID string, sessionToken string)
+	ClearIdentity func()
 }
 
 // Dispatcher 是网关与后续业务模块之间的分发边界。
@@ -91,6 +95,8 @@ type Session struct {
 	lastActiveAt    time.Time
 	closeReason     CloseReason
 	nextSequence    uint64
+	playerID        string
+	sessionToken    string
 }
 
 // NewServer 创建实时网关服务。
@@ -234,7 +240,23 @@ func (s *Server) snapshot(session *Session) SessionSnapshot {
 		ProtocolVersion: session.protocolVersion,
 		CreatedAt:       session.createdAt,
 		LastActiveAt:    session.lastActiveAt,
+		PlayerID:        session.playerID,
+		SessionToken:    session.sessionToken,
 	}
+}
+
+func (s *Server) bindSessionIdentity(session *Session, playerID string, sessionToken string) {
+	s.mu.Lock()
+	session.playerID = playerID
+	session.sessionToken = sessionToken
+	s.mu.Unlock()
+}
+
+func (s *Server) clearSessionIdentity(session *Session) {
+	s.mu.Lock()
+	session.playerID = ""
+	session.sessionToken = ""
+	s.mu.Unlock()
 }
 
 func (s *Server) nextSessionSequence(session *Session) uint64 {
@@ -344,6 +366,12 @@ func (s *Server) dispatchBusiness(ctx context.Context, conn *websocket.Conn, ses
 	response, err := s.dispatcher.Dispatch(ctx, DispatchRequest{
 		Session:  s.snapshot(session),
 		Envelope: envelope,
+		BindIdentity: func(playerID string, sessionToken string) {
+			s.bindSessionIdentity(session, playerID, sessionToken)
+		},
+		ClearIdentity: func() {
+			s.clearSessionIdentity(session)
+		},
 	})
 	if err != nil {
 		s.log.Warn("websocket dispatch failed", "operation", "dispatch", "connection_id", session.connectionID, "message_id", envelope.GetMessageId(), "error", err)
