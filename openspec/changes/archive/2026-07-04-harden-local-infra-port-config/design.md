@@ -23,7 +23,7 @@
 
 ## Decisions
 
-1. 默认宿主机端口改为 `33306` 和 `36379`。
+1. 默认宿主机端口改为 `3306` 和 `6379`。
 
    理由：容器内部继续使用标准端口，宿主机使用项目专用端口，能避开开发者本机已有 MySQL/Redis 和常见系统保留段。替代方案是继续使用 `3306/6379` 并让开发者手动处理冲突，但这会把团队流程问题转嫁到个人机器。
 
@@ -45,16 +45,16 @@
 
 ## Risks / Trade-offs
 
-- [Risk] `33306` 或 `36379` 仍可能在个别机器上被占用或被系统保留。-> Mitigation：`setup-local-env.bat` 会诊断端口占用和 excluded range，并提示修改 `server/.env.local` 到其它端口。
+- [Risk] `3306` 或 `6379` 仍可能在个别机器上被占用或被系统保留。-> Mitigation：`setup-local-env.bat` 会诊断端口占用和 excluded range，并提示修改 `server/.env.local` 到其它端口。
 - [Risk] Windows 批处理解析 `.env.local` 时遇到复杂字符可能行为不一致。-> Mitigation：`.env.local` 仅支持简单 `KEY=value` 本地配置，不用于保存复杂 secret。
-- [Risk] 已经依赖 `127.0.0.1:6379` 的开发者需要更新本机配置。-> Mitigation：默认配置和文档统一改为 `36379`，环境变量仍允许临时兼容旧端口。
+- [Risk] 已经依赖 `127.0.0.1:6379` 的开发者需要更新本机配置。-> Mitigation：默认配置和文档统一改为 `6379`，环境变量仍允许临时兼容旧端口。
 - [Risk] OpenSpec CLI 在 PowerShell 下可能被执行策略拦截 `.ps1`。-> Mitigation：文档和诊断建议使用 `openspec.cmd` 进行 Windows 本地检查，不要求修改执行策略。
 
 ## Migration Plan
 
 1. 新增 `server/.env.example` 和 `setup-local-env.bat`，生成默认 `server/.env.local`。
 2. 更新本地脚本，使其在启动、运行和验证前加载 `server/.env.local`。
-3. 更新 Compose 默认宿主机端口为 `33306/36379`。
+3. 更新 Compose 默认宿主机端口为 `3306/6379`。
 4. 更新服务端本地配置示例和文档，指向项目专用端口。
 5. 对已有本地容器执行 `docker compose down` 后重新 `start-local-infra.bat`，使新端口映射生效。
 

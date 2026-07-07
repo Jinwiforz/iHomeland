@@ -23,13 +23,13 @@ const (
 	defaultReleasePath        = "../release.json"
 	defaultServerVersionPath  = "version.json"
 	defaultClientVersionPath  = "../client/version.json"
-	defaultMySQLAddr          = "127.0.0.1:33306"
+	defaultMySQLAddr          = "127.0.0.1:3306"
 	defaultMySQLDatabase      = "ihomeland"
 	defaultMySQLUser          = "ihomeland"
 	defaultMySQLMaxOpenConns  = 16
 	defaultMySQLMaxIdleConns  = 8
 	defaultMySQLConnMaxLife   = 30 * time.Minute
-	defaultRedisAddr          = "127.0.0.1:36379"
+	defaultRedisAddr          = "127.0.0.1:6379"
 	defaultRedisDB            = 0
 	defaultRedisDialTimeout   = 5 * time.Second
 	defaultGatewayIdleTimeout = 30 * time.Second

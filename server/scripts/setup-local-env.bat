@@ -61,7 +61,7 @@ echo [2/4] Writing server\.env.local...
 if /I "%SELECTED_MODE%"=="native" (
     call :write_env native 3306 6379 3306 6379
 ) else (
-    call :write_env docker 33306 36379 33306 36379
+    call :write_env docker 3306 6379 3306 6379
 )
 if errorlevel 1 goto :finish
 
@@ -77,8 +77,8 @@ if /I "%SELECTED_MODE%"=="native" (
     call :check_endpoint mysql 127.0.0.1 3306
     call :check_endpoint redis 127.0.0.1 6379
 ) else (
-    call :check_port mysql IHOMELAND_MYSQL_PORT 33306
-    call :check_port redis IHOMELAND_REDIS_PORT 36379
+    call :check_port mysql IHOMELAND_MYSQL_PORT 3306
+    call :check_port redis IHOMELAND_REDIS_PORT 6379
 )
 
 echo.
@@ -105,7 +105,7 @@ echo   server\scripts\setup-local-env.bat [--auto^|--docker^|--native]
 echo.
 echo Modes:
 echo   --auto    Use native MySQL/Redis if 127.0.0.1:3306 and 127.0.0.1:6379 are reachable; otherwise use Docker ports.
-echo   --docker  Generate Docker-managed local config: MySQL 33306, Redis 36379.
+echo   --docker  Generate Docker-managed local config: MySQL 3306, Redis 6379.
 echo   --native  Generate native-service local config: MySQL 3306, Redis 6379.
 echo.
 set "EXIT_CODE=0"

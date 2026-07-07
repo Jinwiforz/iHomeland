@@ -63,14 +63,14 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv(envReleasePath, "testdata/release.json")
 	t.Setenv(envServerVersionPath, "testdata/server.json")
 	t.Setenv(envClientVersionPath, "testdata/client.json")
-	t.Setenv(envMySQLAddr, "127.0.0.1:33306")
+	t.Setenv(envMySQLAddr, "127.0.0.1:3306")
 	t.Setenv(envMySQLDatabase, "ihomeland_test")
 	t.Setenv(envMySQLUser, "ihomeland_test")
 	t.Setenv(envMySQLPassword, "secret")
 	t.Setenv(envMySQLMaxOpenConns, "20")
 	t.Setenv(envMySQLMaxIdleConns, "10")
 	t.Setenv(envMySQLConnMaxLife, "15m")
-	t.Setenv(envRedisAddr, "127.0.0.1:36379")
+	t.Setenv(envRedisAddr, "127.0.0.1:6379")
 	t.Setenv(envRedisPassword, "redis-secret")
 	t.Setenv(envRedisDB, "2")
 	t.Setenv(envRedisDialTimeout, "3s")
@@ -96,7 +96,7 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.ReleasePath != "testdata/release.json" {
 		t.Fatalf("ReleasePath = %q", cfg.ReleasePath)
 	}
-	if cfg.MySQL.Addr != "127.0.0.1:33306" {
+	if cfg.MySQL.Addr != "127.0.0.1:3306" {
 		t.Fatalf("MySQL.Addr = %q", cfg.MySQL.Addr)
 	}
 	if cfg.MySQL.Database != "ihomeland_test" {
@@ -111,7 +111,7 @@ func TestLoadFromEnv(t *testing.T) {
 	if cfg.MySQL.MaxOpenConns != 20 || cfg.MySQL.MaxIdleConns != 10 || cfg.MySQL.ConnMaxLifetime != 15*time.Minute {
 		t.Fatalf("MySQL pool config = %+v", cfg.MySQL)
 	}
-	if cfg.Redis.Addr != "127.0.0.1:36379" {
+	if cfg.Redis.Addr != "127.0.0.1:6379" {
 		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
 	}
 	if cfg.Redis.Password != "redis-secret" || cfg.Redis.DB != 2 || cfg.Redis.DialTimeout != 3*time.Second {
@@ -133,7 +133,7 @@ releasePath: "../test-release.json"
 serverVersionPath: "test-server.json"
 clientVersionPath: "../test-client.json"
 mysql:
-  addr: "127.0.0.1:33306"
+  addr: "127.0.0.1:3306"
   database: "ihomeland_file"
   user: "ihomeland_file"
   password: "file-secret"
@@ -141,7 +141,7 @@ mysql:
   maxIdleConns: 4
   connMaxLifetime: "12m"
 redis:
-  addr: "127.0.0.1:36379"
+  addr: "127.0.0.1:6379"
   password: "file-redis-secret"
   db: 3
   dialTimeout: "4s"
@@ -170,7 +170,7 @@ gateway:
 	if cfg.ProtocolVersion != 9 {
 		t.Fatalf("ProtocolVersion = %d", cfg.ProtocolVersion)
 	}
-	if cfg.MySQL.Addr != "127.0.0.1:33306" {
+	if cfg.MySQL.Addr != "127.0.0.1:3306" {
 		t.Fatalf("MySQL.Addr = %q", cfg.MySQL.Addr)
 	}
 	if cfg.MySQL.Database != "ihomeland_file" {
@@ -182,7 +182,7 @@ gateway:
 	if cfg.MySQL.Password != "file-secret" || cfg.MySQL.MaxOpenConns != 12 || cfg.MySQL.MaxIdleConns != 4 || cfg.MySQL.ConnMaxLifetime != 12*time.Minute {
 		t.Fatalf("MySQL file config = %+v", cfg.MySQL)
 	}
-	if cfg.Redis.Addr != "127.0.0.1:36379" {
+	if cfg.Redis.Addr != "127.0.0.1:6379" {
 		t.Fatalf("Redis.Addr = %q", cfg.Redis.Addr)
 	}
 	if cfg.Redis.Password != "file-redis-secret" || cfg.Redis.DB != 3 || cfg.Redis.DialTimeout != 4*time.Second {
@@ -198,9 +198,9 @@ func TestLoadFromEnvAllowsEnvironmentOverride(t *testing.T) {
 	content := []byte(`
 httpAddr: "127.0.0.1:9091"
 mysql:
-  addr: "127.0.0.1:33306"
+  addr: "127.0.0.1:3306"
 redis:
-  addr: "127.0.0.1:36379"
+  addr: "127.0.0.1:6379"
 `)
 	if err := os.WriteFile(configPath, content, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)

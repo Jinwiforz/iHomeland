@@ -20,8 +20,8 @@ if errorlevel 1 (
     call :fail "failed to load local environment."
     goto :finish
 )
-if not defined IHOMELAND_MYSQL_PORT set "IHOMELAND_MYSQL_PORT=33306"
-if not defined IHOMELAND_REDIS_PORT set "IHOMELAND_REDIS_PORT=36379"
+if not defined IHOMELAND_MYSQL_PORT set "IHOMELAND_MYSQL_PORT=3306"
+if not defined IHOMELAND_REDIS_PORT set "IHOMELAND_REDIS_PORT=6379"
 
 where docker >nul 2>nul
 if errorlevel 1 (

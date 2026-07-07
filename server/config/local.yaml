@@ -6,7 +6,7 @@ releasePath: "../release.json"
 serverVersionPath: "version.json"
 clientVersionPath: "../client/version.json"
 mysql:
-  addr: "127.0.0.1:33306"
+  addr: "127.0.0.1:3306"
   database: "ihomeland"
   user: "ihomeland"
   password: "ihomeland"
@@ -14,7 +14,7 @@ mysql:
   maxIdleConns: 8
   connMaxLifetime: "30m"
 redis:
-  addr: "127.0.0.1:36379"
+  addr: "127.0.0.1:6379"
   password: ""
   db: 0
   dialTimeout: "5s"

@@ -21,7 +21,7 @@ Docker MySQL 执行方式：
 
 ```powershell
 cd server
-mysql -u root -p -h 127.0.0.1 -P 33306 < scripts/mysql-local-dev.sql
+mysql -u root -p -h 127.0.0.1 -P 3306 < scripts/mysql-local-dev.sql
 ```
 
 `mysql-local-dev.sql` 末尾使用 `SOURCE` 执行 migration。`SOURCE` 是 mysql 命令行客户端语法，不是通用 SQL 语法；如果所用 SQL IDE 不支持 `SOURCE`，可能只会创建库、用户和授权，不会执行 migration。
@@ -101,8 +101,8 @@ redis-cli -h 127.0.0.1 -p 6379 --scan --pattern "ih:dev:*"
 常用 Docker 检查：
 
 ```powershell
-redis-cli -h 127.0.0.1 -p 36379 PING
-redis-cli -h 127.0.0.1 -p 36379 --scan --pattern "ih:dev:*"
+redis-cli -h 127.0.0.1 -p 6379 PING
+redis-cli -h 127.0.0.1 -p 6379 --scan --pattern "ih:dev:*"
 ```
 
 本地账号 session key 格式：

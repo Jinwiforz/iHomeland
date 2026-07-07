@@ -11,15 +11,15 @@ import (
 
 func TestNewTCPChecker(t *testing.T) {
 	cfg := config.Default()
-	cfg.MySQL.Addr = "127.0.0.1:33306"
-	cfg.Redis.Addr = "127.0.0.1:36379"
+	cfg.MySQL.Addr = "127.0.0.1:3306"
+	cfg.Redis.Addr = "127.0.0.1:6379"
 
 	checker := NewTCPChecker(cfg)
 
-	if checker.MySQLAddr != "127.0.0.1:33306" {
+	if checker.MySQLAddr != "127.0.0.1:3306" {
 		t.Fatalf("MySQLAddr = %q", checker.MySQLAddr)
 	}
-	if checker.RedisAddr != "127.0.0.1:36379" {
+	if checker.RedisAddr != "127.0.0.1:6379" {
 		t.Fatalf("RedisAddr = %q", checker.RedisAddr)
 	}
 }

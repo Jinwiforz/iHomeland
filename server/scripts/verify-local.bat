@@ -25,13 +25,13 @@ if errorlevel 1 (
 set "INFRA_FAILED=0"
 
 if "%IHOMELAND_MYSQL_ADDR%"=="" (
-    set "MYSQL_ADDR=127.0.0.1:33306"
+    set "MYSQL_ADDR=127.0.0.1:3306"
 ) else (
     set "MYSQL_ADDR=%IHOMELAND_MYSQL_ADDR%"
 )
 
 if "%IHOMELAND_REDIS_ADDR%"=="" (
-    set "REDIS_ADDR=127.0.0.1:36379"
+    set "REDIS_ADDR=127.0.0.1:6379"
 ) else (
     set "REDIS_ADDR=%IHOMELAND_REDIS_ADDR%"
 )

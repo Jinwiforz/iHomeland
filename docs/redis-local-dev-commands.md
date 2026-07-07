@@ -13,7 +13,7 @@ redis-cli -h 127.0.0.1 -p 6379 PING
 Docker Redis 默认端口：
 
 ```powershell
-redis-cli -h 127.0.0.1 -p 36379 PING
+redis-cli -h 127.0.0.1 -p 6379 PING
 ```
 
 ## 查看 key

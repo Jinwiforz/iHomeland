@@ -62,8 +62,8 @@ server/
 本地默认宿主机端口使用项目专用端口：
 
 ```text
-MySQL: 127.0.0.1:33306
-Redis: 127.0.0.1:36379
+MySQL: 127.0.0.1:3306
+Redis: 127.0.0.1:6379
 ```
 
 然后启动本地基础设施：
@@ -104,7 +104,7 @@ config/local.yaml
 .\server\scripts\verify-local.bat
 ```
 
-验证脚本会加载 `server/.env.local`，只检查服务端实际配置会连接的地址：`IHOMELAND_MYSQL_ADDR`、`IHOMELAND_REDIS_ADDR` 指向的 TCP 地址是否可连接，并请求 `/healthz`、`/readyz` 和 `/version`。未设置地址时默认检查 `127.0.0.1:33306` 和 `127.0.0.1:36379`。
+验证脚本会加载 `server/.env.local`，只检查服务端实际配置会连接的地址：`IHOMELAND_MYSQL_ADDR`、`IHOMELAND_REDIS_ADDR` 指向的 TCP 地址是否可连接，并请求 `/healthz`、`/readyz` 和 `/version`。未设置地址时默认检查 `127.0.0.1:3306` 和 `127.0.0.1:6379`。
 
 因此 Docker 和本机安装的 MySQL、Redis 可以二选一使用；关键是服务端配置指向的端口必须可连接。Docker 容器是否 healthy 由 `start-local-infra.bat` 负责检查，`verify-local.bat` 不关心依赖是由 Docker 还是本机服务提供。不要让 Docker 和本机安装同时占用同一端口；如果端口冲突，优先修改 `server/.env.local` 中的项目端口。
 

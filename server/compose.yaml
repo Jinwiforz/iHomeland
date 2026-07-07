@@ -8,7 +8,7 @@ services:
       MYSQL_USER: ${IHOMELAND_MYSQL_USER:-ihomeland}
       MYSQL_PASSWORD: ${IHOMELAND_MYSQL_PASSWORD:-ihomeland}
     ports:
-      - "${IHOMELAND_MYSQL_PORT:-33306}:3306"
+      - "${IHOMELAND_MYSQL_PORT:-3306}:3306"
     volumes:
       - ihomeland_mysql_data:/var/lib/mysql
     healthcheck:
@@ -22,7 +22,7 @@ services:
     image: redis:7.2
     container_name: ihomeland-redis
     ports:
-      - "${IHOMELAND_REDIS_PORT:-36379}:6379"
+      - "${IHOMELAND_REDIS_PORT:-6379}:6379"
     volumes:
       - ihomeland_redis_data:/data
     healthcheck:
