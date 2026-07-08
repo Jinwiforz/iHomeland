@@ -217,13 +217,21 @@ cd G:\Jinwiforz\iHomeland\server
 
 8. 发送 `RegisterRequest` 或 `LoginRequest`，确认收到玩家资料、session token 和过期时间。
 
-9. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
+9. 在 Unity Editor 菜单执行 `iHomeland/Smoke Test/WebSocket Account`，确认 Console 输出：
 
-10. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
+```text
+[WebSocketSmokeTest] OK: websocket, heartbeat, account session and logout passed.
+```
 
-11. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+该 smoke test 使用固定账号 `unity_smoke_test`。首次执行会注册账号；后续执行若服务端返回账号已存在，会使用同一密码回退登录，然后发送登出请求。它只验证 `/ws`、二进制 envelope、心跳和账号会话链路，不发送房间大厅请求。
 
-12. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
+10. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
+
+11. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
+
+12. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+
+13. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
 
 ## 当前验收边界
 
@@ -234,9 +242,10 @@ cd G:\Jinwiforz\iHomeland\server
 go test ./...
 ```
 
-Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem` 和真实 `AccountSystem` 注册/登录/登出链路。后续仍需补充房间大厅 UI 和客户端联调验证。
+Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过。后续仍需补充房间大厅 UI 和客户端联调验证。
 
 当前暂未自动化验证的 Unity 项：
 
 - Unity 编辑器中执行注册失败、注册成功、登录失败、登录成功、登出和恢复失败路径。
+- Unity Editor smoke test 尚未自动化；本地服务端、MySQL 和 Redis 变更后仍需手动触发确认。
 - 后续房间大厅客户端接入 change：`add-unity-room-lobby-flow`。

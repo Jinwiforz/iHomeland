@@ -258,7 +258,18 @@
 
 ### add-unity-websocket-smoke-test
 
-目标：实现 Unity 侧最小实时联调：连接 `/ws`、发送心跳、接收响应、发送账号登录请求，并为后续房间大厅 UI 接入验证链路。
+状态：已归档。
+
+目标：实现 Unity 侧最小实时联调：连接 `/ws`、发送心跳、接收响应、发送账号注册或登录请求，并为后续房间大厅 UI 接入验证链路。
+
+产出：
+
+- 新增 Unity Editor 菜单 `iHomeland/Smoke Test/WebSocket Account`。
+- smoke test 使用二进制 Protobuf envelope 连接本地 `/ws` 并校验 `HeartbeatResponse`。
+- smoke test 使用固定测试账号注册；账号已存在时回退登录。
+- smoke test 成功获得 session 后发送登出请求并关闭 WebSocket。
+- smoke test 已在 Unity Editor 中手动验证通过。
+- `client-integration` 长期规格和 Unity 接入文档已同步。
 
 不做：不实现完整房间界面、不做复杂重连 UI、不引入 battle server。
 

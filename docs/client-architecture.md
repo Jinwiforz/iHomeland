@@ -133,6 +133,9 @@ Assets/
   App/
     Scripts/
       App.asmdef
+      Editor/
+        App.Editor.asmdef
+        WebSocketSmokeTestMenu.cs
 
       Core/
         AppRoot.cs
@@ -651,6 +654,14 @@ Unity.InputSystem
 减少默认 Assembly-CSharp 混杂
 方便后续拆分 Editor / Tests / Runtime
 ```
+
+编辑器工具必须放在仅 Editor 平台编译的程序集内，例如：
+
+```text
+Assets/App/Scripts/Editor/App.Editor.asmdef
+```
+
+该程序集可以引用运行时 `App` assembly，但不得被 Windows、Android、iOS 等玩家运行时构建包含。`UnityEditor.MenuItem`、Inspector 扩展、本地 smoke test 等开发工具都应放在 Editor-only assembly 中。
 
 注意：
 

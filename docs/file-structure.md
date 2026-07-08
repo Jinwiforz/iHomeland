@@ -26,6 +26,43 @@ shared/
 
 跨端 Protobuf 源文件目录。Unity 客户端和服务端都以这里的 schema 作为实时通信契约，生成代码不得手工修改。
 
+## 客户端目标结构
+
+```text
+client/
+  README.md
+  version.json
+  Assets/
+    App/
+      Scripts/
+        App.asmdef
+        Core/
+        Systems/
+        UI/
+        Editor/
+          App.Editor.asmdef
+          WebSocketSmokeTestMenu.cs
+        Protocol/
+          Pb/
+    Resources/
+      UI/
+        Pages/
+  Packages/
+  ProjectSettings/
+```
+
+### `Assets/App/Scripts`
+
+Unity 客户端运行时代码目录。`Core` 放置 `AppRoot`、`AppBootstrap` 和配置入口；`Systems` 放置 `NetworkSystem`、`AccountSystem`、`UISystem` 等受 `AppRoot` 管理的系统；`UI` 放置页面脚本和 UI 基类。
+
+### `Assets/App/Scripts/Editor`
+
+Unity Editor 专用工具目录。该目录必须通过 `App.Editor.asmdef` 限制为 `Editor` 平台编译，可以引用运行时 `App` assembly，但不得进入 Windows、Android、iOS 等玩家运行时构建。当前用于放置 `WebSocketSmokeTestMenu.cs`，提供 `iHomeland/Smoke Test/WebSocket Account` 本地联调入口。
+
+### `Assets/App/Scripts/Protocol/Pb`
+
+Unity C# Protobuf 生成代码输出目录，来源于 `shared/proto/`。该目录属于可再生成产物，不手工修改，不提交到 Git。
+
 ## 服务端目标结构
 
 ```text
