@@ -4,9 +4,9 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 
 项目第一阶段聚焦“自定义房间大厅”：先建立外围后台、实时网关、自研房间逻辑和小中规模房间服能力。后续如果进入 MOBA/RTS 核心战斗服，需要单独设计高频权威战斗服务器架构，不直接把当前房间服扩展成《英雄联盟》级别的核心战斗服。
 
-当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、注册、登录、登出、会话恢复、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。Unity 客户端已经具备基础应用链路：`MainScene -> LoadingPage -> LoginPage -> HomePage -> LoadingPage -> BattleScene`，账号注册、登录、登出和会话恢复已经通过真实 WebSocket 账号协议接入服务端，并提供 Unity Editor WebSocket/account smoke test 验证本地 `/ws`、心跳和账号链路。
+当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、注册、登录、登出、会话恢复、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。Unity 客户端已经具备基础应用链路、真实账号会话、Unity Editor WebSocket/account smoke test、房间请求、`RoomSystem`、`RoomPage` 和 `RoomPage.prefab`，可完成房间大厅端到端联调。
 
-下一步优先推进 Unity 房间大厅端到端接入，将 `Start Game` 调整为进入创房、进房、退房、房主转移等大厅流程。第一里程碑完成前暂不推进战斗模块。
+下一步优先推进 `add-room-start-gate`，在房间大厅内定义进入后续占位场景的开始闸门。第一里程碑完成前暂不推进正式战斗模块。
 
 ## 项目边界
 

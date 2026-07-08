@@ -7,10 +7,10 @@
 当前 Unity 客户端已经具备基础页面和场景流转：
 
 ```text
-MainScene -> LoadingPage -> LoginPage -> HomePage -> LoadingPage -> BattleScene
+MainScene -> LoadingPage -> LoginPage -> HomePage -> RoomPage
 ```
 
-该链路中的注册、登录、登出和会话恢复已经接入服务端账号会话；`Start Game` 后续应进入房间大厅流程，而不是直接推进正式战斗模块。
+该链路中的注册、登录、登出和会话恢复已经接入服务端账号会话；`Start Game` 进入 `RoomPage` 承载房间大厅流程，而不是直接推进正式战斗模块。`RoomPage.prefab` 已完成基础控件绑定，代码侧提供 `RoomPage` 脚本、`RoomSystem` 和房间网络请求边界。
 
 ## 协议来源
 
@@ -162,7 +162,9 @@ Unity 客户端必须读取：
 | 重连恢复房间身份 | `2010 ReconnectRoomRequest` | `2011 ReconnectRoomResponse` |
 | 房间快照推送 | 无 | `2012 RoomSnapshotPushed` |
 
-在账号会话接入完成前，房间大厅请求仍必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。账号会话接入后，客户端房间流程应优先使用服务端确认的当前玩家身份；服务端侧房间请求去除显式 `player_id` 的调整由后续房间大厅客户端接入 change 处理。
+当前服务端房间大厅请求仍必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。Unity 客户端必须使用服务端账号会话确认的 `AccountSystem.CurrentPlayerID` 填充 `player_id`，不得使用 UI 输入或临时本地字符串。服务端侧房间请求去除显式 `player_id` 的调整由后续独立 change 处理。
+
+Unity 客户端当前通过 `RoomSystem` 管理房间状态。`RoomSystem` 负责调用 `NetworkSystem` 的房间请求方法、保存当前 `RoomSnapshot`、记录最近 room id 并在登出或会话失效时清理本地房间上下文。
 
 ## UI 状态来源
 
@@ -225,13 +227,21 @@ cd G:\Jinwiforz\iHomeland\server
 
 该 smoke test 使用固定账号 `unity_smoke_test`。首次执行会注册账号；后续执行若服务端返回账号已存在，会使用同一密码回退登录，然后发送登出请求。它只验证 `/ws`、二进制 envelope、心跳和账号会话链路，不发送房间大厅请求。
 
-10. 发送 `CreateRoomRequest`，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`。
+10. 确认 `RoomPage.prefab` 已挂载 `RoomPage` 脚本，并绑定创建、加入、重连、准备、退出、房主转移、返回按钮和文本输入/输出控件。
 
-11. 使用第二个测试玩家发送 `JoinRoomRequest`，确认成员列表刷新。
+11. 点击 `HomePage.Start Game`，确认打开 `RoomPage`，且未登录状态不会发送房间大厅请求。
 
-12. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+12. 在 `RoomPage` 创建房间，确认收到 `CreateRoomResponse` 和 `RoomSnapshot`，UI 展示房间 ID、房主和成员列表。
 
-13. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复。
+13. 使用第二个测试玩家输入 room id 发送 `JoinRoomRequest`，确认成员列表刷新。
+
+14. 发送 `SetReadyRequest`，确认准备状态以服务端快照刷新。
+
+15. 房主输入目标玩家 ID 发送 `TransferHostRequest`，确认房主标记刷新。
+
+16. 主动退出房间，确认客户端清理当前房间快照并回到房间入口状态。
+
+17. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复；保留期外失败时确认本地最近 room id 被清理。
 
 ## 当前验收边界
 
@@ -242,10 +252,10 @@ cd G:\Jinwiforz\iHomeland\server
 go test ./...
 ```
 
-Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过。后续仍需补充房间大厅 UI 和客户端联调验证。
+Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路、`RoomSystem` 房间请求边界、`RoomPage` 脚本、`RoomPage.prefab`，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过；房间大厅已完成本地服务端下的基础端到端手动验证，覆盖单玩家创房/准备/退出、双玩家加入/房主转移和断线重连恢复。
 
 当前暂未自动化验证的 Unity 项：
 
 - Unity 编辑器中执行注册失败、注册成功、登录失败、登录成功、登出和恢复失败路径。
 - Unity Editor smoke test 尚未自动化；本地服务端、MySQL 和 Redis 变更后仍需手动触发确认。
-- 后续房间大厅客户端接入 change：`add-unity-room-lobby-flow`。
+- 房间大厅 UI 端到端路径仍依赖 Unity Editor 手动回归；后续 `add-room-start-gate` 需要继续验证大厅状态进入后续占位场景的闸门行为。

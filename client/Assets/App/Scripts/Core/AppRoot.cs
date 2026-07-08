@@ -21,6 +21,8 @@ namespace App.Core
 
         public AccountSystem Account { get; private set; }
 
+        public RoomSystem Room { get; private set; }
+
         public bool IsInitialized { get; private set; }
 
         private bool _isQuitting;
@@ -60,6 +62,7 @@ namespace App.Core
             Audio.Tick(deltaTime);
             Network.Tick(deltaTime);
             Account.Tick(deltaTime);
+            Room.Tick(deltaTime);
         }
 
         private void OnApplicationQuit()
@@ -91,6 +94,7 @@ namespace App.Core
             Audio = gameObject.AddComponent<AudioSystem>();
             Network = gameObject.AddComponent<NetworkSystem>();
             Account = gameObject.AddComponent<AccountSystem>();
+            Room = gameObject.AddComponent<RoomSystem>();
         }
 
         public void Initialize()
@@ -109,6 +113,7 @@ namespace App.Core
             Audio.Initialize(this);
             Network.Initialize(this);
             Account.Initialize(this);
+            Room.Initialize(this);
 
             IsInitialized = true;
 
@@ -125,6 +130,7 @@ namespace App.Core
             Log.Info<AppRoot>("App shutdown started.");
 
             Account.Shutdown();
+            Room.Shutdown();
             Network.Shutdown();
             Audio.Shutdown();
             UI.Shutdown();

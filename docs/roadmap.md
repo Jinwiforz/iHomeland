@@ -275,7 +275,16 @@
 
 ### add-unity-room-lobby-flow
 
+状态：已归档。
+
 目标：接入已有服务端房间模块，让 Unity 客户端支持创房、进房、准备/取消准备、退房、房主转移、断线重连恢复和房间快照刷新。
+
+当前产出：
+
+- Unity `NetworkSystem` 已新增房间大厅请求方法。
+- Unity `RoomSystem` 已接入 `AppRoot` 生命周期，负责 `RoomSnapshot`、当前房间操作和最近 room id。
+- Unity `RoomPage` 脚本和 `HomePage.Start Game` 到 `RoomPage` 的代码路径已建立。
+- `RoomPage.prefab` 已由 Unity Editor 内创建和绑定，房间大厅基础端到端路径已完成手动验证。
 
 不做：不实现匹配系统，不进入正式战斗模拟，不引入独立 battle server。
 

@@ -5,6 +5,7 @@ namespace App.Core
         public const string LoadingPage = "LoadingPage";
         public const string LoginPage = "LoginPage";
         public const string HomePage = "HomePage";
+        public const string RoomPage = "RoomPage";
     }
 
     public static class AppScenes

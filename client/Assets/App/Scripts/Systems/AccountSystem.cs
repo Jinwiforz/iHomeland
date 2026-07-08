@@ -172,6 +172,11 @@ namespace App.Systems
             DisplayName = string.Empty;
             SessionToken = string.Empty;
 
+            if (Root != null && Root.Room != null)
+            {
+                Root.Room.ClearLocalState(clearSaved);
+            }
+
             if (!clearSaved)
             {
                 return;

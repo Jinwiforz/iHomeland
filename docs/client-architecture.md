@@ -19,12 +19,10 @@ HomePage
   ↓
 Start Game
   ↓
-LoadingPage
-  ↓
-BattleScene
+RoomPage
 ```
 
-该链路用于验证外层生命周期、UI 打开关闭和场景切换。第一里程碑仍以“自定义房间大厅”为目标，`Start Game` 后续应改为进入房间大厅或创建/加入房间流程；在 battle server 设计完成前，不把 `BattleScene` 扩展成正式高频战斗模块。
+该链路用于验证外层生命周期、UI 打开关闭、账号会话和房间大厅入口。第一里程碑仍以“自定义房间大厅”为目标，`Start Game` 进入 `RoomPage`，不再直接进入 `BattleScene`；在 battle server 设计完成前，不把 `BattleScene` 扩展成正式高频战斗模块。
 
 ---
 
@@ -426,6 +424,42 @@ Assets/App/Resources/UI/Pages/HomePage.prefab
 ```
 
 账号、房间和后续联机模块应通过 `NetworkSystem` 发送请求，不应各自直接持有 WebSocket 连接。
+
+---
+
+### 7.10 RoomSystem
+
+房间系统。
+
+职责：
+
+```text
+维护当前 RoomSnapshot
+通过 NetworkSystem 发起房间大厅请求
+使用 AccountSystem.CurrentPlayerID 作为房间请求玩家身份来源
+保存最近 room id 作为重连上下文
+在登出或会话失效时清理房间状态
+为 RoomPage 提供房间状态和操作结果
+```
+
+`RoomSystem` 的当前房间状态必须以服务端返回的 `RoomSnapshot` 为准。UI 点击只触发请求和 pending 状态，不得直接把本地按钮结果写成最终房间状态。
+
+---
+
+### 7.11 RoomPage
+
+`RoomPage` 是 `Start Game` 后的第一阶段房间流程页面，负责承载未进房入口和已进房快照展示。
+
+职责：
+
+```text
+展示房间 ID、房间名、容量和房主
+展示成员、座位、阵营、准备状态和连接状态
+提供创建房间、输入 room id 加入、准备/取消准备、退出和房主转移操作
+展示请求中、失败、未登录和无当前房间等状态
+```
+
+`RoomPage.prefab` 在 Unity Editor 内创建和绑定。创建、加入、转移房主和退出确认可以作为 `RoomPage` 内的子面板或轻量对话框，不需要拆成独立 page。未来若需要房间列表，再单独新增 `RoomListPage` 和对应协议 change。
 
 ---
 

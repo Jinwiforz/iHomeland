@@ -1,4 +1,3 @@
-using System.Collections;
 using App.Core;
 using TMPro;
 using UnityEngine;
@@ -13,8 +12,6 @@ namespace App.UI
         [SerializeField] private Button settingButton;
         [SerializeField] private Button quitButton;
         [SerializeField] private TMP_Text messageText;
-
-        private bool _isStartingGame;
 
         protected override void OnInitialize()
         {
@@ -80,52 +77,14 @@ namespace App.UI
                 return;
             }
 
-            if (_isStartingGame)
+            if (AppRoot.Instance.UI.OpenPage(AppPages.RoomPage) == null)
             {
+                SetMessage("Room page is not ready.");
+                AppRoot.Instance.Log.Error<HomePage>("Open RoomPage failed.");
                 return;
             }
 
-            AppRoot.Instance.StartCoroutine(StartGameRoutine());
-        }
-
-        private IEnumerator StartGameRoutine()
-        {
-            _isStartingGame = true;
-
-            LoadingPage loadingPage = AppRoot.Instance.UI.OpenPage<LoadingPage>(AppPages.LoadingPage);
-
-            if (loadingPage == null)
-            {
-                AppRoot.Instance.Log.Error<HomePage>("Open LoadingPage failed.");
-                _isStartingGame = false;
-                yield break;
-            }
-
-            AppRoot.Instance.UI.BringPageToFront(AppPages.LoadingPage);
-
-            loadingPage.ResetProgress();
-            loadingPage.SetMessage("Preparing battle...");
-            yield return loadingPage.SetProgressSmooth(0.1f, 0.2f);
-
-            yield return AppRoot.Instance.UI.ClosePageAsync(AppPages.HomePage);
-
-            loadingPage.SetMessage("Loading battle scene...");
-
-            yield return AppRoot.Instance.Scene.LoadSceneAsync(
-                AppScenes.BattleScene,
-                progress =>
-                {
-                    float mappedProgress = Mathf.Lerp(0.1f, 0.9f, progress);
-                    loadingPage.SetProgress(mappedProgress);
-                }
-            );
-
-            loadingPage.SetMessage("Entering battle...");
-            yield return loadingPage.SetProgressSmooth(1f, 0.2f);
-
-            yield return AppRoot.Instance.UI.ClosePageAsync(AppPages.LoadingPage);
-
-            _isStartingGame = false;
+            Close();
         }
 
         private void OnClickSetting()

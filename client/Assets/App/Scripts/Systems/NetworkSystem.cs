@@ -111,6 +111,87 @@ namespace App.Systems
             );
         }
 
+        public async Task<CreateRoomResponse> CreateRoomAsync(string playerID, string roomName, uint capacity)
+        {
+            return await SendRequestAsync<CreateRoomResponse>(
+                MessageID.CreateRoomRequest,
+                MessageID.CreateRoomResponse,
+                new CreateRoomRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomName = roomName ?? string.Empty,
+                    Capacity = capacity
+                }
+            );
+        }
+
+        public async Task<JoinRoomResponse> JoinRoomAsync(string playerID, string roomID)
+        {
+            return await SendRequestAsync<JoinRoomResponse>(
+                MessageID.JoinRoomRequest,
+                MessageID.JoinRoomResponse,
+                new JoinRoomRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomId = roomID ?? string.Empty
+                }
+            );
+        }
+
+        public async Task<SetReadyResponse> SetReadyAsync(string playerID, string roomID, bool ready)
+        {
+            return await SendRequestAsync<SetReadyResponse>(
+                MessageID.SetReadyRequest,
+                MessageID.SetReadyResponse,
+                new SetReadyRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomId = roomID ?? string.Empty,
+                    Ready = ready
+                }
+            );
+        }
+
+        public async Task<LeaveRoomResponse> LeaveRoomAsync(string playerID, string roomID)
+        {
+            return await SendRequestAsync<LeaveRoomResponse>(
+                MessageID.LeaveRoomRequest,
+                MessageID.LeaveRoomResponse,
+                new LeaveRoomRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomId = roomID ?? string.Empty
+                }
+            );
+        }
+
+        public async Task<TransferHostResponse> TransferHostAsync(string playerID, string roomID, string targetPlayerID)
+        {
+            return await SendRequestAsync<TransferHostResponse>(
+                MessageID.TransferHostRequest,
+                MessageID.TransferHostResponse,
+                new TransferHostRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomId = roomID ?? string.Empty,
+                    TargetPlayerId = targetPlayerID ?? string.Empty
+                }
+            );
+        }
+
+        public async Task<ReconnectRoomResponse> ReconnectRoomAsync(string playerID, string roomID)
+        {
+            return await SendRequestAsync<ReconnectRoomResponse>(
+                MessageID.ReconnectRoomRequest,
+                MessageID.ReconnectRoomResponse,
+                new ReconnectRoomRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomId = roomID ?? string.Empty
+                }
+            );
+        }
+
         /// <summary>
         /// 业务主动断开连接时使用优雅关闭，给服务端一个正常 WebSocket close frame，但必须受关闭超时约束。
         /// Unity 生命周期退出不会调用该方法，避免在停止播放或关闭游戏时等待网络握手。
