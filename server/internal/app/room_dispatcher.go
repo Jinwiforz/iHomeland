@@ -29,40 +29,56 @@ func (d *roomDispatcher) Dispatch(ctx context.Context, req gateway.DispatchReque
 
 	switch msg := message.(type) {
 	case *pb.CreateRoomRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
 		snapshot, err := d.service.CreateRoom(ctx, room.CreateRoomRequest{
-			PlayerID: msg.GetPlayerId(),
+			PlayerID: playerID,
 			RoomName: msg.GetRoomName(),
 			Capacity: int(msg.GetCapacity()),
 		})
 		if err != nil {
 			return d.roomError(req.Envelope, err)
 		}
-		d.service.BindConnection(req.Session.ConnectionID, msg.GetPlayerId(), snapshot.RoomID)
+		d.service.BindConnection(req.Session.ConnectionID, playerID, snapshot.RoomID)
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDCreateRoomResponse, &pb.CreateRoomResponse{Room: room.ProtoSnapshot(snapshot)})
 	case *pb.JoinRoomRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
 		snapshot, err := d.service.JoinRoom(ctx, room.JoinRoomRequest{
-			PlayerID: msg.GetPlayerId(),
+			PlayerID: playerID,
 			RoomID:   msg.GetRoomId(),
 		})
 		if err != nil {
 			return d.roomError(req.Envelope, err)
 		}
-		d.service.BindConnection(req.Session.ConnectionID, msg.GetPlayerId(), snapshot.RoomID)
+		d.service.BindConnection(req.Session.ConnectionID, playerID, snapshot.RoomID)
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDJoinRoomResponse, &pb.JoinRoomResponse{Room: room.ProtoSnapshot(snapshot)})
 	case *pb.SetReadyRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
 		snapshot, err := d.service.SetReady(ctx, room.SetReadyRequest{
-			PlayerID: msg.GetPlayerId(),
+			PlayerID: playerID,
 			RoomID:   msg.GetRoomId(),
 			Ready:    msg.GetReady(),
 		})
 		if err != nil {
 			return d.roomError(req.Envelope, err)
 		}
-		d.service.BindConnection(req.Session.ConnectionID, msg.GetPlayerId(), snapshot.RoomID)
+		d.service.BindConnection(req.Session.ConnectionID, playerID, snapshot.RoomID)
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDSetReadyResponse, &pb.SetReadyResponse{Room: room.ProtoSnapshot(snapshot)})
 	case *pb.LeaveRoomRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
 		snapshot, err := d.service.LeaveRoom(ctx, room.LeaveRoomRequest{
-			PlayerID: msg.GetPlayerId(),
+			PlayerID: playerID,
 			RoomID:   msg.GetRoomId(),
 		})
 		if err != nil {
@@ -70,8 +86,12 @@ func (d *roomDispatcher) Dispatch(ctx context.Context, req gateway.DispatchReque
 		}
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDLeaveRoomResponse, &pb.LeaveRoomResponse{Room: room.ProtoSnapshot(snapshot)})
 	case *pb.TransferHostRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
 		snapshot, err := d.service.TransferHost(ctx, room.TransferHostRequest{
-			PlayerID:       msg.GetPlayerId(),
+			PlayerID:       playerID,
 			RoomID:         msg.GetRoomId(),
 			TargetPlayerID: msg.GetTargetPlayerId(),
 		})
@@ -80,18 +100,35 @@ func (d *roomDispatcher) Dispatch(ctx context.Context, req gateway.DispatchReque
 		}
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDTransferHostResponse, &pb.TransferHostResponse{Room: room.ProtoSnapshot(snapshot)})
 	case *pb.ReconnectRoomRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
 		snapshot, err := d.service.ReconnectMember(ctx, room.ReconnectMemberRequest{
-			PlayerID: msg.GetPlayerId(),
+			PlayerID: playerID,
 			RoomID:   msg.GetRoomId(),
 		})
 		if err != nil {
 			return d.roomError(req.Envelope, err)
 		}
-		d.service.BindConnection(req.Session.ConnectionID, msg.GetPlayerId(), snapshot.RoomID)
+		d.service.BindConnection(req.Session.ConnectionID, playerID, snapshot.RoomID)
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDReconnectRoomResponse, &pb.ReconnectRoomResponse{Room: room.ProtoSnapshot(snapshot)})
 	default:
 		return protocol.BuildErrorEnvelope(req.Envelope.GetRequestId(), req.Envelope.GetSequence(), protocol.ErrorCodeMessageIDUnsupported, "message id unsupported", fmt.Sprintf("message id %d is not handled by room", req.Envelope.GetMessageId()))
 	}
+}
+
+func authenticatedRoomPlayer(req gateway.DispatchRequest, payloadPlayerID string) (string, *pb.Envelope, error) {
+	sessionPlayerID := req.Session.PlayerID
+	if sessionPlayerID == "" {
+		response, err := protocol.BuildErrorEnvelope(req.Envelope.GetRequestId(), req.Envelope.GetSequence(), protocol.ErrorCodeUnauthenticated, "unauthenticated", "room request requires authenticated connection")
+		return "", response, err
+	}
+	if payloadPlayerID != sessionPlayerID {
+		response, err := protocol.BuildErrorEnvelope(req.Envelope.GetRequestId(), req.Envelope.GetSequence(), protocol.ErrorCodeUnauthenticated, "unauthenticated", "room request player_id does not match authenticated connection")
+		return "", response, err
+	}
+	return sessionPlayerID, nil, nil
 }
 
 func (d *roomDispatcher) OnDisconnect(ctx context.Context, session gateway.SessionSnapshot) {

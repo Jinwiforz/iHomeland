@@ -172,11 +172,15 @@ MUST:房间大厅操作成功响应必须携带可供客户端刷新大厅界面
 - **THEN** 响应 payload 必须包含变化后的房间快照
 
 ### Requirement: 房间协议请求必须携带玩家身份和请求关联信息
-MUST:在账号系统接入前，房间大厅请求必须显式携带 `player_id`，并且需要响应的请求必须携带 envelope `request_id`。
+MUST:现有房间大厅请求必须显式携带 `player_id`，并且需要响应的请求必须携带 envelope `request_id`。服务端必须将 payload `player_id` 与 gateway connection session 中服务端确认的玩家身份进行一致性校验。
 
 #### Scenario: 请求缺少 player id
 - **WHEN** 客户端发送缺少 `player_id` 的房间大厅请求
 - **THEN** 服务端必须拒绝请求并返回结构化错误
+
+#### Scenario: 请求玩家身份与连接身份不一致
+- **WHEN** 客户端发送的房间大厅请求 payload `player_id` 与 connection session `PlayerID` 不一致
+- **THEN** 服务端必须拒绝请求并返回结构化身份错误
 
 #### Scenario: 请求缺少 request id
 - **WHEN** 客户端发送需要响应但缺少 envelope `request_id` 的房间大厅请求

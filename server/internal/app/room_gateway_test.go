@@ -31,9 +31,13 @@ func TestRoomLobbyWebSocketFlow(t *testing.T) {
 	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
 	guestConn := dialAppGateway(t, testServer)
 	defer guestConn.Close(websocket.StatusNormalClosure, "test done")
+	hostSession := registerTestPlayer(t, hostConn, "host")
+	guestSession := registerTestPlayer(t, guestConn, "guest")
+	hostPlayerID := hostSession.GetPlayer().GetPlayerId()
+	guestPlayerID := guestSession.GetPlayer().GetPlayerId()
 
 	createResponse := sendRoomEnvelope[*pb.CreateRoomResponse](t, hostConn, protocol.MessageIDCreateRoomRequest, "req-create", &pb.CreateRoomRequest{
-		PlayerId: "player-1",
+		PlayerId: hostPlayerID,
 		RoomName: "测试房间",
 		Capacity: 2,
 	})
@@ -41,12 +45,12 @@ func TestRoomLobbyWebSocketFlow(t *testing.T) {
 	if roomID == "" {
 		t.Fatal("room id is empty")
 	}
-	if createResponse.GetRoom().GetHostPlayerId() != "player-1" {
-		t.Fatalf("host = %q, want player-1", createResponse.GetRoom().GetHostPlayerId())
+	if createResponse.GetRoom().GetHostPlayerId() != hostPlayerID {
+		t.Fatalf("host = %q, want %q", createResponse.GetRoom().GetHostPlayerId(), hostPlayerID)
 	}
 
 	joinResponse := sendRoomEnvelope[*pb.JoinRoomResponse](t, guestConn, protocol.MessageIDJoinRoomRequest, "req-join", &pb.JoinRoomRequest{
-		PlayerId: "player-2",
+		PlayerId: guestPlayerID,
 		RoomId:   roomID,
 	})
 	if len(joinResponse.GetRoom().GetMembers()) != 2 {
@@ -54,25 +58,25 @@ func TestRoomLobbyWebSocketFlow(t *testing.T) {
 	}
 
 	readyResponse := sendRoomEnvelope[*pb.SetReadyResponse](t, guestConn, protocol.MessageIDSetReadyRequest, "req-ready", &pb.SetReadyRequest{
-		PlayerId: "player-2",
+		PlayerId: guestPlayerID,
 		RoomId:   roomID,
 		Ready:    true,
 	})
-	if !memberReady(readyResponse.GetRoom(), "player-2") {
-		t.Fatal("player-2 ready = false, want true")
+	if !memberReady(readyResponse.GetRoom(), guestPlayerID) {
+		t.Fatalf("%s ready = false, want true", guestPlayerID)
 	}
 
 	transferResponse := sendRoomEnvelope[*pb.TransferHostResponse](t, hostConn, protocol.MessageIDTransferHostRequest, "req-transfer", &pb.TransferHostRequest{
-		PlayerId:       "player-1",
+		PlayerId:       hostPlayerID,
 		RoomId:         roomID,
-		TargetPlayerId: "player-2",
+		TargetPlayerId: guestPlayerID,
 	})
-	if transferResponse.GetRoom().GetHostPlayerId() != "player-2" {
-		t.Fatalf("host = %q, want player-2", transferResponse.GetRoom().GetHostPlayerId())
+	if transferResponse.GetRoom().GetHostPlayerId() != guestPlayerID {
+		t.Fatalf("host = %q, want %q", transferResponse.GetRoom().GetHostPlayerId(), guestPlayerID)
 	}
 
 	leaveResponse := sendRoomEnvelope[*pb.LeaveRoomResponse](t, hostConn, protocol.MessageIDLeaveRoomRequest, "req-leave", &pb.LeaveRoomRequest{
-		PlayerId: "player-1",
+		PlayerId: hostPlayerID,
 		RoomId:   roomID,
 	})
 	if len(leaveResponse.GetRoom().GetMembers()) != 1 {
@@ -89,8 +93,10 @@ func TestRoomLobbyReconnectWebSocketFlow(t *testing.T) {
 	defer testServer.Close()
 
 	conn := dialAppGateway(t, testServer)
+	session := registerTestPlayer(t, conn, "reconnect")
+	playerID := session.GetPlayer().GetPlayerId()
 	createResponse := sendRoomEnvelope[*pb.CreateRoomResponse](t, conn, protocol.MessageIDCreateRoomRequest, "req-create", &pb.CreateRoomRequest{
-		PlayerId: "player-1",
+		PlayerId: playerID,
 		RoomName: "测试房间",
 		Capacity: 2,
 	})
@@ -99,12 +105,77 @@ func TestRoomLobbyReconnectWebSocketFlow(t *testing.T) {
 
 	reconnectConn := dialAppGateway(t, testServer)
 	defer reconnectConn.Close(websocket.StatusNormalClosure, "test done")
+	_ = sendRoomEnvelope[*pb.ResumeSessionResponse](t, reconnectConn, protocol.MessageIDResumeSessionRequest, "req-resume", &pb.ResumeSessionRequest{
+		SessionToken: session.GetSessionToken(),
+	})
 	reconnectResponse := sendRoomEnvelope[*pb.ReconnectRoomResponse](t, reconnectConn, protocol.MessageIDReconnectRoomRequest, "req-reconnect", &pb.ReconnectRoomRequest{
-		PlayerId: "player-1",
+		PlayerId: playerID,
 		RoomId:   roomID,
 	})
-	if memberConnectionState(reconnectResponse.GetRoom(), "player-1") != pb.RoomMemberConnectionState_ROOM_MEMBER_CONNECTION_STATE_ONLINE {
-		t.Fatal("player-1 connection state is not online after reconnect")
+	if memberConnectionState(reconnectResponse.GetRoom(), playerID) != pb.RoomMemberConnectionState_ROOM_MEMBER_CONNECTION_STATE_ONLINE {
+		t.Fatalf("%s connection state is not online after reconnect", playerID)
+	}
+}
+
+func TestRoomRequestRequiresAuthenticatedConnection(t *testing.T) {
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewHTTPServer() error = %v", err)
+	}
+	testServer := httptest.NewServer(server.Handler)
+	defer testServer.Close()
+
+	conn := dialAppGateway(t, testServer)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	errorResponse := sendErrorEnvelope(t, conn, protocol.MessageIDCreateRoomRequest, "req-create-unauthenticated", &pb.CreateRoomRequest{
+		PlayerId: "player-forged",
+		RoomName: "测试房间",
+		Capacity: 2,
+	})
+	if errorResponse.GetCode() != pb.ErrorCode_ERROR_CODE_UNAUTHENTICATED {
+		t.Fatalf("error code = %v, want unauthenticated", errorResponse.GetCode())
+	}
+
+	session := registerTestPlayer(t, conn, "after_unauthenticated")
+	createResponse := sendRoomEnvelope[*pb.CreateRoomResponse](t, conn, protocol.MessageIDCreateRoomRequest, "req-create-after-auth", &pb.CreateRoomRequest{
+		PlayerId: session.GetPlayer().GetPlayerId(),
+		RoomName: "测试房间",
+		Capacity: 2,
+	})
+	if createResponse.GetRoom().GetRoomId() != "room-1" {
+		t.Fatalf("room id = %q, want room-1", createResponse.GetRoom().GetRoomId())
+	}
+}
+
+func TestRoomRequestRejectsMismatchedPlayerID(t *testing.T) {
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewHTTPServer() error = %v", err)
+	}
+	testServer := httptest.NewServer(server.Handler)
+	defer testServer.Close()
+
+	conn := dialAppGateway(t, testServer)
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+	session := registerTestPlayer(t, conn, "identity_mismatch")
+
+	errorResponse := sendErrorEnvelope(t, conn, protocol.MessageIDCreateRoomRequest, "req-create-mismatch", &pb.CreateRoomRequest{
+		PlayerId: "player-forged",
+		RoomName: "测试房间",
+		Capacity: 2,
+	})
+	if errorResponse.GetCode() != pb.ErrorCode_ERROR_CODE_UNAUTHENTICATED {
+		t.Fatalf("error code = %v, want unauthenticated", errorResponse.GetCode())
+	}
+
+	createResponse := sendRoomEnvelope[*pb.CreateRoomResponse](t, conn, protocol.MessageIDCreateRoomRequest, "req-create-real", &pb.CreateRoomRequest{
+		PlayerId: session.GetPlayer().GetPlayerId(),
+		RoomName: "测试房间",
+		Capacity: 2,
+	})
+	if createResponse.GetRoom().GetRoomId() != "room-1" {
+		t.Fatalf("room id = %q, want room-1", createResponse.GetRoom().GetRoomId())
 	}
 }
 
@@ -208,6 +279,22 @@ func dialAppGateway(t *testing.T, testServer *httptest.Server) *websocket.Conn {
 	return conn
 }
 
+func registerTestPlayer(t *testing.T, conn *websocket.Conn, account string) *pb.RegisterResponse {
+	t.Helper()
+	response := sendRoomEnvelope[*pb.RegisterResponse](t, conn, protocol.MessageIDRegisterRequest, "req-register-"+account, &pb.RegisterRequest{
+		Account:     account,
+		Password:    "secret",
+		DisplayName: account,
+	})
+	if response.GetPlayer().GetPlayerId() == "" {
+		t.Fatal("registered player id is empty")
+	}
+	if response.GetSessionToken() == "" {
+		t.Fatal("session token is empty")
+	}
+	return response
+}
+
 func sendRoomEnvelope[T proto.Message](t *testing.T, conn *websocket.Conn, messageID protocol.MessageID, requestID string, message proto.Message) T {
 	t.Helper()
 	responseEnvelope := sendEnvelope(t, conn, messageID, requestID, message)
@@ -220,6 +307,23 @@ func sendRoomEnvelope[T proto.Message](t *testing.T, conn *websocket.Conn, messa
 		t.Fatalf("decoded response = %T", decoded)
 	}
 	return typed
+}
+
+func sendErrorEnvelope(t *testing.T, conn *websocket.Conn, messageID protocol.MessageID, requestID string, message proto.Message) *pb.ErrorResponse {
+	t.Helper()
+	responseEnvelope := sendEnvelope(t, conn, messageID, requestID, message)
+	if responseEnvelope.GetMessageId() != pb.MessageID_MESSAGE_ID_ERROR_RESPONSE {
+		t.Fatalf("message id = %v, want error response", responseEnvelope.GetMessageId())
+	}
+	decoded, err := protocol.DecodeEnvelope(responseEnvelope, true)
+	if err != nil {
+		t.Fatalf("DecodeEnvelope() error = %v", err)
+	}
+	errorResponse, ok := decoded.(*pb.ErrorResponse)
+	if !ok {
+		t.Fatalf("decoded response = %T, want *pb.ErrorResponse", decoded)
+	}
+	return errorResponse
 }
 
 func sendEnvelope(t *testing.T, conn *websocket.Conn, messageID protocol.MessageID, requestID string, message proto.Message) *pb.Envelope {

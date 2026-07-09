@@ -162,7 +162,7 @@ Unity 客户端必须读取：
 | 重连恢复房间身份 | `2010 ReconnectRoomRequest` | `2011 ReconnectRoomResponse` |
 | 房间快照推送 | 无 | `2012 RoomSnapshotPushed` |
 
-当前服务端房间大厅请求仍必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。Unity 客户端必须使用服务端账号会话确认的 `AccountSystem.CurrentPlayerID` 填充 `player_id`，不得使用 UI 输入或临时本地字符串。服务端侧房间请求去除显式 `player_id` 的调整由后续独立 change 处理。
+当前服务端房间大厅请求仍必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。Unity 客户端必须使用服务端账号会话确认的 `AccountSystem.CurrentPlayerID` 填充 `player_id`，不得使用 UI 输入或临时本地字符串。服务端会将该 `player_id` 与 gateway connection session 中已绑定的 `PlayerID` 比对；未登录或不一致的请求会返回结构化 `UNAUTHENTICATED` 错误，并且不会修改房间状态。服务端侧房间请求去除显式 `player_id` 的调整由后续独立协议兼容 change 处理。
 
 Unity 客户端当前通过 `RoomSystem` 管理房间状态。`RoomSystem` 负责调用 `NetworkSystem` 的房间请求方法、保存当前 `RoomSnapshot`、记录最近 room id 并在登出或会话失效时清理本地房间上下文。
 
@@ -245,14 +245,14 @@ cd G:\Jinwiforz\iHomeland\server
 
 ## 当前验收边界
 
-当前服务端侧通过 Go 测试验证 `/ws`、envelope、心跳、错误响应和房间大厅链路：
+当前服务端侧通过 Go 测试验证 `/ws`、envelope、心跳、错误响应、账号会话、房间大厅链路和房间请求身份边界：
 
 ```powershell
 cd G:\Jinwiforz\iHomeland\server
 go test ./...
 ```
 
-Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路、`RoomSystem` 房间请求边界、`RoomPage` 脚本、`RoomPage.prefab`，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过；房间大厅已完成本地服务端下的基础端到端手动验证，覆盖单玩家创房/准备/退出、双玩家加入/房主转移和断线重连恢复。
+Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路、`RoomSystem` 房间请求边界、`RoomPage` 脚本、`RoomPage.prefab`，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过；房间大厅已完成本地服务端下的基础端到端手动验证，覆盖单玩家创房/准备/退出、双玩家加入/房主转移和断线重连恢复。服务端自动化测试已覆盖未登录房间请求拒绝和 payload `player_id` 与 session 身份不一致时的拒绝路径。
 
 当前暂未自动化验证的 Unity 项：
 

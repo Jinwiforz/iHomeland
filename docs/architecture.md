@@ -32,7 +32,7 @@ MainScene
   -> BattleScene
 ```
 
-该链路目前只表示客户端外层生命周期已经跑通，不代表第一里程碑可以直接进入战斗。后续 `Start Game` 应先接入账号会话和房间大厅流程，在第一里程碑完成前不得把正式玩法推进到 battle server 或高频战斗模拟。
+该链路目前只表示客户端外层生命周期已经跑通，不代表第一里程碑可以直接进入战斗。当前 `Start Game` 已进入 `RoomPage` 房间大厅流程；在第一里程碑完成前不得把正式玩法推进到 battle server 或高频战斗模拟。
 
 ### Gateway
 
@@ -45,6 +45,7 @@ MainScene
 - 校验协议版本
 - 维护连接级 session
 - 绑定账号会话确认后的玩家身份
+- 使用连接级玩家身份授权房间大厅请求，拒绝未登录或 payload `player_id` 与 session 身份不一致的请求
 - 处理心跳、空闲超时和断开清理
 - 将业务消息分发到 room、account、match 等模块接口
 

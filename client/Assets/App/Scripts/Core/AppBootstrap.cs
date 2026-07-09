@@ -118,9 +118,7 @@ namespace App.Core
         {
             AppRoot.Instance.Log.Info<AppBootstrap>("Initialize config.");
 
-            // TODO:
-            // 这里以后放真实配置初始化逻辑。
-            // 例如读取本地设置、语言配置、表格配置等。
+            // 当前首屏只需要默认 AppConfig；后续接入本地设置、语言或表格配置时在这里扩展初始化步骤。
             yield return null;
         }
 
@@ -128,9 +126,7 @@ namespace App.Core
         {
             AppRoot.Instance.Log.Info<AppBootstrap>("Check version.");
 
-            // TODO:
-            // 这里以后放真实版本检查逻辑。
-            // 例如请求版本服务器，判断是否需要更新。
+            // 当前版本信息由服务端 `/version` 和本地 version.json 验证；后续接入热更时在这里扩展阻断式检查。
             yield return null;
         }
 
@@ -138,9 +134,7 @@ namespace App.Core
         {
             AppRoot.Instance.Log.Info<AppBootstrap>("Preload resources.");
 
-            // TODO:
-            // 这里以后放真实资源预加载逻辑。
-            // 例如预加载登录页背景、公共 UI 图集、常用音效等。
+            // 当前 UI 资源按页面打开时加载；后续接入公共图集或音效预热时在这里扩展预加载清单。
             yield return null;
         }
 

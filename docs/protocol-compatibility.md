@@ -57,7 +57,7 @@ Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送
 - `3`：`ErrorResponse`
 - `4`：`ProtocolVersionUnsupported`
 
-当前规划中的账号会话消息：
+当前账号会话消息：
 
 - `1000`：`RegisterRequest`
 - `1001`：`RegisterResponse`
@@ -88,7 +88,7 @@ Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送
 - `2011`：`ReconnectRoomResponse`
 - `2012`：`RoomSnapshotPushed`
 
-房间大厅消息 owner 为 `room`。本轮新增消息不破坏既有系统消息；客户端接入房间大厅时需要使用 `RoomSnapshot` 刷新房间 UI，并在请求中携带 `player_id` 和 envelope `request_id`。
+房间大厅消息 owner 为 `room`。客户端接入房间大厅时需要使用 `RoomSnapshot` 刷新房间 UI，并在请求中携带 `player_id` 和 envelope `request_id`。现阶段仍保留 payload `player_id` 字段，但服务端会以 gateway connection session 中已绑定的 `PlayerID` 作为身份事实来源；未登录或 payload `player_id` 与 session 身份不一致时，服务端必须返回结构化 `UNAUTHENTICATED` 错误，不得修改房间状态。
 
 每个 message id 必须有 owner。已发布 message id 不得复用；废弃消息必须保留编号并记录迁移策略。
 
@@ -109,7 +109,7 @@ Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送
 - `PAYLOAD_INVALID`
 - `REQUEST_ID_REQUIRED`
 
-账号会话接入后，账号已存在、账号凭据非法、未登录、session 过期和权限不足必须复用结构化错误响应；当前账号错误码包括 `ACCOUNT_ALREADY_EXISTS`、`ACCOUNT_CREDENTIAL_INVALID`、`SESSION_INVALID` 和 `UNAUTHENTICATED`。
+账号会话和房间身份边界接入后，账号已存在、账号凭据非法、未登录、session 过期和房间请求身份不一致必须复用结构化错误响应；当前账号态错误码包括 `ACCOUNT_ALREADY_EXISTS`、`ACCOUNT_CREDENTIAL_INVALID`、`SESSION_INVALID` 和 `UNAUTHENTICATED`。
 
 需要响应的请求失败时，错误响应必须回传相同 `request_id`。
 

@@ -51,14 +51,15 @@
 7. `document-client-integration`
 8. `add-account-session`
 9. `add-unity-websocket-smoke-test`
+10. `add-unity-room-lobby-flow`
+11. `harden-room-identity-boundary`
 
 第一阶段后续推荐 change 顺序：
 
-1. `add-unity-room-lobby-flow`
-2. `add-room-start-gate`
-3. `add-internal-service-boundaries`
+1. `add-room-start-gate`
+2. `add-internal-service-boundaries`
 
-当前 Unity 客户端基础链路、真实账号会话链路和 Unity Editor WebSocket/account smoke test 已经存在，后续优先补齐房间大厅 UI 接入。协议生成只保留 `tools/proto/generate.bat` 一个入口，必须双端生成。后端内部服务拆分应排在 Unity 房间大厅联调之后；不优先推进 gRPC、中心服或游戏服拆分。
+当前 Unity 客户端基础链路、真实账号会话链路、Unity Editor WebSocket/account smoke test、房间大厅 UI 接入和房间请求身份边界加固已经存在。后续优先在房间大厅内补齐 `add-room-start-gate`，只做房主、成员准备状态和房间状态校验。协议生成只保留 `tools/proto/generate.bat` 一个入口，必须双端生成。后端内部服务拆分应排在开始闸门和第一里程碑闭环之后；不优先推进 gRPC、中心服或游戏服拆分。
 
 ## 任务编写规则
 

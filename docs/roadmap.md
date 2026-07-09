@@ -225,7 +225,7 @@
 - 已有 `BattleScene`
 - 已有 `AppRoot`、`AppBootstrap`、基础 Systems 和 UI 页面打开流程
 - `AccountSystem` 已改为通过 `NetworkSystem` 调用服务端账号协议
-- `HomePage.Start Game` 当前直接加载 `BattleScene`
+- `HomePage.Start Game` 当前进入 `RoomPage` 房间大厅，不再直接加载 `BattleScene`
 
 不做：不实现完整 UI、美术资源、登录系统或战斗玩法。
 
@@ -287,6 +287,21 @@
 - `RoomPage.prefab` 已由 Unity Editor 内创建和绑定，房间大厅基础端到端路径已完成手动验证。
 
 不做：不实现匹配系统，不进入正式战斗模拟，不引入独立 battle server。
+
+### harden-room-identity-boundary
+
+状态：已归档。
+
+目标：加固账号会话到房间大厅之间的服务端身份边界，确保房间请求不能只依赖客户端 payload 中的 `player_id`。
+
+产出：
+
+- room dispatcher 已要求房间大厅请求来自已绑定玩家身份的 gateway connection。
+- 服务端会校验 payload `player_id` 与 connection session `PlayerID` 一致，不一致时返回结构化 `UNAUTHENTICATED` 错误。
+- 未登录 connection 发送创房、进房、准备、退出、房主转移或重连房间请求会被拒绝，且不会调用 room service 修改状态。
+- WebSocket 集成测试已覆盖正常已登录房间流程、未登录房间请求拒绝和伪造 `player_id` 拒绝。
+
+不做：不删除 Protobuf 房间请求中的 `player_id` 字段，不新增协议错误码，不实现开始游戏闸门、房间持久化或 battle server。
 
 ### add-room-start-gate
 

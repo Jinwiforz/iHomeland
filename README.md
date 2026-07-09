@@ -4,7 +4,7 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 
 项目第一阶段聚焦“自定义房间大厅”：先建立外围后台、实时网关、自研房间逻辑和小中规模房间服能力。后续如果进入 MOBA/RTS 核心战斗服，需要单独设计高频权威战斗服务器架构，不直接把当前房间服扩展成《英雄联盟》级别的核心战斗服。
 
-当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、注册、登录、登出、会话恢复、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。Unity 客户端已经具备基础应用链路、真实账号会话、Unity Editor WebSocket/account smoke test、房间请求、`RoomSystem`、`RoomPage` 和 `RoomPage.prefab`，可完成房间大厅端到端联调。
+当前服务端已经具备第一阶段房间大厅的基础闭环：WebSocket 实时入口、Protobuf envelope、注册、登录、登出、会话恢复、gateway 身份绑定、房间请求身份校验、创建/加入房间、准备、退出、房主转移、断线保留和重连恢复。Unity 客户端已经具备基础应用链路、真实账号会话、Unity Editor WebSocket/account smoke test、房间请求、`RoomSystem`、`RoomPage` 和 `RoomPage.prefab`，可完成房间大厅端到端联调。
 
 下一步优先推进 `add-room-start-gate`，在房间大厅内定义进入后续占位场景的开始闸门。第一里程碑完成前暂不推进正式战斗模块。
 
@@ -17,6 +17,7 @@ iHomeland 是一个使用 Go 服务端搭配 Unity 客户端开发的在线游�
 - Protobuf 协议 envelope 和协议兼容规则
 - 自定义房间的创建、加入、准备、退出、房主转移和断线重连
 - 第一阶段账号会话、注册、登录登出和房间大厅所需玩家身份
+- 房间大厅请求必须使用服务端确认的 gateway session 玩家身份，客户端 payload `player_id` 只作为声明并必须与 session 身份一致
 - Redis、MySQL、gRPC、Docker 等后续基础能力
 
 当前阶段暂不实现：
