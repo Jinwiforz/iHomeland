@@ -43,6 +43,8 @@ enum MessageID {
   MESSAGE_ID_RECONNECT_ROOM_REQUEST = 2010;
   MESSAGE_ID_RECONNECT_ROOM_RESPONSE = 2011;
   MESSAGE_ID_ROOM_SNAPSHOT_PUSHED = 2012;
+  MESSAGE_ID_START_ROOM_REQUEST = 2013;
+  MESSAGE_ID_START_ROOM_RESPONSE = 2014;
 }
 
 // ErrorCode 定义可跨端识别的稳定错误码。
@@ -175,6 +177,7 @@ enum RoomState {
   ROOM_STATE_UNSPECIFIED = 0;
   ROOM_STATE_OPEN = 1;
   ROOM_STATE_CLOSED = 2;
+  ROOM_STATE_STARTED = 3;
 }
 
 // RoomMemberConnectionState 描述房间成员连接状态。
@@ -278,6 +281,17 @@ message ReconnectRoomRequest {
 
 // ReconnectRoomResponse 是断线后恢复房间身份响应。
 message ReconnectRoomResponse {
+  RoomSnapshot room = 1;
+}
+
+// StartRoomRequest 是房主请求通过第一阶段开始闸门的请求。
+message StartRoomRequest {
+  string player_id = 1;
+  string room_id = 2;
+}
+
+// StartRoomResponse 是第一阶段开始闸门通过后的响应。
+message StartRoomResponse {
   RoomSnapshot room = 1;
 }
 

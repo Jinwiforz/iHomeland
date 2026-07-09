@@ -63,6 +63,10 @@ const (
 	MessageIDReconnectRoomResponse MessageID = 2011
 	// MessageIDRoomSnapshotPushed 是房间快照推送。
 	MessageIDRoomSnapshotPushed MessageID = 2012
+	// MessageIDStartRoomRequest 是房主请求通过第一阶段开始闸门的请求。
+	MessageIDStartRoomRequest MessageID = 2013
+	// MessageIDStartRoomResponse 是第一阶段开始闸门通过后的响应。
+	MessageIDStartRoomResponse MessageID = 2014
 )
 
 // ErrorCode 是可跨端识别的稳定协议错误码。
@@ -139,6 +143,8 @@ func RoomMessages() []MessageDescriptor {
 		{ID: MessageIDReconnectRoomRequest, Name: "ReconnectRoomRequest", Owner: "room", Comment: "客户端重连恢复房间身份请求"},
 		{ID: MessageIDReconnectRoomResponse, Name: "ReconnectRoomResponse", Owner: "room", Comment: "服务端重连恢复房间身份响应"},
 		{ID: MessageIDRoomSnapshotPushed, Name: "RoomSnapshotPushed", Owner: "room", Comment: "服务端房间快照推送"},
+		{ID: MessageIDStartRoomRequest, Name: "StartRoomRequest", Owner: "room", Comment: "房主请求通过第一阶段开始闸门"},
+		{ID: MessageIDStartRoomResponse, Name: "StartRoomResponse", Owner: "room", Comment: "服务端开始闸门通过响应"},
 	}
 }
 

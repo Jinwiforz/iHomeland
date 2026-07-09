@@ -33,6 +33,8 @@ func protoRoomState(state RoomState) pb.RoomState {
 	switch state {
 	case RoomStateOpen:
 		return pb.RoomState_ROOM_STATE_OPEN
+	case RoomStateStarted:
+		return pb.RoomState_ROOM_STATE_STARTED
 	case RoomStateClosed:
 		return pb.RoomState_ROOM_STATE_CLOSED
 	default:

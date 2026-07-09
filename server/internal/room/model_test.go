@@ -69,6 +69,79 @@ func TestRoomRejectsInvalidTransitions(t *testing.T) {
 	}
 }
 
+func TestRoomStartGateSucceedsForHostWhenMembersReady(t *testing.T) {
+	now := time.Unix(100, 0)
+	room := newStartGateRoom(t, now)
+	if _, err := room.SetReady("player-2", true, now.Add(time.Second)); err != nil {
+		t.Fatalf("SetReady() error = %v", err)
+	}
+
+	snapshot, err := room.Start("player-1", now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if snapshot.State != RoomStateStarted {
+		t.Fatalf("State = %s, want started", snapshot.State)
+	}
+	if room.UpdatedAt != now.Add(2*time.Second) {
+		t.Fatalf("UpdatedAt = %s, want %s", room.UpdatedAt, now.Add(2*time.Second))
+	}
+}
+
+func TestRoomStartGateRejectsNonHost(t *testing.T) {
+	now := time.Unix(100, 0)
+	room := newStartGateRoom(t, now)
+	if _, err := room.SetReady("player-2", true, now.Add(time.Second)); err != nil {
+		t.Fatalf("SetReady() error = %v", err)
+	}
+
+	if _, err := room.Start("player-2", now.Add(2*time.Second)); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("Start(non-host) error = %v, want ErrPermissionDenied", err)
+	}
+	if room.State != RoomStateOpen {
+		t.Fatalf("State = %s, want open", room.State)
+	}
+}
+
+func TestRoomStartGateRejectsUnreadyMember(t *testing.T) {
+	now := time.Unix(100, 0)
+	room := newStartGateRoom(t, now)
+
+	if _, err := room.Start("player-1", now.Add(time.Second)); !errors.Is(err, ErrRoomNotReady) {
+		t.Fatalf("Start(unready) error = %v, want ErrRoomNotReady", err)
+	}
+}
+
+func TestRoomStartGateRejectsDisconnectedMember(t *testing.T) {
+	now := time.Unix(100, 0)
+	room := newStartGateRoom(t, now)
+	if _, err := room.SetReady("player-2", true, now.Add(time.Second)); err != nil {
+		t.Fatalf("SetReady() error = %v", err)
+	}
+	if _, err := room.Disconnect("player-2", now.Add(30*time.Second), now.Add(2*time.Second)); err != nil {
+		t.Fatalf("Disconnect() error = %v", err)
+	}
+
+	if _, err := room.Start("player-1", now.Add(3*time.Second)); !errors.Is(err, ErrRoomNotReady) {
+		t.Fatalf("Start(disconnected) error = %v, want ErrRoomNotReady", err)
+	}
+}
+
+func TestRoomStartGateRejectsInvalidState(t *testing.T) {
+	now := time.Unix(100, 0)
+	room := newStartGateRoom(t, now)
+	if _, err := room.SetReady("player-2", true, now.Add(time.Second)); err != nil {
+		t.Fatalf("SetReady() error = %v", err)
+	}
+	if _, err := room.Start("player-1", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if _, err := room.Start("player-1", now.Add(3*time.Second)); !errors.Is(err, ErrRoomClosed) {
+		t.Fatalf("Start(started) error = %v, want ErrRoomClosed", err)
+	}
+}
+
 func TestRoomDisconnectAndReconnect(t *testing.T) {
 	now := time.Unix(100, 0)
 	room, err := NewRoom("room-1", "测试房间", "player-1", 2, now)
@@ -105,4 +178,16 @@ func TestRoomRejectsExpiredReconnect(t *testing.T) {
 	if _, err := room.Reconnect("player-1", now.Add(2*time.Second)); !errors.Is(err, ErrReconnectExpired) {
 		t.Fatalf("Reconnect(expired) error = %v, want ErrReconnectExpired", err)
 	}
+}
+
+func newStartGateRoom(t *testing.T, now time.Time) *Room {
+	t.Helper()
+	room, err := NewRoom("room-1", "测试房间", "player-1", 2, now)
+	if err != nil {
+		t.Fatalf("NewRoom() error = %v", err)
+	}
+	if _, err := room.Join("player-2", now); err != nil {
+		t.Fatalf("Join(player-2) error = %v", err)
+	}
+	return room
 }

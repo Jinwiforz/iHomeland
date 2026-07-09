@@ -84,6 +84,88 @@ func TestRoomLobbyWebSocketFlow(t *testing.T) {
 	}
 }
 
+func TestRoomStartWebSocketFlow(t *testing.T) {
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewHTTPServer() error = %v", err)
+	}
+	testServer := httptest.NewServer(server.Handler)
+	defer testServer.Close()
+
+	hostConn := dialAppGateway(t, testServer)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	guestConn := dialAppGateway(t, testServer)
+	defer guestConn.Close(websocket.StatusNormalClosure, "test done")
+	hostSession := registerTestPlayer(t, hostConn, "start_host")
+	guestSession := registerTestPlayer(t, guestConn, "start_guest")
+	hostPlayerID := hostSession.GetPlayer().GetPlayerId()
+	guestPlayerID := guestSession.GetPlayer().GetPlayerId()
+
+	createResponse := sendRoomEnvelope[*pb.CreateRoomResponse](t, hostConn, protocol.MessageIDCreateRoomRequest, "req-start-create", &pb.CreateRoomRequest{
+		PlayerId: hostPlayerID,
+		RoomName: "start room",
+		Capacity: 2,
+	})
+	roomID := createResponse.GetRoom().GetRoomId()
+	_ = sendRoomEnvelope[*pb.JoinRoomResponse](t, guestConn, protocol.MessageIDJoinRoomRequest, "req-start-join", &pb.JoinRoomRequest{
+		PlayerId: guestPlayerID,
+		RoomId:   roomID,
+	})
+	_ = sendRoomEnvelope[*pb.SetReadyResponse](t, guestConn, protocol.MessageIDSetReadyRequest, "req-start-ready", &pb.SetReadyRequest{
+		PlayerId: guestPlayerID,
+		RoomId:   roomID,
+		Ready:    true,
+	})
+
+	startResponse := sendRoomEnvelope[*pb.StartRoomResponse](t, hostConn, protocol.MessageIDStartRoomRequest, "req-start", &pb.StartRoomRequest{
+		PlayerId: hostPlayerID,
+		RoomId:   roomID,
+	})
+	if startResponse.GetRoom().GetState() != pb.RoomState_ROOM_STATE_STARTED {
+		t.Fatalf("room state = %v, want started", startResponse.GetRoom().GetState())
+	}
+}
+
+func TestRoomStartWebSocketRejectsUnreadyMember(t *testing.T) {
+	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewHTTPServer() error = %v", err)
+	}
+	testServer := httptest.NewServer(server.Handler)
+	defer testServer.Close()
+
+	hostConn := dialAppGateway(t, testServer)
+	defer hostConn.Close(websocket.StatusNormalClosure, "test done")
+	guestConn := dialAppGateway(t, testServer)
+	defer guestConn.Close(websocket.StatusNormalClosure, "test done")
+	hostSession := registerTestPlayer(t, hostConn, "unready_host")
+	guestSession := registerTestPlayer(t, guestConn, "unready_guest")
+	hostPlayerID := hostSession.GetPlayer().GetPlayerId()
+	guestPlayerID := guestSession.GetPlayer().GetPlayerId()
+
+	createResponse := sendRoomEnvelope[*pb.CreateRoomResponse](t, hostConn, protocol.MessageIDCreateRoomRequest, "req-unready-create", &pb.CreateRoomRequest{
+		PlayerId: hostPlayerID,
+		RoomName: "unready room",
+		Capacity: 2,
+	})
+	roomID := createResponse.GetRoom().GetRoomId()
+	_ = sendRoomEnvelope[*pb.JoinRoomResponse](t, guestConn, protocol.MessageIDJoinRoomRequest, "req-unready-join", &pb.JoinRoomRequest{
+		PlayerId: guestPlayerID,
+		RoomId:   roomID,
+	})
+
+	errorResponse := sendErrorEnvelope(t, hostConn, protocol.MessageIDStartRoomRequest, "req-unready-start", &pb.StartRoomRequest{
+		PlayerId: hostPlayerID,
+		RoomId:   roomID,
+	})
+	if errorResponse.GetCode() != pb.ErrorCode_ERROR_CODE_PAYLOAD_INVALID {
+		t.Fatalf("error code = %v, want payload invalid", errorResponse.GetCode())
+	}
+	if !strings.Contains(errorResponse.GetDetail(), "room not ready") {
+		t.Fatalf("error detail = %q, want room not ready", errorResponse.GetDetail())
+	}
+}
+
 func TestRoomLobbyReconnectWebSocketFlow(t *testing.T) {
 	server, err := newTestHTTPServer(config.Default(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {

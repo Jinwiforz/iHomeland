@@ -87,8 +87,10 @@ Unity 客户端必须用二进制 WebSocket 帧发送 Protobuf envelope。发送
 - `2010`：`ReconnectRoomRequest`
 - `2011`：`ReconnectRoomResponse`
 - `2012`：`RoomSnapshotPushed`
+- `2013`：`StartRoomRequest`
+- `2014`：`StartRoomResponse`
 
-房间大厅消息 owner 为 `room`。客户端接入房间大厅时需要使用 `RoomSnapshot` 刷新房间 UI，并在请求中携带 `player_id` 和 envelope `request_id`。现阶段仍保留 payload `player_id` 字段，但服务端会以 gateway connection session 中已绑定的 `PlayerID` 作为身份事实来源；未登录或 payload `player_id` 与 session 身份不一致时，服务端必须返回结构化 `UNAUTHENTICATED` 错误，不得修改房间状态。
+房间大厅消息 owner 为 `room`。客户端接入房间大厅时需要使用 `RoomSnapshot` 刷新房间 UI，并在请求中携带 `player_id` 和 envelope `request_id`。现阶段仍保留 payload `player_id` 字段，但服务端会以 gateway connection session 中已绑定的 `PlayerID` 作为身份事实来源；未登录或 payload `player_id` 与 session 身份不一致时，服务端必须返回结构化 `UNAUTHENTICATED` 错误，不得修改房间状态。`StartRoomRequest` 只表示第一阶段房间大厅开始闸门，不承载正式战斗同步、结算、观战或回放。
 
 每个 message id 必须有 owner。已发布 message id 不得复用；废弃消息必须保留编号并记录迁移策略。
 

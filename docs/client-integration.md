@@ -2,7 +2,7 @@
 
 本文档说明第一阶段 Unity 客户端如何接入 iHomeland 服务端。它的 owner 是 `client-integration`，维护场景包括协议生成、实时连接、房间大厅联调和客户端接入验收。
 
-当前范围覆盖第一里程碑端到端接入：版本检查、账号会话、WebSocket 连接、Protobuf envelope、心跳、错误响应、创建房间、加入房间、准备、退出、房主转移和断线重连。本文档不规定具体 Unity 第三方包，不实现匹配、battle server、观战、回放或完整经济系统。
+当前范围覆盖第一里程碑端到端接入：版本检查、账号会话、WebSocket 连接、Protobuf envelope、心跳、错误响应、创建房间、加入房间、准备、开始房间、退出、房主转移和断线重连。本文档不规定具体 Unity 第三方包，不实现匹配、battle server、观战、回放或完整经济系统。
 
 当前 Unity 客户端已经具备基础页面和场景流转：
 
@@ -161,8 +161,11 @@ Unity 客户端必须读取：
 | 转移房主 | `2008 TransferHostRequest` | `2009 TransferHostResponse` |
 | 重连恢复房间身份 | `2010 ReconnectRoomRequest` | `2011 ReconnectRoomResponse` |
 | 房间快照推送 | 无 | `2012 RoomSnapshotPushed` |
+| 开始房间 | `2013 StartRoomRequest` | `2014 StartRoomResponse` |
 
 当前服务端房间大厅请求仍必须携带业务所需的 `player_id`，并在 envelope 中携带非空 `request_id`。Unity 客户端必须使用服务端账号会话确认的 `AccountSystem.CurrentPlayerID` 填充 `player_id`，不得使用 UI 输入或临时本地字符串。服务端会将该 `player_id` 与 gateway connection session 中已绑定的 `PlayerID` 比对；未登录或不一致的请求会返回结构化 `UNAUTHENTICATED` 错误，并且不会修改房间状态。服务端侧房间请求去除显式 `player_id` 的调整由后续独立协议兼容 change 处理。
+
+`StartRoomRequest` 是第一阶段房间大厅开始闸门，只允许房主发起，并由服务端校验房间仍处于开放状态、非房主成员均已准备、所有成员在线。成功响应会返回最新 `RoomSnapshot`，其中 `state` 为已开始；客户端当前只展示该状态或进入后续占位流程，不加载 `BattleScene`，不实现正式战斗同步、结算、观战或回放。
 
 Unity 客户端当前通过 `RoomSystem` 管理房间状态。`RoomSystem` 负责调用 `NetworkSystem` 的房间请求方法、保存当前 `RoomSnapshot`、记录最近 room id 并在登出或会话失效时清理本地房间上下文。
 
@@ -227,7 +230,7 @@ cd G:\Jinwiforz\iHomeland\server
 
 该 smoke test 使用固定账号 `unity_smoke_test`。首次执行会注册账号；后续执行若服务端返回账号已存在，会使用同一密码回退登录，然后发送登出请求。它只验证 `/ws`、二进制 envelope、心跳和账号会话链路，不发送房间大厅请求。
 
-10. 确认 `RoomPage.prefab` 已挂载 `RoomPage` 脚本，并绑定创建、加入、重连、准备、退出、房主转移、返回按钮和文本输入/输出控件。
+10. 确认 `RoomPage.prefab` 已挂载 `RoomPage` 脚本，并绑定创建、加入、重连、准备、开始、退出、房主转移、返回按钮和文本输入/输出控件。
 
 11. 点击 `HomePage.Start Game`，确认打开 `RoomPage`，且未登录状态不会发送房间大厅请求。
 
@@ -243,6 +246,8 @@ cd G:\Jinwiforz\iHomeland\server
 
 17. 断开连接后在重连保留期内发送 `ReconnectRoomRequest`，确认身份恢复；保留期外失败时确认本地最近 room id 被清理。
 
+18. 另开一轮房间验证开始闸门：房主在所有非房主成员准备且在线后发送 `StartRoomRequest`，确认 `StartRoomResponse` 返回的 `RoomSnapshot.state` 为已开始，并且客户端停留在占位开始状态而不是进入正式战斗。
+
 ## 当前验收边界
 
 当前服务端侧通过 Go 测试验证 `/ws`、envelope、心跳、错误响应、账号会话、房间大厅链路和房间请求身份边界：
@@ -252,10 +257,10 @@ cd G:\Jinwiforz\iHomeland\server
 go test ./...
 ```
 
-Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路、`RoomSystem` 房间请求边界、`RoomPage` 脚本、`RoomPage.prefab`，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过；房间大厅已完成本地服务端下的基础端到端手动验证，覆盖单玩家创房/准备/退出、双玩家加入/房主转移和断线重连恢复。服务端自动化测试已覆盖未登录房间请求拒绝和 payload `player_id` 与 session 身份不一致时的拒绝路径。
+Unity 工程已经创建基础链路，并已补充 Unity 侧 C# Protobuf 生成代码、Google.Protobuf runtime、`NetworkSystem`、真实 `AccountSystem` 注册/登录/登出链路、`RoomSystem` 房间请求边界、`RoomPage` 脚本、`RoomPage.prefab`，以及 Unity Editor WebSocket/account smoke test。该 smoke test 已在 Unity Editor 中手动验证通过；房间大厅已完成本地服务端下的基础端到端手动验证，覆盖单玩家创房/准备/退出、双玩家加入/房主转移、断线重连恢复和房主开始闸门。服务端自动化测试已覆盖未登录房间请求拒绝、payload `player_id` 与 session 身份不一致时的拒绝路径、房主开始成功和开始失败错误响应。开始闸门只表示房间大厅通过校验并进入已开始占位状态，不承载正式战斗逻辑。
 
 当前暂未自动化验证的 Unity 项：
 
 - Unity 编辑器中执行注册失败、注册成功、登录失败、登录成功、登出和恢复失败路径。
 - Unity Editor smoke test 尚未自动化；本地服务端、MySQL 和 Redis 变更后仍需手动触发确认。
-- 房间大厅 UI 端到端路径仍依赖 Unity Editor 手动回归；后续 `add-room-start-gate` 需要继续验证大厅状态进入后续占位场景的闸门行为。
+- 房间大厅 UI 端到端路径仍依赖 Unity Editor 手动回归；后续涉及按钮布局、房间列表或开始后占位流程时，需要继续做手动回归。

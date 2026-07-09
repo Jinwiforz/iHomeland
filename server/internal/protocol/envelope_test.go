@@ -80,8 +80,8 @@ func TestSystemMessageRegistry(t *testing.T) {
 
 func TestRoomMessageRegistry(t *testing.T) {
 	messages := RoomMessages()
-	if len(messages) != 13 {
-		t.Fatalf("room messages = %d, want 13", len(messages))
+	if len(messages) != 15 {
+		t.Fatalf("room messages = %d, want 15", len(messages))
 	}
 
 	seen := map[MessageID]bool{}
@@ -111,6 +111,8 @@ func TestRoomMessageRegistry(t *testing.T) {
 		MessageIDTransferHostResponse,
 		MessageIDReconnectRoomRequest,
 		MessageIDReconnectRoomResponse,
+		MessageIDStartRoomRequest,
+		MessageIDStartRoomResponse,
 		MessageIDRoomSnapshotPushed,
 	} {
 		if !seen[id] {

@@ -72,6 +72,19 @@ func (d *roomDispatcher) Dispatch(ctx context.Context, req gateway.DispatchReque
 		}
 		d.service.BindConnection(req.Session.ConnectionID, playerID, snapshot.RoomID)
 		return buildRoomEnvelope(req.Envelope, protocol.MessageIDSetReadyResponse, &pb.SetReadyResponse{Room: room.ProtoSnapshot(snapshot)})
+	case *pb.StartRoomRequest:
+		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
+		if authEnvelope != nil || err != nil {
+			return authEnvelope, err
+		}
+		snapshot, err := d.service.StartRoom(ctx, room.StartRoomRequest{
+			PlayerID: playerID,
+			RoomID:   msg.GetRoomId(),
+		})
+		if err != nil {
+			return d.roomError(req.Envelope, err)
+		}
+		return buildRoomEnvelope(req.Envelope, protocol.MessageIDStartRoomResponse, &pb.StartRoomResponse{Room: room.ProtoSnapshot(snapshot)})
 	case *pb.LeaveRoomRequest:
 		playerID, authEnvelope, err := authenticatedRoomPlayer(req, msg.GetPlayerId())
 		if authEnvelope != nil || err != nil {

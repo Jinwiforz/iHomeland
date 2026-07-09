@@ -8,7 +8,7 @@
 MainScene -> LoadingPage -> LoginPage -> HomePage -> RoomPage
 ```
 
-该链路目前用于验证 AppRoot、Systems、UI 页面、账号会话和房间大厅入口。`AccountSystem` 已通过 `NetworkSystem` 接入服务端注册、登录和登出；`RoomSystem` 通过 `NetworkSystem` 接入创建、加入、准备、退出、房主转移和重连恢复请求；Unity Editor 菜单 `iHomeland/Smoke Test/WebSocket Account` 可验证本地 `/ws`、心跳和账号 session 链路。`RoomPage.prefab` 已接入基础房间大厅操作，第一里程碑完成前不推进正式战斗模块。
+该链路目前用于验证 AppRoot、Systems、UI 页面、账号会话和房间大厅入口。`AccountSystem` 已通过 `NetworkSystem` 接入服务端注册、登录和登出；`RoomSystem` 通过 `NetworkSystem` 接入创建、加入、准备、开始、退出、房主转移和重连恢复请求；Unity Editor 菜单 `iHomeland/Smoke Test/WebSocket Account` 可验证本地 `/ws`、心跳和账号 session 链路。`RoomPage.prefab` 已绑定开始按钮，开始成功后只展示房间已开始状态，不进入正式战斗模块。
 
 ## 当前结构
 

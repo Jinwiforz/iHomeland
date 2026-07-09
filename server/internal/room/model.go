@@ -31,6 +31,8 @@ var (
 	ErrRoomClosed = errors.New("room closed")
 	// ErrRoomFull 表示房间已满。
 	ErrRoomFull = errors.New("room full")
+	// ErrRoomNotReady 表示房间尚未满足开始条件。
+	ErrRoomNotReady = errors.New("room not ready")
 	// ErrMemberNotFound 表示玩家不是房间成员。
 	ErrMemberNotFound = errors.New("room member not found")
 	// ErrPermissionDenied 表示调用方没有执行该操作的权限。
@@ -45,6 +47,8 @@ type RoomState string
 const (
 	// RoomStateOpen 表示房间可加入并可进行大厅操作。
 	RoomStateOpen RoomState = "open"
+	// RoomStateStarted 表示房间已通过第一阶段开始闸门，不再接受大厅变更。
+	RoomStateStarted RoomState = "started"
 	// RoomStateClosed 表示房间已关闭或解散。
 	RoomStateClosed RoomState = "closed"
 )
@@ -181,6 +185,34 @@ func (r *Room) SetReady(playerID string, ready bool, now time.Time) (*Snapshot, 
 		return nil, err
 	}
 	member.Ready = ready
+	r.UpdatedAt = now
+	return r.Snapshot(), nil
+}
+
+// Start 校验第一阶段开始闸门并把房间置为已开始状态。
+func (r *Room) Start(actorPlayerID string, now time.Time) (*Snapshot, error) {
+	if err := r.ensureOpen(); err != nil {
+		return nil, err
+	}
+	actorPlayerID = strings.TrimSpace(actorPlayerID)
+	if err := validatePlayerID(actorPlayerID); err != nil {
+		return nil, err
+	}
+	if actorPlayerID != r.HostPlayerID {
+		return nil, ErrPermissionDenied
+	}
+	if _, err := r.onlineMember(actorPlayerID); err != nil {
+		return nil, err
+	}
+	for _, member := range r.Members {
+		if member.ConnectionState != MemberConnectionStateOnline {
+			return nil, ErrRoomNotReady
+		}
+		if member.PlayerID != r.HostPlayerID && !member.Ready {
+			return nil, ErrRoomNotReady
+		}
+	}
+	r.State = RoomStateStarted
 	r.UpdatedAt = now
 	return r.Snapshot(), nil
 }

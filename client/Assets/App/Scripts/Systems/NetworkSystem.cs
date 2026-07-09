@@ -152,6 +152,19 @@ namespace App.Systems
             );
         }
 
+        public async Task<StartRoomResponse> StartRoomAsync(string playerID, string roomID)
+        {
+            return await SendRequestAsync<StartRoomResponse>(
+                MessageID.StartRoomRequest,
+                MessageID.StartRoomResponse,
+                new StartRoomRequest
+                {
+                    PlayerId = playerID ?? string.Empty,
+                    RoomId = roomID ?? string.Empty
+                }
+            );
+        }
+
         public async Task<LeaveRoomResponse> LeaveRoomAsync(string playerID, string roomID)
         {
             return await SendRequestAsync<LeaveRoomResponse>(

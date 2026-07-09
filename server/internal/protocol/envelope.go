@@ -48,6 +48,8 @@ var messageTypes = map[MessageID]func() proto.Message{
 	MessageIDReconnectRoomRequest:       func() proto.Message { return &pb.ReconnectRoomRequest{} },
 	MessageIDReconnectRoomResponse:      func() proto.Message { return &pb.ReconnectRoomResponse{} },
 	MessageIDRoomSnapshotPushed:         func() proto.Message { return &pb.RoomSnapshotPushed{} },
+	MessageIDStartRoomRequest:          func() proto.Message { return &pb.StartRoomRequest{} },
+	MessageIDStartRoomResponse:         func() proto.Message { return &pb.StartRoomResponse{} },
 }
 
 // BuildOptions 描述构造 envelope 所需的稳定元数据。

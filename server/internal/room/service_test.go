@@ -43,6 +43,46 @@ func TestServiceCreateJoinAndDuplicateJoin(t *testing.T) {
 	}
 }
 
+func TestServiceStartRoom(t *testing.T) {
+	now := time.Unix(100, 0)
+	service := NewService(NewMemoryRepository(), Config{})
+	service.now = func() time.Time { return now }
+
+	created, err := service.CreateRoom(context.Background(), CreateRoomRequest{
+		PlayerID: "player-1",
+		RoomName: "测试房间",
+		Capacity: 2,
+	})
+	if err != nil {
+		t.Fatalf("CreateRoom() error = %v", err)
+	}
+	if _, err := service.JoinRoom(context.Background(), JoinRoomRequest{
+		PlayerID: "player-2",
+		RoomID:   created.RoomID,
+	}); err != nil {
+		t.Fatalf("JoinRoom() error = %v", err)
+	}
+	if _, err := service.SetReady(context.Background(), SetReadyRequest{
+		PlayerID: "player-2",
+		RoomID:   created.RoomID,
+		Ready:    true,
+	}); err != nil {
+		t.Fatalf("SetReady() error = %v", err)
+	}
+
+	now = now.Add(time.Second)
+	started, err := service.StartRoom(context.Background(), StartRoomRequest{
+		PlayerID: "player-1",
+		RoomID:   created.RoomID,
+	})
+	if err != nil {
+		t.Fatalf("StartRoom() error = %v", err)
+	}
+	if started.State != RoomStateStarted {
+		t.Fatalf("State = %s, want started", started.State)
+	}
+}
+
 func TestServiceConnectionDisconnectAndReconnect(t *testing.T) {
 	now := time.Unix(100, 0)
 	service := NewService(NewMemoryRepository(), Config{ReconnectTTL: 10 * time.Second})

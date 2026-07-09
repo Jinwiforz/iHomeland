@@ -54,7 +54,7 @@ namespace App.Systems
                 {
                     CreateRoomResponse response = await Root.Network.CreateRoomAsync(playerID, normalizedName, normalizedCapacity);
                     ApplySnapshot(response.Room);
-                    return RoomOperationResult.Ok("Create room success.", CurrentRoom);
+                    return RoomOperationResult.Ok("Room created. Start available.", CurrentRoom);
                 }
             );
         }
@@ -101,6 +101,29 @@ namespace App.Systems
                     SetReadyResponse response = await Root.Network.SetReadyAsync(playerID, roomID, ready);
                     ApplySnapshot(response.Room);
                     return RoomOperationResult.Ok(ready ? "Ready." : "Ready canceled.", CurrentRoom);
+                }
+            );
+        }
+
+        public async Task<RoomOperationResult> StartRoomAsync()
+        {
+            if (!TryGetCurrentPlayerID(out string playerID, out RoomOperationResult validationResult))
+            {
+                return validationResult;
+            }
+
+            if (!TryGetCurrentRoomID(out string roomID, out validationResult))
+            {
+                return validationResult;
+            }
+
+            return await RunRoomOperationAsync(
+                "Start room",
+                async () =>
+                {
+                    StartRoomResponse response = await Root.Network.StartRoomAsync(playerID, roomID);
+                    ApplySnapshot(response.Room);
+                    return RoomOperationResult.Ok("Room started.", CurrentRoom);
                 }
             );
         }
@@ -188,8 +211,23 @@ namespace App.Systems
 
         public bool IsCurrentPlayerHost()
         {
+            if (CurrentRoom == null || Root == null || Root.Account == null)
+            {
+                return false;
+            }
+
+            if (SamePlayerID(CurrentRoom.HostPlayerId, Root.Account.CurrentPlayerID))
+            {
+                return true;
+            }
+
             RoomMemberSnapshot member = FindCurrentPlayerMember();
             return member != null && member.Host;
+        }
+
+        public bool IsCurrentRoomStarted()
+        {
+            return CurrentRoom != null && CurrentRoom.State == RoomState.Started;
         }
 
         public RoomMemberSnapshot FindCurrentPlayerMember()
@@ -207,7 +245,7 @@ namespace App.Systems
 
             foreach (RoomMemberSnapshot member in CurrentRoom.Members)
             {
-                if (member != null && string.Equals(member.PlayerId, playerID, StringComparison.Ordinal))
+                if (member != null && SamePlayerID(member.PlayerId, playerID))
                 {
                     return member;
                 }
@@ -333,6 +371,11 @@ namespace App.Systems
             {
                 MessageChanged?.Invoke(message);
             }
+        }
+
+        private static bool SamePlayerID(string left, string right)
+        {
+            return string.Equals((left ?? string.Empty).Trim(), (right ?? string.Empty).Trim(), StringComparison.Ordinal);
         }
     }
 

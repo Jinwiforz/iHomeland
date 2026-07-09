@@ -60,6 +60,12 @@ type SetReadyRequest struct {
 	Ready    bool
 }
 
+// StartRoomRequest 描述开始房间输入。
+type StartRoomRequest struct {
+	PlayerID string
+	RoomID   string
+}
+
 // LeaveRoomRequest 描述退出房间输入。
 type LeaveRoomRequest struct {
 	PlayerID string
@@ -140,6 +146,23 @@ func (s *Service) SetReady(ctx context.Context, req SetReadyRequest) (*Snapshot,
 	err := s.repo.Update(req.RoomID, func(room *Room) error {
 		var err error
 		snapshot, err = room.SetReady(req.PlayerID, req.Ready, s.now())
+		if err == nil {
+			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
+		}
+		return err
+	})
+	return snapshot, err
+}
+
+// StartRoom 通过第一阶段开始闸门并返回最新房间快照。
+func (s *Service) StartRoom(ctx context.Context, req StartRoomRequest) (*Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var snapshot *Snapshot
+	err := s.repo.Update(req.RoomID, func(room *Room) error {
+		var err error
+		snapshot, err = room.Start(req.PlayerID, s.now())
 		if err == nil {
 			err = s.saveRoomSummary(ctx, roomSummaryFromRoom(room))
 		}

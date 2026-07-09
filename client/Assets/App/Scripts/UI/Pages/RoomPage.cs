@@ -21,6 +21,7 @@ namespace App.UI
         [SerializeField] private Button joinRoomButton;
         [SerializeField] private Button reconnectRoomButton;
         [SerializeField] private Button readyButton;
+        [SerializeField] private Button startRoomButton;
         [SerializeField] private Button leaveRoomButton;
         [SerializeField] private Button transferHostButton;
         [SerializeField] private Button backButton;
@@ -34,6 +35,7 @@ namespace App.UI
 
         protected override void OnInitialize()
         {
+            ConfigureRaycastTargets();
             AddListeners();
 
             AppRoot.Instance.Log.Info<RoomPage>("Initialize.");
@@ -116,6 +118,16 @@ namespace App.UI
             await RunPageOperationAsync(() => roomSystem.SetReadyAsync(nextReady));
         }
 
+        private async void OnClickStartRoom()
+        {
+            if (!TryGetRoomSystem(out RoomSystem roomSystem))
+            {
+                return;
+            }
+
+            await RunPageOperationAsync(roomSystem.StartRoomAsync);
+        }
+
         private async void OnClickLeaveRoom()
         {
             if (!TryGetRoomSystem(out RoomSystem roomSystem))
@@ -153,6 +165,7 @@ namespace App.UI
 
             _operationRunning = true;
             SetButtonsInteractable(false);
+            Refresh(AppRoot.Instance.Room == null ? null : AppRoot.Instance.Room.CurrentRoom);
 
             try
             {
@@ -169,6 +182,7 @@ namespace App.UI
             {
                 _operationRunning = false;
                 SetButtonsInteractable(true);
+                Refresh(AppRoot.Instance.Room == null ? null : AppRoot.Instance.Room.CurrentRoom);
             }
         }
 
@@ -249,22 +263,29 @@ namespace App.UI
             bool hasRoom = snapshot != null;
             bool isHost = AppRoot.Instance.Room != null && AppRoot.Instance.Room.IsCurrentPlayerHost();
             bool isReady = AppRoot.Instance.Room != null && AppRoot.Instance.Room.IsCurrentPlayerReady();
+            bool isStarted = AppRoot.Instance.Room != null && AppRoot.Instance.Room.IsCurrentRoomStarted();
 
             SetButtonText(readyButton, isReady ? "Cancel Ready" : "Ready");
+            SetButtonText(startRoomButton, GetStartButtonText(hasRoom, isHost, isStarted));
 
             if (readyButton != null)
             {
-                readyButton.interactable = hasRoom && !_operationRunning;
+                readyButton.interactable = hasRoom && !isStarted && !_operationRunning;
+            }
+
+            if (startRoomButton != null)
+            {
+                startRoomButton.interactable = hasRoom && isHost && !isStarted && !_operationRunning;
             }
 
             if (leaveRoomButton != null)
             {
-                leaveRoomButton.interactable = hasRoom && !_operationRunning;
+                leaveRoomButton.interactable = hasRoom && !isStarted && !_operationRunning;
             }
 
             if (transferHostButton != null)
             {
-                transferHostButton.interactable = hasRoom && isHost && !_operationRunning;
+                transferHostButton.interactable = hasRoom && isHost && !isStarted && !_operationRunning;
             }
 
             if (reconnectRoomButton != null)
@@ -279,6 +300,7 @@ namespace App.UI
             SetButtonInteractable(joinRoomButton, interactable);
             SetButtonInteractable(reconnectRoomButton, interactable);
             SetButtonInteractable(readyButton, interactable);
+            SetButtonInteractable(startRoomButton, interactable);
             SetButtonInteractable(leaveRoomButton, interactable);
             SetButtonInteractable(transferHostButton, interactable);
             SetButtonInteractable(backButton, interactable);
@@ -329,6 +351,11 @@ namespace App.UI
                 readyButton.onClick.AddListener(OnClickReady);
             }
 
+            if (startRoomButton != null)
+            {
+                startRoomButton.onClick.AddListener(OnClickStartRoom);
+            }
+
             if (leaveRoomButton != null)
             {
                 leaveRoomButton.onClick.AddListener(OnClickLeaveRoom);
@@ -367,6 +394,11 @@ namespace App.UI
                 readyButton.onClick.RemoveListener(OnClickReady);
             }
 
+            if (startRoomButton != null)
+            {
+                startRoomButton.onClick.RemoveListener(OnClickStartRoom);
+            }
+
             if (leaveRoomButton != null)
             {
                 leaveRoomButton.onClick.RemoveListener(OnClickLeaveRoom);
@@ -381,6 +413,21 @@ namespace App.UI
             {
                 backButton.onClick.RemoveListener(OnClickBack);
             }
+        }
+
+        private void ConfigureRaycastTargets()
+        {
+            DisableTextRaycast(messageText);
+            DisableTextRaycast(roomInfoText);
+            DisableTextRaycast(memberListText);
+            DisableButtonLabelRaycast(createRoomButton);
+            DisableButtonLabelRaycast(joinRoomButton);
+            DisableButtonLabelRaycast(reconnectRoomButton);
+            DisableButtonLabelRaycast(readyButton);
+            DisableButtonLabelRaycast(startRoomButton);
+            DisableButtonLabelRaycast(leaveRoomButton);
+            DisableButtonLabelRaycast(transferHostButton);
+            DisableButtonLabelRaycast(backButton);
         }
 
         private void SetMessage(string message)
@@ -411,6 +458,48 @@ namespace App.UI
             {
                 label.text = text;
             }
+        }
+
+        private static void DisableTextRaycast(TMP_Text text)
+        {
+            if (text != null)
+            {
+                text.raycastTarget = false;
+            }
+        }
+
+        private static void DisableButtonLabelRaycast(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            TMP_Text[] labels = button.GetComponentsInChildren<TMP_Text>(true);
+            foreach (TMP_Text label in labels)
+            {
+                DisableTextRaycast(label);
+            }
+        }
+
+        private string GetStartButtonText(bool hasRoom, bool isHost, bool isStarted)
+        {
+            if (_operationRunning)
+            {
+                return "Working...";
+            }
+
+            if (isStarted)
+            {
+                return "Started";
+            }
+
+            if (hasRoom && !isHost)
+            {
+                return "Host Only";
+            }
+
+            return "Start";
         }
     }
 }
