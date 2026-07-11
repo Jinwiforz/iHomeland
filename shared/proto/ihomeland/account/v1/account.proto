@@ -1,0 +1,17 @@
+edition = "2024";
+
+package ihomeland.account.v1;
+
+option csharp_namespace = "IHomeland.Protocol.Account.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/account/v1;accountv1";
+
+// AccountSummary 是认证后共享的安全账号投影，避免向客户端暴露内部账号记录。
+// 该投影只用于展示和关联，授权决策始终使用服务端 connection/session context。
+message AccountSummary {
+  // account_id 是不可变公开身份，但不能覆盖 connection context 的授权身份。
+  string account_id = 1;
+  // display_name 是已经过账号规则规范化的用户可见文本。
+  string display_name = 2;
+  // created_at_ms 以 Unix epoch milliseconds 记录账号创建时间。
+  int64 created_at_ms = 3;
+}

@@ -32,6 +32,7 @@ openspec/    长期规格与变更 artifacts
 server/      Go 服务端版本入口；实现从服务端阶段开始
 shared/      跨端协议与契约
 tools/       生成、测试、构建和运维工具
+versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本目录
 ```
 
 ## 必读文档
@@ -50,4 +51,5 @@ tools/       生成、测试、构建和运维工具
 - `docs/workflow.md`：OpenSpec 与交付流程
 - `docs/git-commit-convention.md`：Git 提交消息与提交粒度
 - `docs/redis-keys.md`：Redis owner、TTL 和恢复规则
+- `docs/technology-versions.md`：集中版本目录与升级规则
 - `openspec/specs/`：长期行为契约

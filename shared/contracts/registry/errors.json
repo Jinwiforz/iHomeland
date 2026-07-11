@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "reserved": [],
+  "errors": [
+    { "code": 1, "name": "PROTOCOL_INVALID_ENVELOPE", "owner": "common", "category": "PROTOCOL", "messageKey": "error.protocol.invalid_envelope", "retryable": false, "httpStatus": 400 },
+    { "code": 2, "name": "PROTOCOL_UNSUPPORTED_VERSION", "owner": "common", "category": "PROTOCOL", "messageKey": "error.protocol.unsupported_version", "retryable": false, "httpStatus": 426 },
+    { "code": 100, "name": "AUTH_UNAUTHENTICATED", "owner": "session", "category": "AUTH", "messageKey": "error.auth.unauthenticated", "retryable": false, "httpStatus": 401 },
+    { "code": 101, "name": "AUTH_FORBIDDEN", "owner": "session", "category": "AUTH", "messageKey": "error.auth.forbidden", "retryable": false, "httpStatus": 403 },
+    { "code": 102, "name": "AUTH_INVALID_CREDENTIALS", "owner": "account", "category": "AUTH", "messageKey": "error.auth.invalid_credentials", "retryable": false, "httpStatus": 401 },
+    { "code": 103, "name": "AUTH_TICKET_EXPIRED", "owner": "session", "category": "AUTH", "messageKey": "error.auth.ticket_expired", "retryable": false, "httpStatus": 401 },
+    { "code": 200, "name": "VALIDATION_FAILED", "owner": "common", "category": "VALIDATION", "messageKey": "error.validation.failed", "retryable": false, "httpStatus": 400 },
+    { "code": 400, "name": "RATE_LIMITED", "owner": "common", "category": "RATE_LIMIT", "messageKey": "error.rate_limited", "retryable": true, "httpStatus": 429 },
+    { "code": 500, "name": "DEPENDENCY_UNAVAILABLE", "owner": "common", "category": "DEPENDENCY", "messageKey": "error.dependency.unavailable", "retryable": true, "httpStatus": 503 },
+    { "code": 501, "name": "INTERNAL_ERROR", "owner": "common", "category": "INTERNAL", "messageKey": "error.internal", "retryable": true, "httpStatus": 500 }
+  ]
+}

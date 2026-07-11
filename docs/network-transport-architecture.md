@@ -113,7 +113,7 @@ HTTP 请求必须有大小、超时、限流、幂等和结构化错误策略。
 要求：
 
 - length-prefix framing
-- 最大帧与 read/write deadline
+- 最大帧、read chunk/partial frame/batch/connection memory budget 与 read/write deadline
 - 每连接唯一 reader/writer
 - bounded writer queue 与 backpressure
 - request correlation 与 push dispatcher
@@ -236,6 +236,7 @@ KCP 是否复用完整 envelope 由 battle profile 决定，但逻辑 message id
 ## 服务端连接模型
 
 - WSS/TCP 各连接只有一个 receive loop 和一个 serialized writer。
+- Reader 必须限制单次读取、未完成 frame 缓冲、单批 dispatch 数和每连接总内存；单帧上限不能替代连接级资源预算。
 - Connection Registry 按 connection/session/player 建索引。
 - Connection Registry 只索引 PersonalWorld/VisitSession/WorldInstance 发送引用，不保存世界、访客或奖励最终事实。
 - Writer queue 必须有容量、丢弃/关闭策略和指标。

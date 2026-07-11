@@ -1,0 +1,55 @@
+edition = "2024";
+
+package ihomeland.control.v1;
+
+import "ihomeland/session/v1/session.proto";
+
+option csharp_namespace = "IHomeland.Protocol.Control.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/control/v1;controlv1";
+
+// MaintenancePush 在连接行为变化前公告受限维护窗口。
+// 它只提供操作提示，不替代服务端 readiness、断连或准入策略的权威判断。
+message MaintenancePush {
+  // starts_at_ms 是公告窗口开始时刻，单位为 Unix epoch millisecond。
+  int64 starts_at_ms = 1;
+  // expected_end_at_ms 仅供预估，后续 push 可以修订。
+  int64 expected_end_at_ms = 2;
+  // message_key 选择经过批准的本地化维护文案。
+  string message_key = 3;
+}
+
+// ForcedLogoutPush 告知客户端其认证 session 必须立即结束的安全原因。
+// 客户端收到后必须停止使用旧连接，不能仅隐藏提示后继续发送业务消息。
+message ForcedLogoutPush {
+  // reason_key 是稳定安全原因键，不包含内部策略细节。
+  string reason_key = 1;
+  // session_epoch 是使旧连接失效的新 epoch。
+  uint64 session_epoch = 2;
+}
+
+// QueueStatusPush 报告准入进度，但不承诺精确开始时间。
+// 所有数值都是瞬时观测，客户端不得由 position 推导稳定身份或预留资源。
+message QueueStatusPush {
+  // position 是当前最佳估算的一基位置，可能向任一方向变化。
+  uint32 position = 1;
+  // retry_after_ms 限制客户端下次状态检查的最短等待时间。
+  uint32 retry_after_ms = 2;
+}
+
+// EndpointUpdatePush 在受控拓扑变化后替换连接 endpoint。
+// endpoints 使用完整替换而非增量合并，避免客户端保留已经撤销的连接目标。
+message EndpointUpdatePush {
+  // endpoints 是当前可用 channel 的完整替换 manifest。
+  repeated ihomeland.session.v1.Endpoint endpoints = 1;
+  // effective_at_ms 是切换边界，单位为 Unix epoch millisecond。
+  int64 effective_at_ms = 2;
+}
+
+// SessionInvalidatedPush 关闭全部绑定到过期 session epoch 的连接。
+// push 可能与连接关闭竞态到达，客户端必须把二者都视为重新认证信号。
+message SessionInvalidatedPush {
+  // session_epoch 是旧连接无法满足的新权威 epoch。
+  uint64 session_epoch = 1;
+  // reason_key 为客户端提供安全恢复或重新登录提示键。
+  string reason_key = 2;
+}

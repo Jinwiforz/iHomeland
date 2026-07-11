@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "unknown-message",
+      "expectedReason": "unknown_message"
+    },
+    {
+      "name": "wrong-channel",
+      "expectedReason": "wrong_channel"
+    },
+    {
+      "name": "invalid-kind-id",
+      "expectedReason": "invalid_correlation"
+    },
+    {
+      "name": "unknown-enum",
+      "expectedReason": "unknown_kind"
+    },
+    {
+      "name": "forbidden-actor-field",
+      "expectedReason": "identity_boundary"
+    },
+    {
+      "name": "oversized-frame",
+      "expectedReason": "frame_too_large"
+    },
+    {
+      "name": "truncated-frame",
+      "expectedReason": "truncated_frame"
+    }
+  ]
+}

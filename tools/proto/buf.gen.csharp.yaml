@@ -1,0 +1,7 @@
+version: v2
+plugins:
+  - protoc_builtin: csharp
+    protoc_path: .local/protoc/35.0/bin/protoc.exe
+    out: .tmp/csharp
+inputs:
+  - directory: shared/proto

@@ -1,0 +1,32 @@
+edition = "2024";
+
+package ihomeland.common.v1;
+
+option csharp_namespace = "IHomeland.Protocol.Common.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/common/v1;commonv1";
+
+// ErrorDetail 提供受限且安全的字段级说明，不泄漏内部实现。
+// detail 只允许使用公开字段名和稳定原因键，不能承载堆栈、SQL 或依赖错误文本。
+message ErrorDetail {
+  // field 标识与拒绝原因相关的公开 request 字段。
+  string field = 1;
+  // reason 是稳定的机器可读原因键，而不是内部 exception message。
+  string reason = 2;
+}
+
+// ErrorPayload 由实时错误共享，并与 HTTPS 错误语义保持一致。
+// 客户端按 code 决定恢复行为，message_key 只负责展示，二者不能被自由文本替代。
+message ErrorPayload {
+  // code 是登记在 errors.json 中的全局稳定数值错误码。
+  uint32 code = 1;
+  // message_key 选择客户端本地化文案，避免信任服务端自由文本。
+  string message_key = 2;
+  // request_id 在存在时将失败与原始 request 关联。
+  bytes request_id = 3;
+  // retryable 表示不修改输入、稍后重试是否可能成功。
+  bool retryable = 4;
+  // retry_after_ms 仅在 error registry 允许重试时提供，范围为 0-60000 milliseconds。
+  uint32 retry_after_ms = 5;
+  // details 最多包含 16 项安全 validation context。
+  repeated ErrorDetail details = 6;
+}

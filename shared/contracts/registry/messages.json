@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "ownerRanges": [
+    { "owner": "common", "start": 1, "end": 99 },
+    { "owner": "session", "start": 100, "end": 499 },
+    { "owner": "control", "start": 500, "end": 999 },
+    { "owner": "account", "start": 1000, "end": 1999 }
+  ],
+  "reserved": [],
+  "messages": [
+    { "id": 500, "name": "CONTROL_MAINTENANCE_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.MaintenancePush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 501, "name": "CONTROL_FORCED_LOGOUT_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.ForcedLogoutPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 502, "name": "CONTROL_QUEUE_STATUS_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.QueueStatusPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 503, "name": "CONTROL_ENDPOINT_UPDATE_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.EndpointUpdatePush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 504, "name": "CONTROL_SESSION_INVALIDATED_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.SessionInvalidatedPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" }
+  ]
+}

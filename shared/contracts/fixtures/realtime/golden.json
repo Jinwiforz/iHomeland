@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "packets": [
+    {
+      "name": "control-maintenance-push",
+      "messageId": 500,
+      "protobuf": "ihomeland.control.v1.MaintenancePush",
+      "payloadBase64": "COCkmf+8MRDA+Zz/vDEaGm5vdGljZS5tYWludGVuYW5jZS5maXh0dXJl",
+      "payloadJson": "{\"starts_at_ms\":\"1700000060000\",\"expected_end_at_ms\":\"1700000120000\",\"message_key\":\"notice.maintenance.fixture\"}",
+      "envelopeBase64": "CAEQ9AMYBDABOIDQlf+8MUIqCOCkmf+8MRDA+Zz/vDEaGm5vdGljZS5tYWludGVuYW5jZS5maXh0dXJl",
+      "sha256": "b0d6f6d6f1f271000b0788f59f75d432672fd41d4bd369eecef9b6a717ee9771"
+    },
+    {
+      "name": "control-session-invalidated-push",
+      "messageId": 504,
+      "protobuf": "ihomeland.control.v1.SessionInvalidatedPush",
+      "payloadBase64": "CAMSG3Nlc3Npb24uaW52YWxpZGF0ZWQuZml4dHVyZQ==",
+      "payloadJson": "{\"session_epoch\":\"3\",\"reason_key\":\"session.invalidated.fixture\"}",
+      "envelopeBase64": "CAEQ+AMYBDACOIHQlf+8MUIfCAMSG3Nlc3Npb24uaW52YWxpZGF0ZWQuZml4dHVyZQ==",
+      "sha256": "0826cee6f3cf720786c6db377ee992675111014bc1b7df05cb6975723064e507"
+    },
+    {
+      "name": "gameplay-connection-ticket",
+      "messageId": 0,
+      "protobuf": "ihomeland.session.v1.ConnectionTicket",
+      "payloadBase64": "ChFzZXNzaW9uLWZpeHR1cmUtMRACGAIiGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIioBAjIQAgICAgICAgICAgICAgICAjiA0JX/vDFAsLqX/7wx",
+      "payloadJson": "{\"session_id\":\"session-fixture-1\",\"session_epoch\":\"2\",\"target_channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"scopes\":[\"AUTH_SCOPE_GAMEPLAY\"],\"nonce\":\"AgICAgICAgICAgICAgICAg==\",\"issued_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700000030000\"}",
+      "sha256": "56c16cc51dc2c57dbce4f80ac3dc8172751c4684082e34639833947fd816ccf8"
+    }
+  ]
+}

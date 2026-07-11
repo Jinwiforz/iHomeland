@@ -48,6 +48,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 - 项目流程：`docs/workflow.md`
 - Git 提交：`docs/git-commit-convention.md`
 - Redis key：`docs/redis-keys.md`
+- 技术版本：`docs/technology-versions.md`
 - 长期规格：`openspec/specs/`
 
 ## OpenSpec 硬规则
@@ -64,7 +65,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 - 所有提交必须符合 `docs/git-commit-convention.md`。
 - 标题使用 `<type>(<scope>): <subject>`；scope 可选，type 与冒号后的空格不可省略。
 - 标题默认使用中文，type、scope、代码标识符和技术名词保留英文。
-- 一个提交只表达一个主要意图，并保持实现、测试、文档和必要生成物一致。
+- 一个提交只表达一个主要意图，并保持实现、测试、文档和必要兼容性基线一致。
 - OpenSpec 实现提交应写 `OpenSpec: <change-name>` footer。
 - 破坏性变更必须同时使用 `!` 和 `BREAKING CHANGE:`，并说明迁移与回滚。
 - `WIP`、`fixup!`、`squash!` 不得进入共享历史。
@@ -72,6 +73,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 ## 注释硬规则
 
 - 所有手写注释必须符合 `docs/code-comment-convention.md`。
+- 手写 Go、C#/Unity、PowerShell 与 Protobuf 注释默认使用中文；代码标识符、协议字段、错误码、命令、外部 API 与无法准确翻译的专业名词保留英文。
 - Go package、导出声明、业务类型、函数、方法、struct 字段和 interface 方法必须有 Go doc 或紧邻声明的契约注释。
 - C# 所有手写类型和成员无论访问级别都必须使用 `///` XML documentation。
 - Protobuf message、enum、service、RPC 和 field 必须在 `.proto` 源文件中注释；禁止手工修改生成代码。
@@ -116,5 +118,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 - 禁止业务模块各自维护 session 或连接身份。
 - 禁止把 Redis 当作持久数据库。
 - 禁止手工修改生成代码。
+- Go/C# generated code、descriptor 与可推导 projection 不得提交；协议源、registry、fixtures/golden 和依赖 lock/checksum 必须提交。
+- 服务端 `generated` 与客户端 `Generated` 必须由统一入口在编译前重建；Unity 序列化资产不得引用已忽略的 generated scripts。
 - 禁止无上下文 TODO、魔法值、静默失败或吞错。
 - 禁止提交本地缓存、密钥、Unity Library/Temp/UserSettings 或 Go module/cache。

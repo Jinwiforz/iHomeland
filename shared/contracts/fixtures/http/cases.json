@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "version-success",
+      "request": {
+        "method": "GET",
+        "path": "/v1/version"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "minimumClientVersion": "0.1.0",
+          "protocolVersion": 1,
+          "serverVersion": "0.1.0"
+        }
+      }
+    },
+    {
+      "name": "login-invalid-credentials",
+      "request": {
+        "method": "POST",
+        "path": "/v1/auth/login",
+        "body": {
+          "password": "fixture-password-not-secret",
+          "username": "fixture-user"
+        }
+      },
+      "response": {
+        "status": 401,
+        "body": {
+          "code": 102,
+          "messageKey": "error.auth.invalid_credentials",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "ticket-channel-boundary",
+      "request": {
+        "method": "POST",
+        "path": "/v1/session/tickets",
+        "body": {
+          "channel": "TLS_TCP"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "endpoint": {
+            "channel": "TLS_TCP",
+            "host": "game.example.invalid",
+            "port": 4433
+          },
+          "expiresAtMs": 1700000030000,
+          "scopes": [
+            "GAMEPLAY"
+          ],
+          "ticket": "fixture-ticket-value-that-is-not-valid"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+edition = "2024";
+
+package ihomeland.common.v1;
+
+option csharp_namespace = "IHomeland.Protocol.Common.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/common/v1;commonv1";
+
+// PageRequest 携带 opaque continuation cursor，避免客户端依赖存储排序细节。
+// cursor 只能返回给签发它的 endpoint，客户端不得解析、拼接或跨查询复用。
+message PageRequest {
+  // cursor 是服务端签发的 opaque value，仅第一页允许为空。
+  string cursor = 1;
+  // page_size 范围为 1-100，限制单次请求工作量并继续受 route policy 上限约束。
+  uint32 page_size = 2;
+}
+
+// PageInfo 告知客户端能否继续请求下一稳定分页。
+// 服务端拥有 continuation 语义，客户端只在 has_more 为 true 时提交 next_cursor。
+message PageInfo {
+  // next_cursor 在不存在后续分页时为空。
+  string next_cursor = 1;
+  // has_more 防止客户端仅根据 item 数量推断是否存在下一页。
+  bool has_more = 2;
+}

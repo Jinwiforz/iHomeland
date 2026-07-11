@@ -1,0 +1,71 @@
+edition = "2024";
+
+package ihomeland.session.v1;
+
+option csharp_namespace = "IHomeland.Protocol.Session.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/session/v1;sessionv1";
+
+// AuthScope 表达服务端授予的 capability，而不是客户端声明的身份。
+// scope 只能由 ticket 签发流程收窄，listener 不得根据客户端请求自行扩大授权。
+enum AuthScope {
+  // AUTH_SCOPE_UNSPECIFIED 用于拒绝未声明明确 capability 的 ticket。
+  AUTH_SCOPE_UNSPECIFIED = 0;
+  // AUTH_SCOPE_CONTROL 允许接收经过认证的 control-plane push。
+  AUTH_SCOPE_CONTROL = 1;
+  // AUTH_SCOPE_GAMEPLAY 只允许建立可靠业务连接，具体 mutation 仍需 admission 与领域授权。
+  AUTH_SCOPE_GAMEPLAY = 2;
+}
+
+// TransportChannel 标识 ticket 唯一可以授权的 listener audience。
+// 每张 ticket 只能选择一个非零 channel，防止凭据在不同握手协议之间重放。
+enum TransportChannel {
+  // TRANSPORT_CHANNEL_UNSPECIFIED 防止 ticket 变成通道无关凭据。
+  TRANSPORT_CHANNEL_UNSPECIFIED = 0;
+  // TRANSPORT_CHANNEL_WSS 指向 WebSocket control plane。
+  TRANSPORT_CHANNEL_WSS = 1;
+  // TRANSPORT_CHANNEL_TLS_TCP 指向权威可靠业务面。
+  TRANSPORT_CHANNEL_TLS_TCP = 2;
+}
+
+// Endpoint 标识一个公开连接目标，但不嵌入凭据。
+// 连接目标来自受信任的 endpoint manifest，客户端输入不能覆盖 ticket 绑定的地址。
+message Endpoint {
+  // channel 决定预期 handshake 与 registry route。
+  TransportChannel channel = 1;
+  // host 是经过 deployment manifest 校验的 DNS name。
+  string host = 2;
+  // port 是范围为 1-65535 的 listener 端口。
+  uint32 port = 3;
+}
+
+// SessionSummary 暴露使全部旧连接失效所需的 epoch。
+// summary 不包含 refresh token、ticket nonce 或其他可用于建立连接的秘密材料。
+message SessionSummary {
+  // session_id 是服务端签发的 opaque identifier。
+  string session_id = 1;
+  // session_epoch 从 1 开始，并在全部旧 ticket 与连接必须失效时递增。
+  uint64 session_epoch = 2;
+  // expires_at_ms 是 session 的绝对 Unix epoch millisecond 过期时间。
+  int64 expires_at_ms = 3;
+}
+
+// ConnectionTicket 只授权一条连接到一个目标 channel，并保持较短有效期。
+// listener 必须校验 audience、epoch、过期时间和一次性 nonce，任一失败都不能降级认证。
+message ConnectionTicket {
+  // session_id 将 ticket 绑定到已认证 session record。
+  string session_id = 1;
+  // session_epoch 用于拒绝全局 session invalidation 之前签发的 ticket。
+  uint64 session_epoch = 2;
+  // target_channel 防止 ticket 被重放到另一个 listener。
+  TransportChannel target_channel = 3;
+  // endpoint 将 ticket 绑定到预期网络目标。
+  Endpoint endpoint = 4;
+  // scopes 只包含目标 channel 所需 capability。
+  repeated AuthScope scopes = 5;
+  // nonce 是 16-byte one-time value，服务端只保存其 hash。
+  bytes nonce = 6;
+  // issued_at_ms 支持受限时钟检查与审计。
+  int64 issued_at_ms = 7;
+  // expires_at_ms 强制执行 ticket 的短有效窗口。
+  int64 expires_at_ms = 8;
+}

@@ -1,0 +1,50 @@
+schema_version: 1
+verified_at: "2026-07-11"
+policy:
+  channel: stable
+  update_rule: latest-compatible
+protocols:
+  openapi:
+    version: "3.2.0"
+    source: "https://spec.openapis.org/oas/v3.2.0.html"
+    schema_sha256: "0c9d74bf25f9b9388b2d81e421ef60fdefa9feffa94898dadfc501b342b3bfcc"
+  protobuf_edition:
+    version: "2024"
+    source: "https://protobuf.dev/editions/overview/"
+  http:
+    version: "3"
+    source: "https://www.rfc-editor.org/rfc/rfc9114.html"
+  tls:
+    version: "1.3"
+    source: "https://www.rfc-editor.org/rfc/rfc8446.html"
+toolchains:
+  buf_cli:
+    version: "1.71.0"
+    source: "https://github.com/bufbuild/buf/releases/tag/v1.71.0"
+    windows_amd64_sha256: "f51dd473b9f5ce549877ac4ca13ff8a3b4678d13db5ae69ab0ae2b11b55d2fba"
+  buf_config:
+    version: "v2"
+    source: "https://buf.build/docs/configuration/v2/buf-yaml/"
+  protobuf_go_generator:
+    version: "1.36.11"
+    source: "https://github.com/protocolbuffers/protobuf-go/releases/tag/v1.36.11"
+  protoc:
+    version: "35.0"
+    source: "https://github.com/protocolbuffers/protobuf/releases/tag/v35.0"
+    windows_amd64_sha256: "d1cede9e308cc3eb072392af1c02ccae4bdd3d2f374ec2970dbd8cdfdaa91363"
+languages:
+  go:
+    version: "1.26.5"
+    source: "https://go.dev/dl/"
+    windows_amd64_sha256: "97e6b2a833b6d89f9ff17d25419ac0a7e3b482a044e9ab18cdef834bd834fd38"
+infrastructure:
+  mysql:
+    version: "9.7.1"
+    source: "https://dev.mysql.com/doc/relnotes/mysql/9.7/en/news-9-7-1.html"
+  redis:
+    version: "8.8.0"
+    source: "https://github.com/redis/redis/releases/tag/8.8.0"
+client:
+  unity:
+    version: "6000.5.2f1"
+    source: "https://unity.com/releases/editor/whats-new/6000.5.2f1"

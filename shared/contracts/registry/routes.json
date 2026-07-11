@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    { "messageId": 500, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 4096, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },
+    { "messageId": 501, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 2048, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },
+    { "messageId": 502, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 1024, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },
+    { "messageId": 503, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 8192, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },
+    { "messageId": 504, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 2048, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 }
+  ]
+}

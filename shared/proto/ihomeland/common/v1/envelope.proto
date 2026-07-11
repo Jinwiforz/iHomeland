@@ -1,0 +1,44 @@
+edition = "2024";
+
+package ihomeland.common.v1;
+
+option csharp_namespace = "IHomeland.Protocol.Common.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/common/v1;commonv1";
+
+// MessageKind 在 payload 解码前区分 correlation 与投递语义。
+// 未知值必须被当前接收方拒绝，不能降级为 PUSH 或其他无需关联的类型。
+enum MessageKind {
+  // MESSAGE_KIND_UNSPECIFIED 用于拒绝发送方未声明投递语义的 envelope。
+  MESSAGE_KIND_UNSPECIFIED = 0;
+  // MESSAGE_KIND_REQUEST 要求恰好一个关联的 response 或 error。
+  MESSAGE_KIND_REQUEST = 1;
+  // MESSAGE_KIND_RESPONSE 完成先前已接受的 request 或 command。
+  MESSAGE_KIND_RESPONSE = 2;
+  // MESSAGE_KIND_COMMAND 请求具备幂等保护的状态变更。
+  MESSAGE_KIND_COMMAND = 3;
+  // MESSAGE_KIND_PUSH 投递由服务端主动发起的状态或控制信息。
+  MESSAGE_KIND_PUSH = 4;
+  // MESSAGE_KIND_ERROR 承载稳定的公开错误契约。
+  MESSAGE_KIND_ERROR = 5;
+}
+
+// ReliableEnvelope 将通道无关的路由与 correlation 信息保持在业务 payload 之外。
+// adapter 必须先验证 envelope，再根据 registry 解码 payload，禁止由 payload 覆盖路由身份。
+message ReliableEnvelope {
+  // protocol_version 选择兼容的 envelope 契约代际。
+  uint32 protocol_version = 1;
+  // message_id 通过 message registry 解析具体 payload 类型。
+  uint32 message_id = 2;
+  // kind 决定允许使用的 correlation identifier 与路由方向。
+  MessageKind kind = 3;
+  // request_id 是仅供 request/response 交互使用的 16-byte opaque identifier。
+  bytes request_id = 4;
+  // command_id 是用于 mutation command 去重的 16-byte opaque identifier。
+  bytes command_id = 5;
+  // sequence 从 1 开始并在同一认证连接内递增，用于检测消息缺口与过期消息。
+  uint64 sequence = 6;
+  // timestamp_ms 是发送方提供的正数 Unix epoch millisecond 观测时间。
+  int64 timestamp_ms = 7;
+  // payload 包含 message_id 所指类型的确定性 Protobuf 编码。
+  bytes payload = 8;
+}

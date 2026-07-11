@@ -4,7 +4,6 @@
 # 源码、配置与文档始终按文本规范化。
 *.asmdef text
 *.asset text
-*.bat text
 *.cs text
 *.editorconfig text
 *.gitignore text
@@ -44,3 +43,4 @@
 *.webm -text
 *.webp -text
 *.zip -text
+*.bin -text

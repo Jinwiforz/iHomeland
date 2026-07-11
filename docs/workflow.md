@@ -6,7 +6,7 @@
 - `develop`：当前集成主线，按路线承载已通过 OpenSpec 的工作。
 - 功能分支：一个 OpenSpec change 对应一条短生命周期分支，命名应表达业务目标。
 
-分支不得混入本机缓存、密钥或与 change 无关的生成文件。
+分支不得混入本机缓存、密钥或 Go/C# generated code；fixtures/golden、lock/checksum 等兼容性与依赖基线按 owner 规则提交。
 
 ## Git 提交规范
 
@@ -60,7 +60,7 @@ Git 提交消息与提交粒度的唯一 owner 文档是 `docs/git-commit-conven
 `qualify-server-v1` 完成前：
 
 - 可以维护 Unity 架构与接入文档。
-- 不得创建 Unity runtime、scene、prefab 或生成 C# 协议。
+- 不得创建 Unity runtime、scene、prefab，或把 C# generated code 写入 Unity 工程和 Git；S0 只允许临时 generation qualification。
 - 不得用 Unity 手工联调替代服务端 contract tests。
 
 `qualify-server-v1` 必须冻结：
@@ -173,7 +173,7 @@ Change 完成至少满足：
 - 提交消息符合 `docs/git-commit-convention.md`
 - 无 unresolved conflict
 - 无无 owner 协议、table、key、listener 或 interface
-- 无密钥、缓存、本机配置和手工 generated code
+- 无密钥、缓存、本机配置和被 Git 跟踪的 generated code
 - README/docs 与实现一致
 
 服务端资格 change 额外要求 Go unit/integration/contract/race、恢复、并发、背压和 shutdown 全部通过。
