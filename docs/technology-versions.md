@@ -8,6 +8,7 @@
 
 - `protocols`：OpenAPI、Protobuf edition、HTTP 与 TLS。
 - `toolchains`：Buf 与 Protobuf 代码生成器。
+- `libraries`：Prometheus client 等直接影响共享运行基础的核心 library。
 - `languages`：Go 等编程语言工具链。
 - `infrastructure`：MySQL、Redis 和后续基础设施镜像。
 - `client`：Unity Editor 与后续客户端运行时基线。

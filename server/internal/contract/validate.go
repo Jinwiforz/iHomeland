@@ -652,6 +652,12 @@ type languageVersionCatalog struct {
 	Go windowsBinaryVersionValue `yaml:"go"`
 }
 
+// libraryVersionCatalog 收集运行时代码直接依赖且需要中央治理的基础库版本。
+type libraryVersionCatalog struct {
+	// PrometheusClientGo 锁定诊断 metrics 使用的官方 Go client。
+	PrometheusClientGo versionValue `yaml:"prometheus_client_go"`
+}
+
 // versionCatalog 是 ValidateVersions 所需的 versions.yaml 只读投影。
 // 使用窄结构可以让其他版本条目独立增长，同时仍对当前执行链要求的字段保持强校验。
 type versionCatalog struct {
@@ -659,6 +665,8 @@ type versionCatalog struct {
 	Protocols protocolVersionCatalog `yaml:"protocols"`
 	// Toolchains 持有生成与配置工具版本。
 	Toolchains toolchainVersionCatalog `yaml:"toolchains"`
+	// Libraries 持有跨运行基础使用的直接 Go library 版本。
+	Libraries libraryVersionCatalog `yaml:"libraries"`
 	// Languages 持有编译项目源代码的语言版本。
 	Languages languageVersionCatalog `yaml:"languages"`
 }
@@ -680,8 +688,8 @@ func ValidateVersions(root string) error {
 	if versions.Protocols.OpenAPI.Version == "" || versions.Protocols.Edition.Version == "" ||
 		versions.Toolchains.BufCLI.Version == "" || versions.Toolchains.BufConfig.Version == "" ||
 		versions.Toolchains.ProtobufGoGenerator.Version == "" || versions.Toolchains.Protoc.Version == "" ||
-		versions.Languages.Go.Version == "" {
-		return errors.New("versions.yaml is missing a required protocol, toolchain, or language version")
+		versions.Libraries.PrometheusClientGo.Version == "" || versions.Languages.Go.Version == "" {
+		return errors.New("versions.yaml is missing a required protocol, toolchain, library, or language version")
 	}
 	// 每项同时声明目标文件和应出现的精确锚点，使新增生态配置必须显式加入治理。
 	checks := []struct {
@@ -698,6 +706,7 @@ func ValidateVersions(root string) error {
 		{filepath.Join(root, "shared", "contracts", "http", "v1", "openapi.yaml"), "openapi: " + versions.Protocols.OpenAPI.Version},
 		{filepath.Join(root, "server", "go.mod"), "go " + versions.Languages.Go.Version},
 		{filepath.Join(root, "server", "go.mod"), "google.golang.org/protobuf v" + versions.Toolchains.ProtobufGoGenerator.Version},
+		{filepath.Join(root, "server", "go.mod"), "github.com/prometheus/client_golang v" + versions.Libraries.PrometheusClientGo.Version},
 		{filepath.Join(root, ".gitignore"), "/.local/"},
 		{filepath.Join(root, ".gitignore"), "/server/internal/generated/proto/"},
 		{filepath.Join(root, ".gitignore"), "/client/Assets/App/Generated/"},

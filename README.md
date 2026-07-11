@@ -41,6 +41,7 @@ versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本�
 - `docs/architecture.md`：总体架构与状态所有权
 - `docs/roadmap.md`：严格 change 路线与进入条件
 - `docs/network-transport-architecture.md`：五种通道与统一会话
+- `docs/network-port-allocation.md`：默认端口、环境覆盖与冲突处理
 - `docs/protocol-compatibility.md`：新 v1 协议治理
 - `docs/client-architecture.md`：Unity 混合运行时
 - `docs/client-ui-architecture.md`：UI Toolkit/uGUI 规则

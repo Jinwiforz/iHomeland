@@ -26,6 +26,7 @@ Git 提交消息与提交粒度的唯一 owner 文档是 `docs/git-commit-conven
 - `docs/architecture.md`：系统边界和状态所有权。
 - `docs/roadmap.md`：严格交付顺序与 changes。
 - `docs/network-transport-architecture.md`：通道、会话、安全和故障。
+- `docs/network-port-allocation.md`：默认端口、环境覆盖、映射和冲突处理。
 - `docs/protocol-compatibility.md`：schema、编号、路由和演进。
 - `docs/client-architecture.md`：Unity runtime 与 scope。
 - `docs/client-ui-architecture.md`：双 UI 与 view lifecycle。

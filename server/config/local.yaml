@@ -1,0 +1,14 @@
+environment: local
+runtime:
+  startupTimeout: 10s
+  shutdownTimeout: 10s
+logging:
+  level: info
+  format: text
+diagnostic:
+  address: 127.0.0.1:8081
+  readHeaderTimeout: 3s
+  readTimeout: 5s
+  writeTimeout: 10s
+  idleTimeout: 30s
+  maxHeaderBytes: 8192

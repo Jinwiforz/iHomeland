@@ -1,21 +1,4 @@
-# Server Architecture 规格
-
-## Purpose
-
-定义 Go 服务端 Composition Root、分层、领域、存储、生命周期、可观测和测试行为。
-
-## Requirements
-
-### Requirement: 服务端必须使用唯一 Composition Root
-Go 服务端 MUST 由唯一 Composition Root 创建配置、日志、metrics、clock、ID generator、基础设施、repositories、application services 和 transport adapters。只有真实持有资源或后台生命周期的对象才能注册为 lifecycle component；组件 MUST 按显式依赖顺序启动，初始化失败时只逆序停止已成功组件，正常关闭时也按逆序停止且每一步共享总关闭 deadline。
-
-#### Scenario: 中间组件初始化失败
-- **WHEN** 第 N 个 lifecycle component 启动失败
-- **THEN** 服务端只按逆序停止前 N-1 个已成功组件、保持非 ready 并返回非零退出结果
-
-#### Scenario: 存储初始化失败
-- **WHEN** MySQL 或 Redis adapter 在启动阶段初始化失败
-- **THEN** 服务端通过同一 lifecycle 协议逆序释放已成功资源、拒绝进入 ready 状态并返回非零退出结果
+## ADDED Requirements
 
 ### Requirement: 服务端配置必须在产生副作用前完整验证
 服务端 MUST 从显式配置文件和受支持的环境覆盖加载类型化、启动后只读的配置快照，拒绝未知字段、格式错误、非法范围、冲突地址和缺失必填值。除读取配置与构建纯内存对象外，任何 listener、文件写入或后台任务 MUST 等待配置验证成功。
@@ -76,19 +59,18 @@ Go 服务端 MUST 由唯一 Composition Root 创建配置、日志、metrics、c
 - **WHEN** 任一必需组件启动失败
 - **THEN** 已启动组件完成逆序回滚，失败组件不会执行 Stop，进程以非零退出码结束
 
-### Requirement: 业务逻辑必须与 transport 解耦
-Account、PersonalWorld、WorldInstance 与 VisitSession 业务 MUST 通过 application service 与 domain model 实现，不得直接依赖 Gin handler、WebSocket connection 或 TCP socket。
+## MODIFIED Requirements
 
-#### Scenario: 个人世界命令由 TCP 调用
-- **WHEN** TLS/TCP adapter 收到通过 AuthContext、admission 和 schema 校验的个人世界 command
-- **THEN** adapter 只完成 decode、validate、authorize、调用 application service 和 encode，世界 mutation 由对应 domain owner 执行
+### Requirement: 服务端必须使用唯一 Composition Root
+Go 服务端 MUST 由唯一 Composition Root 创建配置、日志、metrics、clock、ID generator、基础设施、repositories、application services 和 transport adapters。只有真实持有资源或后台生命周期的对象才能注册为 lifecycle component；组件 MUST 按显式依赖顺序启动，初始化失败时只逆序停止已成功组件，正常关闭时也按逆序停止且每一步共享总关闭 deadline。
 
-### Requirement: 持久事实与运行态缓存必须分离
-MySQL MUST 保存 Account、Player 与 PersonalWorld 等需要恢复的持久事实，Redis MUST 只保存 session、WorldInstance assignment/lease、VisitSession、presence 和 admission 等可恢复或可失效运行态；业务模块不得把 Redis 作为账号、个人世界、资产或奖励事实的唯一来源。
+#### Scenario: 中间组件初始化失败
+- **WHEN** 第 N 个 lifecycle component 启动失败
+- **THEN** 服务端只按逆序停止前 N-1 个已成功组件、保持非 ready 并返回非零退出结果
 
-#### Scenario: Redis 数据被清空
-- **WHEN** Redis flush 后服务恢复
-- **THEN** 持久账号、Player 与 PersonalWorld revision 仍可从 MySQL 恢复，WorldInstance 和 VisitSession 通过权威事实重建或安全结束
+#### Scenario: 存储初始化失败
+- **WHEN** 后续 MySQL 或 Redis adapter 在启动阶段初始化失败
+- **THEN** 服务端通过同一 lifecycle 协议逆序释放已成功资源、拒绝进入 ready 状态并返回非零退出结果
 
 ### Requirement: 服务端必须可观测并可受控关闭
 服务端 MUST 提供结构化日志、低基数 metrics、健康/就绪/版本诊断、稳定关闭原因和有总超时上限的 graceful shutdown。关闭顺序 MUST 先撤销 readiness，再逆序停止组件；每个组件在 Stop 中取消并等待自身任务，root task 按所有权在规定阶段取消，最先启动的诊断 listener 最后关闭。任一步失败都必须保留原因并继续尝试释放剩余组件。
@@ -100,10 +82,3 @@ MySQL MUST 保存 Account、Player 与 PersonalWorld 等需要恢复的持久事
 #### Scenario: 一个组件关闭失败
 - **WHEN** 某 lifecycle component 的 Stop 返回错误
 - **THEN** runtime 记录组件名与错误、继续停止其余组件，并在最终运行结果中报告关闭失败
-
-### Requirement: 服务端核心必须可独立测试
-Domain 和 application service MUST 在不启动 listener、MySQL 或 Redis 的情况下运行单元测试，adapter 必须通过 contract/integration test 验证。
-
-#### Scenario: 测试个人世界核心
-- **WHEN** 测试 PersonalWorld identity/revision、WorldInstance lease/fencing、VisitSession 权限和断线恢复
-- **THEN** 测试只构造纯 Go domain/application 对象并使用 fake repository、clock、placement 或 admission provider

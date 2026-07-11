@@ -38,6 +38,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 - 总体架构：`docs/architecture.md`
 - 路线图：`docs/roadmap.md`
 - 网络传输：`docs/network-transport-architecture.md`
+- 网络端口：`docs/network-port-allocation.md`
 - 协议治理：`docs/protocol-compatibility.md`
 - 客户端运行时：`docs/client-architecture.md`
 - 客户端 UI：`docs/client-ui-architecture.md`
