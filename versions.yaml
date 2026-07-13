@@ -36,6 +36,9 @@ libraries:
   prometheus_client_go:
     version: "1.23.2"
     source: "https://github.com/prometheus/client_golang/releases/tag/v1.23.2"
+  golang_x_text:
+    version: "0.28.0"
+    source: "https://pkg.go.dev/golang.org/x/text@v0.28.0"
 languages:
   go:
     version: "1.26.5"

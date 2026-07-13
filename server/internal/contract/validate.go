@@ -44,6 +44,9 @@ var messageKeyPattern = regexp.MustCompile(`^error(?:\.[a-z][a-z0-9_]*)+$`)
 // checksumPattern 验证版本目录中的 SHA-256 使用完整小写十六进制表达。
 var checksumPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// accountUsernamePattern 是 OpenAPI 与 account domain 必须共同执行的唯一 username 接受集合。
+const accountUsernamePattern = `^[A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?$`
+
 // Validate 联合检查 registry 唯一性、descriptor 引用、路由策略、身份边界与 OpenAPI 语义。
 //
 // root 指向仓库根目录，openAPISchemaPath 可为空；非空时必须是已锁定的官方 schema。
@@ -481,7 +484,49 @@ func validateOpenAPI(root string, schemaPath string) error {
 			return fmt.Errorf("OpenAPI requires %s with operationId %s", route, expectedOperationID)
 		}
 	}
+	if err := validateAccountHTTPSchemas(rootMap); err != nil {
+		return err
+	}
 	return validateHTTPFixtureRoutes(root, paths)
+}
+
+// validateAccountHTTPSchemas 防止账号字段约束仅停留在描述文本或偏离 domain 接受集合。
+func validateAccountHTTPSchemas(root map[string]any) error {
+	components, ok := root["components"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI components must be an object")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI component schemas must be an object")
+	}
+	for _, schemaName := range []string{"RegisterRequest", "LoginRequest"} {
+		schema, ok := schemas[schemaName].(map[string]any)
+		if !ok {
+			return fmt.Errorf("OpenAPI requires schema %s", schemaName)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("OpenAPI schema %s requires properties", schemaName)
+		}
+		username, ok := properties["username"].(map[string]any)
+		if !ok || username["pattern"] != accountUsernamePattern || username["minLength"] != 3 || username["maxLength"] != 64 {
+			return fmt.Errorf("OpenAPI schema %s username must match account canonical boundary", schemaName)
+		}
+		if description, ok := username["description"].(string); !ok || strings.TrimSpace(description) == "" {
+			return fmt.Errorf("OpenAPI schema %s username requires canonicalization description", schemaName)
+		}
+	}
+	register := schemas["RegisterRequest"].(map[string]any)
+	properties := register["properties"].(map[string]any)
+	displayName, ok := properties["displayName"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI RegisterRequest requires displayName")
+	}
+	if description, ok := displayName["description"].(string); !ok || description == "" {
+		return errors.New("OpenAPI displayName requires normalization description")
+	}
+	return nil
 }
 
 // httpFixtureRouteManifest 是 contract validator 消费的 HTTPS fixture 窄投影。
@@ -656,6 +701,8 @@ type languageVersionCatalog struct {
 type libraryVersionCatalog struct {
 	// PrometheusClientGo 锁定诊断 metrics 使用的官方 Go client。
 	PrometheusClientGo versionValue `yaml:"prometheus_client_go"`
+	// GoText 锁定账号 Unicode normalization 使用的官方扩展库。
+	GoText versionValue `yaml:"golang_x_text"`
 }
 
 // versionCatalog 是 ValidateVersions 所需的 versions.yaml 只读投影。
@@ -688,7 +735,7 @@ func ValidateVersions(root string) error {
 	if versions.Protocols.OpenAPI.Version == "" || versions.Protocols.Edition.Version == "" ||
 		versions.Toolchains.BufCLI.Version == "" || versions.Toolchains.BufConfig.Version == "" ||
 		versions.Toolchains.ProtobufGoGenerator.Version == "" || versions.Toolchains.Protoc.Version == "" ||
-		versions.Libraries.PrometheusClientGo.Version == "" || versions.Languages.Go.Version == "" {
+		versions.Libraries.PrometheusClientGo.Version == "" || versions.Libraries.GoText.Version == "" || versions.Languages.Go.Version == "" {
 		return errors.New("versions.yaml is missing a required protocol, toolchain, library, or language version")
 	}
 	// 每项同时声明目标文件和应出现的精确锚点，使新增生态配置必须显式加入治理。
@@ -707,6 +754,7 @@ func ValidateVersions(root string) error {
 		{filepath.Join(root, "server", "go.mod"), "go " + versions.Languages.Go.Version},
 		{filepath.Join(root, "server", "go.mod"), "google.golang.org/protobuf v" + versions.Toolchains.ProtobufGoGenerator.Version},
 		{filepath.Join(root, "server", "go.mod"), "github.com/prometheus/client_golang v" + versions.Libraries.PrometheusClientGo.Version},
+		{filepath.Join(root, "server", "go.mod"), "golang.org/x/text v" + versions.Libraries.GoText.Version},
 		{filepath.Join(root, ".gitignore"), "/.local/"},
 		{filepath.Join(root, ".gitignore"), "/server/internal/generated/proto/"},
 		{filepath.Join(root, ".gitignore"), "/client/Assets/App/Generated/"},

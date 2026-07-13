@@ -124,6 +124,7 @@ func buildHTTPFixtures() HTTPManifest {
 	return HTTPManifest{SchemaVersion: 1, Cases: []HTTPCase{
 		{Name: "version-success", Request: HTTPRequest{Method: "GET", Path: "/v1/version"}, Response: HTTPResponse{Status: 200, Body: map[string]any{"protocolVersion": 1, "minimumClientVersion": "0.1.0", "serverVersion": "0.1.0"}}},
 		{Name: "login-invalid-credentials", Request: HTTPRequest{Method: "POST", Path: "/v1/auth/login", Body: map[string]any{"username": "fixture-user", "password": "fixture-password-not-secret"}}, Response: HTTPResponse{Status: 401, Body: map[string]any{"code": 102, "messageKey": "error.auth.invalid_credentials", "requestId": "fixture-request-id", "retryable": false}}},
+		{Name: "register-username-conflict", Request: HTTPRequest{Method: "POST", Path: "/v1/auth/register", Body: map[string]any{"username": "fixture-user", "password": "fixture-password-not-secret", "displayName": "Fixture User"}}, Response: HTTPResponse{Status: 409, Body: map[string]any{"code": 104, "messageKey": "error.account.username_taken", "requestId": "fixture-request-id", "retryable": false}}},
 		{Name: "ticket-channel-boundary", Request: HTTPRequest{Method: "POST", Path: "/v1/session/tickets", Body: map[string]any{"channel": "TLS_TCP"}}, Response: HTTPResponse{Status: 201, Body: map[string]any{"ticket": "fixture-ticket-value-that-is-not-valid", "endpoint": map[string]any{"channel": "TLS_TCP", "host": "game.example.invalid", "port": 4433}, "scopes": []string{"GAMEPLAY"}, "expiresAtMs": 1700000030000}}},
 	}}
 }

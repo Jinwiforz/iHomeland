@@ -197,6 +197,8 @@ components:
           type: string
           minLength: 3
           maxLength: 64
+          pattern: '^[A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?$'
+          description: 使用 ASCII lowercase canonical key；仅接受 ASCII letter、digit、点、下划线和连字符，且首尾必须为 letter 或 digit。
         password:
           type: string
           minLength: 12
@@ -206,6 +208,7 @@ components:
           type: string
           minLength: 1
           maxLength: 32
+          description: 服务端执行 Unicode NFC、首尾非 control Unicode whitespace 裁剪和连续空白折叠，并拒绝包括 tab、换行在内的 control、format 与 bidi override 字符；长度按规范化后的 Unicode code points 计算。
     LoginRequest:
       type: object
       additionalProperties: false
@@ -215,6 +218,8 @@ components:
           type: string
           minLength: 3
           maxLength: 64
+          pattern: '^[A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?$'
+          description: 使用 ASCII lowercase canonical key；仅接受 ASCII letter、digit、点、下划线和连字符，且首尾必须为 letter 或 digit。
         password:
           type: string
           minLength: 1

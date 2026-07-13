@@ -4,14 +4,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 )
 
-// 编译期断言确认 Composition Root 的生产基础依赖可直接满足 session 消费接口，
-// 避免身份模块复制第二套 system clock 或 CSPRNG ID generator。
+// 编译期断言确认 Composition Root 的生产基础依赖可直接满足 session 与 account 消费接口，
+// 且 Session Core 可以直接作为 account.SessionIssuer，避免身份模块复制第二套 system clock、
+// CSPRNG ID generator 或 session facade。
 var (
-	_ session.Clock       = SystemClock{}
-	_ session.IDGenerator = RandomIDGenerator{}
+	_ session.Clock         = SystemClock{}
+	_ session.IDGenerator   = RandomIDGenerator{}
+	_ account.Clock         = SystemClock{}
+	_ account.IDGenerator   = RandomIDGenerator{}
+	_ account.SessionIssuer = (*session.Service)(nil)
 )
 
 // fakeClock 固定测试时间，避免 lifecycle 断言依赖墙上时钟。

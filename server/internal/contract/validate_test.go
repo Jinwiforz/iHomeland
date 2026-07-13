@@ -3,6 +3,7 @@ package contract
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -174,5 +175,48 @@ func TestForbiddenActorFieldNames(t *testing.T) {
 	}
 	if forbiddenActorField.MatchString("target_seat") {
 		t.Fatal("business target fields must remain legal")
+	}
+}
+
+// TestValidateAccountHTTPSchemasRejectsLooseUsername 保护 OpenAPI 不得放宽或只描述账号字段边界。
+func TestValidateAccountHTTPSchemasRejectsLooseUsername(t *testing.T) {
+	validUsername := func() map[string]any {
+		return map[string]any{"type": "string", "minLength": 3, "maxLength": 64, "pattern": accountUsernamePattern, "description": "canonical ASCII username"}
+	}
+	document := map[string]any{"components": map[string]any{"schemas": map[string]any{
+		"RegisterRequest": map[string]any{"properties": map[string]any{"username": validUsername(), "displayName": map[string]any{"description": "normalized Unicode display name"}}},
+		"LoginRequest":    map[string]any{"properties": map[string]any{"username": validUsername()}},
+	}}}
+	if err := validateAccountHTTPSchemas(document); err != nil {
+		t.Fatalf("valid account schema rejected: %v", err)
+	}
+	register := document["components"].(map[string]any)["schemas"].(map[string]any)["RegisterRequest"].(map[string]any)
+	register["properties"].(map[string]any)["username"].(map[string]any)["pattern"] = `^.*$`
+	if err := validateAccountHTTPSchemas(document); err == nil {
+		t.Fatal("loose username pattern unexpectedly accepted")
+	}
+}
+
+// TestAccountUsernamePatternMatchesDomain 验证公开 regex 对代表性输入执行与 account domain 相同的接受规则。
+func TestAccountUsernamePatternMatchesDomain(t *testing.T) {
+	pattern := regexp.MustCompile(accountUsernamePattern)
+	tests := []struct {
+		// value 是待执行公开 schema pattern 的 username。
+		value string
+		// valid 表示 account domain 是否允许该输入。
+		valid bool
+	}{
+		{value: "a01", valid: true},
+		{value: "Player.One", valid: true},
+		{value: "a1", valid: false},
+		{value: ".player", valid: false},
+		{value: "player-", valid: false},
+		{value: "player one", valid: false},
+		{value: "playеr", valid: false},
+	}
+	for _, test := range tests {
+		if pattern.MatchString(test.value) != test.valid {
+			t.Fatalf("pattern acceptance for %q does not match domain", test.value)
+		}
 	}
 }

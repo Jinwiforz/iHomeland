@@ -4,9 +4,13 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener，以及 transport-independent session core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义，但尚未接入真实 `SessionStore`、账号入口、连接 registry 或公开业务 listener；因此当前进程不会开放登录、刷新或 realtime 认证 API。
+当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener，以及 transport-independent session core 和 account core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。两者尚未接入真实 store、production password hasher、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新或 realtime 认证 API。
 
 Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。后续 Redis 与 transport adapter 必须实现这些接口，不能另建 token、ticket 或 epoch 语义。
+
+Account core 位于 `internal/account/`。Username 使用受限 ASCII lowercase canonical key，Unicode 展示需求由经过 NFC 和安全字符校验的 display name 承担；password 保持原始 bytes，只能进入 `CredentialHasher`，repository 只接收自描述 `CredentialHash`。Register 先原子提交账号再创建 session，后者失败不会删除账号；login 对 unknown username 使用同算法、同成本 dummy hash，并将 unknown、wrong password 与 inactive account 收敛为同一外部错误。Refresh、logout、ticket 和 epoch 始终由 `internal/session` 拥有。
+
+Account production package 只定义消费侧接口，reference adapters 仅存在于 `_test.go`。后续 storage change 必须实现 MySQL repository，并在目标硬件 benchmark 后选择 production memory-hard password hasher；在这两项完成前，Composition Root 不得接线 account service，也不得宣称 register/login 可用。
 
 ## 命令规则
 

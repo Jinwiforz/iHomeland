@@ -8,6 +8,7 @@
     { "code": 101, "name": "AUTH_FORBIDDEN", "owner": "session", "category": "AUTH", "messageKey": "error.auth.forbidden", "retryable": false, "httpStatus": 403 },
     { "code": 102, "name": "AUTH_INVALID_CREDENTIALS", "owner": "account", "category": "AUTH", "messageKey": "error.auth.invalid_credentials", "retryable": false, "httpStatus": 401 },
     { "code": 103, "name": "AUTH_TICKET_EXPIRED", "owner": "session", "category": "AUTH", "messageKey": "error.auth.ticket_expired", "retryable": false, "httpStatus": 401 },
+    { "code": 104, "name": "ACCOUNT_USERNAME_TAKEN", "owner": "account", "category": "CONFLICT", "messageKey": "error.account.username_taken", "retryable": false, "httpStatus": 409 },
     { "code": 200, "name": "VALIDATION_FAILED", "owner": "common", "category": "VALIDATION", "messageKey": "error.validation.failed", "retryable": false, "httpStatus": 400 },
     { "code": 400, "name": "RATE_LIMITED", "owner": "common", "category": "RATE_LIMIT", "messageKey": "error.rate_limited", "retryable": true, "httpStatus": 429 },
     { "code": 500, "name": "DEPENDENCY_UNAVAILABLE", "owner": "common", "category": "DEPENDENCY", "messageKey": "error.dependency.unavailable", "retryable": true, "httpStatus": 503 },
