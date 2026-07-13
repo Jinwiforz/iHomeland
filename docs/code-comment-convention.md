@@ -127,26 +127,21 @@ package comment 必须以 `Package <name>` 开头，并说明：
 - 同组 `const` 或 `var` 只有在共享同一语义时才能使用组注释；成员语义不同则逐项注释。
 
 ```go
-// PersonalWorld 持有单个个人世界的稳定身份与权威 revision。
+// PersonalWorld 持有个人世界身份与粗粒度持久生命周期。
 //
-// PersonalWorld 只允许在 owning goroutine 中修改，以避免锁粒度扩散到领域层。
-// 持久化与网络广播由 application 层在状态迁移成功后协调。
+// Aggregate 使用值语义，不持有 socket、storage transaction 或 mutable cache。调用方不能
+// 原地修改 snapshot；持久并发由 repository 使用 expected revision 原子决议。
 type PersonalWorld struct {
-    // ownerID 是世界生命周期内不可转移的玩家身份。
-    // 该值来自持久事实，不能由连接顺序、访客或 payload 覆盖。
-    ownerID PlayerID
-
-    // revision 在每次已提交 mutation 后严格递增。
-    // 客户端和 adapter 只能把它用于拒绝陈旧投影，不能自行推进。
-    revision uint64
+	// snapshot 保存 ID、immutable owner、lifecycle、revision 与 created time 的完整持久投影。
+	snapshot Snapshot
 }
 
-// Apply 执行通过 admission 与领域 policy 校验的世界 mutation。
+// ArchiveWorld 以 Owner 身份、expected revision 和 idempotency identity 归档世界。
 //
-// actorID 必须来自 AuthContext，而不是客户端 payload。仅 Owner 或被具体规则授权的
-// Visitor 可以修改状态；expectedRevision 过期时返回 ErrRevisionConflict，调用者必须
-// 重新读取权威投影，不能覆盖更新。
-func (world *PersonalWorld) Apply(actorID PlayerID, expectedRevision uint64) error {
+// command 中的 actor 必须来自 AuthContext，而不是客户端 payload。Service 先完成 Owner
+// authorization，再由 repository 原子决议 replay、revision conflict 与 lifecycle；ctx 取消
+// 不能证明 transaction 未提交，调用方必须依据 CommitPhase 选择恢复动作。
+func (service *Service) ArchiveWorld(ctx context.Context, command ArchiveCommand) (PersonalWorld, error) {
 	// ...
 }
 ```
