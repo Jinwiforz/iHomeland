@@ -10,6 +10,10 @@ Redis 只保存可恢复或可失效运行态。任何 key 在实现前必须通
 ih:{env}:{owner}:{kind}:{identity...}
 ```
 
+本文中的 `{...}` 表示待替换片段，不代表已经决定 Redis Cluster hash tag。
+Storage change 必须根据实际部署模式明确 transaction/script 涉及 key 的同 slot 策略，
+不能直接把整个环境固定到单一热点 slot。
+
 要求：
 
 - `env` 明确隔离 local、test、staging、production。
@@ -24,8 +28,11 @@ ih:{env}:{owner}:{kind}:{identity...}
 
 | Key Pattern | Owner | 用途 | 恢复/失效原则 |
 |---|---|---|---|
-| `ih:{env}:session:token:{tokenHash}` | session | access/session metadata | MySQL account 仍在；丢失后要求登录或刷新 |
-| `ih:{env}:session:ticket:{ticketHash}` | session | 一次性 connection ticket | 不恢复，短 TTL，使用后删除 |
+| `ih:{env}:session:record:{sessionID}` | session | principal、epoch、status 与 session expiry | 不恢复；丢失后要求重新登录 |
+| `ih:{env}:session:access:{accessDigest}` | session | access digest 到 session/epoch 的短期索引 | 不恢复；丢失后 access 认证失败 |
+| `ih:{env}:session:refresh:{refreshDigest}` | session | active refresh 或 consumed replay tombstone | 不恢复；consumed tombstone 保留到 session expiry |
+| `ih:{env}:session:ticket:{nonceDigest}` | session | 一次性 connection ticket 绑定与消费状态 | 不恢复；短 TTL，consumed marker 保留到 ticket expiry |
+| `ih:{env}:session:principal:{principalDigest}` | session | principal 到现有 session ids 的失效索引 | 可由活跃 session records 重建，成员随 session 清理 |
 | `ih:{env}:presence:player:{playerID}` | session | 在线连接摘要 | 从 connection registry 恢复 |
 | `ih:{env}:world:assignment:{personalWorldID}` | placement | 当前 WorldInstance assignment generation | 从 PersonalWorld 持久事实和 placement policy 重建 |
 | `ih:{env}:world:lease:{personalWorldID}` | placement | active writable instance lease/fencing | 不恢复；TTL 到期后重新竞争并拒绝旧 fencing token |
@@ -47,7 +54,9 @@ ih:{env}:{owner}:{kind}:{identity...}
 
 - 每个运行态 key 必须有 TTL 或明确的主动清理与恢复路径。
 - ticket TTL 必须短且一次性。
-- session TTL 与 token expiry 一致或更短。
+- session record TTL 必须覆盖该 session 的最长剩余资格，不能短于 refresh/tombstone 生命周期。
+- access、active refresh 与 ticket TTL 不得超过各自 expiry，也不得超过 session 剩余寿命。
+- consumed refresh tombstone 保留到 session expiry；consumed ticket marker 保留到 ticket expiry。
 - presence TTL 必须能容忍心跳抖动但不能无限延长。
 - lock 禁止无过期时间。
 - TTL refresh 由明确 owner 执行，不允许多个模块竞争续期。

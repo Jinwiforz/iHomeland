@@ -4,7 +4,9 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root 和独立诊断 listener；公开业务 listener、账号、session、个人世界、访客会话、MySQL 与 Redis adapter 由各自 change 按路线接入。
+当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener，以及 transport-independent session core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义，但尚未接入真实 `SessionStore`、账号入口、连接 registry 或公开业务 listener；因此当前进程不会开放登录、刷新或 realtime 认证 API。
+
+Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。后续 Redis 与 transport adapter 必须实现这些接口，不能另建 token、ticket 或 epoch 语义。
 
 ## 命令规则
 

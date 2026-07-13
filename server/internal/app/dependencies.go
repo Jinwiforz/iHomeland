@@ -19,7 +19,10 @@ type SystemClock struct{}
 // Now 返回包含单调分量的当前时间。
 func (SystemClock) Now() time.Time { return time.Now() }
 
-// IDGenerator 为进程实例和后续 correlation 创建不可预测标识。
+// IDGenerator 为各消费模块创建不可预测的通用标识材料。
+//
+// 具体 owner 负责添加实体前缀和执行字符校验，避免为 session、connection 或
+// correlation 分别维护重复的生产随机数实现。
 type IDGenerator interface {
 	// NewID 返回固定 16-byte 随机值的十六进制表达。
 	NewID() (string, error)

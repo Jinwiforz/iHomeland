@@ -3,6 +3,15 @@ package app
 import (
 	"testing"
 	"time"
+
+	"github.com/jinwiforz/ihomeland/server/internal/session"
+)
+
+// 编译期断言确认 Composition Root 的生产基础依赖可直接满足 session 消费接口，
+// 避免身份模块复制第二套 system clock 或 CSPRNG ID generator。
+var (
+	_ session.Clock       = SystemClock{}
+	_ session.IDGenerator = RandomIDGenerator{}
 )
 
 // fakeClock 固定测试时间，避免 lifecycle 断言依赖墙上时钟。
