@@ -42,6 +42,8 @@ type Config struct {
 	Logging Logging `yaml:"logging"`
 	// Diagnostic 定义与公开业务面隔离的诊断 listener。
 	Diagnostic Diagnostic `yaml:"diagnostic"`
+	// Storage 定义 MySQL 与 Redis 的非敏感连接、资源和探针策略。
+	Storage Storage `yaml:"storage"`
 }
 
 // Runtime 保存所有组件共享的启动与关闭总预算。
@@ -90,6 +92,7 @@ func Default() Config {
 			IdleTimeout:       30 * time.Second,
 			MaxHeaderBytes:    8192,
 		},
+		Storage: DefaultStorage(),
 	}
 }
 
@@ -165,6 +168,9 @@ func (config Config) Validate() error {
 	if config.Diagnostic.MaxHeaderBytes < 1024 || config.Diagnostic.MaxHeaderBytes > 65536 {
 		return errors.New("diagnostic.maxHeaderBytes must be between 1024 and 65536")
 	}
+	if err := config.Storage.validate(config.Environment); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -178,14 +184,17 @@ func (config Config) DiagnosticIsLoopback() bool {
 	return err == nil && address.IsLoopback()
 }
 
+// environmentOverride 将一个完整白名单环境键绑定到不回显原值的解析动作。
+type environmentOverride struct {
+	// key 是唯一允许读取的完整环境变量名，避免任意前缀键通过反射写入配置。
+	key string
+	// apply 只负责解析并写入目标字段；调用方统一隐藏可能敏感的原始值。
+	apply func(string) error
+}
+
 // applyEnvironment 只执行显式登记的覆盖，未知 IHOMELAND_ 键不会通过反射写入配置。
 func applyEnvironment(config *Config, lookup LookupEnv) error {
-	overrides := []struct {
-		// key 是唯一允许读取的完整环境变量名，避免任意前缀键通过反射写入配置。
-		key string
-		// apply 只负责解析并写入目标字段；调用方统一隐藏可能敏感的原始值。
-		apply func(string) error
-	}{
+	overrides := []environmentOverride{
 		{key: "IHOMELAND_ENVIRONMENT", apply: func(value string) error { config.Environment = value; return nil }},
 		{key: "IHOMELAND_LOG_LEVEL", apply: func(value string) error { config.Logging.Level = strings.ToLower(value); return nil }},
 		{key: "IHOMELAND_LOG_FORMAT", apply: func(value string) error { config.Logging.Format = strings.ToLower(value); return nil }},
@@ -205,6 +214,7 @@ func applyEnvironment(config *Config, lookup LookupEnv) error {
 			return nil
 		}},
 	}
+	overrides = append(overrides, storageEnvironmentOverrides(config)...)
 	for _, override := range overrides {
 		value, exists := lookup(override.key)
 		if !exists {

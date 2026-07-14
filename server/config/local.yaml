@@ -12,3 +12,51 @@ diagnostic:
   writeTimeout: 10s
   idleTimeout: 30s
   maxHeaderBytes: 8192
+storage:
+  mysql:
+    address: 127.0.0.1:3306
+    database: ihomeland
+    username: ihomeland
+    passwordSecret: env:IHOMELAND_MYSQL_PASSWORD
+    connectTimeout: 3s
+    readTimeout: 5s
+    writeTimeout: 5s
+    migrationLockTimeout: 15s
+    pool:
+      maxOpenConns: 16
+      maxIdleConns: 8
+      connMaxLifetime: 30m
+      connMaxIdleTime: 5m
+    probe:
+      interval: 5s
+      timeout: 1s
+      failureThreshold: 3
+    tls:
+      enabled: false
+      serverName: ""
+      caFile: ""
+      clientCertificateFile: ""
+      clientKeySecret: ""
+  redis:
+    address: 127.0.0.1:6379
+    database: 0
+    username: ""
+    passwordSecret: env:IHOMELAND_REDIS_PASSWORD
+    dialTimeout: 3s
+    readTimeout: 2s
+    writeTimeout: 2s
+    pool:
+      size: 16
+      minIdleConns: 2
+      connMaxLifetime: 30m
+      connMaxIdleTime: 5m
+    probe:
+      interval: 5s
+      timeout: 1s
+      failureThreshold: 3
+    tls:
+      enabled: false
+      serverName: ""
+      caFile: ""
+      clientCertificateFile: ""
+      clientKeySecret: ""

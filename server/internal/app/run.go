@@ -12,6 +12,9 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/config"
 	"github.com/jinwiforz/ihomeland/server/internal/logging"
 	"github.com/jinwiforz/ihomeland/server/internal/observability"
+	"github.com/jinwiforz/ihomeland/server/internal/secret"
+	storagemysql "github.com/jinwiforz/ihomeland/server/internal/storage/mysql"
+	storageredis "github.com/jinwiforz/ihomeland/server/internal/storage/redis"
 	"github.com/jinwiforz/ihomeland/server/internal/transport/diagnostic"
 )
 
@@ -29,6 +32,8 @@ type Options struct {
 	Clock Clock
 	// IDGenerator 创建进程实例 ID；为空时使用 CSPRNG。
 	IDGenerator IDGenerator
+	// SecretProvider 解析显式 env:/file: reference；为空时使用 production environment/file provider。
+	SecretProvider secret.Provider
 }
 
 // Run 加载配置、构建唯一 Composition Root，并阻塞到关闭完成。
@@ -40,6 +45,22 @@ func Run(ctx context.Context, options Options) Result {
 	if err := options.BuildInfo.Validate(); err != nil {
 		return Result{Kind: ResultStartupError, Err: err}
 	}
+	secretProvider := options.SecretProvider
+	if secretProvider == nil {
+		secretProvider = secret.NewEnvironmentFileProvider()
+	}
+	if err := validateSecretProvider(secretProvider); err != nil {
+		return Result{Kind: ResultConfigError, Err: err}
+	}
+	startupContext, cancelStartup := context.WithTimeout(ctx, settings.Runtime.StartupTimeout)
+	defer cancelStartup()
+	prepared, err := prepareStorage(startupContext, settings.Storage, secretProvider)
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultConfigError, Err: err}
+	}
+	defer prepared.mysqlPassword.Destroy()
+	defer prepared.redisPassword.Destroy()
 	output := options.Output
 	if output == nil {
 		output = os.Stdout
@@ -70,16 +91,36 @@ func Run(ctx context.Context, options Options) Result {
 	if err != nil {
 		return Result{Kind: ResultStartupError, Err: err}
 	}
-	diagnosticServer := diagnostic.New(settings.Diagnostic, readiness, options.BuildInfo, metrics, diagnosticTasks)
-	lifecycle, err := NewLifecycle([]Component{diagnosticServer}, clock, logger, metrics)
+	mysqlTasks, err := tasks.NewOwner(componentContext, "mysql")
 	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
+	redisTasks, err := tasks.NewOwner(componentContext, "redis")
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
+	diagnosticServer := diagnostic.New(settings.Diagnostic, readiness, options.BuildInfo, metrics, diagnosticTasks)
+	mysqlComponent, err := storagemysql.New(settings.Storage.MySQL, prepared.mysqlPassword, prepared.mysqlTLS, mysqlTasks, metrics, logger.With("component", "mysql"))
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
+	redisComponent, err := storageredis.New(settings.Storage.Redis, prepared.redisPassword, prepared.redisTLS, redisTasks, metrics, logger.With("component", "redis"))
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
+	lifecycle, err := NewLifecycle([]Component{diagnosticServer, mysqlComponent, redisComponent}, clock, logger, metrics)
+	if err != nil {
+		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
 	if !settings.DiagnosticIsLoopback() {
 		logger.Warn("diagnostic listener is not loopback-bound; enforce deployment network policy", "component", "diagnostic", "operation", "configure")
 	}
 
-	startupContext, cancelStartup := context.WithTimeout(ctx, settings.Runtime.StartupTimeout)
 	startErr := lifecycle.Start(startupContext)
 	cancelStartup()
 	if startErr != nil {

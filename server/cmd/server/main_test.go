@@ -58,6 +58,10 @@ func TestRunSecondSignalForcesExit(t *testing.T) {
 
 // TestServerProcessLifecycle 构建真实 binary 并验证 ready、signal、零退出、日志和端口释放。
 func TestServerProcessLifecycle(t *testing.T) {
+	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") != "1" {
+		// cmd/server owner：ready 现依赖真实 storage；统一 harness 提供资源并执行本测试，普通单元门不隐式连接本机服务。
+		t.Skip("cmd/server owner: run tools/storage/storage.ps1 verify to satisfy required storage readiness")
+	}
 	executable := buildServer(t)
 	process := startReadyProcess(t, executable, func() (string, string) { return writeProcessConfig(t) })
 	if err := requestProcessShutdown(process.command.Process); err != nil {
@@ -118,6 +122,10 @@ func TestServerProcessInvalidConfig(t *testing.T) {
 
 // TestServerProcessShutdownTimeout 使用半截 header 保持活跃连接，验证总关闭预算会强制失败退出。
 func TestServerProcessShutdownTimeout(t *testing.T) {
+	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") != "1" {
+		// cmd/server owner：只有真实 graph ready 后才能验证 shutdown timeout；由 storage verify 负责恢复该前置条件。
+		t.Skip("cmd/server owner: run tools/storage/storage.ps1 verify to test process shutdown with required storage")
+	}
 	executable := buildServer(t)
 	process := startReadyProcess(t, executable, func() (string, string) {
 		return writeProcessConfigWithTimeouts(t, 20*time.Millisecond, 5*time.Second)
@@ -185,6 +193,9 @@ func writeProcessConfigWithTimeouts(t *testing.T, shutdownTimeout time.Duration,
 		t.Fatal(err)
 	}
 	contents := fmt.Sprintf("environment: test\nruntime:\n  startupTimeout: 5s\n  shutdownTimeout: %s\nlogging:\n  level: info\n  format: text\ndiagnostic:\n  address: %s\n  readHeaderTimeout: %s\n  readTimeout: 10s\n  writeTimeout: 2s\n  idleTimeout: 2s\n  maxHeaderBytes: 4096\n", shutdownTimeout, address, readHeaderTimeout)
+	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") == "1" {
+		contents += fmt.Sprintf("storage:\n  mysql:\n    address: %s\n    passwordSecret: 'file:%s'\n  redis:\n    address: %s\n    passwordSecret: 'file:%s'\n", os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
+	}
 	path := filepath.Join(t.TempDir(), "server.yaml")
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)

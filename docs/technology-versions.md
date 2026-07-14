@@ -8,7 +8,7 @@
 
 - `protocols`：OpenAPI、Protobuf edition、HTTP 与 TLS。
 - `toolchains`：Buf 与 Protobuf 代码生成器。
-- `libraries`：Prometheus client 等直接影响共享运行基础的核心 library。
+- `libraries`：Prometheus client、MySQL driver、Redis client 等直接影响共享运行基础的核心 library。
 - `languages`：Go 等编程语言工具链。
 - `infrastructure`：MySQL、Redis 和后续基础设施镜像。
 - `client`：Unity Editor 与后续客户端运行时基线。
@@ -23,7 +23,8 @@
 - `.proto` 的 edition 与 Buf generation template 的插件版本。
 - OpenAPI 根节点的规范版本。
 - Unity `ProjectVersion.txt` 的 Editor 版本。
-- Docker/Compose image tag 的 MySQL、Redis 与其他服务版本。
+- `go.mod` 中 `github.com/go-sql-driver/mysql`、`github.com/redis/go-redis/v9` 的直接依赖版本。
+- Docker/Compose image tag 的 MySQL、Redis 与其他服务版本；storage harness 还必须使用 `linux_amd64_digest`，不能只信任可漂移 tag。
 
 这些文件不是第二份治理源。`tools/proto/proto.ps1 verify` 和后续统一 CI 必须检查它们与 `versions.yaml` 一致。
 
@@ -58,6 +59,17 @@ Protobuf schema lint、breaking check 与 generator 调度统一由 Buf 完成�
 ```
 
 项目开发和 CI 必须使用包装入口；直接调用系统 `go` 不属于受支持的仓库命令。
+
+MySQL/Redis integration 统一使用 `tools/storage/storage.ps1`。入口从 `versions.yaml`
+读取明确 tag 与目标平台 digest，为每次运行生成独立 network、volume、container、
+loopback 随机固定端口和高熵 secret，并在清理前验证 run-id label：
+
+```powershell
+& .\tools\storage\storage.ps1 -Action contract
+& .\tools\storage\storage.ps1 -Action verify -TimeoutSeconds 600
+```
+
+临时 manifest、secret 与配置只写入已忽略的 `.local/storage/<run-id>/`。
 
 ## 升级流程
 

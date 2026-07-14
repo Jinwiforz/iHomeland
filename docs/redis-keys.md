@@ -7,12 +7,13 @@ Redis 只保存可恢复或可失效运行态。任何 key 在实现前必须通
 ## 命名
 
 ```text
-ih:{env}:{owner}:{kind}:{identity...}
+ih:<env>:<owner>:<kind>:<identity...>
 ```
 
-本文中的 `{...}` 表示待替换片段，不代表已经决定 Redis Cluster hash tag。
-Storage change 必须根据实际部署模式明确 transaction/script 涉及 key 的同 slot 策略，
-不能直接把整个环境固定到单一热点 slot。
+尖括号只表示文档占位。`Keyspace` 的真实输出使用普通冒号分段，例如
+`ih:production:session:lease:01J...`，不会输出 `{}`，也不会把 environment
+误设为 Redis Cluster hash tag。当前 runtime 只支持 standalone Redis；Cluster/Sentinel
+必须由独立 OpenSpec change 根据已落地的 owner-specific Lua、multi-key lookup 与热点预算设计同 slot 策略。
 
 要求：
 
@@ -28,21 +29,24 @@ Storage change 必须根据实际部署模式明确 transaction/script 涉及 ke
 
 | Key Pattern | Owner | 用途 | 恢复/失效原则 |
 |---|---|---|---|
-| `ih:{env}:session:record:{sessionID}` | session | principal、epoch、status 与 session expiry | 不恢复；丢失后要求重新登录 |
-| `ih:{env}:session:access:{accessDigest}` | session | access digest 到 session/epoch 的短期索引 | 不恢复；丢失后 access 认证失败 |
-| `ih:{env}:session:refresh:{refreshDigest}` | session | active refresh 或 consumed replay tombstone | 不恢复；consumed tombstone 保留到 session expiry |
-| `ih:{env}:session:ticket:{nonceDigest}` | session | 一次性 connection ticket 绑定与消费状态 | 不恢复；短 TTL，consumed marker 保留到 ticket expiry |
-| `ih:{env}:session:principal:{principalDigest}` | session | principal 到现有 session ids 的失效索引 | 可由活跃 session records 重建，成员随 session 清理 |
-| `ih:{env}:presence:player:{playerID}` | session | 在线连接摘要 | 从 connection registry 恢复 |
-| `ih:{env}:world:assignment:{personalWorldID}` | placement | 当前 WorldInstance assignment generation | 从 PersonalWorld 持久事实和 placement policy 重建 |
-| `ih:{env}:world:lease:{personalWorldID}` | placement | active writable instance lease/fencing | 不恢复；TTL 到期后重新竞争并拒绝旧 fencing token |
-| `ih:{env}:visit:session:{visitSessionID}` | visit | Visitor membership、revision、expiry 与 Owner grace | 丢失后访问安全结束或按权威事实重建，不是持久世界事实 |
-| `ih:{env}:visit:player:{playerID}` | visit | 玩家当前 visit membership 索引 | 从有效 VisitSession 重建，必须有 TTL 与 cleanup owner |
-| `ih:{env}:rate:{scope}:{identity}` | owning adapter | 限流窗口 | 丢失后最多放宽一个窗口 |
-| `ih:{env}:lock:{owner}:{resourceID}` | owning module | 必要短租约 | 不恢复，必须有 TTL 与 fencing/idempotency |
+| `ih:<env>:session:record:<sessionID>` | session | principal、epoch、status 与 session expiry | 不恢复；丢失后要求重新登录 |
+| `ih:<env>:session:access:<accessDigest>` | session | access digest 到 session/epoch 的短期索引 | 不恢复；丢失后 access 认证失败 |
+| `ih:<env>:session:refresh:<refreshDigest>` | session | active refresh 或 consumed replay tombstone | 不恢复；consumed tombstone 保留到 session expiry |
+| `ih:<env>:session:ticket:<nonceDigest>` | session | 一次性 connection ticket 绑定与消费状态 | 不恢复；短 TTL，consumed marker 保留到 ticket expiry |
+| `ih:<env>:session:principal:<principalDigest>` | session | principal 到现有 session ids 的失效索引 | 可由活跃 session records 重建，成员随 session 清理 |
+| `ih:<env>:presence:player:<playerID>` | session | 在线连接摘要 | 从 connection registry 恢复 |
+| `ih:<env>:world:assignment:<personalWorldID>` | placement | 当前 WorldInstance assignment generation | 从 PersonalWorld 持久事实和 placement policy 重建 |
+| `ih:<env>:world:lease:<personalWorldID>` | placement | active writable instance lease/fencing | 不恢复；TTL 到期后重新竞争并拒绝旧 fencing token |
+| `ih:<env>:visit:session:<visitSessionID>` | visit | Visitor membership、revision、expiry 与 Owner grace | 丢失后访问安全结束或按权威事实重建，不是持久世界事实 |
+| `ih:<env>:visit:player:<playerID>` | visit | 玩家当前 visit membership 索引 | 从有效 VisitSession 重建，必须有 TTL 与 cleanup owner |
+| `ih:<env>:rate:<scope>:<identity>` | owning adapter | 限流窗口 | 丢失后最多放宽一个窗口 |
+| `ih:<env>:lock:<owner>:<resourceID>` | owning module | 必要短租约 | 不恢复，必须有 TTL 与 fencing/idempotency |
 
 ## Value 规则
 
+- 每个已实现 key 必须登记不可变 definition：name、owner、kind、用途、TTL/cleanup、schema version、最大 encoded bytes、恢复、失败和 metrics。
+- Registry 只治理 metadata，不提供 generic cache API；typed codec、Lua/transaction 和 outcome parser 仍由消费 adapter owner 定义。
+- 单个 built-in command 的明确 server rejection 可以分类为 `not_applied`；Lua/transaction 的运行时错误不会回滚此前写入，generic classifier 必须保持 `commit_unknown`，只有 owner-specific outcome parser 可以进一步收窄。
 - Value 使用明确 schema，不存任意 `map[string]any`。
 - JSON 字段使用稳定英文名；文档用中文说明含义。
 - 时间字段包含单位。
@@ -60,6 +64,7 @@ Storage change 必须根据实际部署模式明确 transaction/script 涉及 ke
 - presence TTL 必须能容忍心跳抖动但不能无限延长。
 - lock 禁止无过期时间。
 - TTL refresh 由明确 owner 执行，不允许多个模块竞争续期。
+- runtime 的 TTL helper 只接受 absolute expiry 与受信 `now`，结果小于等于零时拒绝写入。
 
 ## 清理与恢复
 
@@ -101,3 +106,4 @@ Value schema:
 - 使用 `KEYS` 扫描生产 namespace
 - 在日志中打印完整敏感 key/value
 - 多个模块写同一 key 但没有并发与版本策略
+- client-level mutation 隐式 retry；连接中断或 Lua/transaction generic error 后的 atomic mutation 必须返回 commit-unknown，由 owner 使用稳定 identity resolve

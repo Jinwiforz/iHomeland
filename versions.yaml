@@ -1,5 +1,5 @@
 schema_version: 1
-verified_at: "2026-07-11"
+verified_at: "2026-07-13"
 policy:
   channel: stable
   update_rule: latest-compatible
@@ -39,6 +39,12 @@ libraries:
   golang_x_text:
     version: "0.28.0"
     source: "https://pkg.go.dev/golang.org/x/text@v0.28.0"
+  mysql_driver_go:
+    version: "1.10.0"
+    source: "https://github.com/go-sql-driver/mysql/releases/tag/v1.10.0"
+  redis_client_go:
+    version: "9.21.0"
+    source: "https://github.com/redis/go-redis/releases/tag/v9.21.0"
 languages:
   go:
     version: "1.26.5"
@@ -48,9 +54,13 @@ infrastructure:
   mysql:
     version: "9.7.1"
     source: "https://dev.mysql.com/doc/relnotes/mysql/9.7/en/news-9-7-1.html"
+    image: "mysql:9.7.1"
+    linux_amd64_digest: "sha256:91e42ae952f37b724f945c734cf067c65aa66bf15d4992a7f7c174918d15fc77"
   redis:
     version: "8.8.0"
     source: "https://github.com/redis/redis/releases/tag/8.8.0"
+    image: "redis:8.8.0"
+    linux_amd64_digest: "sha256:c904002d182255b6db3cbe3a1e8ce6c187d15390c39500b59fc07181aabff7bf"
 client:
   unity:
     version: "6000.5.2f1"

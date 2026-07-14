@@ -33,7 +33,6 @@ server/
   version.json
   go.mod
   go.sum
-  compose.yaml
   config/
     local.yaml
   cmd/
@@ -49,6 +48,7 @@ server/
     config/
     logging/
     observability/
+    secret/
     session/
     account/
     personalworld/
@@ -61,9 +61,10 @@ server/
       tcp/
     storage/
       mysql/
+        migrations/
       redis/
+      tlsconfig/
     testclient/
-  migrations/
   scripts/
 ```
 
@@ -77,9 +78,10 @@ server/
 
 Lifecycle component 只用于真实持有资源或后台任务的对象；成功启动栈同时是唯一逆序关闭顺序源。所有长生命周期 goroutine 必须向受控 task group 登记，并由 root 或 component context 明确拥有。
 
-### `internal/config`、`logging`、`observability` 与 `buildinfo`
+### `internal/config`、`secret`、`logging`、`observability` 与 `buildinfo`
 
 - `config`：严格 YAML、白名单环境覆盖和启动前完整校验。
+- `secret`：只解析显式 `env:`/绝对 `file:` reference，并提供默认不可展开、可主动清零的 secret value。
 - `logging`：`log/slog` handler、level 与敏感字段脱敏。
 - `observability`：进程私有 Prometheus registry 和低基数 runtime metrics。
 - `buildinfo`：linker 注入且启动后不可变的安全构建身份。
@@ -134,8 +136,9 @@ Account 不拥有 refresh、logout、ticket、token parsing 或 AuthContext，�
 
 ### `internal/storage`
 
-- `mysql`：connection、transaction、repository adapters。
-- `redis`：cache adapters、key builders、TTL 和 scripts。
+- `mysql`：唯一 `database/sql` pool、嵌入式 migration history/catalog、transaction runner；后续 owner-specific repository adapter 只能在对应业务 change 中加入。
+- `redis`：唯一 standalone client、Keyspace/registry metadata、TTL 与 command outcome policy；不提供 generic cache 或预造业务 scripts。
+- `tlsconfig`：从已验证 policy 与 secret value 构造 production TLS client identity。
 - repository/cache interfaces 由业务 owner 包定义，避免 infrastructure 反向拥有业务契约。
 
 ### `internal/testclient`
@@ -144,7 +147,7 @@ Go 协议测试客户端和 scenario runner。它是服务端资格验收的正�
 
 ### `migrations`
 
-新 v1 空库 migration baseline。文件按不可变序号排列，已合并 migration 不修改，只新增后续 migration。
+Migration 与唯一执行 owner 同包嵌入，例如 `internal/storage/mysql/migrations/`。文件按固定宽度不可变序号排列，每个文件只含一个 statement；已合并 migration 不修改，只新增 forward migration。D0 只创建 `ih_schema_migrations` metadata，不提前创建业务 table。
 
 ## 共享协议结构
 
@@ -299,6 +302,8 @@ tools/
     proto.ps1
     buf.gen.go.yaml
     buf.gen.csharp.yaml
+  storage/
+    storage.ps1
 ```
 
 工具目录只在对应工具可运行时创建，不保存本机二进制缓存。

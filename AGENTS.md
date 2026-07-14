@@ -49,6 +49,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 - 项目流程：`docs/workflow.md`
 - Git 提交：`docs/git-commit-convention.md`
 - Redis key：`docs/redis-keys.md`
+- 存储 Schema 注释：`docs/storage-schema-comment-convention.md`
 - 技术版本：`docs/technology-versions.md`
 - 长期规格：`openspec/specs/`
 
@@ -91,6 +92,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 - PersonalWorld、WorldInstance 与 VisitSession 必须由独立 domain owner 管理，状态迁移只能通过显式 command/policy。
 - MySQL 保存持久事实；Redis 只保存可恢复运行态。
 - 每个 table、Redis key、协议消息、listener 和 service interface 必须有 owner。
+- MySQL 每张表和每一列必须有中文短注释；Redis 已实现 value schema 必须维护中文字典，具体遵守 `docs/storage-schema-comment-convention.md`。
 - 初始化必须支持失败回滚，关闭必须有顺序、deadline 和可观测原因。
 - 单元测试不得依赖真实 listener；adapter 必须有 contract/integration test。
 

@@ -109,7 +109,9 @@ Metrics label 必须来自稳定有限集合；禁止把 request URL、错误文
 - MySQL migration 必须可按顺序初始化空数据库。
 - 已合并 migration 不修改。
 - 表、字段、索引和事务边界有 owner 与用途。
+- MySQL 表和列必须提供中文短注释；时间、时长、容量与速率必须注明真实时区、精度或单位，完整规则见 `docs/storage-schema-comment-convention.md`。
 - Redis key 必须记录 owner、TTL、value、恢复来源和清理触发。
+- Redis 没有原生 COMMENT 时，已实现 value schema 必须在 `docs/redis-keys.md` 维护英文字段名、类型/编码、中文短注释与必填规则。
 - Redis 不保存唯一持久事实。
 - schema/key 变化必须更新文档和 integration tests。
 - 个人世界交互必须分别指定 PlayerState、PersonalWorldState、VisitSessionState 或 ActivityInstanceState owner；Visitor 奖励与 Owner 世界 mutation 不得通过跨存储顺序双写伪装原子提交。

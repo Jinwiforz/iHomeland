@@ -11,7 +11,7 @@ type ReadinessState uint32
 const (
 	// ReadinessStarting 表示配置有效但必需组件尚未全部启动。
 	ReadinessStarting ReadinessState = iota
-	// ReadinessReady 表示进程可以接收公开业务。
+	// ReadinessReady 表示当前已接线 graph 可服务，不代表尚未接线的公开业务 API 已存在。
 	ReadinessReady
 	// ReadinessDraining 表示进程已撤销就绪且正在释放资源。
 	ReadinessDraining

@@ -16,6 +16,7 @@
 *.proto text
 *.ps1 text
 *.sh text
+*.sql text eol=lf
 *.toml text
 *.txt text
 *.unity text
