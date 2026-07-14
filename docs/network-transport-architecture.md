@@ -55,8 +55,8 @@ Future battle endpoint:
 
 ```text
 HTTPS -> world bootstrap / invite accept / admission issue
-WSS   -> invite / owner availability / assignment control push
-TCP   -> PersonalWorld snapshot / VisitSession / reliable interaction
+WSS   -> invite / owner availability / assignment / close notice
+TCP   -> PersonalWorld snapshot / VisitSession command / safe-return
 UDP   -> replaceable transform and presentation snapshots
 KCP   -> reliable low-latency combat input and events
 ```
@@ -100,15 +100,17 @@ HTTP 请求必须有大小、超时、限流、幂等和结构化错误策略。
 
 不承担 world mutation、资产修改或经济操作。WSS 与 HTTPS 可以同进程或同端口托管，但逻辑路由必须独立。
 
+`VISIT_CLOSED_NOTICE_PUSH` 只收敛控制面 UI 和可见性，不驱动 gameplay connection 返回。`VISIT_SAFE_RETURN_PUSH` 只在 TLS/TCP 上表达当前连接的权威返回动作；两者不是同一消息的双通道副本。
+
 ### TLS/TCP 权威可靠业务面
 
 承担：
 
-- PersonalWorld/WorldInstance snapshot 与 reliable interaction
+- PersonalWorld/WorldInstance snapshot
 - VisitSession join/leave/kick/reconnect 与 safe-return
 - chat、inventory、task、economy 等未来可靠业务
 - request/response 与 authoritative push
-- 个人世界阶段的 world snapshot、Visitor membership 与可靠世界交互
+- 个人世界阶段的 world snapshot、VisitSession 控制命令与 safe-return
 
 要求：
 
@@ -187,7 +189,11 @@ HTTPS 登录建立：
 
 ticket 使用后立即失效，不能跨通道或跨 endpoint 重放。
 
-个人世界 admission 在 connection ticket 安全模型上增加受信 `PersonalWorldID`、`VisitSessionID`、`WorldInstanceID`、Owner/Visitor role 与 assignment generation 绑定。Invite 只允许接受或拒绝访问，不直接授予 gameplay connection；旧 assignment、失效 lease 或已关闭 VisitSession 不能通过重放 ticket 恢复。
+### World Admission
+
+World admission 与 session bearer、`ConnectionTicket`、invite、`AdmissionIntent` 分层且不可互换：bearer 只证明 account/session lineage；ticket 只允许建立目标 endpoint/channel 的连接；invite/intent 只表达领域资格；admission 才允许该连接进入一个 current PersonalWorld/VisitSession target。GAMEPLAY scope 本身不授予 Owner/Visitor role。
+
+Admission 是短期、一次性 opaque credential。Issuer/verifier 必须绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorldID、可选 VisitSessionID、`OWN_WORLD`/`JOIN`/`RECONNECT` purpose、完整 current AssignmentStamp、endpoint、`TLS_TCP` channel、nonce、issued-at 与 expiry。`JOIN` 只允许 active reserved membership，`RECONNECT` 只允许 active reconnecting membership；expiry、replay、旧 assignment/epoch 或错误 endpoint/channel 均 fail closed。当前 P0 只冻结 OpenAPI public response 与 semantic corpus，不实现 production 签发或 nonce consume。
 
 ### Connection Context
 

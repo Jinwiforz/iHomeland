@@ -146,12 +146,110 @@ paths:
                 $ref: "#/components/schemas/TicketResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /v1/world/bootstrap:
+    get:
+      operationId: getWorldBootstrap
+      summary: 查询当前认证 Player 自己的 PersonalWorld 与安全 assignment 投影。
+      x-ihomeland-body-limit-bytes: 0
+      x-ihomeland-timeout-ms: 5000
+      x-ihomeland-idempotency: SAFE
+      responses:
+        "200":
+          description: 当前 own-world bootstrap 投影。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorldBootstrapResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /v1/visits/{visitSessionId}/invites/{inviteId}/accept:
+    parameters:
+      - $ref: "#/components/parameters/VisitSessionId"
+      - $ref: "#/components/parameters/InviteId"
+    post:
+      operationId: acceptVisitInvite
+      summary: 由 bearer 对应的目标 Visitor 接受定向邀请。
+      x-ihomeland-body-limit-bytes: 4096
+      x-ihomeland-timeout-ms: 5000
+      x-ihomeland-idempotency: IDEMPOTENCY_KEY_REQUIRED
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptVisitInviteRequest"
+      responses:
+        "200":
+          description: Invite 已消费并创建或重放同一 reservation。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptVisitInviteResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /v1/world/admissions:
+    post:
+      operationId: issueWorldAdmission
+      summary: 为 own-world 或已有 Visitor membership 签发一次性 opaque admission。
+      x-ihomeland-body-limit-bytes: 4096
+      x-ihomeland-timeout-ms: 5000
+      x-ihomeland-idempotency: IDEMPOTENCY_KEY_REQUIRED
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorldAdmissionRequest"
+      responses:
+        "201":
+          description: 与当前权威身份、assignment、endpoint 和 purpose 绑定的一次性 admission。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorldAdmissionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: opaque
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 在同一认证 actor scope 内稳定标识一次 mutation；相同 key 不得改变目标语义。
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
+    VisitSessionId:
+      name: visitSessionId
+      in: path
+      required: true
+      description: 目标 VisitSession 的安全 ASCII identity，不代表 actor。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
+    InviteId:
+      name: inviteId
+      in: path
+      required: true
+      description: 目标 invite 的安全 ASCII identity，不包含 credential。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
   responses:
     ErrorResponse:
       description: 稳定且安全的错误响应。
@@ -336,6 +434,148 @@ components:
           type: integer
           format: int64
           minimum: 0
+    PersonalWorldSummary:
+      type: object
+      additionalProperties: false
+      required: [personalWorldId, ownerPlayerId, lifecycle, revision, createdAtMs]
+      properties:
+        personalWorldId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+        ownerPlayerId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+        lifecycle:
+          type: string
+          enum: [ACTIVE, ARCHIVED]
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        createdAtMs:
+          type: integer
+          format: int64
+          minimum: 1
+    WorldAssignment:
+      type: object
+      additionalProperties: false
+      required: [personalWorldId, worldInstanceId, endpoint, generation, leaseExpiresAtMs]
+      properties:
+        personalWorldId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+        worldInstanceId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+        endpoint:
+          $ref: "#/components/schemas/GameplayEndpoint"
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+        leaseExpiresAtMs:
+          type: integer
+          format: int64
+          minimum: 1
+    WorldBootstrapResponse:
+      type: object
+      additionalProperties: false
+      required: [world]
+      properties:
+        world:
+          $ref: "#/components/schemas/PersonalWorldSummary"
+        assignment:
+          $ref: "#/components/schemas/WorldAssignment"
+    AcceptVisitInviteRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+    VisitReservation:
+      type: object
+      additionalProperties: false
+      required: [visitSessionId, revision, reservationExpiresAtMs]
+      properties:
+        visitSessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        reservationExpiresAtMs:
+          type: integer
+          format: int64
+          minimum: 1
+    AcceptVisitInviteResponse:
+      type: object
+      additionalProperties: false
+      required: [reservation]
+      properties:
+        reservation:
+          $ref: "#/components/schemas/VisitReservation"
+    WorldAdmissionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/OwnWorldAdmissionTarget"
+        - $ref: "#/components/schemas/VisitWorldAdmissionTarget"
+    OwnWorldAdmissionTarget:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [OWN_WORLD]
+    VisitWorldAdmissionTarget:
+      type: object
+      additionalProperties: false
+      required: [kind, visitSessionId]
+      properties:
+        kind:
+          type: string
+          enum: [VISIT_WORLD]
+        visitSessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+    WorldAdmissionResponse:
+      type: object
+      additionalProperties: false
+      required: [credential, endpoint, role, purpose, expiresAtMs]
+      properties:
+        credential:
+          type: string
+          minLength: 32
+          maxLength: 4096
+          pattern: '^[A-Za-z0-9._~-]+$'
+          description: 仅由 admission verifier 解释的 opaque value，不是公开 claims JSON。
+        endpoint:
+          $ref: "#/components/schemas/GameplayEndpoint"
+        role:
+          type: string
+          enum: [OWNER, VISITOR]
+        purpose:
+          type: string
+          enum: [OWN_WORLD, JOIN, RECONNECT]
+        expiresAtMs:
+          type: integer
+          format: int64
+          minimum: 1
     Endpoint:
       type: object
       additionalProperties: false
@@ -344,6 +584,22 @@ components:
         channel:
           type: string
           enum: [WSS, TLS_TCP]
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+    GameplayEndpoint:
+      type: object
+      additionalProperties: false
+      required: [channel, host, port]
+      properties:
+        channel:
+          type: string
+          enum: [TLS_TCP]
         host:
           type: string
           minLength: 1

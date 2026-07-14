@@ -15,6 +15,8 @@ import (
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/common/v1"
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/control/v1"
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/session/v1"
+	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/visit/v1"
+	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/world/v1"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -28,9 +30,9 @@ const maximumFrameSize = 1 << 20
 // registrySchemaVersion 是当前 validator 唯一理解的 registry 结构代际，未知版本不得猜测解析。
 const registrySchemaVersion uint32 = 1
 
-// forbiddenActorField 匹配 command 顶层中可能覆盖认证连接身份的常见字段写法。
-// 目标实体仍可使用明确业务名称表达，例如 target_seat；这里只禁止把操作者身份放回 payload。
-var forbiddenActorField = regexp.MustCompile(`(?i)^(actor|account|player|user)_?id$`)
+// forbiddenCommandIdentityField 匹配 command 中可能覆盖认证、admission 或 assignment 的字段。
+// 目标实体仍可使用明确业务名称表达，例如 target_visitor_id；这里只禁止把受信上下文放回 payload。
+var forbiddenCommandIdentityField = regexp.MustCompile(`(?i)^(?:(?:actor|account|player|user)_?id|session_?id|session_?epoch|world_?id|personal_?world_?id|world_?instance_?id|role|endpoint|fencing_?token|assignment_?stamp|runtime_?node_?id)$`)
 
 // registrySymbolPattern 限制公开 symbol 使用稳定的大写下划线形式，避免大小写折叠产生歧义。
 var registrySymbolPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
@@ -46,6 +48,12 @@ var checksumPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // accountUsernamePattern 是 OpenAPI 与 account domain 必须共同执行的唯一 username 接受集合。
 const accountUsernamePattern = `^[A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?$`
+
+// safeASCIIIdentityPattern 是公网 identity 与幂等键允许的可日志化 ASCII 字符集合。
+const safeASCIIIdentityPattern = `^[A-Za-z0-9._:-]+$`
+
+// safeOpaqueCredentialPattern 限制 opaque credential 使用无需二次编码的安全 ASCII token 字符。
+const safeOpaqueCredentialPattern = `^[A-Za-z0-9._~-]+$`
 
 // Validate 联合检查 registry 唯一性、descriptor 引用、路由策略、身份边界与 OpenAPI 语义。
 //
@@ -91,6 +99,46 @@ func validateOwnerRanges(ranges []OwnerRange) error {
 				return fmt.Errorf("owner ranges %s and %s overlap", previous.Owner, current.Owner)
 			}
 		}
+	}
+	return nil
+}
+
+// worldVisitErrorProfiles 固定首批 world/visit public error 的完整恢复语义。
+var worldVisitErrorProfiles = map[uint32]ErrorEntry{
+	2000: {Code: 2000, Name: "WORLD_NOT_FOUND", Owner: "world", Category: "NOT_FOUND", MessageKey: "error.world.not_found", Retryable: false, HTTPStatus: 404},
+	2001: {Code: 2001, Name: "WORLD_NOT_READY", Owner: "world", Category: "CONFLICT", MessageKey: "error.world.not_ready", Retryable: true, HTTPStatus: 409},
+	2002: {Code: 2002, Name: "WORLD_ASSIGNMENT_STALE", Owner: "world", Category: "CONFLICT", MessageKey: "error.world.assignment_stale", Retryable: false, HTTPStatus: 409},
+	2003: {Code: 2003, Name: "WORLD_ADMISSION_INVALID", Owner: "world", Category: "AUTH", MessageKey: "error.world.admission_invalid", Retryable: false, HTTPStatus: 401},
+	2004: {Code: 2004, Name: "WORLD_ADMISSION_EXPIRED", Owner: "world", Category: "AUTH", MessageKey: "error.world.admission_expired", Retryable: false, HTTPStatus: 401},
+	2005: {Code: 2005, Name: "WORLD_ADMISSION_REPLAYED", Owner: "world", Category: "CONFLICT", MessageKey: "error.world.admission_replayed", Retryable: false, HTTPStatus: 409},
+	2006: {Code: 2006, Name: "WORLD_IDEMPOTENCY_CONFLICT", Owner: "world", Category: "CONFLICT", MessageKey: "error.world.idempotency_conflict", Retryable: false, HTTPStatus: 409},
+	2100: {Code: 2100, Name: "VISIT_NOT_FOUND", Owner: "visit", Category: "NOT_FOUND", MessageKey: "error.visit.not_found", Retryable: false, HTTPStatus: 404},
+	2101: {Code: 2101, Name: "VISIT_INVITE_NOT_FOUND", Owner: "visit", Category: "NOT_FOUND", MessageKey: "error.visit.invite_not_found", Retryable: false, HTTPStatus: 404},
+	2102: {Code: 2102, Name: "VISIT_INVITE_EXPIRED", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.invite_expired", Retryable: false, HTTPStatus: 410},
+	2103: {Code: 2103, Name: "VISIT_CAPACITY_EXCEEDED", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.capacity_exceeded", Retryable: false, HTTPStatus: 409},
+	2104: {Code: 2104, Name: "VISIT_STATE_CONFLICT", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.state_conflict", Retryable: false, HTTPStatus: 409},
+	2105: {Code: 2105, Name: "VISIT_REVISION_CONFLICT", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.revision_conflict", Retryable: false, HTTPStatus: 409},
+	2106: {Code: 2106, Name: "VISIT_IDEMPOTENCY_CONFLICT", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.idempotency_conflict", Retryable: false, HTTPStatus: 409},
+	2107: {Code: 2107, Name: "VISIT_MEMBERSHIP_REQUIRED", Owner: "visit", Category: "AUTH", MessageKey: "error.visit.membership_required", Retryable: false, HTTPStatus: 403},
+	2108: {Code: 2108, Name: "VISIT_OWNER_UNAVAILABLE", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.owner_unavailable", Retryable: false, HTTPStatus: 409},
+	2109: {Code: 2109, Name: "VISIT_RECONNECT_EXPIRED", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.reconnect_expired", Retryable: false, HTTPStatus: 410},
+}
+
+// validateWorldVisitErrors 拒绝首批稳定错误被改名、改 owner 或改变客户端恢复语义。
+func validateWorldVisitErrors(entries []ErrorEntry) error {
+	seen := make(map[uint32]struct{}, len(worldVisitErrorProfiles))
+	for _, entry := range entries {
+		if entry.Owner != "world" && entry.Owner != "visit" {
+			continue
+		}
+		expected, ok := worldVisitErrorProfiles[entry.Code]
+		if !ok || entry != expected {
+			return fmt.Errorf("world/visit error %d does not match its reviewed profile", entry.Code)
+		}
+		seen[entry.Code] = struct{}{}
+	}
+	if len(seen) != len(worldVisitErrorProfiles) {
+		return errors.New("world/visit error registry is incomplete")
 	}
 	return nil
 }
@@ -239,7 +287,7 @@ func findForbiddenActorField(descriptor protoreflect.MessageDescriptor, visited 
 	for index := 0; index < descriptor.Fields().Len(); index++ {
 		field := descriptor.Fields().Get(index)
 		fieldName := string(field.Name())
-		if forbiddenActorField.MatchString(fieldName) {
+		if forbiddenCommandIdentityField.MatchString(fieldName) {
 			return fieldName, true
 		}
 		if field.IsMap() {
@@ -293,8 +341,8 @@ func validateRouteSemantics(message MessageEntry, route RouteEntry) error {
 	if message.Kind == "REQUEST" && route.Idempotency != "REQUEST_ID" {
 		return fmt.Errorf("request message %d must use REQUEST_ID", message.ID)
 	}
-	if message.Kind == "RESPONSE" && route.Idempotency != "REQUEST_ID" && route.Idempotency != "COMMAND_ID" {
-		return fmt.Errorf("response message %d must use REQUEST_ID or COMMAND_ID", message.ID)
+	if message.Kind == "RESPONSE" && route.Idempotency != "CORRELATION_ID" {
+		return fmt.Errorf("response message %d must use CORRELATION_ID", message.ID)
 	}
 	if message.Kind == "COMMAND" && route.Idempotency != "COMMAND_ID" {
 		return fmt.Errorf("command message %d must use COMMAND_ID", message.ID)
@@ -311,7 +359,61 @@ func validateRouteSemantics(message MessageEntry, route RouteEntry) error {
 	if message.Kind != "PUSH" && route.TimeoutMS == 0 {
 		return fmt.Errorf("message %d requires a positive timeout", message.ID)
 	}
+	return validateWorldVisitRoute(message, route)
+}
+
+// worldVisitRouteProfile 保存已评审 world/visit 消息不可漂移的完整路由策略。
+type worldVisitRouteProfile struct {
+	// channel 是消息唯一允许的可靠传输通道。
+	channel string
+	// authScope 是 dispatch 前必须持有的连接授权范围。
+	authScope string
+	// maxSize 是完整 envelope 的最大字节数。
+	maxSize uint32
+	// ratePolicy 是服务端拥有的限流策略名称。
+	ratePolicy string
+	// idempotency 是 envelope correlation 规则。
+	idempotency string
+	// timeoutMS 是服务端处理预算，push 固定为零。
+	timeoutMS uint32
+}
+
+// validateWorldVisitRoute 固定 P0 world/visit 的控制面、权威业务面与执行预算。
+// 新消息没有显式 profile 时默认拒绝，确保 size、rate、timeout 与唯一通道必须先经评审。
+func validateWorldVisitRoute(message MessageEntry, route RouteEntry) error {
+	if message.Owner != "world" && message.Owner != "visit" {
+		return nil
+	}
+	profile, ok := worldVisitProfile(message.ID)
+	if !ok {
+		return fmt.Errorf("world/visit message %d has no reviewed route profile", message.ID)
+	}
+	if route.Channel != profile.channel || route.AuthScope != profile.authScope || route.MaxSize != profile.maxSize || route.RatePolicy != profile.ratePolicy || route.Idempotency != profile.idempotency || route.TimeoutMS != profile.timeoutMS {
+		return fmt.Errorf("world/visit message %d does not match its reviewed route profile", message.ID)
+	}
 	return nil
+}
+
+// worldVisitProfile 返回已登记消息的固定路由合同；未登记编号不做范围推断。
+func worldVisitProfile(messageID uint32) (worldVisitRouteProfile, bool) {
+	switch messageID {
+	case 2000, 2119:
+		return worldVisitRouteProfile{"TLS_TCP", "GAMEPLAY", 4096, "world_read", "REQUEST_ID", 10000}, true
+	case 2001, 2120:
+		return worldVisitRouteProfile{"TLS_TCP", "GAMEPLAY", 65536, "world_read", "CORRELATION_ID", 10000}, true
+	case 2002, 2121:
+		return worldVisitRouteProfile{"TLS_TCP", "GAMEPLAY", 65536, "server_world", "NONE", 0}, true
+	case 2003, 2100, 2101, 2102:
+		return worldVisitRouteProfile{"WSS", "CONTROL", 16384, "server_control", "NONE", 0}, true
+	case 2103, 2105, 2107, 2109, 2111, 2113, 2115, 2117:
+		return worldVisitRouteProfile{"TLS_TCP", "GAMEPLAY", 4096, "visit_command", "COMMAND_ID", 5000}, true
+	case 2104, 2106, 2108, 2110, 2112, 2114, 2116, 2118:
+		return worldVisitRouteProfile{"TLS_TCP", "GAMEPLAY", 16384, "visit_command", "CORRELATION_ID", 5000}, true
+	case 2122:
+		return worldVisitRouteProfile{"TLS_TCP", "GAMEPLAY", 16384, "server_world", "NONE", 0}, true
+	default:
+		return worldVisitRouteProfile{}, false
+	}
 }
 
 // validMessageKind 限定 registry 可表达的可靠 envelope 语义。
@@ -380,13 +482,13 @@ func validateErrors(registry ErrorRegistry) error {
 		names[entry.Name] = struct{}{}
 		keys[entry.MessageKey] = struct{}{}
 	}
-	return nil
+	return validateWorldVisitErrors(registry.Errors)
 }
 
 // validErrorOwner 限定基础契约中可以发布稳定错误语义的 capability。
 func validErrorOwner(owner string) bool {
 	switch owner {
-	case "common", "session", "account":
+	case "common", "session", "account", "world", "visit":
 		return true
 	default:
 		return false
@@ -447,6 +549,9 @@ func validateOpenAPI(root string, schemaPath string) error {
 		"POST /v1/auth/refresh":    "refreshSession",
 		"POST /v1/auth/logout":     "logoutSession",
 		"POST /v1/session/tickets": "issueConnectionTicket",
+		"GET /v1/world/bootstrap":  "getWorldBootstrap",
+		"POST /v1/visits/{visitSessionId}/invites/{inviteId}/accept": "acceptVisitInvite",
+		"POST /v1/world/admissions":                                  "issueWorldAdmission",
 	}
 	seenOperations := make(map[string]string, len(requiredOperations))
 	for route, rawPath := range paths {
@@ -473,6 +578,9 @@ func validateOpenAPI(root string, schemaPath string) error {
 			if _, ok := operation["responses"].(map[string]any); !ok {
 				return fmt.Errorf("OpenAPI operation %s needs responses", operationID)
 			}
+			if err := validateOperationErrorResponse(operationID, operation); err != nil {
+				return err
+			}
 			if err := validateOperationPolicy(method, operationID, operation); err != nil {
 				return err
 			}
@@ -487,7 +595,24 @@ func validateOpenAPI(root string, schemaPath string) error {
 	if err := validateAccountHTTPSchemas(rootMap); err != nil {
 		return err
 	}
+	if err := validateWorldHTTPSchemas(rootMap, paths); err != nil {
+		return err
+	}
 	return validateHTTPFixtureRoutes(root, paths)
+}
+
+// validateOperationErrorResponse 强制所有公开 operation 使用同一安全错误 envelope。
+// 具体 stable code 来自 errors.json；OpenAPI 不得为单条 route 另建自由文本错误结构。
+func validateOperationErrorResponse(operationID string, operation map[string]any) error {
+	responses, ok := operation["responses"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("OpenAPI operation %s needs responses", operationID)
+	}
+	defaultResponse, ok := responses["default"].(map[string]any)
+	if !ok || defaultResponse["$ref"] != "#/components/responses/ErrorResponse" {
+		return fmt.Errorf("OpenAPI operation %s must use the shared default error response", operationID)
+	}
+	return nil
 }
 
 // validateAccountHTTPSchemas 防止账号字段约束仅停留在描述文本或偏离 domain 接受集合。
@@ -529,6 +654,171 @@ func validateAccountHTTPSchemas(root map[string]any) error {
 	return nil
 }
 
+// validateWorldHTTPSchemas 固定 world/visit HTTP payload 的最小公开面与身份边界。
+// 该校验有意只接受已设计字段，防止 actor、assignment fence 或 credential claims 通过
+// additional schema 悄然进入公网 ABI。
+func validateWorldHTTPSchemas(root map[string]any, paths map[string]any) error {
+	components, ok := root["components"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI components must be an object")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI component schemas must be an object")
+	}
+	parameters, ok := components["parameters"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI component parameters must be an object")
+	}
+	idempotency, ok := parameters["IdempotencyKey"].(map[string]any)
+	if !ok || idempotency["name"] != "Idempotency-Key" || idempotency["in"] != "header" || idempotency["required"] != true {
+		return errors.New("OpenAPI requires the Idempotency-Key header parameter")
+	}
+	idempotencySchema, ok := idempotency["schema"].(map[string]any)
+	if !ok || idempotencySchema["type"] != "string" || idempotencySchema["minLength"] != 16 || idempotencySchema["maxLength"] != 128 || idempotencySchema["pattern"] != safeASCIIIdentityPattern {
+		return errors.New("OpenAPI Idempotency-Key must be a bounded string")
+	}
+	if err := requireExactSchema(schemas, "AcceptVisitInviteRequest", []string{"expectedRevision"}, []string{"expectedRevision"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "OwnWorldAdmissionTarget", []string{"kind"}, []string{"kind"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "VisitWorldAdmissionTarget", []string{"kind", "visitSessionId"}, []string{"kind", "visitSessionId"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "WorldAssignment", []string{"personalWorldId", "worldInstanceId", "endpoint", "generation", "leaseExpiresAtMs"}, []string{"personalWorldId", "worldInstanceId", "endpoint", "generation", "leaseExpiresAtMs"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "WorldAdmissionResponse", []string{"credential", "endpoint", "role", "purpose", "expiresAtMs"}, []string{"credential", "endpoint", "role", "purpose", "expiresAtMs"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "GameplayEndpoint", []string{"channel", "host", "port"}, []string{"channel", "host", "port"}); err != nil {
+		return err
+	}
+	assignment := schemas["WorldAssignment"].(map[string]any)
+	assignmentProperties := assignment["properties"].(map[string]any)
+	response := schemas["WorldAdmissionResponse"].(map[string]any)
+	responseProperties := response["properties"].(map[string]any)
+	if schemaRef(assignmentProperties["endpoint"]) != "#/components/schemas/GameplayEndpoint" || schemaRef(responseProperties["endpoint"]) != "#/components/schemas/GameplayEndpoint" {
+		return errors.New("OpenAPI world endpoints must use GameplayEndpoint")
+	}
+	credential, ok := responseProperties["credential"].(map[string]any)
+	description, hasDescription := credential["description"].(string)
+	if !ok || credential["type"] != "string" || credential["minLength"] != 32 || credential["maxLength"] != 4096 || credential["pattern"] != safeOpaqueCredentialPattern || !hasDescription || strings.TrimSpace(description) == "" {
+		return errors.New("OpenAPI admission credential must remain bounded and opaque")
+	}
+	ownTarget := schemas["OwnWorldAdmissionTarget"].(map[string]any)["properties"].(map[string]any)
+	visitTarget := schemas["VisitWorldAdmissionTarget"].(map[string]any)["properties"].(map[string]any)
+	if !exactStringEnum(ownTarget["kind"], []string{"OWN_WORLD"}) || !exactStringEnum(visitTarget["kind"], []string{"VISIT_WORLD"}) {
+		return errors.New("OpenAPI admission target kinds must remain closed")
+	}
+	if !exactStringEnum(responseProperties["role"], []string{"OWNER", "VISITOR"}) || !exactStringEnum(responseProperties["purpose"], []string{"OWN_WORLD", "JOIN", "RECONNECT"}) {
+		return errors.New("OpenAPI admission role and purpose must remain closed")
+	}
+	gameplayEndpoint := schemas["GameplayEndpoint"].(map[string]any)
+	gameplayProperties := gameplayEndpoint["properties"].(map[string]any)
+	if !exactStringEnum(gameplayProperties["channel"], []string{"TLS_TCP"}) {
+		return errors.New("OpenAPI GameplayEndpoint must use TLS_TCP")
+	}
+	request, ok := schemas["WorldAdmissionRequest"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI requires WorldAdmissionRequest")
+	}
+	oneOf, ok := request["oneOf"].([]any)
+	if !ok || len(oneOf) != 2 || schemaRef(oneOf[0]) != "#/components/schemas/OwnWorldAdmissionTarget" || schemaRef(oneOf[1]) != "#/components/schemas/VisitWorldAdmissionTarget" {
+		return errors.New("OpenAPI WorldAdmissionRequest must use the fixed target one-of")
+	}
+	for _, route := range []string{"/v1/visits/{visitSessionId}/invites/{inviteId}/accept", "/v1/world/admissions"} {
+		pathItem, ok := paths[route].(map[string]any)
+		if !ok {
+			return fmt.Errorf("OpenAPI requires path %s", route)
+		}
+		operation, ok := pathItem["post"].(map[string]any)
+		if !ok || !hasParameterRef(operation, "#/components/parameters/IdempotencyKey") {
+			return fmt.Errorf("OpenAPI operation POST %s requires Idempotency-Key", route)
+		}
+	}
+	return nil
+}
+
+// requireExactSchema 拒绝公开 schema 增加未评审字段或放松必填集合。
+func requireExactSchema(schemas map[string]any, name string, propertiesExpected, requiredExpected []string) error {
+	schema, ok := schemas[name].(map[string]any)
+	if !ok || schema["additionalProperties"] != false {
+		return fmt.Errorf("OpenAPI schema %s must be closed", name)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok || len(properties) != len(propertiesExpected) {
+		return fmt.Errorf("OpenAPI schema %s has an unexpected public field set", name)
+	}
+	for _, property := range propertiesExpected {
+		if _, exists := properties[property]; !exists {
+			return fmt.Errorf("OpenAPI schema %s requires property %s", name, property)
+		}
+	}
+	required, ok := schema["required"].([]any)
+	if !ok || len(required) != len(requiredExpected) {
+		return fmt.Errorf("OpenAPI schema %s has an unexpected required field set", name)
+	}
+	requiredSet := make(map[string]struct{}, len(required))
+	for _, value := range required {
+		requiredName, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("OpenAPI schema %s has a non-string required field", name)
+		}
+		requiredSet[requiredName] = struct{}{}
+	}
+	for _, property := range requiredExpected {
+		if _, exists := requiredSet[property]; !exists {
+			return fmt.Errorf("OpenAPI schema %s requires required field %s", name, property)
+		}
+	}
+	return nil
+}
+
+// exactStringEnum 报告 schema 是否按顺序声明完整且唯一的字符串枚举。
+func exactStringEnum(value any, expected []string) bool {
+	schema, ok := value.(map[string]any)
+	if !ok || schema["type"] != "string" {
+		return false
+	}
+	values, ok := schema["enum"].([]any)
+	if !ok || len(values) != len(expected) {
+		return false
+	}
+	for index, item := range values {
+		if item != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// schemaRef 读取 one-of item 的本地 schema 引用，其他形态返回空值并由调用方拒绝。
+func schemaRef(value any) string {
+	item, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	reference, _ := item["$ref"].(string)
+	return reference
+}
+
+// hasParameterRef 报告 operation 是否显式引用指定公共 parameter。
+func hasParameterRef(operation map[string]any, expected string) bool {
+	parameters, ok := operation["parameters"].([]any)
+	if !ok {
+		return false
+	}
+	for _, parameter := range parameters {
+		if schemaRef(parameter) == expected {
+			return true
+		}
+	}
+	return false
+}
+
 // httpFixtureRouteManifest 是 contract validator 消费的 HTTPS fixture 窄投影。
 // Body 结构仍由 OpenAPI 与 fixture generator 拥有，此处只读取 route 和 status 引用。
 type httpFixtureRouteManifest struct {
@@ -554,6 +844,8 @@ type httpFixtureRouteRequest struct {
 	Method string `json:"method"`
 	// Path 必须与 OpenAPI paths 的键完全一致。
 	Path string `json:"path"`
+	// Headers 保存 fixture 显式提供的契约 header；bearer 等环境凭据不进入版本化示例。
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // httpFixtureRouteResponse 是验证 response 引用所需的最小响应投影。
@@ -592,6 +884,9 @@ func validateHTTPFixtureRoutes(root string, paths map[string]any) error {
 		if !ok {
 			return fmt.Errorf("HTTP fixture %s references unknown method %s", fixture.Name, fixture.Request.Method)
 		}
+		if operation["x-ihomeland-idempotency"] == "IDEMPOTENCY_KEY_REQUIRED" && strings.TrimSpace(fixture.Request.Headers["Idempotency-Key"]) == "" {
+			return fmt.Errorf("HTTP fixture %s requires Idempotency-Key", fixture.Name)
+		}
 		responses, ok := operation["responses"].(map[string]any)
 		if !ok {
 			return fmt.Errorf("HTTP fixture %s operation has no responses", fixture.Name)
@@ -623,7 +918,7 @@ func validateOperationPolicy(method string, operationID string, operation map[st
 		return fmt.Errorf("OpenAPI operation %s: %w", operationID, err)
 	}
 	idempotency, ok := operation["x-ihomeland-idempotency"].(string)
-	if !ok || (idempotency != "SAFE" && idempotency != "IDEMPOTENT" && idempotency != "NON_IDEMPOTENT") {
+	if !ok || (idempotency != "SAFE" && idempotency != "IDEMPOTENT" && idempotency != "NON_IDEMPOTENT" && idempotency != "IDEMPOTENCY_KEY_REQUIRED") {
 		return fmt.Errorf("OpenAPI operation %s has invalid idempotency policy", operationID)
 	}
 	if strings.EqualFold(method, "get") && idempotency != "SAFE" {
@@ -631,6 +926,9 @@ func validateOperationPolicy(method string, operationID string, operation map[st
 	}
 	if !strings.EqualFold(method, "get") && idempotency == "SAFE" {
 		return fmt.Errorf("OpenAPI operation %s cannot declare SAFE for method %s", operationID, method)
+	}
+	if idempotency == "IDEMPOTENCY_KEY_REQUIRED" && !hasParameterRef(operation, "#/components/parameters/IdempotencyKey") {
+		return fmt.Errorf("OpenAPI operation %s requires Idempotency-Key parameter", operationID)
 	}
 	return nil
 }
@@ -796,6 +1094,8 @@ func ValidateVersions(root string) error {
 		"ihomeland/account/v1": "ihomeland.account.v1",
 		"ihomeland/session/v1": "ihomeland.session.v1",
 		"ihomeland/control/v1": "ihomeland.control.v1",
+		"ihomeland/world/v1":   "ihomeland.world.v1",
+		"ihomeland/visit/v1":   "ihomeland.visit.v1",
 	}
 	protoRoot := filepath.Join(root, "shared", "proto")
 	return filepath.WalkDir(protoRoot, func(path string, entry os.DirEntry, walkErr error) error {

@@ -3,31 +3,69 @@
   "cases": [
     {
       "name": "unknown-message",
-      "expectedReason": "unknown_message"
+      "expectedReason": "unknown_message",
+      "gate": "registry",
+      "expectedErrorCode": 1
     },
     {
       "name": "wrong-channel",
-      "expectedReason": "wrong_channel"
+      "expectedReason": "wrong_channel",
+      "gate": "registry",
+      "expectedErrorCode": 1
+    },
+    {
+      "name": "wrong-direction",
+      "expectedReason": "wrong_direction",
+      "gate": "registry",
+      "expectedErrorCode": 1
     },
     {
       "name": "invalid-kind-id",
-      "expectedReason": "invalid_correlation"
+      "expectedReason": "invalid_correlation",
+      "gate": "envelope",
+      "expectedErrorCode": 1
     },
     {
-      "name": "unknown-enum",
-      "expectedReason": "unknown_kind"
+      "name": "invalid-response-correlation",
+      "expectedReason": "invalid_response_correlation",
+      "gate": "envelope",
+      "expectedErrorCode": 1
+    },
+    {
+      "name": "unknown-envelope-enum",
+      "expectedReason": "unknown_kind",
+      "gate": "envelope",
+      "expectedErrorCode": 1
     },
     {
       "name": "forbidden-actor-field",
-      "expectedReason": "identity_boundary"
+      "expectedReason": "identity_boundary",
+      "gate": "descriptor",
+      "expectedErrorCode": 200
+    },
+    {
+      "name": "forbidden-internal-assignment",
+      "expectedReason": "internal_assignment_boundary",
+      "gate": "descriptor",
+      "expectedErrorCode": 200
     },
     {
       "name": "oversized-frame",
-      "expectedReason": "frame_too_large"
+      "expectedReason": "frame_too_large",
+      "gate": "frame",
+      "expectedErrorCode": 1
     },
     {
       "name": "truncated-frame",
-      "expectedReason": "truncated_frame"
+      "expectedReason": "truncated_frame",
+      "gate": "frame",
+      "expectedErrorCode": 1
+    },
+    {
+      "name": "unregistered-world-interaction",
+      "expectedReason": "unregistered_interaction",
+      "gate": "registry",
+      "expectedErrorCode": 1
     }
   ]
 }

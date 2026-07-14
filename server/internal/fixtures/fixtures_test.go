@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jinwiforz/ihomeland/server/internal/contract"
@@ -16,13 +17,14 @@ import (
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/control/v1"
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/session/v1"
 	"github.com/jinwiforz/ihomeland/server/internal/protocol"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
-// TestGoldenPackets 对每个 packet 执行 registry lookup、decode、确定性 re-encode 与摘要验证。
-// 动态类型解析确保 fixture 的 Protobuf 全名真实可消费，摘要校验则覆盖 envelope 路由上下文。
+// TestGoldenPackets 对每个 packet 执行 registry lookup、decode、canonical re-encode 与摘要验证。
+// 动态类型解析确保 fixture 的 Protobuf 全名真实可消费，覆盖检查则防止新增登记遗漏 golden。
 func TestGoldenPackets(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -36,12 +38,13 @@ func TestGoldenPackets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 通过真实基线驱动子测试，防止测试代码复制一份可能漂移的 packet 清单。
+	// 通过真实基线驱动子测试，避免测试代码复制一份可能漂移的 packet 清单。
 	var manifest GoldenManifest
 	if err := json.Unmarshal(contents, &manifest); err != nil {
 		t.Fatal(err)
 	}
 	seenKinds := make(map[string]bool)
+	seenMessageIDs := make(map[uint32]bool)
 	for _, packet := range manifest.Packets {
 		t.Run(packet.Name, func(t *testing.T) {
 			payload, err := base64.StdEncoding.DecodeString(packet.PayloadBase64)
@@ -60,8 +63,19 @@ func TestGoldenPackets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(payload) != string(reencoded) {
+			if !bytes.Equal(payload, reencoded) {
 				t.Fatal("deterministic payload changed after decode")
+			}
+			jsonPayload, err := (protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: false}).Marshal(message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonicalJSON := new(bytes.Buffer)
+			if err := json.Compact(canonicalJSON, jsonPayload); err != nil {
+				t.Fatal(err)
+			}
+			if canonicalJSON.String() != packet.PayloadJSON {
+				t.Fatal("canonical JSON changed after descriptor decode")
 			}
 			digestSource := payload
 			if packet.MessageID != 0 {
@@ -92,6 +106,7 @@ func TestGoldenPackets(t *testing.T) {
 				}
 				assertEnvelopeCorrelation(t, route.Idempotency, envelope)
 				seenKinds[kind] = true
+				seenMessageIDs[packet.MessageID] = true
 				digestSource = envelopeBytes
 			}
 			digest := sha256.Sum256(digestSource)
@@ -100,14 +115,19 @@ func TestGoldenPackets(t *testing.T) {
 			}
 		})
 	}
-	for _, required := range []string{"PUSH"} {
+	for _, required := range []string{"REQUEST", "RESPONSE", "COMMAND", "PUSH"} {
 		if !seenKinds[required] {
 			t.Fatalf("golden packets do not cover message kind %s", required)
 		}
 	}
+	for _, message := range catalog.Messages.Messages {
+		if message.ID >= 2000 && message.ID <= 2122 && !seenMessageIDs[message.ID] {
+			t.Fatalf("golden packets do not cover message id %d", message.ID)
+		}
+	}
 }
 
-// TestFixtureFilesMatchDeterministicGeneration 确保 HTTP、golden 与 negative 三类基线都由同一生成器拥有。
+// TestFixtureFilesMatchDeterministicGeneration 确保所有版本化 fixture 都由同一生成器拥有。
 func TestFixtureFilesMatchDeterministicGeneration(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -118,8 +138,8 @@ func TestFixtureFilesMatchDeterministicGeneration(t *testing.T) {
 	}
 }
 
-// TestNegativeCasesCoversRequiredBoundaries 保证拒绝用例清单持续覆盖 change 规定的边界。
-// 这里只验证清单完整性；各畸形字节的具体拒绝行为由对应 codec 与 contract 测试负责。
+// TestNegativeCasesCoversRequiredBoundaries 保证拒绝用例持续覆盖协议规定的边界。
+// 这里验证清单完整性；各畸形字节的具体拒绝行为由对应 codec 与 contract 测试负责。
 func TestNegativeCasesCoversRequiredBoundaries(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -129,7 +149,6 @@ func TestNegativeCasesCoversRequiredBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 从版本化清单收集原因，确保新增 case 不会削弱必须长期保留的攻击与边界覆盖。
 	var manifest NegativeManifest
 	if err := json.Unmarshal(contents, &manifest); err != nil {
 		t.Fatal(err)
@@ -146,11 +165,88 @@ func TestNegativeCasesCoversRequiredBoundaries(t *testing.T) {
 		names[testCase.Name] = true
 		reasons[testCase.ExpectedReason] = true
 	}
-	for _, required := range []string{"unknown_message", "wrong_channel", "invalid_correlation", "unknown_kind", "identity_boundary", "frame_too_large", "truncated_frame"} {
+	for _, required := range []string{
+		"unknown_message", "wrong_channel", "wrong_direction", "invalid_correlation",
+		"invalid_response_correlation", "unknown_kind", "identity_boundary",
+		"internal_assignment_boundary", "frame_too_large", "truncated_frame", "unregistered_interaction",
+	} {
 		if !reasons[required] {
 			t.Fatalf("missing negative reason %s", required)
 		}
 	}
+}
+
+// TestAdmissionSemanticCorpusIsOpaque 验证语义 corpus 只描述受信绑定结果，不泄露 credential claims 布局。
+func TestAdmissionSemanticCorpusIsOpaque(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "shared", "contracts", "fixtures", "admission", "semantic.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest AdmissionSemanticManifest
+	if err := json.Unmarshal(contents, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.RuntimeImplemented {
+		t.Fatal("semantic corpus must not claim runtime admission implementation")
+	}
+	for _, forbiddenKey := range []string{`"credential":`, `"claims":`, `"nonce":`, `"sessionEpoch":`, `"assignmentStamp":`, `"signature":`} {
+		if strings.Contains(string(contents), forbiddenKey) {
+			t.Fatalf("semantic corpus exposes forbidden credential detail %s", forbiddenKey)
+		}
+	}
+	accepted := make(map[string]bool)
+	for _, testCase := range manifest.Cases {
+		if testCase.ExpectedOutcome == "ACCEPT" {
+			accepted[testCase.MembershipState+":"+testCase.Purpose] = true
+		}
+	}
+	if !accepted["RESERVED:JOIN"] || !accepted["RECONNECTING:RECONNECT"] {
+		t.Fatal("semantic corpus lacks valid JOIN or RECONNECT binding")
+	}
+}
+
+// FuzzGoldenPayloadRoundTrip 验证已登记类型在未知字段、未知 enum 与任意字段顺序下仍可 canonical re-encode。
+func FuzzGoldenPayloadRoundTrip(f *testing.F) {
+	manifest, err := buildGoldenManifest()
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, packet := range manifest.Packets {
+		payload, err := base64.StdEncoding.DecodeString(packet.PayloadBase64)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(packet.Protobuf, payload)
+	}
+	f.Fuzz(func(t *testing.T, typeName string, payload []byte) {
+		messageType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(typeName))
+		if err != nil {
+			return
+		}
+		first := messageType.New().Interface()
+		if err := proto.Unmarshal(payload, first); err != nil {
+			return
+		}
+		canonical, err := (proto.MarshalOptions{Deterministic: true}).Marshal(first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second := messageType.New().Interface()
+		if err := proto.Unmarshal(canonical, second); err != nil {
+			t.Fatal(err)
+		}
+		reencoded, err := (proto.MarshalOptions{Deterministic: true}).Marshal(second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(canonical, reencoded) || !proto.Equal(first, second) {
+			t.Fatal("payload canonical form is not stable")
+		}
+	})
 }
 
 // messageKindName 将 wire enum 转换为 registry 使用的稳定 kind symbol。
@@ -199,7 +295,7 @@ func assertEnvelopeCorrelation(t *testing.T, strategy string, envelope *commonv1
 }
 
 // routeChannel 返回已登记 channel，使 LookupRoute 仍能验证路由唯一存在。
-// 未登记消息返回空字符串并由 LookupRoute 拒绝，helper 不提供任何 fallback channel。
+// 未登记消息返回空字符串并由 LookupRoute 拒绝，helper 不提供 fallback channel。
 func routeChannel(catalog contract.Catalog, messageID uint32) string {
 	for _, route := range catalog.Routes.Routes {
 		if route.MessageID == messageID {

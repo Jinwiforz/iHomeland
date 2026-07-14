@@ -172,17 +172,20 @@ shared/
       account/v1/
       session/v1/
       control/v1/
-      world/v1/            # 对应业务协议 change 落地时创建
-      visit/v1/            # 对应业务协议 change 落地时创建
+      world/v1/            # PersonalWorld 公开投影与 snapshot
+      visit/v1/            # VisitSession 控制、snapshot 与 safe-return
   contracts/
     http/v1/openapi.yaml
     registry/
     fixtures/
+      admission/           # issuer/verifier 的抽象语义 corpus，不含 claims
+      http/
+      realtime/
 ```
 
 - `.proto` 是跨端消息源。
 - route/error catalog 是协议源的一部分。
-- HTTP fixtures、realtime golden packets 与 negative coverage manifest 是兼容性基线，必须版本化并由统一工具重复生成和验证。
+- HTTP fixtures、realtime golden packets、negative coverage manifest 与 admission semantic corpus 是兼容性基线，必须版本化并由统一工具重复生成和验证。
 - `descriptor.bin` 与 registry projection 不落盘；validator 使用刚生成的 Go descriptor registry，并在内存构建路由投影。
 - 不放服务端 domain model 或 Unity 类型。
 

@@ -102,6 +102,18 @@ func TestValidateMessagesRejectsInvalidGovernance(t *testing.T) {
 		{name: "push correlation strategy", mutate: func(catalog *Catalog) {
 			catalog.Routes.Routes[len(catalog.Routes.Routes)-1].Idempotency = "REQUEST_ID"
 		}},
+		{name: "response correlation strategy", mutate: func(catalog *Catalog) {
+			for index := range catalog.Messages.Messages {
+				if catalog.Messages.Messages[index].Kind == "RESPONSE" {
+					for routeIndex := range catalog.Routes.Routes {
+						if catalog.Routes.Routes[routeIndex].MessageID == catalog.Messages.Messages[index].ID {
+							catalog.Routes.Routes[routeIndex].Idempotency = "COMMAND_ID"
+							return
+						}
+					}
+				}
+			}
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -165,16 +177,279 @@ func TestValidateOperationPolicyRejectsMissingOrContradictoryLimits(t *testing.T
 	}
 }
 
+// TestValidateOperationPolicyRequiresIdempotencyHeader 固定一次性 admission 与 invite accept 的安全重试边界。
+func TestValidateOperationPolicyRequiresIdempotencyHeader(t *testing.T) {
+	operation := map[string]any{
+		"requestBody":                  map[string]any{},
+		"x-ihomeland-body-limit-bytes": 4096,
+		"x-ihomeland-timeout-ms":       5000,
+		"x-ihomeland-idempotency":      "IDEMPOTENCY_KEY_REQUIRED",
+	}
+	if err := validateOperationPolicy("post", "issueWorldAdmission", operation); err == nil {
+		t.Fatal("expected missing Idempotency-Key rejection")
+	}
+	operation["parameters"] = []any{map[string]any{"$ref": "#/components/parameters/IdempotencyKey"}}
+	if err := validateOperationPolicy("post", "issueWorldAdmission", operation); err != nil {
+		t.Fatalf("valid idempotency-key operation rejected: %v", err)
+	}
+}
+
+// validWorldHTTPSchemaDocument 构造 validator 单元测试使用的最小完整 world/visit HTTP 合同。
+func validWorldHTTPSchemaDocument() (map[string]any, map[string]any) {
+	closedSchema := func(properties map[string]any, required ...string) map[string]any {
+		values := make([]any, len(required))
+		for index, name := range required {
+			values[index] = name
+		}
+		return map[string]any{"additionalProperties": false, "required": values, "properties": properties}
+	}
+	parameterRef := []any{map[string]any{"$ref": "#/components/parameters/IdempotencyKey"}}
+	document := map[string]any{"components": map[string]any{
+		"parameters": map[string]any{"IdempotencyKey": map[string]any{
+			"name": "Idempotency-Key", "in": "header", "required": true,
+			"schema": map[string]any{"type": "string", "minLength": 16, "maxLength": 128, "pattern": safeASCIIIdentityPattern},
+		}},
+		"schemas": map[string]any{
+			"AcceptVisitInviteRequest":  closedSchema(map[string]any{"expectedRevision": map[string]any{"type": "integer"}}, "expectedRevision"),
+			"OwnWorldAdmissionTarget":   closedSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []any{"OWN_WORLD"}}}, "kind"),
+			"VisitWorldAdmissionTarget": closedSchema(map[string]any{"kind": map[string]any{"type": "string", "enum": []any{"VISIT_WORLD"}}, "visitSessionId": map[string]any{"type": "string"}}, "kind", "visitSessionId"),
+			"WorldAdmissionRequest": map[string]any{"oneOf": []any{
+				map[string]any{"$ref": "#/components/schemas/OwnWorldAdmissionTarget"},
+				map[string]any{"$ref": "#/components/schemas/VisitWorldAdmissionTarget"},
+			}},
+			"WorldAssignment": closedSchema(map[string]any{
+				"personalWorldId": map[string]any{"type": "string"}, "worldInstanceId": map[string]any{"type": "string"},
+				"endpoint": map[string]any{"$ref": "#/components/schemas/GameplayEndpoint"}, "generation": map[string]any{"type": "integer"}, "leaseExpiresAtMs": map[string]any{"type": "integer"},
+			}, "personalWorldId", "worldInstanceId", "endpoint", "generation", "leaseExpiresAtMs"),
+			"WorldAdmissionResponse": closedSchema(map[string]any{
+				"credential": map[string]any{"type": "string", "minLength": 32, "maxLength": 4096, "pattern": safeOpaqueCredentialPattern, "description": "opaque credential"},
+				"endpoint":   map[string]any{"$ref": "#/components/schemas/GameplayEndpoint"}, "role": map[string]any{"type": "string", "enum": []any{"OWNER", "VISITOR"}},
+				"purpose": map[string]any{"type": "string", "enum": []any{"OWN_WORLD", "JOIN", "RECONNECT"}}, "expiresAtMs": map[string]any{"type": "integer"},
+			}, "credential", "endpoint", "role", "purpose", "expiresAtMs"),
+			"GameplayEndpoint": closedSchema(map[string]any{
+				"channel": map[string]any{"type": "string", "enum": []any{"TLS_TCP"}}, "host": map[string]any{"type": "string"}, "port": map[string]any{"type": "integer"},
+			}, "channel", "host", "port"),
+		},
+	}}
+	paths := map[string]any{
+		"/v1/visits/{visitSessionId}/invites/{inviteId}/accept": map[string]any{"post": map[string]any{"parameters": parameterRef}},
+		"/v1/world/admissions": map[string]any{"post": map[string]any{"parameters": parameterRef}},
+	}
+	return document, paths
+}
+
+// TestValidateWorldHTTPSchemasRejectsIdentityExpansion 保护 admission target 只能表达受限目标选择。
+func TestValidateWorldHTTPSchemasRejectsIdentityExpansion(t *testing.T) {
+	document, paths := validWorldHTTPSchemaDocument()
+	if err := validateWorldHTTPSchemas(document, paths); err != nil {
+		t.Fatalf("valid world HTTP schemas rejected: %v", err)
+	}
+	target := document["components"].(map[string]any)["schemas"].(map[string]any)["VisitWorldAdmissionTarget"].(map[string]any)
+	target["properties"].(map[string]any)["playerId"] = map[string]any{"type": "string"}
+	if err := validateWorldHTTPSchemas(document, paths); err == nil {
+		t.Fatal("actor identity expansion unexpectedly accepted")
+	}
+}
+
+// TestValidateWorldHTTPSchemasRejectsAdmissionDrift 固定 credential、purpose 与 TLS/TCP endpoint 边界。
+func TestValidateWorldHTTPSchemasRejectsAdmissionDrift(t *testing.T) {
+	mutations := []struct {
+		// name 标识被放松的 admission 合同维度。
+		name string
+		// mutate 只改变一个公开 schema 约束。
+		mutate func(map[string]any)
+	}{
+		{name: "generic endpoint", mutate: func(schemas map[string]any) {
+			schemas["WorldAdmissionResponse"].(map[string]any)["properties"].(map[string]any)["endpoint"] = map[string]any{"$ref": "#/components/schemas/Endpoint"}
+		}},
+		{name: "missing opaque description", mutate: func(schemas map[string]any) {
+			delete(schemas["WorldAdmissionResponse"].(map[string]any)["properties"].(map[string]any)["credential"].(map[string]any), "description")
+		}},
+		{name: "unsafe credential alphabet", mutate: func(schemas map[string]any) {
+			schemas["WorldAdmissionResponse"].(map[string]any)["properties"].(map[string]any)["credential"].(map[string]any)["pattern"] = `^.*$`
+		}},
+		{name: "expanded purpose", mutate: func(schemas map[string]any) {
+			schemas["WorldAdmissionResponse"].(map[string]any)["properties"].(map[string]any)["purpose"].(map[string]any)["enum"] = []any{"OWN_WORLD", "JOIN", "RECONNECT", "ADMIN"}
+		}},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			document, paths := validWorldHTTPSchemaDocument()
+			schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+			mutation.mutate(schemas)
+			if err := validateWorldHTTPSchemas(document, paths); err == nil {
+				t.Fatal("drifted admission schema unexpectedly accepted")
+			}
+		})
+	}
+}
+
+// TestValidateWorldVisitErrorsRejectsRecoveryDrift 固定 stable error 的 owner、状态码与原样重试语义。
+func TestValidateWorldVisitErrorsRejectsRecoveryDrift(t *testing.T) {
+	entries := make([]ErrorEntry, 0, len(worldVisitErrorProfiles))
+	for _, entry := range worldVisitErrorProfiles {
+		entries = append(entries, entry)
+	}
+	if err := validateWorldVisitErrors(entries); err != nil {
+		t.Fatalf("valid world/visit error profiles rejected: %v", err)
+	}
+	for index := range entries {
+		if entries[index].Code == 2105 {
+			entries[index].Retryable = true
+			break
+		}
+	}
+	if err := validateWorldVisitErrors(entries); err == nil {
+		t.Fatal("revision conflict retryability drift unexpectedly accepted")
+	}
+}
+
+// TestValidateOperationErrorResponseRejectsTransportLocalSchema 确保所有 HTTP route 复用 stable error envelope。
+func TestValidateOperationErrorResponseRejectsTransportLocalSchema(t *testing.T) {
+	operation := map[string]any{"responses": map[string]any{"default": map[string]any{"$ref": "#/components/responses/ErrorResponse"}}}
+	if err := validateOperationErrorResponse("testOperation", operation); err != nil {
+		t.Fatalf("shared error response rejected: %v", err)
+	}
+	operation["responses"].(map[string]any)["default"] = map[string]any{"description": "free text"}
+	if err := validateOperationErrorResponse("testOperation", operation); err == nil {
+		t.Fatal("transport-local error schema unexpectedly accepted")
+	}
+}
+
 // TestForbiddenActorFieldNames 防止 command schema 重新引入由 payload 决定的操作者身份。
 // 测试覆盖 snake_case 与 camelCase；target_seat 作为合法反例，避免规则误伤业务目标字段。
 func TestForbiddenActorFieldNames(t *testing.T) {
-	for _, name := range []string{"actor_id", "accountId", "player_id", "userId"} {
-		if !forbiddenActorField.MatchString(name) {
+	for _, name := range []string{"actor_id", "accountId", "player_id", "userId", "session_id", "sessionEpoch", "world_id", "personalWorldId", "world_instance_id", "role", "endpoint", "fencingToken", "assignment_stamp", "runtimeNodeId"} {
+		if !forbiddenCommandIdentityField.MatchString(name) {
 			t.Fatalf("expected %s to be forbidden", name)
 		}
 	}
-	if forbiddenActorField.MatchString("target_seat") {
-		t.Fatal("business target fields must remain legal")
+	for _, name := range []string{"target_seat", "target_visitor_id", "player_profile", "world_view_revision"} {
+		if forbiddenCommandIdentityField.MatchString(name) {
+			t.Fatalf("business target field %s must remain legal", name)
+		}
+	}
+}
+
+// TestCommandDescriptorIdentityScan 覆盖合法target反例和嵌套assignment身份字段发现。
+func TestCommandDescriptorIdentityScan(t *testing.T) {
+	files := &protoregistryFiles{files: protoregistry.GlobalFiles}
+	command, err := files.FindMessage("ihomeland.visit.v1.VisitCreateInviteCommand")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, found := findForbiddenActorField(command, nil); found {
+		t.Fatalf("valid target command rejected at %s", path)
+	}
+	assignment, err := files.FindMessage("ihomeland.world.v1.WorldAssignment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, found := findForbiddenActorField(assignment, nil); !found || path != "personal_world_id" {
+		t.Fatalf("expected nested assignment identity detection, path=%q found=%v", path, found)
+	}
+}
+
+// TestPublishedControlRegistryBaseline 固定已经发布的 control message、route 与 stable error 身份。
+func TestPublishedControlRegistryBaseline(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMessages := map[uint32]string{
+		500: "CONTROL_MAINTENANCE_PUSH", 501: "CONTROL_FORCED_LOGOUT_PUSH", 502: "CONTROL_QUEUE_STATUS_PUSH",
+		503: "CONTROL_ENDPOINT_UPDATE_PUSH", 504: "CONTROL_SESSION_INVALIDATED_PUSH",
+	}
+	for id, name := range wantMessages {
+		message, route, err := catalog.LookupRoute(id, "WSS")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if message.Name != name || message.Owner != "control" || message.Kind != "PUSH" || message.Direction != "SERVER_TO_CLIENT" || route.Idempotency != "NONE" {
+			t.Fatalf("published control message %d changed incompatibly", id)
+		}
+	}
+	wantErrors := map[uint32]string{1: "PROTOCOL_INVALID_ENVELOPE", 2: "PROTOCOL_UNSUPPORTED_VERSION", 100: "AUTH_UNAUTHENTICATED", 101: "AUTH_FORBIDDEN", 102: "AUTH_INVALID_CREDENTIALS", 103: "AUTH_TICKET_EXPIRED", 104: "ACCOUNT_USERNAME_TAKEN", 200: "VALIDATION_FAILED", 400: "RATE_LIMITED", 500: "DEPENDENCY_UNAVAILABLE", 501: "INTERNAL_ERROR"}
+	seen := make(map[uint32]string, len(catalog.Errors.Errors))
+	for _, entry := range catalog.Errors.Errors {
+		seen[entry.Code] = entry.Name
+	}
+	for code, name := range wantErrors {
+		if seen[code] != name {
+			t.Fatalf("published error %d changed from %s to %s", code, name, seen[code])
+		}
+	}
+}
+
+// FuzzWorldAdmissionOneOfIdentityBoundary 验证 YAML/JSON map 解码后的额外字段不能扩张 admission one-of。
+func FuzzWorldAdmissionOneOfIdentityBoundary(f *testing.F) {
+	for _, seed := range []string{"playerId", "actor_id", "endpoint", "role", "kind", "visitSessionId", "futureField"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, property string) {
+		document, paths := validWorldHTTPSchemaDocument()
+		target := document["components"].(map[string]any)["schemas"].(map[string]any)["VisitWorldAdmissionTarget"].(map[string]any)
+		allowed := property == "kind" || property == "visitSessionId"
+		if !allowed {
+			target["properties"].(map[string]any)[property] = map[string]any{"type": "string"}
+		}
+		err := validateWorldHTTPSchemas(document, paths)
+		if allowed && err != nil {
+			t.Fatalf("allowed property %q rejected: %v", property, err)
+		}
+		if !allowed && err == nil {
+			t.Fatalf("extra property %q expanded admission identity", property)
+		}
+	})
+}
+
+// TestValidateWorldVisitRouteProfiles 固定 world/visit 的唯一通道、size、rate 与 timeout 合同。
+func TestValidateWorldVisitRouteProfiles(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, route, err := catalog.LookupRoute(2103, "TLS_TCP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateWorldVisitRoute(message, route); err != nil {
+		t.Fatalf("valid visit command rejected: %v", err)
+	}
+	mutations := []struct {
+		// name 标识被破坏的路由维度。
+		name string
+		// mutate 只改变一个已评审字段。
+		mutate func(*RouteEntry)
+	}{
+		{name: "channel", mutate: func(value *RouteEntry) { value.Channel = "WSS" }},
+		{name: "auth scope", mutate: func(value *RouteEntry) { value.AuthScope = "CONTROL" }},
+		{name: "max size", mutate: func(value *RouteEntry) { value.MaxSize++ }},
+		{name: "rate policy", mutate: func(value *RouteEntry) { value.RatePolicy = "server_world" }},
+		{name: "idempotency", mutate: func(value *RouteEntry) { value.Idempotency = "REQUEST_ID" }},
+		{name: "timeout", mutate: func(value *RouteEntry) { value.TimeoutMS++ }},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			invalid := route
+			mutation.mutate(&invalid)
+			if err := validateWorldVisitRoute(message, invalid); err == nil {
+				t.Fatal("drifted route unexpectedly accepted")
+			}
+		})
+	}
+	unknown := message
+	unknown.ID = 2123
+	if err := validateWorldVisitRoute(unknown, route); err == nil {
+		t.Fatal("unreviewed world/visit message unexpectedly accepted")
 	}
 }
 

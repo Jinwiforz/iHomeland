@@ -30,9 +30,9 @@ shared/proto/
     session.proto
   ihomeland/control/v1/
     control.proto
-  ihomeland/world/v1/         PersonalWorld 协议阶段创建
-  ihomeland/visit/v1/         VisitSession 协议阶段创建
-  ihomeland/battle/v1/          battle 阶段创建
+  ihomeland/world/v1/         PersonalWorld 公开投影与 snapshot
+  ihomeland/visit/v1/         VisitSession 控制、snapshot 与 safe-return
+  ihomeland/battle/v1/        battle 阶段创建
 ```
 
 Domain model 不直接使用 generated protobuf type；application/transport adapter 负责转换。
@@ -56,7 +56,9 @@ Domain model 不直接使用 generated protobuf type；application/transport ada
 | `100-499` | session/auth |
 | `500-999` | control |
 | `1000-1999` | account/profile |
-| `2000+` | 由业务协议 change 按 owner 分配；未登记区间不得占位 |
+| `2000-2099` | world |
+| `2100-2299` | visit |
+| `2300+` | 由业务协议 change 按 owner 分配；未登记区间不得占位 |
 | `20000+` | reserved by explicit OpenSpec |
 
 规则：
@@ -66,6 +68,8 @@ Domain model 不直接使用 generated protobuf type；application/transport ada
 - 已冻结编号不得复用，即使消息废弃。
 - 废弃编号进入 reserved 清单。
 - 不依赖奇偶数推断方向，方向由 route registry 明示。
+
+World 首批登记 `2000-2003`，Visit 首批登记 `2100-2122`；区间内其余编号仍是未分配状态，不得把 owner range 当成可发送消息清单。未登记 world interaction 默认拒绝，不能进入通用 dispatcher。
 
 ## 字段兼容
 
@@ -128,6 +132,8 @@ Domain model 不直接使用 generated protobuf type；application/transport ada
 
 `retryable` 只表示保持输入不变并稍后重试可能成功。ticket 过期或 revision 冲突要求先取得新 ticket/snapshot，因此不得标记为可直接重试。
 
+World 使用 `2000-2006`，Visit 使用 `2100-2109` 作为当前稳定错误；权限、validation、rate limit、dependency 与 internal failure 继续复用 shared error。Public error 不得包含 credential、nonce、完整 assignment、runtime node/fence、session epoch、binding、fingerprint 或 backend detail。
+
 ## Route Registry
 
 Route Registry 的字段与通道选择原则由 `docs/network-transport-architecture.md` 定义，当前机器事实由 `shared/contracts/registry/routes.json` 持有。协议治理要求 schema、route registry 和服务端 dispatcher 由测试确认一致，未登记或复用已冻结 message id 的消息不得进入正式 listener。实时 error 也必须拥有独立 message id、单一 channel 和 `ErrorPayload` 类型，不能复用原操作 message id 却更换 payload 类型。
@@ -139,6 +145,7 @@ Route Registry 的字段与通道选择原则由 `docs/network-transport-archite
 - HTTP 使用标准 request/response correlation 与 idempotency key（需要时）。
 - 实时 request 使用不可预测或足够唯一的 request id。
 - mutation command 使用 command id 处理重复提交。
+- response 使用原 request id 或 command id，registry 统一登记为 `CORRELATION_ID`，且 envelope 中必须恰有一种关联标识。
 - Push 不伪装成 request response，必须有独立 direction 和 handler。
 - Snapshot 带单调 revision；客户端拒绝低 revision 覆盖高 revision。
 - 战斗消息使用 tick/sequence 与 expiry，不复用 PersonalWorld、VisitSession 或 ActivityInstance revision。
@@ -151,6 +158,15 @@ Route Registry 的字段与通道选择原则由 `docs/network-transport-archite
 - 每条实时 route 限制完整 encoded envelope 大小，不能只限制内部 payload 后忽略 envelope 开销。
 - TCP frame、HTTP body、WSS message 和 UDP datagram 分别配置上限。
 - 每个 HTTP operation 使用 `x-ihomeland-body-limit-bytes`、`x-ihomeland-timeout-ms` 和 `x-ihomeland-idempotency` 声明 adapter 必须执行的资源与重试边界。
+- world bootstrap 不带 body；invite accept 与 admission issuance 都要求 `Idempotency-Key`。相同 key、相同语义重放首次结果，相同 key 改变语义返回稳定 conflict。
+
+## World/Visit 公开投影与 credential 分层
+
+- Client-safe assignment 只公开 PersonalWorldID、WorldInstanceID、TLS/TCP endpoint、generation 与 lease expiry；RuntimeNodeID、FencingToken 和完整 AssignmentStamp 只保留在服务端 binding。
+- Wire 绝对时间统一使用 Unix epoch milliseconds，并在字段名使用 `_at_ms` 或 `_expires_at_ms`；这不改变服务端持久事实的时间精度。
+- HTTPS bearer 只证明 account/session lineage；`ConnectionTicket` 只允许连接一个 endpoint/channel；invite 与 `AdmissionIntent` 只表达领域资格；opaque world admission 才允许已认证 TLS/TCP connection 进入 current world target。
+- Admission purpose 必须显式为 `OWN_WORLD`、`JOIN` 或 `RECONNECT`。Visitor 的 `JOIN` 只匹配 active reserved membership，`RECONNECT` 只匹配 active reconnecting membership；GAMEPLAY scope 本身不授予 Owner/Visitor role。
+- Admission 只由 OpenAPI `WorldAdmissionResponse` 公开安全 ASCII opaque credential、endpoint、role、purpose 与 expiry；realtime schema 原样消费同一 string，不重复定义响应 DTO，也不公开可伪造 claims JSON。完整 binding、nonce 原子消费与 replay 防护规则由 `docs/network-transport-architecture.md` 的 World Admission 章节持有。
 
 ## 生成与验证
 

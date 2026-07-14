@@ -185,12 +185,14 @@ A0 Project Baseline
 **产出：**
 
 - world/visit Protobuf packages 与 owner ranges
-- bootstrap、assignment、invite、admission、snapshot、interaction 和 safe-return schema
+- bootstrap、assignment、invite、admission、snapshot、VisitSession command 和 safe-return schema
 - message/error/route registry 与唯一 allowed channel
 - gameplay ticket 与一次性 world/visit admission 的明确分层
 - deterministic request/response/error/push fixtures 和 negative cases
 
 **完成条件：**payload identity 不能覆盖 AuthContext/admission；同一业务消息无 WSS/TCP 双入口；fixtures 与 Go validator 全部通过。
+
+**当前边界：**P0 已形成可生成、可登记、可严格验证的 source contract 与 deterministic fixtures；production HTTP/WSS/TLS-TCP adapter、admission issuer/verifier、Composition Root 接线和 Go 协议客户端仍属于 N0/Q0，当前进程不开放这些业务入口。未登记 generic world interaction 继续默认拒绝。
 
 ## N0：公开通道与安全接入
 
@@ -200,7 +202,7 @@ A0 Project Baseline
 
 ### `add-server-websocket-control`
 
-交付认证 WSS control、maintenance/forced logout/endpoint update、visit invite/Owner availability/safe-return notice，以及 bounded queue、deadline、slow consumer 和 connection storm tests。WSS 不接收 world mutation。
+交付认证 WSS control、maintenance/forced logout/endpoint update、visit invite/Owner availability/assignment/close notice，以及 bounded queue、deadline、slow consumer 和 connection storm tests。WSS 不接收 world mutation，也不发送 TLS/TCP safe-return 的替代消息。
 
 ### `add-server-tcp-gameplay`
 

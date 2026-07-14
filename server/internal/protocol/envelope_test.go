@@ -50,6 +50,27 @@ func TestEnvelopeRejectsInvalidKindIdentifierPairs(t *testing.T) {
 	}
 }
 
+// TestEnvelopeResponseRequiresExactlyOneCorrelation 固定 response 对 request 或 command 的唯一回显规则。
+// 同时携带或完全缺少 identifier 都无法确定首次提交结果的归属，必须在 dispatch 前拒绝。
+func TestEnvelopeResponseRequiresExactlyOneCorrelation(t *testing.T) {
+	base := commonv1.ReliableEnvelope_builder{ProtocolVersion: proto.Uint32(1), MessageId: proto.Uint32(2104), Kind: enumPointer(commonv1.MessageKind_MESSAGE_KIND_RESPONSE), Sequence: proto.Uint64(1), TimestampMs: proto.Int64(1)}.Build()
+	if err := ValidateEnvelope(base); err == nil {
+		t.Fatal("response without correlation should fail")
+	}
+	base.SetRequestId(bytes.Repeat([]byte{1}, 16))
+	if err := ValidateEnvelope(base); err != nil {
+		t.Fatalf("request response correlation rejected: %v", err)
+	}
+	base.SetCommandId(bytes.Repeat([]byte{2}, 16))
+	if err := ValidateEnvelope(base); err == nil {
+		t.Fatal("response with both correlations should fail")
+	}
+	base.ClearRequestId()
+	if err := ValidateEnvelope(base); err != nil {
+		t.Fatalf("command response correlation rejected: %v", err)
+	}
+}
+
 // TestEnvelopeRejectsMissingSequenceAndOversize 保护 WSS 与 TLS/TCP 共享的 envelope 资源边界。
 // WSS 不经过 length-prefix frame decoder，因此大小限制必须由通道无关 codec 再执行一次。
 func TestEnvelopeRejectsMissingSequenceAndOversize(t *testing.T) {

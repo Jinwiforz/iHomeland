@@ -1,0 +1,302 @@
+edition = "2024";
+
+package ihomeland.visit.v1;
+
+import "ihomeland/world/v1/world.proto";
+
+option csharp_namespace = "IHomeland.Protocol.Visit.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/visit/v1;visitv1";
+
+// VisitLifecycle 表达 VisitSession 控制面的封闭状态。
+enum VisitLifecycle {
+  // VISIT_LIFECYCLE_UNSPECIFIED 用于拒绝缺失或未知状态。
+  VISIT_LIFECYCLE_UNSPECIFIED = 0;
+  // VISIT_LIFECYCLE_OPEN 允许创建邀请以及目标 Visitor accept/join。
+  VISIT_LIFECYCLE_OPEN = 1;
+  // VISIT_LIFECYCLE_OWNER_GRACE 暂停新资格并等待 immutable Owner 恢复。
+  VISIT_LIFECYCLE_OWNER_GRACE = 2;
+  // VISIT_LIFECYCLE_CLOSED 表示 session 已终止且不能迁移或恢复。
+  VISIT_LIFECYCLE_CLOSED = 3;
+}
+
+// VisitInviteState 表达公开 invite projection 的封闭状态。
+enum VisitInviteState {
+  // VISIT_INVITE_STATE_UNSPECIFIED 用于拒绝缺失或未知状态。
+  VISIT_INVITE_STATE_UNSPECIFIED = 0;
+  // VISIT_INVITE_STATE_PENDING 表示只有目标 Visitor 可以 accept。
+  VISIT_INVITE_STATE_PENDING = 1;
+  // VISIT_INVITE_STATE_ACCEPTED 表示 invite 已转换为 reservation，不能再次 accept。
+  VISIT_INVITE_STATE_ACCEPTED = 2;
+}
+
+// VisitMembershipState 表达客户端可见的 Visitor presence 阶段。
+enum VisitMembershipState {
+  // VISIT_MEMBERSHIP_STATE_UNSPECIFIED 不表示任何访问资格。
+  VISIT_MEMBERSHIP_STATE_UNSPECIFIED = 0;
+  // VISIT_MEMBERSHIP_STATE_RESERVED 表示 accept 完成但尚未 join。
+  VISIT_MEMBERSHIP_STATE_RESERVED = 1;
+  // VISIT_MEMBERSHIP_STATE_JOINED 表示 Visitor 已绑定当前 gameplay connection。
+  VISIT_MEMBERSHIP_STATE_JOINED = 2;
+  // VISIT_MEMBERSHIP_STATE_RECONNECTING 表示 Visitor 位于有界恢复窗口。
+  VISIT_MEMBERSHIP_STATE_RECONNECTING = 3;
+}
+
+// SafeReturnReason 是 Visitor 离开当前访客世界的公开封闭原因。
+enum SafeReturnReason {
+  // SAFE_RETURN_REASON_UNSPECIFIED 用于拒绝没有权威原因的返回指令。
+  SAFE_RETURN_REASON_UNSPECIFIED = 0;
+  // SAFE_RETURN_REASON_VOLUNTARY_LEAVE 表示 Visitor 主动离开。
+  SAFE_RETURN_REASON_VOLUNTARY_LEAVE = 1;
+  // SAFE_RETURN_REASON_KICKED 表示 immutable Owner 移除 Visitor。
+  SAFE_RETURN_REASON_KICKED = 2;
+  // SAFE_RETURN_REASON_OWNER_CLOSED 表示 Owner 显式关闭访问。
+  SAFE_RETURN_REASON_OWNER_CLOSED = 3;
+  // SAFE_RETURN_REASON_OWNER_UNAVAILABLE 表示 Owner grace 到期仍未恢复。
+  SAFE_RETURN_REASON_OWNER_UNAVAILABLE = 4;
+  // SAFE_RETURN_REASON_SESSION_EXPIRED 表示 VisitSession 到达绝对 expiry。
+  SAFE_RETURN_REASON_SESSION_EXPIRED = 5;
+  // SAFE_RETURN_REASON_ASSIGNMENT_CHANGED 表示 current assignment 已丢失或替换。
+  SAFE_RETURN_REASON_ASSIGNMENT_CHANGED = 6;
+  // SAFE_RETURN_REASON_VISITOR_RECONNECT_EXPIRED 表示 Visitor 恢复窗口到期。
+  SAFE_RETURN_REASON_VISITOR_RECONNECT_EXPIRED = 7;
+  // SAFE_RETURN_REASON_DEPENDENCY_LOST 表示可失效运行态无法再被安全证明。
+  SAFE_RETURN_REASON_DEPENDENCY_LOST = 8;
+}
+
+// SafeReturnDestination 表达服务端选择的安全返回目标类别。
+enum SafeReturnDestination {
+  // SAFE_RETURN_DESTINATION_UNSPECIFIED 用于拒绝客户端自选目标。
+  SAFE_RETURN_DESTINATION_UNSPECIFIED = 0;
+  // SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD 表示优先解析 Visitor 自己的世界。
+  SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD = 1;
+  // SAFE_RETURN_DESTINATION_SAFE_ENTRY 表示 own world 不可用时进入受信安全入口。
+  SAFE_RETURN_DESTINATION_SAFE_ENTRY = 2;
+}
+
+// VisitVisitorSummary 是不含 session lineage 或 connection binding 的 Visitor 摘要。
+message VisitVisitorSummary {
+  // player_id 是 Visitor 的公开 PlayerID，最大 128 bytes。
+  string player_id = 1;
+  // state 表达该 snapshot 时刻的 Visitor presence。
+  VisitMembershipState state = 2;
+}
+
+// VisitInviteSummary 是定向通知或 Owner command result 使用的安全邀请投影。
+message VisitInviteSummary {
+  // invite_id 是独立 invite namespace identity，最大 128 bytes。
+  string invite_id = 1;
+  // visit_session_id 是 invite 所属 aggregate identity，最大 128 bytes。
+  string visit_session_id = 2;
+  // target_visitor_id 是唯一可 accept 的目标 PlayerID，最大 128 bytes。
+  string target_visitor_id = 3;
+  // state 是 pending 或 accepted 的公开状态。
+  VisitInviteState state = 4;
+  // created_revision 是 invite 创建后从 1 开始的 aggregate revision。
+  uint64 created_revision = 5;
+  // expires_at_ms 是等于即失效的 Unix epoch millisecond deadline。
+  int64 expires_at_ms = 6;
+}
+
+// VisitSessionSnapshot 是一次完整替换的客户端安全访问投影。
+message VisitSessionSnapshot {
+  // visit_session_id 是本次临时访问 aggregate identity，最大 128 bytes。
+  string visit_session_id = 1;
+  // owner_player_id 是不可转移的 Owner PlayerID，最大 128 bytes。
+  string owner_player_id = 2;
+  // assignment 是 VisitSession 创建时绑定的client-safe assignment。
+  ihomeland.world.v1.WorldAssignment assignment = 3;
+  // lifecycle 是当前访问控制面状态。
+  VisitLifecycle lifecycle = 4;
+  // revision 是从 1 开始且每次首次 mutation 精确增加一的版本。
+  uint64 revision = 5;
+  // capacity 是不包含 Owner 的 Visitor 上限，范围为 1-32。
+  uint32 capacity = 6;
+  // visitors 是按 PlayerID 稳定排序的公开 Visitor 摘要，最多 32 项且不包含 Owner。
+  repeated VisitVisitorSummary visitors = 7;
+  // created_at_ms 是 VisitSession 创建时间，单位为 Unix epoch millisecond。
+  int64 created_at_ms = 8;
+  // expires_at_ms 是等于即失效的 session 绝对 deadline。
+  int64 expires_at_ms = 9;
+  // owner_grace_expires_at_ms 只在 OWNER_GRACE 状态设置，单位为 Unix epoch millisecond。
+  int64 owner_grace_expires_at_ms = 10;
+}
+
+// SafeReturnDirective 是 current gameplay connection 必须执行的权威返回投影。
+message SafeReturnDirective {
+  // visit_session_id 标识产生返回结果的 aggregate，最大 128 bytes。
+  string visit_session_id = 1;
+  // visitor_id 标识必须执行该指令的目标 Visitor，最大 128 bytes；它不是 actor 身份来源。
+  string visitor_id = 2;
+  // reason 是不可由客户端改写的返回原因。
+  SafeReturnReason reason = 3;
+  // preferred 是服务端选择的首选目标类别。
+  SafeReturnDestination preferred = 4;
+  // fallback 是 preferred 不可用时的安全目标类别。
+  SafeReturnDestination fallback = 5;
+}
+
+// VisitMutationResult 是 mutation response 共享的完整首次提交结果。
+message VisitMutationResult {
+  // snapshot 是提交后的完整替换投影。
+  VisitSessionSnapshot snapshot = 1;
+  // safe_returns 是按目标 PlayerID 稳定排序的返回指令。
+  repeated SafeReturnDirective safe_returns = 2;
+}
+
+// VisitInvitePush 只向 invite 的目标 Visitor 发送定向控制面通知。
+message VisitInvitePush {
+  // invite 是不包含 credential 或内部 membership 的公开邀请。
+  VisitInviteSummary invite = 1;
+  // owner_player_id 是不可转移的邀请发起 Owner。
+  string owner_player_id = 2;
+}
+
+// VisitOwnerAvailabilityPush 报告 Owner availability 的控制面变化。
+message VisitOwnerAvailabilityPush {
+  // visit_session_id 是目标 aggregate identity，最大 128 bytes。
+  string visit_session_id = 1;
+  // available 表示 Owner 当前是否已经恢复可用。
+  bool available = 2;
+  // grace_expires_at_ms 在 unavailable 时给出 Unix epoch millisecond deadline。
+  int64 grace_expires_at_ms = 3;
+  // revision 是产生本通知的已提交 aggregate 版本。
+  uint64 revision = 4;
+}
+
+// VisitClosedNoticePush 只用于 WSS 控制面收敛，不驱动 gameplay safe-return。
+message VisitClosedNoticePush {
+  // visit_session_id 是已经关闭的 aggregate identity，最大 128 bytes。
+  string visit_session_id = 1;
+  // reason 是关闭导致的公开安全原因。
+  SafeReturnReason reason = 2;
+  // revision 是 terminal close 的已提交 aggregate 版本。
+  uint64 revision = 3;
+}
+
+// VisitOpenCommand 请求为当前 own-world admission 开启或解析 active VisitSession。
+message VisitOpenCommand {}
+
+// VisitOpenResponse 返回首次创建或已存在的 active VisitSession。
+message VisitOpenResponse {
+  // snapshot 是当前完整替换投影。
+  VisitSessionSnapshot snapshot = 1;
+}
+
+// VisitCreateInviteCommand 请求 Owner 创建一张不预占 capacity 的定向邀请。
+message VisitCreateInviteCommand {
+  // target_visitor_id 是被操作目标而非 actor，最大 128 bytes。
+  string target_visitor_id = 1;
+  // invite_lifetime_ms 是服务端 policy 范围内请求的有效期，单位为 milliseconds。
+  uint32 invite_lifetime_ms = 2;
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 3;
+}
+
+// VisitCreateInviteResponse 返回提交后的 snapshot 与新邀请投影。
+message VisitCreateInviteResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+  // invite 是本 command 创建或 replay 的公开邀请。
+  VisitInviteSummary invite = 2;
+}
+
+// VisitRevokeInviteCommand 请求 Owner 撤销一张 pending invite。
+message VisitRevokeInviteCommand {
+  // invite_id 是被撤销的目标 invite identity，最大 128 bytes。
+  string invite_id = 1;
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 2;
+}
+
+// VisitRevokeInviteResponse 返回撤销后的完整首次结果。
+message VisitRevokeInviteResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+}
+
+// VisitJoinCommand 使用一次性 JOIN admission 完成 reserved membership。
+message VisitJoinCommand {
+  // admission_credential 是与当前 connection/assignment/reservation 绑定的安全 ASCII opaque string，最大 4096 bytes。
+  string admission_credential = 1;
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 2;
+}
+
+// VisitJoinResponse 返回 join 后的完整首次结果。
+message VisitJoinResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+}
+
+// VisitLeaveCommand 请求当前 Visitor 离开自己的 active membership。
+message VisitLeaveCommand {
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 1;
+}
+
+// VisitLeaveResponse 返回 membership 删除与safe-return结果。
+message VisitLeaveResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+}
+
+// VisitKickCommand 请求 immutable Owner 移除指定 Visitor。
+message VisitKickCommand {
+  // target_visitor_id 是被操作目标而非 actor，最大 128 bytes。
+  string target_visitor_id = 1;
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 2;
+}
+
+// VisitKickResponse 返回目标 membership 删除后的完整首次结果。
+message VisitKickResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+}
+
+// VisitReconnectCommand 使用一次性 RECONNECT admission 恢复当前 Visitor membership。
+message VisitReconnectCommand {
+  // admission_credential 是与当前 connection/assignment/reconnect window 绑定的安全 ASCII opaque string，最大 4096 bytes。
+  string admission_credential = 1;
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 2;
+}
+
+// VisitReconnectResponse 返回 reconnect 后的完整首次结果。
+message VisitReconnectResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+}
+
+// VisitCloseCommand 请求 immutable Owner 关闭当前 VisitSession。
+message VisitCloseCommand {
+  // expected_revision 是从 1 开始的乐观并发前置条件。
+  uint64 expected_revision = 1;
+}
+
+// VisitCloseResponse 返回 terminal close 与全部确定性safe-return结果。
+message VisitCloseResponse {
+  // result 是首次提交或幂等 replay 的完整结果。
+  VisitMutationResult result = 1;
+}
+
+// VisitSnapshotRequest 请求当前 admission target 的完整 VisitSession projection。
+message VisitSnapshotRequest {}
+
+// VisitSnapshotResponse 完成一个 VisitSession snapshot request。
+message VisitSnapshotResponse {
+  // snapshot 是请求时刻的完整替换投影。
+  VisitSessionSnapshot snapshot = 1;
+}
+
+// VisitSnapshotPush 在当前 gameplay target 的访问事实变化后推送完整替换投影。
+message VisitSnapshotPush {
+  // snapshot 覆盖客户端保存的旧 VisitSession projection。
+  VisitSessionSnapshot snapshot = 1;
+}
+
+// VisitSafeReturnPush 通过 TLS/TCP 驱动当前 gameplay connection 安全离开旧实例。
+message VisitSafeReturnPush {
+  // directive 是服务端确定且客户端不能替换目标 identity 的返回指令。
+  SafeReturnDirective directive = 1;
+}

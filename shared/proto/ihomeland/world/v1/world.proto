@@ -1,0 +1,85 @@
+edition = "2024";
+
+package ihomeland.world.v1;
+
+import "ihomeland/session/v1/session.proto";
+
+option csharp_namespace = "IHomeland.Protocol.World.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/world/v1;worldv1";
+
+// PersonalWorldLifecycle 表达个人持久世界的公开封闭状态。
+// 该状态不表示 WorldInstance 是否在线，也不授予任何写入资格。
+enum PersonalWorldLifecycle {
+  // PERSONAL_WORLD_LIFECYCLE_UNSPECIFIED 用于拒绝缺失或未知状态。
+  PERSONAL_WORLD_LIFECYCLE_UNSPECIFIED = 0;
+  // PERSONAL_WORLD_LIFECYCLE_ACTIVE 表示持久世界可以被 placement 承载。
+  PERSONAL_WORLD_LIFECYCLE_ACTIVE = 1;
+  // PERSONAL_WORLD_LIFECYCLE_ARCHIVED 表示持久世界已经终止且不可恢复。
+  PERSONAL_WORLD_LIFECYCLE_ARCHIVED = 2;
+}
+
+// WorldAssignment 是客户端连接当前 WorldInstance 所需的安全投影。
+// runtime node、fencing token 与完整 AssignmentStamp 只保留在服务端授权边界。
+message WorldAssignment {
+  // personal_world_id 是 assignment 绑定的持久世界 identity，最大 128 bytes。
+  string personal_world_id = 1;
+  // world_instance_id 是本次不可复活运行承载的公开 identity，最大 128 bytes。
+  string world_instance_id = 2;
+  // endpoint 是部署清单解析出的公开 TLS/TCP 连接目标。
+  ihomeland.session.v1.Endpoint endpoint = 3;
+  // generation 是从 1 开始的 current assignment 公开单调版本。
+  uint64 generation = 4;
+  // lease_expires_at_ms 是只供客户端收敛状态的 Unix epoch millisecond 到期时间。
+  int64 lease_expires_at_ms = 5;
+}
+
+// PersonalWorldSnapshot 是 PersonalWorld 持久事实的客户端安全投影。
+// 授权方必须从受信 AuthContext 解析 actor，不能使用该投影反向证明所有权。
+message PersonalWorldSnapshot {
+  // personal_world_id 是稳定的个人世界 identity，最大 128 bytes。
+  string personal_world_id = 1;
+  // owner_player_id 是不可变 Owner 的公开 PlayerID，最大 128 bytes。
+  string owner_player_id = 2;
+  // lifecycle 是持久存在性状态，不表示 runtime readiness。
+  PersonalWorldLifecycle lifecycle = 3;
+  // revision 是从 1 开始的已提交持久版本。
+  uint64 revision = 4;
+  // created_at_ms 是 PersonalWorld 创建时间，单位为 Unix epoch millisecond。
+  int64 created_at_ms = 5;
+}
+
+// WorldSnapshot 将持久世界与当前 client-safe assignment 组成一次完整替换投影。
+// assignment 缺失表示当前没有可连接实例，客户端不得沿用旧 endpoint。
+message WorldSnapshot {
+  // world 是当前 actor 的个人持久世界事实。
+  PersonalWorldSnapshot world = 1;
+  // assignment 是当前可连接承载；未设置时必须清除客户端旧 assignment。
+  WorldAssignment assignment = 2;
+}
+
+// WorldSnapshotRequest 请求当前 admission 已绑定世界的完整公开快照。
+// 请求 identity 与 correlation 只存在于受信连接上下文和 envelope。
+message WorldSnapshotRequest {}
+
+// WorldSnapshotResponse 完成一个 world snapshot request。
+message WorldSnapshotResponse {
+  // snapshot 是请求时刻的完整替换投影。
+  WorldSnapshot snapshot = 1;
+}
+
+// WorldSnapshotPush 在同一 admission target 的公开事实变化后推送完整替换快照。
+message WorldSnapshotPush {
+  // snapshot 覆盖客户端保存的旧 world/assignment projection。
+  WorldSnapshot snapshot = 1;
+}
+
+// WorldAssignmentChangedPush 通过 WSS 通知 current assignment 已替换或撤销。
+// 它只用于控制面收敛，不能代替 TLS/TCP admission 或 world snapshot。
+message WorldAssignmentChangedPush {
+  // personal_world_id 标识发生变化的个人世界，最大 128 bytes。
+  string personal_world_id = 1;
+  // assignment 是新的 client-safe current assignment；缺失表示当前不可连接。
+  WorldAssignment assignment = 2;
+  // reason_key 是稳定安全原因键，不包含 runtime node 或依赖错误详情。
+  string reason_key = 3;
+}

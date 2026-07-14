@@ -81,6 +81,244 @@
           "ticket": "fixture-ticket-value-that-is-not-valid"
         }
       }
+    },
+    {
+      "name": "world-bootstrap-success",
+      "request": {
+        "method": "GET",
+        "path": "/v1/world/bootstrap"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "assignment": {
+            "endpoint": {
+              "channel": "TLS_TCP",
+              "host": "game.example.invalid",
+              "port": 4433
+            },
+            "generation": 2,
+            "leaseExpiresAtMs": 1700000120000,
+            "personalWorldId": "pworld_fixture_owner",
+            "worldInstanceId": "winst_fixture_current"
+          },
+          "world": {
+            "createdAtMs": 1700000000000,
+            "lifecycle": "ACTIVE",
+            "ownerPlayerId": "player_fixture_owner",
+            "personalWorldId": "pworld_fixture_owner",
+            "revision": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "visit-accept-success",
+      "request": {
+        "method": "POST",
+        "path": "/v1/visits/{visitSessionId}/invites/{inviteId}/accept",
+        "headers": {
+          "Idempotency-Key": "fixture-accept-key-0001"
+        },
+        "body": {
+          "expectedRevision": 4
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "reservation": {
+            "reservationExpiresAtMs": 1700000060000,
+            "revision": 5,
+            "visitSessionId": "visit_fixture_one"
+          }
+        }
+      }
+    },
+    {
+      "name": "visit-accept-same-key-replay",
+      "request": {
+        "method": "POST",
+        "path": "/v1/visits/{visitSessionId}/invites/{inviteId}/accept",
+        "headers": {
+          "Idempotency-Key": "fixture-accept-key-0001"
+        },
+        "body": {
+          "expectedRevision": 4
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "reservation": {
+            "reservationExpiresAtMs": 1700000060000,
+            "revision": 5,
+            "visitSessionId": "visit_fixture_one"
+          }
+        }
+      }
+    },
+    {
+      "name": "own-world-admission-success",
+      "request": {
+        "method": "POST",
+        "path": "/v1/world/admissions",
+        "headers": {
+          "Idempotency-Key": "fixture-own-admission-01"
+        },
+        "body": {
+          "kind": "OWN_WORLD"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "credential": "fixture-own-world-admission-value-not-valid",
+          "endpoint": {
+            "channel": "TLS_TCP",
+            "host": "game.example.invalid",
+            "port": 4433
+          },
+          "expiresAtMs": 1700000030000,
+          "purpose": "OWN_WORLD",
+          "role": "OWNER"
+        }
+      }
+    },
+    {
+      "name": "visit-world-admission-success",
+      "request": {
+        "method": "POST",
+        "path": "/v1/world/admissions",
+        "headers": {
+          "Idempotency-Key": "fixture-visit-admission-1"
+        },
+        "body": {
+          "kind": "VISIT_WORLD",
+          "visitSessionId": "visit_fixture_one"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "credential": "fixture-visit-world-admission-value-not-valid",
+          "endpoint": {
+            "channel": "TLS_TCP",
+            "host": "game.example.invalid",
+            "port": 4433
+          },
+          "expiresAtMs": 1700000030000,
+          "purpose": "JOIN",
+          "role": "VISITOR"
+        }
+      }
+    },
+    {
+      "name": "world-admission-idempotency-conflict",
+      "request": {
+        "method": "POST",
+        "path": "/v1/world/admissions",
+        "headers": {
+          "Idempotency-Key": "fixture-own-admission-01"
+        },
+        "body": {
+          "kind": "VISIT_WORLD",
+          "visitSessionId": "visit_fixture_two"
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": 2006,
+          "messageKey": "error.world.idempotency_conflict",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "visit-accept-stale-revision",
+      "request": {
+        "method": "POST",
+        "path": "/v1/visits/{visitSessionId}/invites/{inviteId}/accept",
+        "headers": {
+          "Idempotency-Key": "fixture-accept-stale-01"
+        },
+        "body": {
+          "expectedRevision": 3
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": 2105,
+          "messageKey": "error.visit.revision_conflict",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "world-admission-forbidden-actor-field",
+      "request": {
+        "method": "POST",
+        "path": "/v1/world/admissions",
+        "headers": {
+          "Idempotency-Key": "fixture-forbidden-actor1"
+        },
+        "body": {
+          "kind": "OWN_WORLD",
+          "playerId": "player_attacker"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "code": 200,
+          "messageKey": "error.validation.failed",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "visit-admission-membership-required",
+      "request": {
+        "method": "POST",
+        "path": "/v1/world/admissions",
+        "headers": {
+          "Idempotency-Key": "fixture-membership-none1"
+        },
+        "body": {
+          "kind": "VISIT_WORLD",
+          "visitSessionId": "visit_fixture_missing"
+        }
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "code": 2107,
+          "messageKey": "error.visit.membership_required",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "world-bootstrap-dependency-unavailable",
+      "request": {
+        "method": "GET",
+        "path": "/v1/world/bootstrap"
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "code": 500,
+          "messageKey": "error.dependency.unavailable",
+          "requestId": "fixture-request-id",
+          "retryable": true
+        }
+      }
     }
   ]
 }

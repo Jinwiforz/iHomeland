@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "runtimeImplemented": false,
+  "cases": [
+    {
+      "name": "reserved-join-valid",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "MATCHING_BINDING",
+      "expectedOutcome": "ACCEPT"
+    },
+    {
+      "name": "reconnecting-reconnect-valid",
+      "membershipState": "RECONNECTING",
+      "purpose": "RECONNECT",
+      "condition": "MATCHING_BINDING",
+      "expectedOutcome": "ACCEPT"
+    },
+    {
+      "name": "reserved-reconnect-purpose-mismatch",
+      "membershipState": "RESERVED",
+      "purpose": "RECONNECT",
+      "condition": "PURPOSE_MISMATCH",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2003
+    },
+    {
+      "name": "reconnecting-join-purpose-mismatch",
+      "membershipState": "RECONNECTING",
+      "purpose": "JOIN",
+      "condition": "PURPOSE_MISMATCH",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2003
+    },
+    {
+      "name": "expired",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "EXPIRED",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2004
+    },
+    {
+      "name": "replayed-nonce",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "NONCE_REPLAYED",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2005
+    },
+    {
+      "name": "stale-session-epoch",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "STALE_SESSION_EPOCH",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2003
+    },
+    {
+      "name": "stale-full-assignment",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "STALE_ASSIGNMENT",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2002
+    },
+    {
+      "name": "wrong-endpoint",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "WRONG_ENDPOINT",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2003
+    },
+    {
+      "name": "wrong-channel",
+      "membershipState": "RESERVED",
+      "purpose": "JOIN",
+      "condition": "WRONG_CHANNEL",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2003
+    },
+    {
+      "name": "missing-membership",
+      "membershipState": "NONE",
+      "purpose": "JOIN",
+      "condition": "MEMBERSHIP_MISSING",
+      "expectedOutcome": "REJECT",
+      "expectedErrorCode": 2107
+    }
+  ]
+}

@@ -4,7 +4,7 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement 和 VisitSession core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。这些能力尚未接入完整的 production store、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新、PersonalWorld、visit-world 或 realtime 业务 API。
+当前 module 包含 world/visit Protobuf 与 HTTPS/registry/fixture 契约、协议校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement 和 VisitSession core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。这些能力尚未接入完整的 production store、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新、PersonalWorld、visit-world 或 realtime 业务 API。
 
 Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。后续 Redis 与 transport adapter 必须实现这些接口，不能另建 token、ticket 或 epoch 语义。
 
@@ -18,7 +18,7 @@ WorldInstance placement core 位于 `internal/placement/`。它建立独立 `Wor
 
 VisitSession core 位于 `internal/visitsession/`。它建立独立且默认脱敏的 session/invite/command/connection-binding identities，不可变绑定 Owner、PersonalWorld 与完整 current assignment stamp，并实现有界 invite、reservation、join、leave/kick、Owner/Visitor disconnect/reconnect/expiry、expected revision、command replay/commit-unknown 和确定性 safe-return。Invite 与 `AdmissionIntent` 都不是 gameplay credential；join 的受信 qualification 构造入口仍保持封闭，Visitor 对未登记 gameplay mutation 默认没有权限。
 
-VisitSession 的并发 reference store、fake reader/clock/ID 与 admission fixture 只存在于 `_test.go`。生产 package 不含 Redis/MySQL adapter、timer/goroutine、generated protocol、listener 或 memory fallback；正式 Composition Root 也没有构造该 service。后续必须分别交付 Redis 运行态/cleanup、world/visit protocol、admission credential、transport 与 Go 协议客户端，当前实现不表示 visit-world 已经可用。
+VisitSession 的并发 reference store 与 fake reader/clock/ID 只存在于 `_test.go`；跨端 admission semantic fixture 位于 `shared/contracts/fixtures/admission/`。生产 package 不含 Redis/MySQL adapter、timer/goroutine、generated protocol、listener 或 memory fallback；正式 Composition Root 也没有构造该 service。P0 已冻结 world/visit public projection、message/error/route、HTTP operations 与 OpenAPI opaque admission response；后续仍必须分别交付 admission issuer/verifier、HTTP/WSS/TLS-TCP adapter、Composition Root 接线与 Go 协议客户端，当前实现不表示 visit-world 已经可用。Admission semantic fixture 只约束 binding、expiry 与 replay 验收，不包含可解析 claims，也不表示生产签发或 nonce 原子消费已经实现。
 
 PersonalWorld 与 placement core 已有独立 production storage adapter：`internal/storage/personalworld`
 借用共享 MySQL pool 保存 identity、immutable owner、lifecycle、revision 与 archive replay；

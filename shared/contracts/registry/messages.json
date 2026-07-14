@@ -4,7 +4,9 @@
     { "owner": "common", "start": 1, "end": 99 },
     { "owner": "session", "start": 100, "end": 499 },
     { "owner": "control", "start": 500, "end": 999 },
-    { "owner": "account", "start": 1000, "end": 1999 }
+    { "owner": "account", "start": 1000, "end": 1999 },
+    { "owner": "world", "start": 2000, "end": 2099 },
+    { "owner": "visit", "start": 2100, "end": 2299 }
   ],
   "reserved": [],
   "messages": [
@@ -12,6 +14,33 @@
     { "id": 501, "name": "CONTROL_FORCED_LOGOUT_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.ForcedLogoutPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
     { "id": 502, "name": "CONTROL_QUEUE_STATUS_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.QueueStatusPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
     { "id": 503, "name": "CONTROL_ENDPOINT_UPDATE_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.EndpointUpdatePush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
-    { "id": 504, "name": "CONTROL_SESSION_INVALIDATED_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.SessionInvalidatedPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" }
+    { "id": 504, "name": "CONTROL_SESSION_INVALIDATED_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.SessionInvalidatedPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2000, "name": "WORLD_SNAPSHOT_REQUEST", "owner": "world", "protobuf": "ihomeland.world.v1.WorldSnapshotRequest", "kind": "REQUEST", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2001, "name": "WORLD_SNAPSHOT_RESPONSE", "owner": "world", "protobuf": "ihomeland.world.v1.WorldSnapshotResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2002, "name": "WORLD_SNAPSHOT_PUSH", "owner": "world", "protobuf": "ihomeland.world.v1.WorldSnapshotPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2003, "name": "WORLD_ASSIGNMENT_CHANGED_PUSH", "owner": "world", "protobuf": "ihomeland.world.v1.WorldAssignmentChangedPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2100, "name": "VISIT_INVITE_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitInvitePush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2101, "name": "VISIT_OWNER_AVAILABILITY_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitOwnerAvailabilityPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2102, "name": "VISIT_CLOSED_NOTICE_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitClosedNoticePush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2103, "name": "VISIT_OPEN_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitOpenCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2104, "name": "VISIT_OPEN_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitOpenResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2105, "name": "VISIT_CREATE_INVITE_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitCreateInviteCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2106, "name": "VISIT_CREATE_INVITE_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitCreateInviteResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2107, "name": "VISIT_REVOKE_INVITE_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitRevokeInviteCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2108, "name": "VISIT_REVOKE_INVITE_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitRevokeInviteResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2109, "name": "VISIT_JOIN_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitJoinCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2110, "name": "VISIT_JOIN_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitJoinResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2111, "name": "VISIT_LEAVE_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitLeaveCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2112, "name": "VISIT_LEAVE_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitLeaveResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2113, "name": "VISIT_KICK_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitKickCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2114, "name": "VISIT_KICK_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitKickResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2115, "name": "VISIT_RECONNECT_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitReconnectCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2116, "name": "VISIT_RECONNECT_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitReconnectResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2117, "name": "VISIT_CLOSE_COMMAND", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitCloseCommand", "kind": "COMMAND", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2118, "name": "VISIT_CLOSE_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitCloseResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2119, "name": "VISIT_SNAPSHOT_REQUEST", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSnapshotRequest", "kind": "REQUEST", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2120, "name": "VISIT_SNAPSHOT_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSnapshotResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2121, "name": "VISIT_SNAPSHOT_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSnapshotPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 2122, "name": "VISIT_SAFE_RETURN_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSafeReturnPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" }
   ]
 }

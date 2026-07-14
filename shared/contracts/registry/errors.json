@@ -12,6 +12,23 @@
     { "code": 200, "name": "VALIDATION_FAILED", "owner": "common", "category": "VALIDATION", "messageKey": "error.validation.failed", "retryable": false, "httpStatus": 400 },
     { "code": 400, "name": "RATE_LIMITED", "owner": "common", "category": "RATE_LIMIT", "messageKey": "error.rate_limited", "retryable": true, "httpStatus": 429 },
     { "code": 500, "name": "DEPENDENCY_UNAVAILABLE", "owner": "common", "category": "DEPENDENCY", "messageKey": "error.dependency.unavailable", "retryable": true, "httpStatus": 503 },
-    { "code": 501, "name": "INTERNAL_ERROR", "owner": "common", "category": "INTERNAL", "messageKey": "error.internal", "retryable": true, "httpStatus": 500 }
+    { "code": 501, "name": "INTERNAL_ERROR", "owner": "common", "category": "INTERNAL", "messageKey": "error.internal", "retryable": true, "httpStatus": 500 },
+    { "code": 2000, "name": "WORLD_NOT_FOUND", "owner": "world", "category": "NOT_FOUND", "messageKey": "error.world.not_found", "retryable": false, "httpStatus": 404 },
+    { "code": 2001, "name": "WORLD_NOT_READY", "owner": "world", "category": "CONFLICT", "messageKey": "error.world.not_ready", "retryable": true, "httpStatus": 409 },
+    { "code": 2002, "name": "WORLD_ASSIGNMENT_STALE", "owner": "world", "category": "CONFLICT", "messageKey": "error.world.assignment_stale", "retryable": false, "httpStatus": 409 },
+    { "code": 2003, "name": "WORLD_ADMISSION_INVALID", "owner": "world", "category": "AUTH", "messageKey": "error.world.admission_invalid", "retryable": false, "httpStatus": 401 },
+    { "code": 2004, "name": "WORLD_ADMISSION_EXPIRED", "owner": "world", "category": "AUTH", "messageKey": "error.world.admission_expired", "retryable": false, "httpStatus": 401 },
+    { "code": 2005, "name": "WORLD_ADMISSION_REPLAYED", "owner": "world", "category": "CONFLICT", "messageKey": "error.world.admission_replayed", "retryable": false, "httpStatus": 409 },
+    { "code": 2006, "name": "WORLD_IDEMPOTENCY_CONFLICT", "owner": "world", "category": "CONFLICT", "messageKey": "error.world.idempotency_conflict", "retryable": false, "httpStatus": 409 },
+    { "code": 2100, "name": "VISIT_NOT_FOUND", "owner": "visit", "category": "NOT_FOUND", "messageKey": "error.visit.not_found", "retryable": false, "httpStatus": 404 },
+    { "code": 2101, "name": "VISIT_INVITE_NOT_FOUND", "owner": "visit", "category": "NOT_FOUND", "messageKey": "error.visit.invite_not_found", "retryable": false, "httpStatus": 404 },
+    { "code": 2102, "name": "VISIT_INVITE_EXPIRED", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.invite_expired", "retryable": false, "httpStatus": 410 },
+    { "code": 2103, "name": "VISIT_CAPACITY_EXCEEDED", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.capacity_exceeded", "retryable": false, "httpStatus": 409 },
+    { "code": 2104, "name": "VISIT_STATE_CONFLICT", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.state_conflict", "retryable": false, "httpStatus": 409 },
+    { "code": 2105, "name": "VISIT_REVISION_CONFLICT", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.revision_conflict", "retryable": false, "httpStatus": 409 },
+    { "code": 2106, "name": "VISIT_IDEMPOTENCY_CONFLICT", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.idempotency_conflict", "retryable": false, "httpStatus": 409 },
+    { "code": 2107, "name": "VISIT_MEMBERSHIP_REQUIRED", "owner": "visit", "category": "AUTH", "messageKey": "error.visit.membership_required", "retryable": false, "httpStatus": 403 },
+    { "code": 2108, "name": "VISIT_OWNER_UNAVAILABLE", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.owner_unavailable", "retryable": false, "httpStatus": 409 },
+    { "code": 2109, "name": "VISIT_RECONNECT_EXPIRED", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.reconnect_expired", "retryable": false, "httpStatus": 410 }
   ]
 }

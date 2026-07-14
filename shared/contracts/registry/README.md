@@ -15,16 +15,19 @@
 | `100-499` | `session` |
 | `500-999` | `control` |
 | `1000-1999` | `account` |
+| `2000-2099` | `world` |
+| `2100-2299` | `visit` |
 
 删除后的编号必须进入 `reserved`，不得重新分配。新增 owner 或扩大范围必须先修改 OpenSpec 与长期协议文档。
 
 ## 路由规则
 
 - 每个 `messageId` 在三个 registry 中引用一致，并且只有一条 route。
-- `control` 只允许 `WSS`；后续业务消息必须由所属 protocol change 分配 owner 范围并登记唯一通道。
-- request 使用 `REQUEST_ID`，command 使用 `COMMAND_ID`，response 跟随其来源，error 使用 `CORRELATION_ID`，push 使用 `NONE`。
+- `control` 与 world/visit control notice 只允许 `WSS`；world/visit authoritative request、command、response 与 safe-return 只允许 `TLS_TCP`。
+- request 使用 `REQUEST_ID`，command 使用 `COMMAND_ID`，response 使用 `CORRELATION_ID` 并在 envelope 中恰好携带来源 request id 或 command id，push 使用 `NONE`。
 - route `maxSize` 限制完整编码 envelope，不得超过全局 1 MiB frame 上限。
-- command schema 禁止声明 `actor_id`、`account_id`、`player_id` 或 `user_id` 等操作者字段。
+- command schema 禁止声明 actor/account/player/user、session/epoch、world/instance、role、endpoint、fencing 或 assignment stamp 等可覆盖受信上下文的字段；Owner 控制面的 `target_visitor_id` 是明确允许的业务目标。
+- 未登记 world/visit interaction 必须在 registry gate 默认拒绝，不能转交通用 action/mutation handler。
 
 ## 示例
 

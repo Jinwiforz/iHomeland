@@ -396,7 +396,7 @@ function Invoke-CSharpGeneration {
         }
         foreach ($file in $generatedFiles) {
             $source = Get-Content -LiteralPath $file.FullName -Raw -Encoding utf8
-            if ($source -notmatch '(?m)^namespace IHomeland\.Protocol\.(Common|Account|Session|Control)\.V1\s*\{?\s*$') {
+            if ($source -notmatch '(?m)^namespace IHomeland\.Protocol\.(Common|Account|Session|Control|World|Visit)\.V1\s*\{?\s*$') {
                 throw "C# generated namespace is outside the protocol root: $($file.FullName)"
             }
         }
