@@ -170,15 +170,17 @@ A0 Project Baseline
 
 **进入条件：**PersonalWorld owner 与 WorldInstance assignment 可独立查询和测试。
 
-**产出：**VisitSessionID、immutable owner、Visitor membership/capacity/revision/expiry、invite/accept/join/leave/kick/reconnect/expire、Owner grace、safe-return 和权限策略。
+**产出：**VisitSessionID、immutable owner/world/assignment binding、Visitor membership/capacity/revision/expiry、invite/accept/join/leave/kick/reconnect/expire、Owner grace、safe-return、权限策略、expected revision 与完整 replay/commit-unknown store 契约。
 
-**完成条件：**Visitor 不能继承 Owner、伪造 world/instance、推进未授权世界事实或通过 invite 直接取得 gameplay credential。
+**完成条件：**纯 Go domain/application 的 unit/table/fuzz/race 验收通过；Visitor 不能继承 Owner、伪造 world/instance、推进未授权世界事实或通过 invite/AdmissionIntent 直接取得 gameplay credential。Production Redis、protocol、admission、transport、cleanup 与 Composition Root 接线仍留给后续 change，V0 完成不表示 visit-world 已开放。
 
 ## P0：个人世界与访客协议
 
 ### `establish-server-personal-world-protocol`
 
 **目标：**在领域语义稳定后冻结 own-world 与 visit-world 的唯一跨端契约。
+
+**进入条件：**V0 的 snapshot、AdmissionIntent、safe-return、角色与 stale assignment/epoch 语义已归档；不得用协议字段重新定义这些 owner 事实。
 
 **产出：**
 

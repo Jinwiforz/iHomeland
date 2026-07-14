@@ -52,8 +52,9 @@ server/
     session/
     account/
     personalworld/
+    placement/
     worldinstance/
-    visit/
+    visitsession/
     transport/
       diagnostic/
       http/
@@ -117,11 +118,19 @@ account/
 
 Account 不拥有 refresh、logout、ticket、token parsing 或 AuthContext，也不依赖 generated protocol type。包内职责仍清晰时不拆 `domain/application` 子目录；出现真实复杂度后必须通过独立 change 证明拆分价值。
 
+### `internal/visitsession`
+
+VisitSession 独立拥有定向 invite、Visitor membership/capacity、connection-binding 条件、Owner/Visitor grace、绝对 expiry 与 safe-return 结果。它不可变绑定 `account.PlayerID` Owner、`personalworld.PersonalWorldID` 与创建时完整 `placement.AssignmentStamp`；accept、join 和 reconnect 必须由 application 重新读取 current active assignment 与 lease，不能由 payload、旧 endpoint 或 invite 覆盖。
+
+生产 package 只包含纯 Go domain/application、消费侧 `VisitSessionStore`/world/assignment ports、稳定 command fingerprint 与严格 outcome/result 校验。并发 reference store、fake reader/clock/ID 与 admission qualification fixture 只存在于 `_test.go`；package 不启动 timer/goroutine，不拥有 socket、PersonalWorld 持久 mutation 或 placement lifecycle。
+
+VisitSession 当前没有 production Redis adapter、cleanup owner、admission credential、公开 protocol/transport 或正式 Composition Root 接线。Redis 运行态、TTL/replay key、连接迁移和 safe-return side effect 必须由后续独立 change 交付；在此之前当前进程不得宣称 visit-world 可用。
+
 ### 个人世界阶段目录门禁
 
-每个 owner 对应的 OpenSpec change 进入实现前，不创建 `personalworld`、`worldinstance`、`placement`、`visit`、`activity`、`party` 或 `room` 空目录。真实实现出现时按下列职责决定 package，不把名称直接当作必须存在的层级：
+每个 owner 对应的 OpenSpec change 进入实现前，不创建 `personalworld`、`worldinstance`、`placement`、`visitsession`、`activity`、`party` 或 `room` 空目录。真实实现出现时按下列职责决定 package，不把名称直接当作必须存在的层级：
 
-| 未来 owner | 目录职责 |
+| owner | 目录职责 |
 |---|---|
 | PersonalWorld | world identity、immutable owner、持久 revision 与 lifecycle |
 | WorldInstance/Placement | assignment、lease/fencing、运行实例启动/休眠/重建 |

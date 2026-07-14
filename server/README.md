@@ -4,7 +4,7 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld 和 WorldInstance placement core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。这些能力尚未接入完整的 production store、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新、PersonalWorld 或 realtime 业务 API。
+当前 module 包含协议/fixture 校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement 和 VisitSession core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。这些能力尚未接入完整的 production store、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新、PersonalWorld、visit-world 或 realtime 业务 API。
 
 Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。后续 Redis 与 transport adapter 必须实现这些接口，不能另建 token、ticket 或 epoch 语义。
 
@@ -16,6 +16,10 @@ PersonalWorld core 位于 `internal/personalworld/`。它建立独立 `PersonalW
 
 WorldInstance placement core 位于 `internal/placement/`。它建立独立 `WorldInstanceID`、受信 `RuntimeNodeID`、单调 assignment generation/fencing token、`starting -> active` 发布、lease renew/write qualification，以及 revoke-before-stop、break-before-make 的休眠、重建和迁移编排。所有 store 条件操作绑定完整 assignment stamp；并发 reference store、fake runtime/clock/ID 与故障注入只存在于 `_test.go`，生产 package 不提供 memory fallback。
 
+VisitSession core 位于 `internal/visitsession/`。它建立独立且默认脱敏的 session/invite/command/connection-binding identities，不可变绑定 Owner、PersonalWorld 与完整 current assignment stamp，并实现有界 invite、reservation、join、leave/kick、Owner/Visitor disconnect/reconnect/expiry、expected revision、command replay/commit-unknown 和确定性 safe-return。Invite 与 `AdmissionIntent` 都不是 gameplay credential；join 的受信 qualification 构造入口仍保持封闭，Visitor 对未登记 gameplay mutation 默认没有权限。
+
+VisitSession 的并发 reference store、fake reader/clock/ID 与 admission fixture 只存在于 `_test.go`。生产 package 不含 Redis/MySQL adapter、timer/goroutine、generated protocol、listener 或 memory fallback；正式 Composition Root 也没有构造该 service。后续必须分别交付 Redis 运行态/cleanup、world/visit protocol、admission credential、transport 与 Go 协议客户端，当前实现不表示 visit-world 已经可用。
+
 PersonalWorld 与 placement core 已有独立 production storage adapter：`internal/storage/personalworld`
 借用共享 MySQL pool 保存 identity、immutable owner、lifecycle、revision 与 archive replay；
 `internal/storage/placement` 由 MySQL allocation ledger 永久推进 generation/fence，再由 Redis
@@ -23,8 +27,8 @@ Lua 管理可失效 current assignment 与有界 transition replay。重试只�
 identity，首次 allocation 的时间结果不会被新时钟覆盖。Redis flush 不恢复旧 lease，旧
 allocation 也不会重新发布；新 candidate 必须取得更高 fence。Adapter 不持有共享 client、
 不注册 lifecycle component，也尚未接入正式业务 Composition Root、协议、listener 或 Unity。
-当前进程因此仍没有公开 world API，也不包含地图、任务、奖励、Visitor、connection presence
-或 endpoint；这些能力必须继续遵守 `docs/roadmap.md` 的进入条件，由后续独立 change 实现和验收。
+当前进程因此仍没有公开 world API，也不包含地图、任务、奖励、production Visitor
+运行态、connection presence 或 endpoint；这些能力必须继续遵守 `docs/roadmap.md` 的进入条件，由后续独立 change 实现和验收。
 
 Storage runtime 位于 `internal/storage/`。MySQL component 拥有唯一 pool、UTC/strict session、advisory-lock migration 和一次性 transaction callback；Redis component 固定 standalone，禁用 mutation 隐式 retry，并拥有 Keyspace/registry/TTL policy。Migration catalog 除 `ih_schema_migrations` 外已创建 `personal_worlds`、`personal_world_idempotency`、`placement_sequences` 与 append-only `placement_allocations`；table owner 分别是 PersonalWorld/placement adapter。Account/Session adapter 和公开业务接线仍未实现。
 
