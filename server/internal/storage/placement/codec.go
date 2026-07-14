@@ -56,14 +56,11 @@ func decodeAssignment(fields map[string]string, observedAt time.Time, replay boo
 		}
 		encodedBytes += len(name) + len(value)
 	}
-	if encodedBytes == 0 || encodedBytes > definition.MaxEncodedBytes {
-		return domain.AssignmentSnapshot{}, errors.New("placement redis value exceeds encoded budget")
-	}
 	version, err := parseCanonicalUint(fields["v"])
 	if err != nil || version > uint64(^uint16(0)) {
 		return domain.AssignmentSnapshot{}, errors.New("placement redis schema version is invalid")
 	}
-	if err := storageredis.ValidateEncodedValue(definition, uint16(version), make([]byte, encodedBytes)); err != nil {
+	if err := storageredis.ValidateEncodedSize(definition, uint16(version), encodedBytes); err != nil {
 		return domain.AssignmentSnapshot{}, err
 	}
 	if replay {

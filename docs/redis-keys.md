@@ -37,8 +37,9 @@ ih:<env>:<owner>:<kind>:<identity...>
 | `ih:<env>:presence:player:<playerID>` | session | 在线连接摘要 | 从 connection registry 恢复 |
 | `ih:<env>:placement:assignment:<personalWorldID>` | placement | schema v1 current WorldInstance stamp、starting/active phase 与精确 lease expiry | 不恢复旧 assignment；TTL 到期或 Redis flush 后，新 candidate 必须从 MySQL allocation ledger 获得更高 generation/fence |
 | `ih:<env>:placement:transition:<transitionDigest>` | placement | schema v1 Acquire/Activate/Renew/Revoke/Replace 首次结果与完整 request fingerprint | 正 TTL 覆盖有界 retry window；丢失后既有 allocation 保持 commit-unknown，不猜测或重新发布 |
-| `ih:<env>:visit:session:<visitSessionID>` | visit | Visitor membership、revision、expiry 与 Owner grace | 丢失后访问安全结束或按权威事实重建，不是持久世界事实 |
-| `ih:<env>:visit:player:<playerID>` | visit | 玩家当前 visit membership 索引 | 从有效 VisitSession 重建，必须有 TTL 与 cleanup owner |
+| `ih:<env>:visitsession:active:<personalWorldID>` | visitsession | PersonalWorld 当前 VisitSession 索引 | 进程重启可读取 Redis 仍保留的合法值；terminal transition 主动删除，丢失后旧访问资格失效 |
+| `ih:<env>:visitsession:session:<visitSessionID>` | visitsession | Visitor membership、revision、expiry、Owner grace 与完整运行快照 | 进程重启只读取 Redis 仍保留的合法值；丢失后访问安全结束，不影响持久世界事实 |
+| `ih:<env>:visitsession:command:<commandID>` | visitsession | Create/transition 首次完整结果与重放证据 | 进程重启只读取 Redis 仍保留的合法值；丢失后禁止猜测首次提交结果 |
 | `ih:<env>:rate:<scope>:<identity>` | owning adapter | 限流窗口 | 丢失后最多放宽一个窗口 |
 | `ih:<env>:lock:<owner>:<resourceID>` | owning module | 必要短租约 | 不恢复，必须有 TTL 与 fencing/idempotency |
 
@@ -162,6 +163,107 @@ Value 字段字典：
 | `phase` | enum string | 实例阶段 | 必填，`starting` 或 `active` |
 | `created_us` | canonical decimal `int64` | 创建时间(Unix微秒) | 必填，正 UTC Unix time |
 | `expires_us` | canonical decimal `int64` | 租约到期时间(Unix微秒) | 必填，严格晚于创建时间 |
+
+### 已实现的 VisitSession definitions
+
+三类 key 由 `internal/storage/visitsession` 独占，使用 Redis Hash schema v1。它们的
+`PEXPIREAT` 统一等于 VisitSession `expires_us` 加 1 分钟至 24 小时的配置重放保留期，
+转换为 Unix milliseconds 时向后取整。Hash 内的 `expires_us` 始终是领域 session
+到期时间(UTC Unix微秒)，不是 physical cleanup 时间；invite、reservation、Owner/Visitor
+grace 与 session 等于 deadline 即失效，即使 key 仍存在也不能延长资格。
+
+Redis 进程重启时，adapter 可以从 Redis 自身仍保留的合法 Hash 恢复进程内投影。
+Redis flush、key miss 或 physical TTL 到期后，不从 MySQL、日志或 memory 补回旧
+VisitSession。当前不实现 `player` membership index：`VisitSessionStore` 没有该查询
+consumer，预建索引会引入无 owner 双写。Semantic expiry task、safe-return side effect 与
+admission credential 仍由后续独立 change 接线。在 cleanup owner 接线前，已过领域
+deadline 但仍在 physical retention 窗口内的 active index 会 fail closed，不得被 Create 直接覆盖。
+
+`visitsession_active`：
+
+- Pattern：`ih:<env>:visitsession:active:<personalWorldID>`
+- Owner：`internal/storage/visitsession`
+- 大小预算：Hash 全部 field name/value 累计不超过 1024 bytes
+- 写入触发：Create 首次成功时与 session/command 在同一 Lua 线性化点写入
+- 读取触发：Create existing 决议与 ResolveActive 原子读取
+- 恢复/清理：进程重启只读取 Redis 仍保留的合法值；丢失后不从其他来源重建。Terminal Commit 只在索引仍指向目标 VisitSession 时原子删除，否则到 physical TTL 自然删除
+- 故障行为：缺失表示没有 active session；unknown version、字段多余/缺失、world/session 交叉绑定矛盾或缺失 TTL 按 dependency defect fail closed
+- 指标：固定 `visitsession` adapter、operation、outcome；PersonalWorldID 与 VisitSessionID 不进入 label
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为 `1` |
+| `visit_id` | string | 访客会话ID | 必填，合法 `vses_` identity |
+| `world` | string | 个人世界ID | 必填，必须等于 key identity 与 session payload |
+| `expires_us` | canonical decimal `int64` | 会话到期时间(UTC Unix微秒) | 必填，等于 session snapshot 的领域到期时间 |
+
+`visitsession_session`：
+
+- Pattern：`ih:<env>:visitsession:session:<visitSessionID>`
+- Owner：`internal/storage/visitsession`
+- 大小预算：Hash 全部 field name/value 累计不超过 131072 bytes
+- Value schema：Hash metadata 加 canonical JSON `payload`；JSON 使用固定 struct field order，不允许 unknown/重复/缺失字段或非规范空白
+- 写入触发：Create 或 Commit 在 owner Lua script 内保存完整 current/terminal snapshot
+- 读取触发：ResolveActive、FindByID、Create existing 与 Commit CAS
+- 恢复/清理：进程重建只从合法 Hash hydrate；不从持久存储补回，physical TTL 到期自然删除
+- 故障行为：metadata/payload矛盾、unknown enum/version、非法identity/时间、越界集合、超预算或缺失TTL全部fail closed，不自动修补
+
+| Field / JSON path | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | Hash必填，固定为`1` |
+| `visit_id` | string | 访客会话ID | Hash必填，必须等于key与`payload.id` |
+| `world` | string | 个人世界ID | Hash必填，必须等于active index与`payload.world_id` |
+| `revision` | canonical decimal `uint64` | 会话版本号 | Hash必填，正整数，不经过Lua double |
+| `lifecycle` | enum string | 会话生命周期 | Hash必填，`open`、`owner_grace`或`closed` |
+| `expires_us` | canonical decimal `int64` | 会话到期时间(UTC Unix微秒) | Hash必填，等于`payload.expires_us` |
+| `facts` | lowercase hex string | 不可变事实摘要(SHA-256,32字节) | Hash必填；覆盖ID、Owner、World、assignment、capacity及创建/到期时间，仅用于CAS一致性，不是MAC、凭据或授权证据 |
+| `payload` | canonical JSON object | 完整会话快照 | Hash必填；与metadata共享131072 bytes累计上限 |
+| `payload.id` | string | 访客会话ID | 合法`vses_` identity |
+| `payload.owner_id` | string | 世界主人玩家ID | 合法`ply_` identity且不可转移 |
+| `payload.world_id` | string | 个人世界ID | 合法`pworld_` identity |
+| `payload.assignment.*` | object | 世界实例分配标记 | 必含`world_id`、`instance_id`、`node_id`、正`generation`与正`fencing_token` |
+| `payload.lifecycle` | enum string | 会话生命周期 | 与Hash metadata相同 |
+| `payload.revision` | JSON `uint64` | 会话版本号 | 正整数，与Hash metadata相同 |
+| `payload.capacity` | JSON `uint8` | 访客容量(人) | 1至32 |
+| `payload.created_us` | JSON `int64` | 创建时间(UTC Unix微秒) | 正值且早于`expires_us` |
+| `payload.expires_us` | JSON `int64` | 会话到期时间(UTC Unix微秒) | 达到边界即失效 |
+| `payload.owner_binding.*` | object | 主人连接绑定 | 必含`player_id`、`session_id`、正`epoch`与`connection_id` |
+| `payload.owner_grace_generation` | JSON `uint64` | 主人恢复代际 | 仅`owner_grace`为正 |
+| `payload.owner_grace_expires_us` | JSON `int64` | 主人恢复到期时间(UTC Unix微秒) | 非`owner_grace`固定为0 |
+| `payload.invites[]` | array | 定向邀请集合 | pending最多64个，集合总数最多`64 + capacity`；每项含`id`、`target_id`、`state`、`created_revision`、`expires_us` |
+| `payload.memberships[]` | array | 访客成员集合 | 最多capacity个；每项含Visitor/invite/session/epoch/state及状态专属binding/deadline |
+| `payload.memberships[].reservation_expires_us` | JSON `int64` | 预留到期时间(UTC Unix微秒) | 仅`reserved`为正，否则为0 |
+| `payload.memberships[].reconnect_generation` | JSON `uint64` | 访客恢复代际 | 仅`reconnecting`为正 |
+| `payload.memberships[].reconnect_expires_us` | JSON `int64` | 访客恢复到期时间(UTC Unix微秒) | 仅`reconnecting`为正，否则为0 |
+
+`visitsession_command`：
+
+- Pattern：`ih:<env>:visitsession:command:<commandID>`
+- Owner：`internal/storage/visitsession`
+- 大小预算：Hash 全部 field name/value 累计不超过 196608 bytes
+- 写入触发：Create/Commit首次成功时与snapshot/index在同一Lua线性化点写入；existing与确定性conflict不写入
+- 读取触发：相同CommandID重试时必须先于active index、not-found与revision决议
+- 恢复/清理：进程重启只读取 Redis 仍保留的合法值；丢失后不重建，与所属session共享absolute physical expiry
+- 故障行为：fingerprint不同返回idempotency conflict；metadata/payload矛盾、unknown kind/version、超预算或缺失TTL按dependency defect fail closed
+
+| Field / JSON path | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | Hash必填，固定为`1` |
+| `kind` | enum string | 重放结果类型 | Hash必填，`create`或`mutation` |
+| `fingerprint` | lowercase hex | 命令指纹(SHA-256,32字节) | Hash必填，64个hex字符 |
+| `visit_id` | string | 访客会话ID | Hash必填，必须等于result snapshot |
+| `world` | string | 个人世界ID | Hash必填，必须等于result snapshot |
+| `revision` | canonical decimal `uint64` | 结果会话版本号 | Hash必填，正整数 |
+| `expires_us` | canonical decimal `int64` | 会话到期时间(UTC Unix微秒) | Hash必填，等于result snapshot |
+| `payload` | canonical JSON object | 首次完整结果 | Hash必填；与metadata共享196608 bytes累计上限 |
+| `payload.operation` | enum string | 变更类型 | mutation必填，必须是VisitSession已登记operation |
+| `payload.snapshot` | snapshot object | 结果会话快照 | 字段与`visitsession_session.payload`完全相同 |
+| `payload.command_id` | string | 命令ID | 必填，必须等于key identity |
+| `payload.fingerprint` | lowercase hex | 命令指纹(SHA-256,32字节) | 必填，必须等于Hash metadata |
+| `payload.invite` | object/omitted | 邀请结果 | 仅create-invite存在 |
+| `payload.admission` | object/omitted | 非凭据准入意图 | 仅accept存在；含VisitSession/Visitor/session/epoch/assignment与`expires_us` |
+| `payload.membership` | object/omitted | 访客成员结果 | 仅join/reconnect存在，字段与snapshot membership相同 |
+| `payload.directives[]` | array | 安全返回指令集合 | 按VisitorID稳定排序；每项含`visit_session_id`、`visitor_id`与封闭`reason` |
 
 `placement_transition`：
 

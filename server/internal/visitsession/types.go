@@ -466,6 +466,15 @@ func NewAuthBinding(actor Actor, connectionID ConnectionBindingID) (AuthBinding,
 	return AuthBinding{actor: actor, connectionID: connectionID}, nil
 }
 
+// HydrateAuthBinding 从已验证的 storage projection 恢复认证与连接绑定。
+//
+// 该入口只重建 VisitSession snapshot 中已经提交的条件事实，不创建 AuthContext，也不授予
+// 新 command 权限。调用方仍须通过 NewSnapshot 的 owner 与集合交叉校验。
+func HydrateAuthBinding(playerID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, connectionID ConnectionBindingID) (AuthBinding, error) {
+	actor := Actor{playerID: playerID, sessionID: sessionID, epoch: epoch}
+	return NewAuthBinding(actor, connectionID)
+}
+
 // Actor 返回不可变认证投影值副本。
 func (binding AuthBinding) Actor() Actor { return binding.actor }
 

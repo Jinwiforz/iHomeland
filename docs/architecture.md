@@ -233,6 +233,8 @@ Visitor 默认不能修改世界配置、推进 Owner 关键任务、消费不�
 
 Owner 断线后进入有绝对 deadline 的 reconnect grace。Owner 在 deadline 前恢复时可继续访问；主动关闭或 grace 到期时 VisitSession 关闭，Visitor 获得明确原因并返回自己的 PersonalWorld 或安全入口。Visitor 不继承 WorldOwnerID，个人世界不执行 Room 式 host succession。
 
+`internal/storage/visitsession` 已以共享 standalone Redis 实现 production `VisitSessionStore`：active/session/command 三类 versioned Hash 在 owner Lua 线性化点内维护唯一索引、revision CAS 和完整重放结果。Adapter 不拥有 Redis client、后台 cleanup、admission credential 或 listener，也尚未接入正式 Composition Root。Redis 进程重启只能恢复其自身仍保留的合法运行态；flush 或 key 丢失后不从 MySQL 补回旧访问资格。完整 key/field/TTL 字典由 `docs/redis-keys.md` 唯一管理。
+
 Party 只在需要跨场景持续队伍、队长、队伍聊天或连续活动时建立。直接访问好友个人世界只需要 VisitSession，不要求预先创建 Party 或 Room。
 
 Room 只在未来活动确实需要公开列表、席位、房主、ready/start 或活动前组装时建立，并且只拥有活动准备事实。Room 不作为 PersonalWorld、VisitSession 或 ActivityInstance 的父模型，也不接管世界运行、活动运行或结算事实。

@@ -18,7 +18,7 @@ WorldInstance placement core 位于 `internal/placement/`。它建立独立 `Wor
 
 VisitSession core 位于 `internal/visitsession/`。它建立独立且默认脱敏的 session/invite/command/connection-binding identities，不可变绑定 Owner、PersonalWorld 与完整 current assignment stamp，并实现有界 invite、reservation、join、leave/kick、Owner/Visitor disconnect/reconnect/expiry、expected revision、command replay/commit-unknown 和确定性 safe-return。Invite 与 `AdmissionIntent` 都不是 gameplay credential；join 的受信 qualification 构造入口仍保持封闭，Visitor 对未登记 gameplay mutation 默认没有权限。
 
-VisitSession 的并发 reference store 与 fake reader/clock/ID 只存在于 `_test.go`；跨端 admission semantic fixture 位于 `shared/contracts/fixtures/admission/`。生产 package 不含 Redis/MySQL adapter、timer/goroutine、generated protocol、listener 或 memory fallback；正式 Composition Root 也没有构造该 service。P0 已冻结 world/visit public projection、message/error/route、HTTP operations 与 OpenAPI opaque admission response；后续仍必须分别交付 admission issuer/verifier、HTTP/WSS/TLS-TCP adapter、Composition Root 接线与 Go 协议客户端，当前实现不表示 visit-world 已经可用。Admission semantic fixture 只约束 binding、expiry 与 replay 验收，不包含可解析 claims，也不表示生产签发或 nonce 原子消费已经实现。
+VisitSession 的并发 reference store 与 fake reader/clock/ID 只存在于 `_test.go`。`internal/storage/visitsession` 已用共享 standalone Redis client、versioned active/session/command schemas、完整 snapshot/result codec 与 owner Lua scripts 实现 production `VisitSessionStore`。Redis 进程重启只能读取自身仍保留的合法运行态；flush 或 key 丢失后旧 invite、membership、binding 与 replay 不从其他来源补回。Adapter 不拥有 client、timer/goroutine、admission credential、generated protocol、listener 或 memory fallback，正式 Composition Root 也没有构造该 service 或 semantic cleanup task。跨端 admission semantic fixture 位于 `shared/contracts/fixtures/admission/`；P0 已冻结 world/visit public projection、message/error/route、HTTP operations 与 OpenAPI opaque admission response。后续仍必须分别交付 admission issuer/verifier、HTTP/WSS/TLS-TCP adapter、Composition Root 接线与 Go 协议客户端，当前实现不表示 visit-world 已经可用。
 
 PersonalWorld 与 placement core 已有独立 production storage adapter：`internal/storage/personalworld`
 借用共享 MySQL pool 保存 identity、immutable owner、lifecycle、revision 与 archive replay；
@@ -27,10 +27,10 @@ Lua 管理可失效 current assignment 与有界 transition replay。重试只�
 identity，首次 allocation 的时间结果不会被新时钟覆盖。Redis flush 不恢复旧 lease，旧
 allocation 也不会重新发布；新 candidate 必须取得更高 fence。Adapter 不持有共享 client、
 不注册 lifecycle component，也尚未接入正式业务 Composition Root、协议、listener 或 Unity。
-当前进程因此仍没有公开 world API，也不包含地图、任务、奖励、production Visitor
-运行态、connection presence 或 endpoint；这些能力必须继续遵守 `docs/roadmap.md` 的进入条件，由后续独立 change 实现和验收。
+当前进程因此仍没有公开 world API，也不包含地图、任务、奖励、已接线的 Visitor
+service graph、connection presence 或 endpoint；这些能力必须继续遵守 `docs/roadmap.md` 的进入条件，由后续独立 change 实现和验收。
 
-Storage runtime 位于 `internal/storage/`。MySQL component 拥有唯一 pool、UTC/strict session、advisory-lock migration 和一次性 transaction callback；Redis component 固定 standalone，禁用 mutation 隐式 retry，并拥有 Keyspace/registry/TTL policy。Migration catalog 除 `ih_schema_migrations` 外已创建单张 `accounts`、`personal_worlds`、`personal_world_idempotency`、`placement_sequences` 与 append-only `placement_allocations`；table owner 分别是 Account、PersonalWorld/placement adapter。Account/Session adapters 已可由 contract/integration tests 直接构造，但正式 Composition Root 仍只应用 migration，不构造 register/login/refresh/logout/ticket service graph，也不开放业务 route。
+Storage runtime 位于 `internal/storage/`。MySQL component 拥有唯一 pool、UTC/strict session、advisory-lock migration 和一次性 transaction callback；Redis component 固定 standalone，禁用 mutation 隐式 retry，并拥有 Keyspace/registry/TTL policy。根 `storage` package 只组合 Session、Placement 与 VisitSession 已实现的 Redis definitions，不拥有 client 或业务 service。Migration catalog 除 `ih_schema_migrations` 外已创建单张 `accounts`、`personal_worlds`、`personal_world_idempotency`、`placement_sequences` 与 append-only `placement_allocations`；table owner 分别是 Account 与 PersonalWorld/Placement adapters。Account/Session/VisitSession adapters 已可由 contract/integration tests 直接构造，但正式 Composition Root 仍只应用 migration，不构造业务 service graph，也不开放业务 route。
 
 ## 命令规则
 

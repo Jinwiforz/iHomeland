@@ -67,6 +67,7 @@ server/
       session/
       personalworld/
       placement/
+      visitsession/
       redis/
       tlsconfig/
     testclient/
@@ -126,7 +127,7 @@ VisitSession 独立拥有定向 invite、Visitor membership/capacity、connectio
 
 生产 package 只包含纯 Go domain/application、消费侧 `VisitSessionStore`/world/assignment ports、稳定 command fingerprint 与严格 outcome/result 校验。并发 reference store、fake reader/clock/ID 与 admission qualification fixture 只存在于 `_test.go`；package 不启动 timer/goroutine，不拥有 socket、PersonalWorld 持久 mutation 或 placement lifecycle。
 
-VisitSession 当前没有 production Redis adapter、cleanup owner、admission credential、公开 protocol/transport 或正式 Composition Root 接线。Redis 运行态、TTL/replay key、连接迁移和 safe-return side effect 必须由后续独立 change 交付；在此之前当前进程不得宣称 visit-world 可用。
+VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 仍未构造 VisitSession service，world admission 与公开 transport 必须由后续独立 change 交付；在此之前当前进程不得宣称 visit-world 可用。
 
 ### 个人世界阶段目录门禁
 
@@ -156,6 +157,7 @@ VisitSession 当前没有 production Redis adapter、cleanup owner、admission c
 - `session`：借用共享 standalone Redis client 与 Keyspace，以 owner Lua scripts 实现原子 SessionStore；Redis flush 后不恢复旧 session，也不持有 client lifecycle。
 - `personalworld`：借用共享 MySQL pool，实现 PersonalWorld identity/lifecycle/revision 与 actor-scoped archive replay；拥有 `personal_worlds`、`personal_world_idempotency` table，不持有 pool 或 lifecycle。
 - `placement`：借用共享 MySQL/Redis clients 与 Keyspace，拥有持久 allocation high-watermark、current assignment 与 transition replay；不关闭共享资源、不启动后台任务，也不保存通用 world state。
+- `visitsession`：借用共享 standalone Redis client 与 Keyspace，以 owner Lua scripts 原子维护 active index、完整 snapshot 与 command replay；不持有 client lifecycle、semantic cleanup 或 admission credential。
 - repository/cache interfaces 由业务 owner 包定义，避免 infrastructure 反向拥有业务契约。
 
 ### `internal/testclient`

@@ -184,18 +184,26 @@ func TTLUntil(expiresAt time.Time, now time.Time) (time.Duration, error) {
 	return ttl, nil
 }
 
-// ValidateEncodedValue 在 owner decode 前验证 schema version 和 encoded 大小。
-func ValidateEncodedValue(definition Definition, schemaVersion uint16, encoded []byte) error {
+// ValidateEncodedSize 在 owner decode 前验证 schema version 和累计 encoded 字节数。
+//
+// Hash owner 应传入全部 field name 与 value 的累计字节数，不能只统计其中的
+// JSON payload。该函数不分配与 value 同大小的临时 buffer。
+func ValidateEncodedSize(definition Definition, schemaVersion uint16, encodedBytes int) error {
 	if schemaVersion != definition.SchemaVersion {
 		return errors.New("redis value schema version is unknown")
 	}
-	if len(encoded) == 0 {
+	if encodedBytes <= 0 {
 		return errors.New("redis encoded value is empty or corrupt")
 	}
-	if len(encoded) > definition.MaxEncodedBytes {
+	if encodedBytes > definition.MaxEncodedBytes {
 		return errors.New("redis encoded value exceeds definition size")
 	}
 	return nil
+}
+
+// ValidateEncodedValue 验证已物化的单一 encoded value 的 schema version 与字节数。
+func ValidateEncodedValue(definition Definition, schemaVersion uint16, encoded []byte) error {
+	return ValidateEncodedSize(definition, schemaVersion, len(encoded))
 }
 
 // validateDefinition 在 registry 与 builder 两个入口统一验证 owner metadata。

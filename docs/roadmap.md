@@ -19,7 +19,8 @@ A0 Project Baseline
   -> V0 VisitSession Domain
   -> P0 PersonalWorld + Visit Protocol
   -> D1 Account / Session Storage
-  -> N0 HTTPS + WSS + TLS-TCP + Admission
+  -> V1 VisitSession Storage
+  -> N0 Admission + HTTPS + WSS + TLS-TCP
   -> Q0 Server v1 Qualification
   -> C0 Unity Runtime
   -> C1 Unity Network + Account
@@ -207,7 +208,21 @@ A0 Project Baseline
 
 **完成条件：**账号事实只进入 MySQL，session/token/ticket 只以 digest 和可失效运行态进入 Redis；所有原子操作经真实 Docker storage 验收。正式 Composition Root 仍只应用 migration，不构造账号/session service graph，也不开放业务 route。
 
+## V1：访客会话生产存储
+
+### `establish-server-visit-session-storage`
+
+**目标：**在公开 world/visit transport 之前交付 VisitSession 可失效运行态与完整命令重放。
+
+**产出：**VisitSession active/session/command Redis schemas、owner Lua create/CAS、absolute TTL、完整 safe-return replay，以及并发、response-loss、restart/flush/corruption 集成测试。
+
+**完成条件：**production adapter 忠实实现 `VisitSessionStore`；Redis 进程重启可读取自身仍保留的合法运行态，丢失后不补回旧资格；正式 Composition Root 仍不构造 VisitSession service、cleanup task 或公开 listener。
+
 ## N0：公开通道与安全接入
+
+### `establish-server-world-admission-runtime`
+
+独立交付短期一次性 opaque world admission issuer/verifier、nonce 原子消费、session epoch/assignment/endpoint/channel 绑定与 semantic fixture 验收；不得在 HTTP 或 TLS/TCP handler 中顺带发明凭据语义。
 
 ### `add-server-http-bootstrap`
 
@@ -229,7 +244,7 @@ A0 Project Baseline
 
 ### `qualify-server-v1`
 
-**进入条件：**S0-S3、W0-W2、D0-D1、V0、P0、N0 全部完成。
+**进入条件：**S0-S3、W0-W2、D0-D1、V0-V1、P0、N0 全部完成。
 
 **验证：**
 

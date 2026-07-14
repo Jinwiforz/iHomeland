@@ -180,6 +180,18 @@ func newAdmissionIntent(visitSessionID VisitSessionID, actor Actor, assignment p
 	return intent, nil
 }
 
+// HydrateAdmissionIntent 从已提交的 accept result 恢复非凭据 reservation 投影。
+//
+// 该入口不创建签名、nonce、endpoint、JoinQualification 或任何连接权限；NewMutationResult
+// 仍会把 intent 与 reserved membership、assignment 和 deadline 做完整交叉校验。
+func HydrateAdmissionIntent(visitSessionID VisitSessionID, visitorID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, assignment placement.AssignmentStamp, expiresAt time.Time) (AdmissionIntent, error) {
+	intent := AdmissionIntent{visitSessionID: visitSessionID, visitorID: visitorID, sessionID: sessionID, epoch: epoch, assignment: assignment, expiresAt: canonicalOptionalTime(expiresAt)}
+	if !intent.Valid() {
+		return AdmissionIntent{}, errors.New("admission intent hydration is incomplete")
+	}
+	return intent, nil
+}
+
 // VisitSessionID 返回 reservation 所属 aggregate identity。
 func (intent AdmissionIntent) VisitSessionID() VisitSessionID { return intent.visitSessionID }
 

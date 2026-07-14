@@ -154,6 +154,12 @@ func TestTTLAndEncodedValueBoundaries(t *testing.T) {
 	if err := ValidateEncodedValue(definition, 1, make([]byte, definition.MaxEncodedBytes+1)); err == nil {
 		t.Fatal("oversize value 应被拒绝")
 	}
+	if err := ValidateEncodedSize(definition, 1, definition.MaxEncodedBytes); err != nil {
+		t.Fatalf("最大 encoded size 被拒绝: %v", err)
+	}
+	if err := ValidateEncodedSize(definition, 1, 0); err == nil {
+		t.Fatal("空 encoded size 应被拒绝")
+	}
 }
 
 // TestDigestAndCommandClassification 验证敏感 identity 摘要与 command/script 的保守失败分类。

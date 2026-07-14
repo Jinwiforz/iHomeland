@@ -1,10 +1,4 @@
-# Delivery Sequencing 规格
-
-## Purpose
-
-定义项目从协议基线到服务端 v1、Unity 客户端和战斗阶段的严格交付顺序，以及服务端资格门、第一里程碑范围、客户端进入条件和每个 change 的独立验收边界。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 项目必须按契约依赖顺序交付
 项目 MUST 先完成基础协议治理、服务端 runtime、session 与 account，再依次完成 PersonalWorld domain、WorldInstance placement model、MySQL/Redis runtime、个人世界存储与 placement adapters、VisitSession domain、world/visit protocol、公开 adapter 所需的 production Account/Session storage 与 credential hashing、VisitSession production storage、独立 world admission issuer/verifier、HTTPS/WSS/TLS-TCP adapters 和 Go 协议测试客户端资格验收，最后开始 Unity 运行时实现。任何公开 transport change MUST 先具备其消费的 production store、cryptography 与安全资格组件，不得在 handler/listener change 内顺带创造未独立验收的数据或凭据语义。Room、Party 与 ActivityInstance MUST NOT 成为 PersonalWorld 或 VisitSession 的前置条件。
@@ -28,24 +22,3 @@
 #### Scenario: 缺少 VisitSession storage 或 admission 时实现公开 world/visit route
 - **WHEN** proposal 尝试实现world bootstrap、invite accept、world admission或gameplay join，但VisitSessionStore仍只有测试实现，或一次性admission issuer/verifier与nonce消费尚未独立验收
 - **THEN** 评审必须先分别完成production VisitSession storage与world admission capability，transport handler不得顺带创建Redis状态机、credential claims、nonce store或memory fallback
-
-### Requirement: 服务端 v1 必须具备独立消费者验收
-服务端 MUST 交付 Go 协议测试客户端、contract fixtures 和 golden packets，使账号、会话、HTTP/WSS/TCP、own-world 与 visit-world 流程不依赖 Unity 即可验证。
-
-#### Scenario: 验证个人世界与访客联机
-- **WHEN** Go 客户端完成登录、进入自己的 PersonalWorld、邀请 Visitor、断线重连并结束 VisitSession
-- **THEN** 服务端维持单调 revision、唯一 writable WorldInstance、不可转移 Owner、幂等 membership 和明确 safe-return 结果
-
-### Requirement: 第一阶段范围必须保持有限
-第一阶段 MUST 只包含账号、会话、PersonalWorld、WorldInstance、VisitSession、MySQL/Redis、HTTPS、WSS 和 TLS/TCP，不得混入 ActivityInstance、Room、Party、正式战斗、匹配、观战、回放或完整经济系统。
-
-#### Scenario: 规划 UDP 或 KCP
-- **WHEN** battle simulation model 和 network profile 尚未完成
-- **THEN** 项目不得创建 UDP/KCP listener、占位协议或战斗运行时
-
-### Requirement: 每个实现阶段必须独立验收
-路线图中的每个实现 change MUST 有明确进入条件、产出、自动化测试、完成条件和提交级回滚点。
-
-#### Scenario: 一个 change 同时涉及多个交付阶段
-- **WHEN** proposal 同时实现协议、存储、多个 transport 和客户端 UI
-- **THEN** 评审必须将其拆分为可独立运行和验收的 changes
