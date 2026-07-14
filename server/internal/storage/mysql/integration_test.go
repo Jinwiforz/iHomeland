@@ -59,7 +59,7 @@ func TestMySQLIntegrationRuntimeMigrationAndRecovery(t *testing.T) {
 	}()
 	resetIntegrationSchema(t, ctx, db)
 	result, err := Migrate(ctx, db, "ihomeland", 10*time.Second)
-	if err != nil || result.Applied != 5 {
+	if err != nil || result.Applied != 6 || result.CurrentVersion != 6 {
 		t.Fatalf("empty migration = %+v, %v", result, err)
 	}
 	assertBusinessSchema(t, ctx, db)
@@ -70,7 +70,7 @@ func TestMySQLIntegrationRuntimeMigrationAndRecovery(t *testing.T) {
 	resetIntegrationSchema(t, ctx, db)
 	seedD0MigrationHistory(t, ctx, db)
 	result, err = Migrate(ctx, db, "ihomeland", 10*time.Second)
-	if err != nil || result.Applied != 4 || result.CurrentVersion != 5 {
+	if err != nil || result.Applied != 5 || result.CurrentVersion != 6 {
 		t.Fatalf("D0 history upgrade = %+v, %v", result, err)
 	}
 	assertBusinessSchema(t, ctx, db)
@@ -120,7 +120,7 @@ func TestMySQLIntegrationRuntimeMigrationAndRecovery(t *testing.T) {
 	for value := range results {
 		totalApplied += value.Applied
 	}
-	if totalApplied != 5 {
+	if totalApplied != 6 {
 		t.Fatalf("concurrent applied total = %d", totalApplied)
 	}
 
@@ -180,6 +180,7 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 		"personal_world_idempotency": "个人世界幂等结果(owner=storage/personalworld)",
 		"placement_sequences":        "实例放置序列(owner=storage/placement)",
 		"placement_allocations":      "实例放置分配(owner=storage/placement)",
+		"accounts":                   "账号(owner=storage/account)",
 	} {
 		var comment string
 		if err := db.QueryRowContext(ctx, `SELECT table_comment FROM information_schema.tables
@@ -222,6 +223,13 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 		"placement_allocations.candidate_lease_expires_at":  "候选租约到期时间(UTC,微秒)",
 		"placement_allocations.candidate_checksum":          "候选身份校验值(SHA-256,32字节)",
 		"placement_allocations.allocated_at":                "分配时间(UTC,微秒)",
+		"accounts.account_id":                               "账号ID",
+		"accounts.player_id":                                "玩家ID",
+		"accounts.username":                                 "登录名",
+		"accounts.display_name":                             "展示名称",
+		"accounts.credential_hash":                          "凭据哈希(PHC)",
+		"accounts.status":                                   "账号状态",
+		"accounts.created_at":                               "创建时间(UTC,微秒)",
 	}
 	rows, err := db.QueryContext(ctx, `SELECT table_name, column_name, data_type, column_comment
 		FROM information_schema.columns WHERE table_schema = DATABASE()`)
@@ -262,6 +270,7 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 		"fk_placement_sequences_world", "chk_placement_sequences_generation", "chk_placement_sequences_fence",
 		"uq_placement_allocations_generation", "uq_placement_allocations_fence", "fk_placement_allocations_world",
 		"chk_placement_allocations_generation", "chk_placement_allocations_fence", "chk_placement_allocations_lease",
+		"uq_accounts_player", "uq_accounts_username",
 	} {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.table_constraints
@@ -295,7 +304,7 @@ func containsHan(value string) bool {
 // 该 helper 只供 migration recovery 测试模拟空库；生产 migrator 永不执行 down 或删除数据。
 func resetIntegrationSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
-	for _, table := range []string{"placement_allocations", "placement_sequences", "personal_world_idempotency", "personal_worlds", "ih_schema_migrations"} {
+	for _, table := range []string{"accounts", "placement_allocations", "placement_sequences", "personal_world_idempotency", "personal_worlds", "ih_schema_migrations"} {
 		if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatalf("reset integration table failed: %v", err)
 		}

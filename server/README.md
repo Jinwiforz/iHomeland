@@ -4,13 +4,13 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含 world/visit Protobuf 与 HTTPS/registry/fixture 契约、协议校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement 和 VisitSession core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。这些能力尚未接入完整的 production store、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新、PersonalWorld、visit-world 或 realtime 业务 API。
+当前 module 包含 world/visit Protobuf 与 HTTPS/registry/fixture 契约、协议校验、listener-independent codec、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement 和 VisitSession core。Session core 已实现 opaque access/refresh token、原子轮换契约、带 16-byte nonce 的结构化 connection ticket、构造入口封闭的 AuthContext 和 epoch 失效语义；account core 已实现 username/display name 规范化、凭据边界、账号原子 repository 契约以及 register/login 编排。Account/Session 已有 production storage adapters，但尚未接入正式 service graph、连接 registry 或公开业务 listener，因此当前进程不会开放登录、刷新、PersonalWorld、visit-world 或 realtime 业务 API。
 
-Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。后续 Redis 与 transport adapter 必须实现这些接口，不能另建 token、ticket 或 epoch 语义。
+Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。`internal/storage/session` 已用共享 Redis client、严格 key/Hash codec 与原子 Lua scripts 实现 `SessionStore`；后续 transport adapter 不能另建 token、ticket 或 epoch 语义。
 
 Account core 位于 `internal/account/`。Username 使用受限 ASCII lowercase canonical key，Unicode 展示需求由经过 NFC 和安全字符校验的 display name 承担；password 保持原始 bytes，只能进入 `CredentialHasher`，repository 只接收自描述 `CredentialHash`。Register 先原子提交账号再创建 session，后者失败不会删除账号；login 对 unknown username 使用同算法、同成本 dummy hash，并将 unknown、wrong password 与 inactive account 收敛为同一外部错误。Refresh、logout、ticket 和 epoch 始终由 `internal/session` 拥有。
 
-Account production package 只定义消费侧接口，reference adapters 仅存在于 `_test.go`。后续 Account storage adapter change 必须实现 MySQL repository，并在目标硬件 benchmark 后选择 production memory-hard password hasher；在这两项完成前，Composition Root 不得接线 account service，也不得宣称 register/login 可用。
+Account production package 只定义消费侧接口，reference adapters 仅存在于 `_test.go`。`internal/storage/account` 已借用共享 MySQL pool 实现单表 repository，并以固定 Argon2id v19 profile、严格 PHC parser 和有界并发实现 production hasher。正式 Composition Root 仍不得提前接线 account service，也不得在公开 HTTP change 完成前宣称 register/login 可用。
 
 PersonalWorld core 位于 `internal/personalworld/`。它建立独立 `PersonalWorldID`、不可变 `account.PlayerID` owner、primary world 原子 ensure、严格 snapshot hydration、持久 revision、`active -> archived` 生命周期，以及带 expected revision、Owner-scoped idempotency fingerprint 和 commit-unknown 的归档契约。并发 reference repository、fake clock/ID generator 与故障注入只存在于 `_test.go`，生产 package 不提供 memory fallback。
 
@@ -30,7 +30,7 @@ allocation 也不会重新发布；新 candidate 必须取得更高 fence。Adap
 当前进程因此仍没有公开 world API，也不包含地图、任务、奖励、production Visitor
 运行态、connection presence 或 endpoint；这些能力必须继续遵守 `docs/roadmap.md` 的进入条件，由后续独立 change 实现和验收。
 
-Storage runtime 位于 `internal/storage/`。MySQL component 拥有唯一 pool、UTC/strict session、advisory-lock migration 和一次性 transaction callback；Redis component 固定 standalone，禁用 mutation 隐式 retry，并拥有 Keyspace/registry/TTL policy。Migration catalog 除 `ih_schema_migrations` 外已创建 `personal_worlds`、`personal_world_idempotency`、`placement_sequences` 与 append-only `placement_allocations`；table owner 分别是 PersonalWorld/placement adapter。Account/Session adapter 和公开业务接线仍未实现。
+Storage runtime 位于 `internal/storage/`。MySQL component 拥有唯一 pool、UTC/strict session、advisory-lock migration 和一次性 transaction callback；Redis component 固定 standalone，禁用 mutation 隐式 retry，并拥有 Keyspace/registry/TTL policy。Migration catalog 除 `ih_schema_migrations` 外已创建单张 `accounts`、`personal_worlds`、`personal_world_idempotency`、`placement_sequences` 与 append-only `placement_allocations`；table owner 分别是 Account、PersonalWorld/placement adapter。Account/Session adapters 已可由 contract/integration tests 直接构造，但正式 Composition Root 仍只应用 migration，不构造 register/login/refresh/logout/ticket service graph，也不开放业务 route。
 
 ## 命令规则
 

@@ -18,6 +18,7 @@ A0 Project Baseline
   -> W2 PersonalWorld Storage + Placement Adapters
   -> V0 VisitSession Domain
   -> P0 PersonalWorld + Visit Protocol
+  -> D1 Account / Session Storage
   -> N0 HTTPS + WSS + TLS-TCP + Admission
   -> Q0 Server v1 Qualification
   -> C0 Unity Runtime
@@ -194,6 +195,18 @@ A0 Project Baseline
 
 **当前边界：**P0 已形成可生成、可登记、可严格验证的 source contract 与 deterministic fixtures；production HTTP/WSS/TLS-TCP adapter、admission issuer/verifier、Composition Root 接线和 Go 协议客户端仍属于 N0/Q0，当前进程不开放这些业务入口。未登记 generic world interaction 继续默认拒绝。
 
+## D1：账号与会话存储
+
+### `establish-server-account-session-storage`
+
+**目标：**在公开 HTTP/WSS/TLS-TCP 之前交付账号持久化、密码哈希与会话原子运行态。
+
+**进入条件：**Account/Session 消费侧接口、共享 MySQL/Redis runtime 与公开 world/visit protocol 已稳定。
+
+**产出：**单表 Account MySQL repository、固定 Argon2id v19 profile、Session Redis Hash schemas 与 owner Lua scripts，以及密码资源上限、commit-unknown、refresh replay、ticket consume、epoch invalidation、restart/flush/corruption 集成测试。
+
+**完成条件：**账号事实只进入 MySQL，session/token/ticket 只以 digest 和可失效运行态进入 Redis；所有原子操作经真实 Docker storage 验收。正式 Composition Root 仍只应用 migration，不构造账号/session service graph，也不开放业务 route。
+
 ## N0：公开通道与安全接入
 
 ### `add-server-http-bootstrap`
@@ -216,7 +229,7 @@ A0 Project Baseline
 
 ### `qualify-server-v1`
 
-**进入条件：**S0-S3、W0-W2、D0、V0、P0、N0 全部完成。
+**进入条件：**S0-S3、W0-W2、D0-D1、V0、P0、N0 全部完成。
 
 **验证：**
 

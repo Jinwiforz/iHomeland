@@ -190,7 +190,9 @@ HTTPS credentials
 
 `PlayerID` 在一个独立产品部署中是稳定玩家身份。登录地点、物理部署位置、WorldInstance 或 ActivityInstance 变化不得创建、覆盖或重新解释 PlayerID。中国大陆版与国际版可以根据账号、发行或合规要求使用独立账号入口和数据部署。
 
-MySQL account repository、production password hasher、Redis session adapter、连接 registry 与公开 listener 完成并接入 Composition Root 前，正式进程不得提供账号或 session API；`_test.go` reference adapters 永远不能进入生产接线。
+`internal/storage/account` 已借用共享 MySQL pool 实现单表 repository，并以固定 Argon2id v19 profile、严格 PHC parser、constant-time compare 和有界并发实现 production hasher；`internal/storage/session` 已借用共享 standalone Redis client，以版本化 Hash、逻辑 UTC Unix 微秒 expiry 和 owner Lua scripts 实现 `SessionStore`。两者不拥有 pool/client、goroutine、listener 或 memory fallback。Redis flush 后旧 credential 全部 fail closed，只能基于仍在 MySQL 的账号重新登录创建新 session，不能恢复旧运行态。
+
+这些 production adapters 尚未接入正式 Composition Root 的账号/session service graph。连接 registry、endpoint provider 与公开 listener 完成并接线前，正式进程仍不得提供账号或 session API；`_test.go` reference adapters 永远不能进入生产接线。
 
 ## 个人世界与访客联机
 

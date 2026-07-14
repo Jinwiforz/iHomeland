@@ -63,6 +63,8 @@ server/
     storage/
       mysql/
         migrations/
+      account/
+      session/
       personalworld/
       placement/
       redis/
@@ -95,7 +97,7 @@ Lifecycle component 只用于真实持有资源或后台任务的对象；成功
 
 ### `internal/session`
 
-统一拥有 session id/epoch、opaque token、结构化 connection ticket/nonce、AuthContext、scope policy 和连接失效语义。`SessionStore`、`EndpointProvider` 与 `ConnectionInvalidator` 由该消费包定义，真实 Redis 和 transport adapter 在后续目录实现；协议 adapter 负责将纯 Go ticket 投影转换为 generated Protobuf/OpenAPI model。
+统一拥有 session id/epoch、opaque token、结构化 connection ticket/nonce、AuthContext、scope policy 和连接失效语义。`SessionStore`、`EndpointProvider` 与 `ConnectionInvalidator` 由该消费包定义；真实 Redis adapter 位于 `internal/storage/session`，后续 transport adapter 负责将纯 Go ticket 投影转换为 generated Protobuf/OpenAPI model。
 
 生产 package 不包含 memory store、listener、数据库 client 或 generated protocol type。并发参考 store、fake clock 与确定性 generator 只允许出现在 `_test.go`，防止 Composition Root 在真实 adapter 完成前提供看似可用但不可恢复的 session 服务。
 
@@ -114,7 +116,7 @@ account/
   *_test.go
 ```
 
-`types.go` 拥有账号身份和规范化值，`credential.go` 拥有默认脱敏的 password/hash 值，`store.go` 定义 repository、hasher、session、clock 与 ID 消费接口，`service.go` 只编排 register/login。并发 reference repository、fake hasher/session issuer/clock/ID 只允许存在于 `_test.go`；production MySQL 与 password adapter 归入后续 infrastructure change。
+`types.go` 拥有账号身份和规范化值，`credential.go` 拥有默认脱敏的 password/hash 值，`store.go` 定义 repository、hasher、session、clock 与 ID 消费接口，`service.go` 只编排 register/login。并发 reference repository、fake hasher/session issuer/clock/ID 只允许存在于 `_test.go`；production MySQL repository 与 password hasher 位于 `internal/storage/account`。
 
 Account 不拥有 refresh、logout、ticket、token parsing 或 AuthContext，也不依赖 generated protocol type。包内职责仍清晰时不拆 `domain/application` 子目录；出现真实复杂度后必须通过独立 change 证明拆分价值。
 
@@ -150,6 +152,8 @@ VisitSession 当前没有 production Redis adapter、cleanup owner、admission c
 - `mysql`：唯一 `database/sql` pool、嵌入式 migration history/catalog、transaction runner；后续 owner-specific repository adapter 只能在对应业务 change 中加入。
 - `redis`：唯一 standalone client、Keyspace/registry metadata、TTL 与 command outcome policy；不提供 generic cache 或预造业务 scripts。
 - `tlsconfig`：从已验证 policy 与 secret value 构造 production TLS client identity。
+- `account`：借用共享 MySQL pool/transaction policy，实现单表 AccountRepository 与固定 Argon2id hasher；拥有 `accounts` table，不记录 password、PHC、salt 或 tag。
+- `session`：借用共享 standalone Redis client 与 Keyspace，以 owner Lua scripts 实现原子 SessionStore；Redis flush 后不恢复旧 session，也不持有 client lifecycle。
 - `personalworld`：借用共享 MySQL pool，实现 PersonalWorld identity/lifecycle/revision 与 actor-scoped archive replay；拥有 `personal_worlds`、`personal_world_idempotency` table，不持有 pool 或 lifecycle。
 - `placement`：借用共享 MySQL/Redis clients 与 Keyspace，拥有持久 allocation high-watermark、current assignment 与 transition replay；不关闭共享资源、不启动后台任务，也不保存通用 world state。
 - repository/cache interfaces 由业务 owner 包定义，避免 infrastructure 反向拥有业务契约。
@@ -160,7 +164,7 @@ Go 协议测试客户端和 scenario runner。它是服务端资格验收的正�
 
 ### `migrations`
 
-Migration 与唯一执行 owner 同包嵌入，例如 `internal/storage/mysql/migrations/`。文件按固定宽度不可变序号排列，每个文件只含一个 statement；已合并 migration 不修改，只新增 forward migration。Storage runtime 最初只创建 `ih_schema_migrations` metadata；当前 catalog 已按 owner change 追加 PersonalWorld 与 placement tables，后续业务 schema 仍不得提前创建。
+Migration 与唯一执行 owner 同包嵌入，例如 `internal/storage/mysql/migrations/`。文件按固定宽度不可变序号排列，每个文件只含一个 statement；已合并 migration 不修改，只新增 forward migration。Storage runtime 最初只创建 `ih_schema_migrations` metadata；当前 catalog 已按 owner change 追加单张 `accounts`、PersonalWorld 与 placement tables，后续业务 schema 仍不得提前创建。
 
 ## 共享协议结构
 

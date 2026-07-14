@@ -39,6 +39,9 @@ libraries:
   golang_x_text:
     version: "0.28.0"
     source: "https://pkg.go.dev/golang.org/x/text@v0.28.0"
+  golang_x_crypto:
+    version: "0.41.0"
+    source: "https://pkg.go.dev/golang.org/x/crypto@v0.41.0"
   mysql_driver_go:
     version: "1.10.0"
     source: "https://github.com/go-sql-driver/mysql/releases/tag/v1.10.0"

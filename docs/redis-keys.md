@@ -33,7 +33,7 @@ ih:<env>:<owner>:<kind>:<identity...>
 | `ih:<env>:session:access:<accessDigest>` | session | access digest 到 session/epoch 的短期索引 | 不恢复；丢失后 access 认证失败 |
 | `ih:<env>:session:refresh:<refreshDigest>` | session | active refresh 或 consumed replay tombstone | 不恢复；consumed tombstone 保留到 session expiry |
 | `ih:<env>:session:ticket:<nonceDigest>` | session | 一次性 connection ticket 绑定与消费状态 | 不恢复；短 TTL，consumed marker 保留到 ticket expiry |
-| `ih:<env>:session:principal:<principalDigest>` | session | principal 到现有 session ids 的失效索引 | 可由活跃 session records 重建，成员随 session 清理 |
+| `ih:<env>:session:principal:<principalDigest>` | session | principal 到现有 session ids 的失效索引 | 不恢复；丢失或损坏时 principal 批量撤销 fail closed，单会话仍由 record 校验 |
 | `ih:<env>:presence:player:<playerID>` | session | 在线连接摘要 | 从 connection registry 恢复 |
 | `ih:<env>:placement:assignment:<personalWorldID>` | placement | schema v1 current WorldInstance stamp、starting/active phase 与精确 lease expiry | 不恢复旧 assignment；TTL 到期或 Redis flush 后，新 candidate 必须从 MySQL allocation ledger 获得更高 generation/fence |
 | `ih:<env>:placement:transition:<transitionDigest>` | placement | schema v1 Acquire/Activate/Renew/Revoke/Replace 首次结果与完整 request fingerprint | 正 TTL 覆盖有界 retry window；丢失后既有 allocation 保持 commit-unknown，不猜测或重新发布 |
@@ -41,6 +41,98 @@ ih:<env>:<owner>:<kind>:<identity...>
 | `ih:<env>:visit:player:<playerID>` | visit | 玩家当前 visit membership 索引 | 从有效 VisitSession 重建，必须有 TTL 与 cleanup owner |
 | `ih:<env>:rate:<scope>:<identity>` | owning adapter | 限流窗口 | 丢失后最多放宽一个窗口 |
 | `ih:<env>:lock:<owner>:<resourceID>` | owning module | 必要短租约 | 不恢复，必须有 TTL 与 fencing/idempotency |
+
+### 已实现的 session definitions
+
+五类 key 均由 `internal/storage/session` 独占，使用 Redis Hash schema v1 和必需
+`PEXPIREAT`。Hash 内的 `*_us` 是授权判断使用的 UTC Unix 微秒；physical TTL
+向上取整到 Unix 毫秒，只负责最终清理，不能替代逻辑 expiry。Access、refresh 与
+ticket digest 使用完整 SHA-256 的 64 位 lowercase hex；`principalDigest` 是对带长度
+前缀的受信 account/player 组合取 SHA-256 前 128 bit，Hash 同时保存原 identity 以检测
+摘要碰撞。任何 unknown version、字段缺失/多余、非法枚举、交叉绑定不一致或缺失 TTL
+都按依赖损坏 fail closed。
+
+`session_record`：
+
+- Pattern：`ih:<env>:session:record:<sessionID>`
+- TTL：session 绝对到期时间；不滑动续期
+- 恢复/清理：不从 MySQL 或 memory 恢复；到期自然删除，Redis flush 后要求重新登录
+- 指标：固定 `session` adapter、operation、outcome，不记录 key、identity 或 digest
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为 `1` |
+| `account` | string | 账号ID | 必填，合法 `acc_` identity |
+| `player` | string | 玩家ID | 必填，合法 `ply_` identity |
+| `epoch` | canonical decimal `uint64` | 会话代际 | 必填，正整数，不经过 Lua double |
+| `status` | enum string | 会话状态 | 必填，`active` 或 `invalidated` |
+| `expires_us` | canonical decimal `int64` | 会话到期时间(UTC Unix微秒) | 必填，达到边界即失效 |
+| `invalidation_epoch` | canonical decimal `uint64` | 失效会话代际 | active 时为 `0`；invalidated 时等于 `epoch` |
+| `invalidation_reason` | enum string | 会话失效原因 | active 时为 `none`；否则为固定失效原因 |
+
+`session_access`：
+
+- Pattern：`ih:<env>:session:access:<accessDigest>`
+- TTL：access 绝对到期时间，不得晚于 session 到期时间
+- 恢复/清理：不恢复；到期自然删除，refresh 成功时原子删除上一枚 access
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为 `1` |
+| `session` | string | 会话ID | 必填，合法 `ses_` identity |
+| `epoch` | canonical decimal `uint64` | 会话代际 | 必填，必须匹配 current session |
+| `expires_us` | canonical decimal `int64` | 访问凭据到期时间(UTC Unix微秒) | 必填，达到边界即失效 |
+
+`session_refresh`：
+
+- Pattern：`ih:<env>:session:refresh:<refreshDigest>`
+- TTL：active 时为 refresh 到期时间；消费后延长到 session 到期时间
+- 恢复/清理：不恢复；消费后保留 replay tombstone，重放会原子失效整条 session lineage
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为 `1` |
+| `session` | string | 会话ID | 必填，合法 `ses_` identity |
+| `epoch` | canonical decimal `uint64` | 会话代际 | 必填，必须匹配 current session |
+| `access` | lowercase hex | 访问凭据摘要(SHA-256,32字节) | 必填，绑定本次 refresh 应撤销的 access |
+| `expires_us` | canonical decimal `int64` | 刷新凭据到期时间(UTC Unix微秒) | 必填，达到边界即失效 |
+| `session_expires_us` | canonical decimal `int64` | 会话到期时间(UTC Unix微秒) | 必填，决定 tombstone 最长寿命 |
+| `consumed` | enum string | 消费标记 | 必填，`0` 或 `1` |
+| `replay_epoch` | canonical decimal `uint64` | 重放失效代际 | 未发生重放时为 `0`，之后保存稳定结果 |
+| `replay_reason` | enum string | 重放失效原因 | 未发生重放时为 `none`，之后保存既有失效原因 |
+
+`session_ticket`：
+
+- Pattern：`ih:<env>:session:ticket:<ticketDigest>`
+- TTL：ticket 绝对到期时间，且不得晚于 session 到期时间
+- 恢复/清理：不恢复；成功消费只写 `consumed=1` 并保留到 ticket 到期，错误 listener 不消费
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为 `1` |
+| `session` | string | 会话ID | 必填，合法 `ses_` identity |
+| `epoch` | canonical decimal `uint64` | 会话代际 | 必填，必须匹配 current session |
+| `channel` | enum string | 接入通道 | 必填，`wss` 或 `tls_tcp` |
+| `host` | lowercase ASCII | 监听地址 | 必填，规范化 IP 或 DNS name |
+| `port` | canonical decimal `uint16` | 监听端口 | 必填，范围 `1..65535` |
+| `scopes` | enum string | 授权范围 | WSS 固定 `control`；TLS/TCP 固定 `gameplay` |
+| `expires_us` | canonical decimal `int64` | 票据到期时间(UTC Unix微秒) | 必填，达到边界即失效 |
+| `consumed` | enum string | 消费标记 | 必填，`0` 或 `1` |
+
+`session_principal`：
+
+- Pattern：`ih:<env>:session:principal:<principalDigest>`
+- TTL：该 principal 索引内最晚 session 到期时间
+- 大小上限：最多 64 个 session ID；超限或损坏时禁止部分撤销
+- 恢复/清理：不扫描或重建；到期自然删除，Redis flush 后旧 credential 已全部失效
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为 `1` |
+| `account` | string | 账号ID | 必填，并用于拒绝 principal digest 碰撞 |
+| `player` | string | 玩家ID | 必填，并用于拒绝 principal digest 碰撞 |
+| `expires_us` | canonical decimal `int64` | 索引到期时间(UTC Unix微秒) | 必填，等于成员最晚 session expiry |
+| `sessions` | canonical CSV | 活跃会话ID集合 | 必填，1 至 64 个唯一 `ses_` identity；创建新会话时原子移除已缺失或已失效成员 |
 
 ### 已实现的 placement definitions
 

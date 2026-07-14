@@ -16,7 +16,7 @@ func TestCatalogIsContinuousAndSingleStatement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedNames := []string{"initialize_schema_history", "create_personal_worlds", "create_personal_world_idempotency", "create_placement_sequences", "create_placement_allocations"}
+	expectedNames := []string{"initialize_schema_history", "create_personal_worlds", "create_personal_world_idempotency", "create_placement_sequences", "create_placement_allocations", "create_accounts"}
 	if len(catalog) != len(expectedNames) {
 		t.Fatalf("catalog = %+v", catalog)
 	}
