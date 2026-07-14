@@ -43,7 +43,7 @@ type Definition struct {
 	Owner string
 	// Kind 是真实 key namespace 中的资源类型段。
 	Kind string
-	// Purpose 简述运行态用途，不定义业务 schema。
+	// Purpose 使用中文短名词概括运行态用途；完整字段字典由 docs/redis-keys.md 管理。
 	Purpose string
 	// TTLPolicy 声明 expiry 或主动 cleanup 契约。
 	TTLPolicy TTLPolicy

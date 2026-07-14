@@ -90,6 +90,22 @@ func TestAssignmentSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAssignmentCandidateCanonicalizesSchemaPrecision 防止亚微秒时间导致首次结果与 hydration 冲突。
+func TestAssignmentCandidateCanonicalizesSchemaPrecision(t *testing.T) {
+	t.Parallel()
+	createdAt := time.Date(2026, 7, 13, 4, 0, 0, 987654321, time.FixedZone("CST", 8*60*60))
+	worldID, _ := personalworld.NewPersonalWorldID("pworld_precision")
+	instanceID, _ := NewWorldInstanceID("winst_precision")
+	nodeID, _ := NewRuntimeNodeID("rnode_precision")
+	candidate, err := NewAssignmentCandidate(worldID, instanceID, nodeID, createdAt, createdAt.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.CreatedAt().Location() != time.UTC || candidate.CreatedAt().Nanosecond()%int(time.Microsecond) != 0 || candidate.LeaseExpiresAt().Nanosecond()%int(time.Microsecond) != 0 {
+		t.Fatalf("candidate times were not canonicalized: %v / %v", candidate.CreatedAt(), candidate.LeaseExpiresAt())
+	}
+}
+
 // TestExpiredAssignmentHydration 验证 production adapter 可恢复旧 stamp，但过期值不能继续推进。
 func TestExpiredAssignmentHydration(t *testing.T) {
 	t.Parallel()

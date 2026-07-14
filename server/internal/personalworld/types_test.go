@@ -107,7 +107,7 @@ func TestSnapshotHydrationAndArchiveTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPersonalWorld() error = %v", err)
 	}
-	if !world.Valid() || world.ID() != id || world.OwnerID() != owner || world.Lifecycle() != LifecycleActive || world.Revision() != InitialRevision || world.CreatedAt().Location() != time.UTC {
+	if !world.Valid() || world.ID() != id || world.OwnerID() != owner || world.Lifecycle() != LifecycleActive || world.Revision() != InitialRevision || world.CreatedAt().Location() != time.UTC || world.CreatedAt().Nanosecond()%int(time.Microsecond) != 0 {
 		t.Fatalf("new world = %#v", world.Snapshot())
 	}
 	hydrated, err := HydratePersonalWorld(world.Snapshot())

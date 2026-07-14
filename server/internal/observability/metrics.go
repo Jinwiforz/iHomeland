@@ -108,12 +108,22 @@ func (metrics *Metrics) ObserveMigration(outcome string, count int) {
 	metrics.storageMigrationTotal.WithLabelValues(outcome).Add(float64(count))
 }
 
-// RecordStorageOperation 记录固定 transaction/command operation 与 outcome。
-func (metrics *Metrics) RecordStorageOperation(dependency string, operation string, outcome string) {
-	requireStorageLabel(dependency, "mysql", "redis")
-	requireStorageLabel(operation, "transaction", "command", "script")
-	requireStorageLabel(outcome, "ok", "failed", "not_committed", "pre_commit_transient", "commit_unknown", "not_applied", "read_failed")
-	metrics.storageOperationTotal.WithLabelValues(dependency, operation, outcome).Inc()
+// RecordStorageOperation 记录固定 runtime/adapter、operation 与 outcome。
+//
+// PersonalWorld/placement adapter 只上报此处枚举的流程结果；identity、SQL、key、fence、
+// idempotency material 与原始错误永远不能成为 label。
+func (metrics *Metrics) RecordStorageOperation(adapter string, operation string, outcome string) {
+	requireStorageLabel(adapter, "mysql", "redis", "personalworld", "placement")
+	requireStorageLabel(operation,
+		"transaction", "command", "script", "ensure_primary", "find_by_id", "archive", "allocation",
+		"resolve", "acquire", "activate", "renew", "revoke", "replace", "qualify_write")
+	requireStorageLabel(outcome,
+		"ok", "failed", "invalid", "defect", "dependency_defect", "codec_failed", "key_failed", "read_failed",
+		"current_read_failed", "replay_read_failed", "allocation_read_failed", "not_committed", "pre_commit_transient",
+		"commit_unknown", "allocation_not_committed", "allocation_commit_unknown", "not_applied", "created", "existing",
+		"applied", "replay", "in_progress", "not_found", "conflict", "expired", "revision_conflict",
+		"idempotency_conflict", "invalid_state", "found", "burned")
+	metrics.storageOperationTotal.WithLabelValues(adapter, operation, outcome).Inc()
 }
 
 // requireStorageLabel 只接受编译期固定枚举；非法值视为 programmer error 并 panic。

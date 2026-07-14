@@ -62,6 +62,8 @@ server/
     storage/
       mysql/
         migrations/
+      personalworld/
+      placement/
       redis/
       tlsconfig/
     testclient/
@@ -139,6 +141,8 @@ Account 不拥有 refresh、logout、ticket、token parsing 或 AuthContext，�
 - `mysql`：唯一 `database/sql` pool、嵌入式 migration history/catalog、transaction runner；后续 owner-specific repository adapter 只能在对应业务 change 中加入。
 - `redis`：唯一 standalone client、Keyspace/registry metadata、TTL 与 command outcome policy；不提供 generic cache 或预造业务 scripts。
 - `tlsconfig`：从已验证 policy 与 secret value 构造 production TLS client identity。
+- `personalworld`：借用共享 MySQL pool，实现 PersonalWorld identity/lifecycle/revision 与 actor-scoped archive replay；拥有 `personal_worlds`、`personal_world_idempotency` table，不持有 pool 或 lifecycle。
+- `placement`：借用共享 MySQL/Redis clients 与 Keyspace，拥有持久 allocation high-watermark、current assignment 与 transition replay；不关闭共享资源、不启动后台任务，也不保存通用 world state。
 - repository/cache interfaces 由业务 owner 包定义，避免 infrastructure 反向拥有业务契约。
 
 ### `internal/testclient`
@@ -147,7 +151,7 @@ Go 协议测试客户端和 scenario runner。它是服务端资格验收的正�
 
 ### `migrations`
 
-Migration 与唯一执行 owner 同包嵌入，例如 `internal/storage/mysql/migrations/`。文件按固定宽度不可变序号排列，每个文件只含一个 statement；已合并 migration 不修改，只新增 forward migration。D0 只创建 `ih_schema_migrations` metadata，不提前创建业务 table。
+Migration 与唯一执行 owner 同包嵌入，例如 `internal/storage/mysql/migrations/`。文件按固定宽度不可变序号排列，每个文件只含一个 statement；已合并 migration 不修改，只新增 forward migration。Storage runtime 最初只创建 `ih_schema_migrations` metadata；当前 catalog 已按 owner change 追加 PersonalWorld 与 placement tables，后续业务 schema 仍不得提前创建。
 
 ## 共享协议结构
 
@@ -272,6 +276,7 @@ docs/
   git-commit-convention.md
   workflow.md
   redis-keys.md
+  storage-schema-comment-convention.md
   technology-versions.md
 ```
 

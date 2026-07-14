@@ -26,13 +26,14 @@ type Snapshot struct {
 
 // NewSnapshot 校验 repository hydration 的完整持久事实。
 //
-// createdAt 被转换为 UTC 并移除进程内单调时钟分量，使持久化、重放和跨进程比较只依赖
-// 绝对时间；构造不接受部分字段，避免 adapter 产生看似有效的残缺 aggregate。
+// createdAt 被转换为 UTC、截断到 MySQL DATETIME(6) 可保存的微秒精度并移除进程内单调
+// 时钟分量，使首次结果、持久 hydration 与跨进程 replay 使用同一绝对时间。构造不接受
+// 部分字段，避免 adapter 产生看似有效的残缺 aggregate。
 func NewSnapshot(id PersonalWorldID, ownerID account.PlayerID, lifecycle Lifecycle, revision Revision, createdAt time.Time) (Snapshot, error) {
 	if !id.Valid() || !ownerID.Valid() || !lifecycle.Valid() || !revision.Valid() || createdAt.IsZero() {
 		return Snapshot{}, errors.New("personal world snapshot is incomplete")
 	}
-	return Snapshot{id: id, ownerID: ownerID, lifecycle: lifecycle, revision: revision, createdAt: createdAt.UTC()}, nil
+	return Snapshot{id: id, ownerID: ownerID, lifecycle: lifecycle, revision: revision, createdAt: createdAt.UTC().Truncate(time.Microsecond)}, nil
 }
 
 // ID 返回稳定 PersonalWorld identity。
@@ -47,7 +48,7 @@ func (snapshot Snapshot) Lifecycle() Lifecycle { return snapshot.lifecycle }
 // Revision 返回 snapshot 对应的已提交版本。
 func (snapshot Snapshot) Revision() Revision { return snapshot.revision }
 
-// CreatedAt 返回移除单调分量后的 UTC 创建时间。
+// CreatedAt 返回移除单调分量后的 UTC 微秒创建时间。
 func (snapshot Snapshot) CreatedAt() time.Time { return snapshot.createdAt }
 
 // Valid 报告 snapshot 是否可以安全进入 domain/application。

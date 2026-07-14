@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"encoding/hex"
 	"errors"
 	"testing"
 
@@ -15,8 +16,18 @@ func TestCatalogIsContinuousAndSingleStatement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 1 || catalog[0].Version != 1 || catalog[0].Name != "initialize_schema_history" {
+	expectedNames := []string{"initialize_schema_history", "create_personal_worlds", "create_personal_world_idempotency", "create_placement_sequences", "create_placement_allocations"}
+	if len(catalog) != len(expectedNames) {
 		t.Fatalf("catalog = %+v", catalog)
+	}
+	for index, expectedName := range expectedNames {
+		if catalog[index].Version != uint64(index+1) || catalog[index].Name != expectedName {
+			t.Fatalf("catalog[%d] = %+v", index, catalog[index])
+		}
+	}
+	// 第一条已归档 migration 的固定 checksum 防止业务 schema change 顺手改写历史。
+	if got := hex.EncodeToString(catalog[0].Checksum[:]); got != "07cbb33e3dc84249acd0be9b34372bfa61c44576960a18f72ee095b5602a2165" {
+		t.Fatalf("archived migration checksum = %s", got)
 	}
 	if err := validateCatalog([]Migration{{Version: 1}, {Version: 3}}); err == nil {
 		t.Fatal("version gap 应被拒绝")

@@ -82,14 +82,14 @@ type Lease struct {
 
 // NewLease 校验 store hydration 返回的 token 与相对受信观测时间仍有效的 deadline。
 //
-// observedAt 和 expiresAt 都会移除单调分量并转换为 UTC；expiry 必须严格晚于观测时间，
-// 因此到达边界的 lease 不会被构造成可续租或可写值。
+// observedAt 和 expiresAt 都会移除单调分量并规范为 UTC 微秒；expiry 必须严格晚于观测
+// 时间，因此到达边界的 lease 不会被构造成可续租或可写值。
 func NewLease(fencingToken FencingToken, expiresAt time.Time, observedAt time.Time) (Lease, error) {
 	if !fencingToken.Valid() || observedAt.IsZero() || expiresAt.IsZero() {
 		return Lease{}, errors.New("assignment lease is incomplete")
 	}
-	observedAt = observedAt.UTC()
-	expiresAt = expiresAt.UTC()
+	observedAt = canonicalPlacementTime(observedAt)
+	expiresAt = canonicalPlacementTime(expiresAt)
 	if !expiresAt.After(observedAt) {
 		return Lease{}, errors.New("assignment lease is expired")
 	}
@@ -127,16 +127,17 @@ type AssignmentSnapshot struct {
 
 // NewAssignmentSnapshot 校验 store hydration 返回的完整 current assignment。
 //
-// createdAt 必须不晚于 observedAt，lease expiry 必须严格晚于 createdAt。Hydration 允许恢复
-// 在 observedAt 已经过期的 snapshot，使 application 能按原 stamp 条件替换或撤销；调用期
-// 有效性必须用 ValidAt 判断。该 constructor 不修复 generation、phase 或时间。
+// createdAt 必须不晚于 observedAt，lease expiry 必须严格晚于 createdAt。三个时间都规范为
+// Redis/MySQL schema 使用的 UTC 微秒，避免首次结果与持久 hydration 因亚微秒差异冲突。
+// Hydration 允许恢复在 observedAt 已经过期的 snapshot，使 application 能按原 stamp 条件
+// 替换或撤销；调用期有效性必须用 ValidAt 判断。该 constructor 不修复 generation 或 phase。
 func NewAssignmentSnapshot(stamp AssignmentStamp, phase Phase, createdAt time.Time, leaseExpiresAt time.Time, observedAt time.Time) (AssignmentSnapshot, error) {
 	if !stamp.Valid() || !phase.Valid() || createdAt.IsZero() || leaseExpiresAt.IsZero() || observedAt.IsZero() {
 		return AssignmentSnapshot{}, errors.New("assignment snapshot is incomplete")
 	}
-	createdAt = createdAt.UTC()
-	leaseExpiresAt = leaseExpiresAt.UTC()
-	observedAt = observedAt.UTC()
+	createdAt = canonicalPlacementTime(createdAt)
+	leaseExpiresAt = canonicalPlacementTime(leaseExpiresAt)
+	observedAt = canonicalPlacementTime(observedAt)
 	if createdAt.After(observedAt) {
 		return AssignmentSnapshot{}, errors.New("assignment created time is in the future")
 	}
@@ -265,3 +266,8 @@ func (WriteFence) LogValue() slog.Value { return slog.StringValue(writeFencePlac
 
 // empty 报告 store 是否返回严格零 fence。
 func (fence WriteFence) empty() bool { return fence == (WriteFence{}) }
+
+// canonicalPlacementTime 把 adapter-facing absolute time 规范为持久 schema 的 UTC 微秒精度。
+func canonicalPlacementTime(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
+}

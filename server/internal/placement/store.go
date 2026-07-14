@@ -95,12 +95,15 @@ type AssignmentCandidate struct {
 }
 
 // NewAssignmentCandidate 校验 application 交给 acquire/replace 的全部候选事实。
+//
+// 时间会规范为 UTC 微秒，使首次 Redis/MySQL 结果与后续 hydration 保持精确相等；亚微秒
+// 差异不属于可用于区分 WorldInstance candidate 的稳定 identity。
 func NewAssignmentCandidate(worldID personalworld.PersonalWorldID, instanceID WorldInstanceID, nodeID RuntimeNodeID, createdAt time.Time, leaseExpiresAt time.Time) (AssignmentCandidate, error) {
 	if !worldID.Valid() || !instanceID.Valid() || !nodeID.Valid() || createdAt.IsZero() || leaseExpiresAt.IsZero() {
 		return AssignmentCandidate{}, errors.New("assignment candidate is incomplete")
 	}
-	createdAt = createdAt.UTC()
-	leaseExpiresAt = leaseExpiresAt.UTC()
+	createdAt = canonicalPlacementTime(createdAt)
+	leaseExpiresAt = canonicalPlacementTime(leaseExpiresAt)
 	if !leaseExpiresAt.After(createdAt) {
 		return AssignmentCandidate{}, errors.New("assignment candidate lease is expired")
 	}
@@ -160,7 +163,7 @@ func NewAcquireRequest(candidate AssignmentCandidate, observedAt time.Time) (Acq
 	if !candidate.Valid() || observedAt.IsZero() || !candidate.LeaseExpiresAt().After(observedAt.UTC()) {
 		return AcquireRequest{}, errors.New("acquire request is incomplete")
 	}
-	return AcquireRequest{candidate: candidate, observedAt: observedAt.UTC()}, nil
+	return AcquireRequest{candidate: candidate, observedAt: canonicalPlacementTime(observedAt)}, nil
 }
 
 // Candidate 返回 store 必须原子决议的候选值副本。
@@ -196,7 +199,7 @@ func NewStampRequest(stamp AssignmentStamp, observedAt time.Time) (StampRequest,
 	if !stamp.Valid() || observedAt.IsZero() {
 		return StampRequest{}, errors.New("stamp request is incomplete")
 	}
-	return StampRequest{stamp: stamp, observedAt: observedAt.UTC()}, nil
+	return StampRequest{stamp: stamp, observedAt: canonicalPlacementTime(observedAt)}, nil
 }
 
 // Stamp 返回 store 必须完整比较的 assignment identity。
@@ -236,7 +239,7 @@ func NewRenewRequest(stamp AssignmentStamp, observedAt time.Time, leaseExpiresAt
 	if err != nil || leaseExpiresAt.IsZero() || !leaseExpiresAt.UTC().After(condition.ObservedAt()) {
 		return RenewRequest{}, errors.New("renew request is incomplete")
 	}
-	return RenewRequest{condition: condition, leaseExpiresAt: leaseExpiresAt.UTC()}, nil
+	return RenewRequest{condition: condition, leaseExpiresAt: canonicalPlacementTime(leaseExpiresAt)}, nil
 }
 
 // Condition 返回 renew 必须完整比较的 stamp 与时间。
@@ -274,7 +277,7 @@ func NewReplaceRequest(expected AssignmentStamp, successor AssignmentCandidate, 
 	if !expected.Valid() || !successor.Valid() || observedAt.IsZero() || successor.WorldID() != expected.WorldID() || successor.InstanceID() == expected.InstanceID() || !successor.LeaseExpiresAt().After(observedAt.UTC()) {
 		return ReplaceRequest{}, errors.New("replace request is incomplete or reuses predecessor")
 	}
-	return ReplaceRequest{expected: expected, successor: successor, observedAt: observedAt.UTC()}, nil
+	return ReplaceRequest{expected: expected, successor: successor, observedAt: canonicalPlacementTime(observedAt)}, nil
 }
 
 // Expected 返回 cutover 必须完整比较的 predecessor stamp。

@@ -161,6 +161,17 @@ type CommandFingerprint struct {
 	digest [sha256.Size]byte
 }
 
+// NewCommandFingerprint 从 repository 保存的固定 SHA-256 投影恢复 command fingerprint。
+//
+// 输入必须是已提交 idempotency row 的完整 32 bytes；该 constructor 不重新解释 command，
+// 只恢复由本 package 生成的等值比较材料。全零摘要被拒绝，避免 malformed row 伪装成有效 replay。
+func NewCommandFingerprint(digest [sha256.Size]byte) (CommandFingerprint, error) {
+	if digest == [sha256.Size]byte{} {
+		return CommandFingerprint{}, errors.New("command fingerprint digest is empty")
+	}
+	return CommandFingerprint{digest: digest}, nil
+}
+
 // Valid 报告 fingerprint 是否来自受校验 command，而不是零值结果。
 func (fingerprint CommandFingerprint) Valid() bool {
 	return fingerprint.digest != [sha256.Size]byte{}
@@ -170,6 +181,12 @@ func (fingerprint CommandFingerprint) Valid() bool {
 func (fingerprint CommandFingerprint) Equal(other CommandFingerprint) bool {
 	return fingerprint.digest == other.digest
 }
+
+// Digest 返回 repository 持久化使用的固定大小值副本。
+//
+// Digest 不是认证凭据，但能够关联同一 command；调用方只能写入幂等表或受控比较边界，
+// 不得把 bytes 放入普通日志、错误、metrics label 或外部协议。
+func (fingerprint CommandFingerprint) Digest() [sha256.Size]byte { return fingerprint.digest }
 
 // String 防止默认格式化把 command 关联摘要扩散到日志。
 func (CommandFingerprint) String() string { return "[REDACTED_COMMAND_FINGERPRINT]" }

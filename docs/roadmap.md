@@ -158,9 +158,9 @@ A0 Project Baseline
 - PersonalWorld MySQL schema、repository、revision transaction
 - WorldInstance assignment/lease/fencing Redis adapter
 - duplicate instance、commit-unknown、Redis flush、MySQL restart tests
-- 必要 idempotency/outbox 边界
+- archive idempotency replay；无已定义 consumer 时不预建 outbox
 
-**完成条件：**只有持有当前 fencing token 的实例可以提交世界 mutation，Redis 丢失只能要求重建运行态。
+**完成条件：**只有 current active、lease 有效且完整 stamp 匹配的实例可以取得 point-in-time `WriteFence`；未来真实 world mutation 必须在最终 MySQL commit boundary 重新验证该 fence，Redis 丢失只能要求以更高 generation/fence 重建运行态。
 
 ## V0：访客会话领域
 
