@@ -36,6 +36,8 @@
 
 公开 HTTP 与 WSS control 复用同一个实际 listener：WSS 不是第二个端口，而是该入口的精确 `/v1/control` upgrade path。`publicApi.address` 决定进程 bind，`publicApi.endpoints.wss` 决定客户端可见且写入 ticket 的 advertised endpoint；两者可以因 ingress 或 port mapping 不同，但必须由部署配置显式对应，服务端不得从不受信 Host header 重建 advertised endpoint。
 
+Gameplay TLS/TCP 使用 `publicApi.gameplayTcp.address` 独立 bind，客户端只使用 `publicApi.endpoints.tlsTcp` 下发的 advertised endpoint。bind 与 advertised endpoint 可以因 NAT、ingress 或端口映射不同；Session ticket、WorldAdmission 和 TCP handshake 必须复用同一个受信 advertised 值。gameplay bind 端口不得与公开 HTTP/WSS 或 diagnostic 端口相同；明文本地模式要求 bind 与实际 remote 都是 loopback，production 必须使用 TLS 1.3。
+
 ## 覆盖与映射
 
 推荐默认值被占用时必须显式覆盖，不能要求开发者释放系统或其他软件已经使用的端口。例如本机 MySQL 无法绑定产品默认端口时，可以采用：

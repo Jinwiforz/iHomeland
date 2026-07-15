@@ -103,7 +103,7 @@ Readiness 固定单向迁移：
 starting -> ready -> draining -> stopped
 ```
 
-诊断 listener 最先启动、最后关闭，只提供 `/healthz`、`/readyz`、`/version` 与 `/metrics`。公开 HTTP 与 WSS control 由同一 lifecycle component、listener 和 TLS 入口承载，并在 MySQL/Redis 之后启动、之前关闭；顶层 mux 只把精确 `/v1/control` 交给 WSS，其余请求仍由冻结的 10-operation HTTP router 处理。TLS/TCP 仍由后续 transport change 创建，公开业务 handler 不得复用诊断 router。
+诊断 listener 最先启动、最后关闭，只提供 `/healthz`、`/readyz`、`/version` 与 `/metrics`。公开 HTTP 与 WSS control 共用一个 TLS 入口，gameplay TLS/TCP 使用独立 listener；三者在 MySQL/Redis 之后启动、之前关闭。顶层 HTTP mux 只把精确 `/v1/control` 交给 WSS，其余请求仍由冻结的 10-operation HTTP router 处理，gameplay TCP 不复用 HTTP 或诊断 router。
 
 Listener 的推荐默认值、环境覆盖、容器映射与端口冲突规则统一由 `docs/network-port-allocation.md` 管理。端口不是跨环境身份：客户端通过 bootstrap、服务发现或 ticket 获得实际业务端点，基础设施 adapter 从环境配置读取实际连接地址。
 
@@ -193,7 +193,7 @@ HTTPS credentials
 
 `internal/storage/account` 已借用共享 MySQL pool 实现单表 repository，并以固定 Argon2id v19 profile、严格 PHC parser、constant-time compare 和有界并发实现 production hasher；`internal/storage/session` 已借用共享 standalone Redis client，以版本化 Hash、逻辑 UTC Unix 微秒 expiry 和 owner Lua scripts 实现 `SessionStore`。两者不拥有 pool/client、goroutine、listener 或 memory fallback。Redis flush 后旧 credential 全部 fail closed，只能基于仍在 MySQL 的账号重新登录创建新 session，不能恢复旧运行态。
 
-这些 production adapters 已接入正式 Composition Root，提供 register/login/refresh/logout、connection ticket 签发和认证 WSS control。WSS 使用受信 `EndpointProvider` 值消费一次性 ticket，真实进程内 registry 实现 `ConnectionInvalidator`，在 epoch 提交后尽力发送安全失效通知并无条件关闭旧连接；TLS/TCP 仍未接线。`_test.go` reference adapters 永远不能进入生产接线。
+这些 production adapters 已接入正式 Composition Root，提供 register/login/refresh/logout、connection ticket 签发以及认证 WSS/TLS-TCP 通道。WSS 与 TCP 都使用受信 `EndpointProvider` 值原子消费一次性 ticket；TCP 还消费绑定 current full AssignmentStamp 的 WorldAdmission。组合 `ConnectionInvalidator` 在 epoch 提交后并行关闭两个通道的旧连接，任一通道失败不跳过另一通道。`_test.go` reference adapters 永远不能进入生产接线。
 
 ## 个人世界与访客联机
 
@@ -236,7 +236,7 @@ Owner 断线后进入有绝对 deadline 的 reconnect grace。Owner 在 deadline
 
 `internal/storage/visitsession` 已以共享 standalone Redis 实现 production `VisitSessionStore`：active/session/command 三类 versioned Hash 在 owner Lua 线性化点内维护唯一索引、revision CAS 和完整重放结果。Adapter 不拥有 Redis client、后台 cleanup、admission credential 或 listener；正式 Composition Root 已为 HTTP accept/admission 读取接线该 adapter，但尚未开放创建邀请的 HTTP operation 或 realtime lifecycle command。Redis 进程重启只能恢复其自身仍保留的合法运行态；flush 或 key 丢失后不从 MySQL 补回旧访问资格。完整 key/field/TTL 字典由 `docs/redis-keys.md` 唯一管理。
 
-World admission runtime 使用注入的至少 256-bit derivation key、稳定 issuance identity 与完整 binding fingerprint，以 HMAC-SHA-256 可重复推导短期 credential；Redis 只保存 credential digest、binding 和 consume tombstone。Issue/consume 由 `internal/storage/worldadmission` owner Lua 原子线性化，同一 consume identity 可解析响应丢失，其他重放拒绝；消费后 application 仍重新读取 current full assignment，VisitSession 仍二次验证 membership 与 deadline。正式 Composition Root 已接线 HTTP issuance；TLS/TCP consume 尚未实现，所以签发成功只证明准入边界成立，不表示 gameplay connection 可建立。
+World admission runtime 使用注入的至少 256-bit derivation key、稳定 issuance identity 与完整 binding fingerprint，以 HMAC-SHA-256 可重复推导短期 credential；Redis 只保存 credential digest、binding 和 consume tombstone。Issue/consume 由 `internal/storage/worldadmission` owner Lua 原子线性化，同一 consume identity 可解析响应丢失，其他重放拒绝；TCP 握手消费后 application 仍重新读取 current full assignment，VisitSession 仍二次验证 membership 与 deadline。该接线只建立通道与现有 command/snapshot 入口；完整 own-world/visit-world producer、cleanup 编排和 Go 资格客户端仍由后续竖切 change 交付。
 
 Party 只在需要跨场景持续队伍、队长、队伍聊天或连续活动时建立。直接访问好友个人世界只需要 VisitSession，不要求预先创建 Party 或 Room。
 

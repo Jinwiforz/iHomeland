@@ -71,6 +71,8 @@ type PublicAPI struct {
 	WorldAdmission WorldAdmissionPolicy `yaml:"worldAdmission"`
 	// WebSocketControl 定义共享公开listener上的WSS控制面资源与握手策略。
 	WebSocketControl WebSocketControlPolicy `yaml:"websocketControl"`
+	// GameplayTCP 定义独立TLS/TCP gameplay listener的认证、并发和生命周期预算。
+	GameplayTCP GameplayTCPPolicy `yaml:"gameplayTcp"`
 }
 
 // PublicTLS 定义公开 HTTP server TLS material reference。
@@ -203,6 +205,50 @@ type WebSocketControlPolicy struct {
 	CloseTimeout time.Duration `yaml:"closeTimeout"`
 }
 
+// GameplayTCPPolicy 定义TLS/TCP gameplay通道的固定协议与每进程资源预算。
+type GameplayTCPPolicy struct {
+	// Address 是显式IP与端口组成的独立gameplay listener bind地址。
+	Address string `yaml:"address"`
+	// PreAuthRate 限制单remote identity在认证前提交preface的速率。
+	PreAuthRate RatePolicy `yaml:"preAuthRate"`
+	// MaxConnections 限制当前进程reserved与active gameplay连接总数。
+	MaxConnections int `yaml:"maxConnections"`
+	// MaxPerRemote 限制单remote identity的reserved与active连接数。
+	MaxPerRemote int `yaml:"maxPerRemote"`
+	// MaxPerSession 限制单SessionID的active连接数。
+	MaxPerSession int `yaml:"maxPerSession"`
+	// MaxPerPlayer 限制单PlayerID跨session的active连接数。
+	MaxPerPlayer int `yaml:"maxPerPlayer"`
+	// MaxPerTarget 限制单PersonalWorldID或VisitSessionID的active连接数。
+	MaxPerTarget int `yaml:"maxPerTarget"`
+	// MaxRemoteEntries 限制pre-auth limiter持有的remote identity数量。
+	MaxRemoteEntries int `yaml:"maxRemoteEntries"`
+	// RemoteIdleTTL 是remote limiter entry的惰性回收期限。
+	RemoteIdleTTL time.Duration `yaml:"remoteIdleTtl"`
+	// HandshakeBytes 限制preface length-prefix声明和认证缓冲区(bytes)。
+	HandshakeBytes int `yaml:"handshakeBytes"`
+	// ReadBatchFrames 限制单次reader循环连续处理的frame数量。
+	ReadBatchFrames int `yaml:"readBatchFrames"`
+	// QueueItems 限制每连接待发送response或push的条目数。
+	QueueItems int `yaml:"queueItems"`
+	// QueueBytes 限制每连接待发送完整encoded frame总量(bytes)。
+	QueueBytes int `yaml:"queueBytes"`
+	// HandshakeTimeout 限制TLS握手与authentication preface完成时间。
+	HandshakeTimeout time.Duration `yaml:"handshakeTimeout"`
+	// ReadTimeout 限制单个完整frame的读取时间。
+	ReadTimeout time.Duration `yaml:"readTimeout"`
+	// WriteTimeout 限制单个完整frame的写出时间。
+	WriteTimeout time.Duration `yaml:"writeTimeout"`
+	// KeepAlive 是操作系统TCP keepalive探测周期。
+	KeepAlive time.Duration `yaml:"keepAlive"`
+	// IdleTimeout 限制连接没有成功业务I/O的寿命。
+	IdleTimeout time.Duration `yaml:"idleTimeout"`
+	// CloseTimeout 限制连接任务与发送队列的关闭等待时间。
+	CloseTimeout time.Duration `yaml:"closeTimeout"`
+	// ShutdownTimeout 限制listener停止接受后全部连接的共享关闭时间。
+	ShutdownTimeout time.Duration `yaml:"shutdownTimeout"`
+}
+
 // DefaultPublicAPI 返回仅绑定loopback的本地明文配置；production校验会拒绝该TLS策略。
 func DefaultPublicAPI() PublicAPI {
 	rates := make(map[string]RatePolicy, len(publicOperationIDs))
@@ -256,6 +302,16 @@ func DefaultPublicAPI() PublicAPI {
 			QueueItems: 64, QueueBytes: 1024 * 1024,
 			WriteTimeout: 5 * time.Second, PingInterval: 15 * time.Second, PongTimeout: 10 * time.Second,
 			IdleTimeout: 45 * time.Second, CloseTimeout: 3 * time.Second,
+		},
+		GameplayTCP: GameplayTCPPolicy{
+			Address:        "127.0.0.1:8444",
+			PreAuthRate:    RatePolicy{Requests: 60, Window: time.Minute, Burst: 10},
+			MaxConnections: 4096, MaxPerRemote: 32, MaxPerSession: 4, MaxPerPlayer: 8, MaxPerTarget: 64,
+			MaxRemoteEntries: 4096, RemoteIdleTTL: 10 * time.Minute,
+			HandshakeBytes: 8192, ReadBatchFrames: 16,
+			QueueItems: 64, QueueBytes: 1024 * 1024,
+			HandshakeTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 5 * time.Second,
+			KeepAlive: 15 * time.Second, IdleTimeout: 45 * time.Second, CloseTimeout: 3 * time.Second, ShutdownTimeout: 8 * time.Second,
 		},
 	}
 }
@@ -321,7 +377,66 @@ func (public PublicAPI) validate(environment string, diagnosticAddress string) e
 	if err := public.WorldAdmission.validate(); err != nil {
 		return err
 	}
-	return public.WebSocketControl.Validate(public.Limits.RealtimeFrameBytes)
+	if err := public.WebSocketControl.Validate(public.Limits.RealtimeFrameBytes); err != nil {
+		return err
+	}
+	return public.GameplayTCP.Validate(public.Limits.RealtimeFrameBytes, public.Address, diagnosticAddress, public.TLS.Enabled, environment == "test")
+}
+
+// Validate 约束gameplay listener地址、连接、frame、队列和deadline，且不产生任何外部副作用。
+func (policy GameplayTCPPolicy) Validate(frameBytes int, publicAddress string, diagnosticAddress string, tlsEnabled bool, allowZero bool) error {
+	if err := validatePublicAddress(policy.Address, allowZero); err != nil {
+		return fmt.Errorf("gameplayTcp.%w", err)
+	}
+	gameplayHost, gameplayPort, _ := net.SplitHostPort(policy.Address)
+	for name, address := range map[string]string{"publicApi.address": publicAddress, "diagnostic.address": diagnosticAddress} {
+		_, port, err := net.SplitHostPort(address)
+		if err == nil && gameplayPort != "0" && gameplayPort == port {
+			return fmt.Errorf("gameplayTcp.address port must differ from %s", name)
+		}
+	}
+	if !tlsEnabled {
+		parsed, err := netip.ParseAddr(gameplayHost)
+		if err != nil || !parsed.IsLoopback() {
+			return errors.New("plaintext gameplayTcp must bind loopback")
+		}
+	}
+	if frameBytes < minimumPublicBodyBytes || frameBytes > maximumPublicBodyBytes {
+		return errors.New("gameplayTcp frame budget is invalid")
+	}
+	if err := policy.PreAuthRate.validate(); err != nil {
+		return fmt.Errorf("gameplayTcp.preAuthRate: %w", err)
+	}
+	if policy.MaxConnections < 1 || policy.MaxConnections > 100000 || policy.MaxPerRemote < 1 || policy.MaxPerRemote > policy.MaxConnections ||
+		policy.MaxPerSession < 1 || policy.MaxPerSession > policy.MaxConnections || policy.MaxPerPlayer < 1 || policy.MaxPerPlayer > policy.MaxConnections ||
+		policy.MaxPerTarget < 1 || policy.MaxPerTarget > policy.MaxConnections {
+		return errors.New("gameplayTcp connection limits are invalid")
+	}
+	if policy.MaxRemoteEntries < 1 || policy.MaxRemoteEntries > maximumRateEntries || policy.RemoteIdleTTL < time.Second || policy.RemoteIdleTTL > 24*time.Hour {
+		return errors.New("gameplayTcp remote limiter bounds are invalid")
+	}
+	if policy.HandshakeBytes < 1024 || policy.HandshakeBytes > 64*1024 || policy.HandshakeBytes > frameBytes {
+		return errors.New("gameplayTcp handshake budget is invalid")
+	}
+	if policy.ReadBatchFrames < 1 || policy.ReadBatchFrames > 256 {
+		return errors.New("gameplayTcp read batch budget is invalid")
+	}
+	if policy.QueueItems < 1 || policy.QueueItems > 1024 || policy.QueueBytes < frameBytes+4 || policy.QueueBytes > 16*1024*1024 {
+		return errors.New("gameplayTcp queue budget is invalid")
+	}
+	for name, value := range map[string]time.Duration{
+		"handshakeTimeout": policy.HandshakeTimeout, "readTimeout": policy.ReadTimeout, "writeTimeout": policy.WriteTimeout,
+		"keepAlive": policy.KeepAlive, "idleTimeout": policy.IdleTimeout, "closeTimeout": policy.CloseTimeout, "shutdownTimeout": policy.ShutdownTimeout,
+	} {
+		if err := validateDuration("gameplayTcp."+name, value); err != nil {
+			return err
+		}
+	}
+	if policy.WriteTimeout > policy.IdleTimeout || policy.ReadTimeout > policy.IdleTimeout || policy.KeepAlive >= policy.IdleTimeout ||
+		policy.CloseTimeout > policy.ShutdownTimeout || policy.ShutdownTimeout > policy.IdleTimeout {
+		return errors.New("gameplayTcp deadlines are inconsistent")
+	}
+	return nil
 }
 
 // Validate 冻结WSS握手契约并限制连接、队列、限流与deadline资源。
@@ -546,6 +661,21 @@ func publicAPIEnvironmentOverrides(config *Config) []environmentOverride {
 		{key: "IHOMELAND_WSS_PONG_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.PongTimeout)},
 		{key: "IHOMELAND_WSS_IDLE_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.IdleTimeout)},
 		{key: "IHOMELAND_WSS_CLOSE_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.CloseTimeout)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_ADDRESS", apply: stringSetter(&config.PublicAPI.GameplayTCP.Address)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_MAX_CONNECTIONS", apply: intSetter(&config.PublicAPI.GameplayTCP.MaxConnections)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_MAX_PER_REMOTE", apply: intSetter(&config.PublicAPI.GameplayTCP.MaxPerRemote)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_MAX_PER_SESSION", apply: intSetter(&config.PublicAPI.GameplayTCP.MaxPerSession)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_MAX_PER_PLAYER", apply: intSetter(&config.PublicAPI.GameplayTCP.MaxPerPlayer)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_MAX_PER_TARGET", apply: intSetter(&config.PublicAPI.GameplayTCP.MaxPerTarget)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_QUEUE_ITEMS", apply: intSetter(&config.PublicAPI.GameplayTCP.QueueItems)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_QUEUE_BYTES", apply: intSetter(&config.PublicAPI.GameplayTCP.QueueBytes)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_HANDSHAKE_TIMEOUT", apply: durationSetter(&config.PublicAPI.GameplayTCP.HandshakeTimeout)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_READ_TIMEOUT", apply: durationSetter(&config.PublicAPI.GameplayTCP.ReadTimeout)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_WRITE_TIMEOUT", apply: durationSetter(&config.PublicAPI.GameplayTCP.WriteTimeout)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_KEEPALIVE", apply: durationSetter(&config.PublicAPI.GameplayTCP.KeepAlive)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_IDLE_TIMEOUT", apply: durationSetter(&config.PublicAPI.GameplayTCP.IdleTimeout)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_CLOSE_TIMEOUT", apply: durationSetter(&config.PublicAPI.GameplayTCP.CloseTimeout)},
+		{key: "IHOMELAND_GAMEPLAY_TCP_SHUTDOWN_TIMEOUT", apply: durationSetter(&config.PublicAPI.GameplayTCP.ShutdownTimeout)},
 	}
 }
 

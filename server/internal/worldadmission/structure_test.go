@@ -58,8 +58,9 @@ func TestProductionPackageHasNoInfrastructureWiring(t *testing.T) {
 	}
 }
 
-// TestProductionCompositionWiresAdmissionOnlyInPublicRuntime 保证credential owner只在唯一公开graph接线。
-func TestProductionCompositionWiresAdmissionOnlyInPublicRuntime(t *testing.T) {
+// TestProductionCompositionRestrictsAdmissionWiring 保证credential/storage owner只在唯一公开graph接线。
+// TCP application bridge只允许消费只读Qualification类型，不能构造service或storage adapter。
+func TestProductionCompositionRestrictsAdmissionWiring(t *testing.T) {
 	t.Parallel()
 	found := false
 	for _, root := range []string{filepath.Join("..", "..", "cmd"), filepath.Join("..", "app")} {
@@ -76,11 +77,17 @@ func TestProductionCompositionWiresAdmissionOnlyInPublicRuntime(t *testing.T) {
 			}
 			for _, imported := range file.Imports {
 				value, _ := strconv.Unquote(imported.Path.Value)
+				if strings.Contains(value, "/internal/storage/worldadmission") && filepath.Base(path) != "public_runtime.go" {
+					t.Fatalf("%s wires world admission storage outside public runtime", path)
+				}
 				if strings.Contains(value, "/internal/worldadmission") || strings.Contains(value, "/internal/storage/worldadmission") {
-					if filepath.Base(path) != "public_runtime.go" {
+					base := filepath.Base(path)
+					if base != "public_runtime.go" && base != "tcp_gameplay_application.go" {
 						t.Fatalf("%s wires world admission outside public runtime", path)
 					}
-					found = true
+					if base == "public_runtime.go" {
+						found = true
+					}
 				}
 			}
 			return nil

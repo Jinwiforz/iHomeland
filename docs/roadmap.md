@@ -194,7 +194,7 @@ A0 Project Baseline
 
 **完成条件：**payload identity 不能覆盖 AuthContext/admission；同一业务消息无 WSS/TCP 双入口；fixtures 与 Go validator 全部通过。
 
-**当前边界：**P0 已形成可生成、可登记、可严格验证的 source contract 与 deterministic fixtures；production HTTP/WSS/TLS-TCP adapter、admission issuer/verifier、Composition Root 接线和 Go 协议客户端仍属于 N0/Q0，当前进程不开放这些业务入口。未登记 generic world interaction 继续默认拒绝。
+**P0 完成边界：**该阶段只形成可生成、可登记、可严格验证的 source contract 与 deterministic fixtures；production adapter、admission 和 Composition Root 接线由 N0 交付，Go 协议客户端由 Q0 交付。未登记 generic world interaction 继续默认拒绝。
 
 ## D1：账号与会话存储
 
@@ -240,7 +240,9 @@ A0 Project Baseline
 
 ### `add-server-tcp-gameplay`
 
-交付 TLS/TCP framing、gameplay ticket consume、world/visit admission、dispatcher、pending correlation、push、backpressure、rate/idempotency 与 reconnect/shutdown tests。
+交付 TLS/TCP framing、gameplay ticket consume、world/visit admission、dispatcher、pending target、push、backpressure、rate/idempotency 与 reconnect/shutdown tests。
+
+**完成边界：**独立 TLS 1.3 listener（local/test loopback 明文例外）使用固定 `IHTP` preface 依次消费 GAMEPLAY ticket 与 WorldAdmission，按冻结 registry 接入 world/visit snapshot、mutation response/error 和三个 typed PUSH。Connection registry、双预算队列、组合 session invalidation、受监督生命周期及真实 Redis TCP `OWN_WORLD`/`JOIN`/`RECONNECT` 已接线；完整业务 producer、cleanup/orchestration 与 Go 资格客户端仍属于后续 change。
 
 ### `complete-server-personal-world-slice`
 

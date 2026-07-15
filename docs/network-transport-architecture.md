@@ -138,6 +138,19 @@ HTTP 请求必须有大小、超时、限流、幂等和结构化错误策略。
 - ticket/session binding
 - route、scope、rate、idempotency 校验
 
+当前 v1 TCP stream 先发送一条 transport authentication preface，再切换为 `ReliableEnvelope`：
+
+```text
+uint32_be frame_length
+"IHTP" | uint16_be version=1 | purpose_byte
+uint16_be ticket_length | uint16_be admission_length
+ticket_ascii | admission_ascii
+```
+
+ticket 固定为 32 字节小写十六进制，admission 固定为 `wad1_` 开头的 48 字节安全 ASCII；purpose 只允许 `OWN_WORLD`、`JOIN`、`RECONNECT`。preface 不是业务 message，不占用 message ID。服务端在读取前先取得 global/remote reservation，按 ticket 后 admission 的顺序提交；后一步失败不补偿已提交 credential。`JOIN`/`RECONNECT` 连接先进入 pending，只能在 admission deadline 前提交匹配 command，application 成功后才转 active。
+
+preface 和后续业务 frame 都使用 4-byte unsigned big-endian 长度前缀，但分别执行 handshake 与 realtime frame 预算。单次 `Read` 不代表完整 frame；reader 必须先验证声明长度再分配，并处理半包、粘包与有限批量 frame。每连接只有一个 reader 与 serialized writer，response、error、push 共享单调 S2C sequence 和双重有界发送队列。
+
 ### 裸 UDP 不可靠时序面
 
 只承载：
@@ -211,7 +224,7 @@ World admission 与 session bearer、`ConnectionTicket`、invite、`AdmissionInt
 
 Admission 是短期、一次性 opaque credential。Issuer/verifier 必须绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorldID、可选 VisitSessionID、`OWN_WORLD`/`JOIN`/`RECONNECT` purpose、完整 current AssignmentStamp、endpoint、`TLS_TCP` channel、issued-at 与 expiry。原子消费使用 credential digest 与稳定 consume identity，不复用 ConnectionTicket nonce。`JOIN` 只允许 active reserved membership，`RECONNECT` 只允许 active reconnecting membership；expiry、replay、旧 assignment/epoch 或错误 endpoint/channel 均 fail closed。
 
-`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root 与 HTTP issuance 已经接线。TLS/TCP consume 仍等待对应 N0 transport change，因此当前可以取得短期 credential，但不能据此声明 gameplay 连接或完整 world/visit 竖切可用。
+`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root 已接线 HTTP issuance 与 TLS/TCP consume。通道可用仍不等于完整 world/visit 竖切完成：业务 producer、Owner grace/expiry cleanup、safe-return 目的地加载和 Go 资格客户端属于后续 change。
 
 ### Connection Context
 
@@ -345,4 +358,4 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 
 所有网络模拟必须可重复并记录参数。
 
-当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 HTTP operation、真实 Redis WSS ticket 一次性消费、重放拒绝、logout invalidation push、活动连接关闭，以及 Session/VisitSession/WorldAdmission 的重放、冲突与依赖故障。通过表示 HTTP bootstrap 与 WSS control 可用，不表示 TLS/TCP gameplay、world admission consume 或完整 world/visit 竖切已经完成。
+当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 HTTP operation、真实 Redis WSS/TCP ticket 一次性消费、TCP world admission、真实 wire `OWN_WORLD`/`JOIN`/`RECONNECT`、重放拒绝、logout 跨通道失效，以及 Session/VisitSession/WorldAdmission 的重放、冲突与依赖故障。通过表示 HTTP bootstrap、WSS control 与 TLS/TCP transport capability 可用，仍不表示完整 world/visit 业务竖切已经完成。

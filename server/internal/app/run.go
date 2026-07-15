@@ -117,6 +117,11 @@ func Run(ctx context.Context, options Options) Result {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
+	tcpTasks, err := tasks.NewOwner(componentContext, "tcp_gameplay")
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
 	diagnosticServer := diagnostic.New(settings.Diagnostic, readiness, options.BuildInfo, metrics, diagnosticTasks)
 	mysqlComponent, err := storagemysql.New(settings.Storage.MySQL, prepared.mysqlPassword, prepared.mysqlTLS, mysqlTasks, metrics, logger.With("component", "mysql"))
 	if err != nil {
@@ -128,7 +133,7 @@ func Run(ctx context.Context, options Options) Result {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
-	publicComponent := &publicRuntimeComponent{settings: settings, prepared: preparedPublic, mysql: mysqlComponent, redis: redisComponent, clock: clock, ids: ids, info: options.BuildInfo, readiness: readiness, metrics: metrics, tasks: publicTasks, websocketTasks: websocketTasks, logger: logger.With("component", "public_http")}
+	publicComponent := &publicRuntimeComponent{settings: settings, prepared: preparedPublic, mysql: mysqlComponent, redis: redisComponent, clock: clock, ids: ids, info: options.BuildInfo, readiness: readiness, metrics: metrics, tasks: publicTasks, websocketTasks: websocketTasks, tcpTasks: tcpTasks, logger: logger.With("component", "public_http")}
 	lifecycle, err := NewLifecycle([]Component{diagnosticServer, mysqlComponent, redisComponent, publicComponent}, clock, logger, metrics)
 	if err != nil {
 		cancelStartup()

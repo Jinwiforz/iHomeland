@@ -167,7 +167,7 @@ type AdmissionIntent struct {
 	epoch session.Epoch
 	// assignment 绑定 accept 时重新确认的完整 current stamp。
 	assignment placement.AssignmentStamp
-	// expiresAt 是 reservation 与 intent 共同使用的 UTC 微秒 deadline。
+	// expiresAt 对accept intent等于membership deadline；verifier hydration可按credential上限收紧但不可延长。
 	expiresAt time.Time
 }
 

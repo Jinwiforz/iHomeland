@@ -4,7 +4,10 @@
 // 路由和公开错误可以在服务端启动前独立验收，也不会因某个 transport 的实现细节而改变。
 package contract
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Catalog 聚合一次验证所需的全部 registry，避免调用方组合出版本不一致的局部视图。
 //
@@ -87,6 +90,16 @@ type ErrorRegistry struct {
 	Reserved []uint32 `json:"reserved"`
 	// Errors 是当前允许跨网络边界返回的完整错误集合。
 	Errors []ErrorEntry `json:"errors"`
+}
+
+// LookupError 返回指定公开错误码的冻结目录项；未登记错误不得跨网络边界发送。
+func (catalog Catalog) LookupError(code uint32) (ErrorEntry, error) {
+	for _, entry := range catalog.Errors.Errors {
+		if entry.Code == code {
+			return entry, nil
+		}
+	}
+	return ErrorEntry{}, fmt.Errorf("public error code %d is not registered", code)
 }
 
 // RouteEntry 记录单条消息唯一允许的 channel 与运行策略，禁止多通道双入口。
@@ -187,6 +200,31 @@ func (catalog Catalog) LookupWSSPush(messageID uint32) (ProjectedRoute, error) {
 	return ProjectedRoute{MessageEntry: message, RouteEntry: route}, nil
 }
 
+// LookupTLSGameplay 返回由TLS/TCP gameplay adapter消费的严格路由投影。
+//
+// direction必须是实际socket方向，当前只接受CLIENT_TO_SERVER或SERVER_TO_CLIENT。
+// 本入口统一校验channel、scope、QoS与完整frame预算，防止dispatcher或publisher
+// 只按message ID建立第二套宽松路由表。
+func (catalog Catalog) LookupTLSGameplay(messageID uint32, direction string) (ProjectedRoute, error) {
+	message, route, err := catalog.LookupRoute(messageID, "TLS_TCP")
+	if err != nil {
+		return ProjectedRoute{}, err
+	}
+	if direction != "CLIENT_TO_SERVER" && direction != "SERVER_TO_CLIENT" {
+		return ProjectedRoute{}, errors.New("TLS/TCP gameplay direction is invalid")
+	}
+	if message.Direction != direction || route.AuthScope != "GAMEPLAY" || route.QoS != "RELIABLE_ORDERED" || route.MaxSize == 0 {
+		return ProjectedRoute{}, fmt.Errorf("message %d is not a valid TLS/TCP gameplay route", messageID)
+	}
+	if direction == "CLIENT_TO_SERVER" && message.Kind != "REQUEST" && message.Kind != "COMMAND" {
+		return ProjectedRoute{}, fmt.Errorf("message %d is not a client gameplay operation", messageID)
+	}
+	if direction == "SERVER_TO_CLIENT" && message.Kind != "RESPONSE" && message.Kind != "PUSH" {
+		return ProjectedRoute{}, fmt.Errorf("message %d is not a server gameplay result", messageID)
+	}
+	return ProjectedRoute{MessageEntry: message, RouteEntry: route}, nil
+}
+
 // WSSPushCatalog 返回编译进服务端的control push只读投影。
 //
 // 该投影只包含当前registry允许由WSS发送的9个PUSH。contract测试必须把它与
@@ -209,6 +247,53 @@ func WSSPushCatalog() Catalog {
 		catalog.Routes.Routes = append(catalog.Routes.Routes, profile.RouteEntry)
 	}
 	return catalog
+}
+
+// TLSGameplayCatalog 返回编译进服务端的world/visit可靠业务路由投影。
+//
+// 该投影必须由contract测试与registry逐字段比较。它不包含WSS消息、握手preface、
+// 未登记heartbeat或generic world action，因此adapter无法在运行时扩张协议面。
+func TLSGameplayCatalog() Catalog {
+	profiles := []ProjectedRoute{
+		tlsGameplayProfile(2000, "WORLD_SNAPSHOT_REQUEST", "world", "ihomeland.world.v1.WorldSnapshotRequest", "REQUEST", "CLIENT_TO_SERVER", 4096, "world_read", "REQUEST_ID", 10000),
+		tlsGameplayProfile(2001, "WORLD_SNAPSHOT_RESPONSE", "world", "ihomeland.world.v1.WorldSnapshotResponse", "RESPONSE", "SERVER_TO_CLIENT", 65536, "world_read", "CORRELATION_ID", 10000),
+		tlsGameplayProfile(2002, "WORLD_SNAPSHOT_PUSH", "world", "ihomeland.world.v1.WorldSnapshotPush", "PUSH", "SERVER_TO_CLIENT", 65536, "server_world", "NONE", 0),
+		tlsGameplayProfile(2103, "VISIT_OPEN_COMMAND", "visit", "ihomeland.visit.v1.VisitOpenCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2104, "VISIT_OPEN_RESPONSE", "visit", "ihomeland.visit.v1.VisitOpenResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2105, "VISIT_CREATE_INVITE_COMMAND", "visit", "ihomeland.visit.v1.VisitCreateInviteCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2106, "VISIT_CREATE_INVITE_RESPONSE", "visit", "ihomeland.visit.v1.VisitCreateInviteResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2107, "VISIT_REVOKE_INVITE_COMMAND", "visit", "ihomeland.visit.v1.VisitRevokeInviteCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2108, "VISIT_REVOKE_INVITE_RESPONSE", "visit", "ihomeland.visit.v1.VisitRevokeInviteResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2109, "VISIT_JOIN_COMMAND", "visit", "ihomeland.visit.v1.VisitJoinCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2110, "VISIT_JOIN_RESPONSE", "visit", "ihomeland.visit.v1.VisitJoinResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2111, "VISIT_LEAVE_COMMAND", "visit", "ihomeland.visit.v1.VisitLeaveCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2112, "VISIT_LEAVE_RESPONSE", "visit", "ihomeland.visit.v1.VisitLeaveResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2113, "VISIT_KICK_COMMAND", "visit", "ihomeland.visit.v1.VisitKickCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2114, "VISIT_KICK_RESPONSE", "visit", "ihomeland.visit.v1.VisitKickResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2115, "VISIT_RECONNECT_COMMAND", "visit", "ihomeland.visit.v1.VisitReconnectCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2116, "VISIT_RECONNECT_RESPONSE", "visit", "ihomeland.visit.v1.VisitReconnectResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2117, "VISIT_CLOSE_COMMAND", "visit", "ihomeland.visit.v1.VisitCloseCommand", "COMMAND", "CLIENT_TO_SERVER", 4096, "visit_command", "COMMAND_ID", 5000),
+		tlsGameplayProfile(2118, "VISIT_CLOSE_RESPONSE", "visit", "ihomeland.visit.v1.VisitCloseResponse", "RESPONSE", "SERVER_TO_CLIENT", 16384, "visit_command", "CORRELATION_ID", 5000),
+		tlsGameplayProfile(2119, "VISIT_SNAPSHOT_REQUEST", "visit", "ihomeland.visit.v1.VisitSnapshotRequest", "REQUEST", "CLIENT_TO_SERVER", 4096, "world_read", "REQUEST_ID", 10000),
+		tlsGameplayProfile(2120, "VISIT_SNAPSHOT_RESPONSE", "visit", "ihomeland.visit.v1.VisitSnapshotResponse", "RESPONSE", "SERVER_TO_CLIENT", 65536, "world_read", "CORRELATION_ID", 10000),
+		tlsGameplayProfile(2121, "VISIT_SNAPSHOT_PUSH", "visit", "ihomeland.visit.v1.VisitSnapshotPush", "PUSH", "SERVER_TO_CLIENT", 65536, "server_world", "NONE", 0),
+		tlsGameplayProfile(2122, "VISIT_SAFE_RETURN_PUSH", "visit", "ihomeland.visit.v1.VisitSafeReturnPush", "PUSH", "SERVER_TO_CLIENT", 16384, "server_world", "NONE", 0),
+	}
+	catalog := Catalog{Messages: MessageRegistry{SchemaVersion: 1}, Routes: RouteRegistry{SchemaVersion: 1}}
+	for _, profile := range profiles {
+		catalog.Messages.Messages = append(catalog.Messages.Messages, profile.MessageEntry)
+		catalog.Routes.Routes = append(catalog.Routes.Routes, profile.RouteEntry)
+	}
+	return catalog
+}
+
+// tlsGameplayProfile 集中构造编译期TLS/TCP profile，参数逐字段对应registry事实。
+func tlsGameplayProfile(id uint32, name string, owner string, protobufName string, kind string, direction string, maxSize uint32, ratePolicy string, idempotency string, timeoutMS uint32) ProjectedRoute {
+	return ProjectedRoute{
+		MessageEntry: MessageEntry{ID: id, Name: name, Owner: owner, Protobuf: protobufName, Kind: kind, Direction: direction},
+		RouteEntry: RouteEntry{MessageID: id, Channel: "TLS_TCP", AuthScope: "GAMEPLAY", QoS: "RELIABLE_ORDERED", MaxSize: maxSize,
+			RatePolicy: ratePolicy, Idempotency: idempotency, TimeoutMS: timeoutMS},
+	}
 }
 
 // wssPushProfile 集中冻结所有WSS PUSH共享策略，只让身份和frame预算逐项变化。

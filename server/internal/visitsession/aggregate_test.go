@@ -70,6 +70,10 @@ func TestAcceptJoinAndReservationExpiry(t *testing.T) {
 		t.Fatalf("non-target accept should fail: %v", err)
 	}
 	binding := mustBindingID(t, "vbind_visitorA")
+	shortIntent, _ := HydrateAdmissionIntent(reserved.ID(), fixture.visitorA.playerID, fixture.visitorA.sessionID, fixture.visitorA.epoch, reserved.Assignment(), reservationDeadline.Add(-5*time.Second))
+	if _, _, err := reserved.Join(fixture.visitorA, JoinQualification{intent: shortIntent, purpose: qualificationPurposeJoin}, binding, fixture.assignment, reservationDeadline.Add(-10*time.Second)); err != nil {
+		t.Fatalf("short-lived credential within reservation was rejected: %v", err)
+	}
 	if _, _, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, binding, fixture.assignment, reservationDeadline); !IsErrorCode(err, ErrorCodeStale) {
 		t.Fatalf("join at deadline should fail: %v", err)
 	}
@@ -117,6 +121,10 @@ func TestVisitorLeaveKickAndReconnect(t *testing.T) {
 	}
 	newBinding := mustBindingID(t, "vbind_new")
 	reconnectIntent, _ := HydrateAdmissionIntent(reconnecting.ID(), fixture.visitorA.playerID, fixture.visitorA.sessionID, fixture.visitorA.epoch, reconnecting.Assignment(), reconnectDeadline)
+	shortReconnectIntent, _ := HydrateAdmissionIntent(reconnecting.ID(), fixture.visitorA.playerID, fixture.visitorA.sessionID, fixture.visitorA.epoch, reconnecting.Assignment(), reconnectDeadline.Add(-5*time.Second))
+	if _, _, err := reconnecting.VisitorReconnect(fixture.visitorA, JoinQualification{intent: shortReconnectIntent, purpose: qualificationPurposeReconnect}, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second)); err != nil {
+		t.Fatalf("short-lived reconnect credential within grace was rejected: %v", err)
+	}
 	if _, _, err := reconnecting.VisitorReconnect(fixture.visitorA, JoinQualification{intent: reconnectIntent, purpose: qualificationPurposeJoin}, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second)); !IsErrorCode(err, ErrorCodeStale) {
 		t.Fatalf("join qualification was accepted by reconnect: %v", err)
 	}

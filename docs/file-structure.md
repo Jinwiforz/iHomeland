@@ -96,13 +96,15 @@ Lifecycle component 只用于真实持有资源或后台任务的对象；成功
 
 独立标准库 HTTP listener，只提供 health、readiness、version 和 metrics。它不依赖 application service，也不能成为公开业务 API 的临时入口。
 
-### `internal/worldentry`、`internal/transport/httpapi` 与 `internal/transport/wscontrol`
+### `internal/worldentry`、`internal/transport/httpapi`、`internal/transport/wscontrol` 与 `internal/transport/tcpgameplay`
 
 `worldentry` 是 transport-independent 的窄用例协调器，只编排 own-world bootstrap、invite accept 与 world admission issue；账号和 Session 用例仍由各自 owner 直接提供。`transport/httpapi` 是公开 HTTP adapter，集中拥有 10 个冻结 operation 的 route metadata、closed-schema codec、稳定错误映射、认证/限流/deadline middleware 及独立 listener 生命周期。只有该 package 可以导入 Gin；它不保存账号、world、visit 或 credential 事实。
 
 `transport/wscontrol` 拥有精确握手、typed PUSH codec、双重有界队列、单 reader/writer、心跳、connection/session/player 索引和 Session 失效关闭。它不依赖业务 storage package，不保存领域事实，不接收客户端 mutation，也不注册 TLS/TCP route。HTTP 与 WSS 共享公开 listener，但两个 adapter 保持独立路由与职责。
 
-本地明文只允许绑定 loopback，production 必须使用 TLS 1.3。公开 ready 表示 HTTP 与 WSS handler 均已接线；`publicApi.endpoints.wss` 仍是可与 bind 地址不同的部署事实。TLS/TCP advertised endpoint 和 world admission consume 尚未实现。
+`transport/tcpgameplay` 独立拥有 TLS/TCP listener、authentication preface、typed codec/dispatcher、connection registry、双重有界 writer queue 与 typed publisher。它通过窄 application port 调用 PersonalWorld/VisitSession owner，不导入 Gin 或业务 storage adapter，不保存 aggregate snapshot、raw credential 或第二套 session/assignment 事实。
+
+本地明文只允许 bind 与 remote 都是 loopback，production 必须使用 TLS 1.3。公开 ready 表示 HTTP、WSS 与 TLS/TCP graph 均已接线；`publicApi.endpoints.wss`、`publicApi.endpoints.tlsTcp` 都是可与 bind 地址不同的受信部署事实。关闭时全局 readiness 先进入 draining 以拒绝新 HTTP/WSS 握手，TCP 停止 accept，随后并行回收实时连接、停止公开 listener并排空 HTTP in-flight，最后由外层 lifecycle 释放 storage。
 
 ### `internal/session`
 
@@ -135,13 +137,13 @@ VisitSession 独立拥有定向 invite、Visitor membership/capacity、connectio
 
 生产 package 只包含纯 Go domain/application、消费侧 `VisitSessionStore`/world/assignment ports、稳定 command fingerprint 与严格 outcome/result 校验。并发 reference store、fake reader/clock/ID 与 admission qualification fixture 只存在于 `_test.go`；package 不启动 timer/goroutine，不拥有 socket、PersonalWorld 持久 mutation 或 placement lifecycle。
 
-VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 已为公开 HTTP accept/admission 查询构造 VisitSession service；邀请创建、join/reconnect 与 safe-return 仍等待后续 WSS/TLS-TCP 接线。
+VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 已为 HTTP accept/admission 与 TLS/TCP snapshot/mutation 构造同一个 VisitSession service；完整 producer、cleanup 与 safe-return 目的地编排仍由后续竖切 change 交付。
 
 ### `internal/worldadmission`
 
 独立拥有短期 opaque credential、role/purpose/full-assignment binding、稳定 issuance/consume identity、deterministic HMAC derivation、幂等 issuer、单次 verifier 与只读 qualification。它只接收 application 从 AuthContext、PersonalWorld/VisitSession 和 placement 派生的 domain value object；不读取请求 DTO，不拥有 socket、handler、listener、connection registry、Redis client 或业务 aggregate。
 
-Production Redis adapter 位于 `internal/storage/worldadmission`，独占 issue/credential 两类 versioned Hash、digest-only key、owner Lua 与 replay retention。Adapter 借用共享 standalone client/keyspace，不保存 raw credential/derivation key，不关闭资源、不启动 timer/goroutine，也不从 MySQL、日志或 memory 恢复 flush 后的旧资格。正式 Composition Root 与 HTTP issuance 已经接线；TLS/TCP consume 仍由后续 transport change 交付。
+Production Redis adapter 位于 `internal/storage/worldadmission`，独占 issue/credential 两类 versioned Hash、digest-only key、owner Lua 与 replay retention。Adapter 借用共享 standalone client/keyspace，不保存 raw credential/derivation key，不关闭资源、不启动 timer/goroutine，也不从 MySQL、日志或 memory 恢复 flush 后的旧资格。正式 Composition Root 已接线 HTTP issuance 与 TLS/TCP consume，transport 只保留只读 Qualification 投影。
 
 ### 个人世界阶段目录门禁
 

@@ -8,6 +8,7 @@ package observability
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -62,6 +63,26 @@ type Metrics struct {
 	websocketCloses *prometheus.CounterVec
 	// websocketInvalidations 统计Session失效联动结果。
 	websocketInvalidations *prometheus.CounterVec
+	// tcpHandshakes 按固定阶段和结果统计gameplay认证。
+	tcpHandshakes *prometheus.CounterVec
+	// tcpConnections 按transport状态观察连接数。
+	tcpConnections *prometheus.GaugeVec
+	// tcpFrames 与 tcpFrameBytes 观察方向、结果和完整frame大小。
+	tcpFrames     *prometheus.CounterVec
+	tcpFrameBytes *prometheus.HistogramVec
+	// tcpDispatches 与 tcpDispatchSeconds 按登记message ID和稳定结果观察application dispatch。
+	tcpDispatches      *prometheus.CounterVec
+	tcpDispatchSeconds *prometheus.HistogramVec
+	// tcpInFlight 观察当前进程尚未完成的gameplay operation数量。
+	tcpInFlight prometheus.Gauge
+	// tcpQueues 及其histogram观察双预算队列。
+	tcpQueues     *prometheus.CounterVec
+	tcpQueueItems prometheus.Histogram
+	tcpQueueBytes prometheus.Histogram
+	// tcpPushes、tcpCloses与tcpInvalidations记录运行时稳定结果。
+	tcpPushes        *prometheus.CounterVec
+	tcpCloses        *prometheus.CounterVec
+	tcpInvalidations *prometheus.CounterVec
 }
 
 // NewMetrics 注册运行时固定指标集合；私有 registry 使重复构造不会污染 package global 状态。
@@ -91,8 +112,21 @@ func NewMetrics() *Metrics {
 		websocketHeartbeats:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_heartbeats_total", Help: "WebSocket control heartbeat results."}, []string{"outcome"}),
 		websocketCloses:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_closes_total", Help: "WebSocket control close reasons."}, []string{"reason"}),
 		websocketInvalidations: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_invalidations_total", Help: "WebSocket control invalidation results."}, []string{"outcome"}),
+		tcpHandshakes:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_handshakes_total", Help: "TLS/TCP gameplay handshake results."}, []string{"stage", "outcome"}),
+		tcpConnections:         prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_tcp_gameplay_connections", Help: "TLS/TCP gameplay connections by transport state."}, []string{"state"}),
+		tcpFrames:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_frames_total", Help: "TLS/TCP gameplay frame results."}, []string{"direction", "outcome"}),
+		tcpFrameBytes:          prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_frame_bytes", Help: "TLS/TCP gameplay complete frame bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 15)}, []string{"direction", "outcome"}),
+		tcpDispatches:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_dispatches_total", Help: "TLS/TCP gameplay dispatch results."}, []string{"message_id", "outcome"}),
+		tcpDispatchSeconds:     prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_dispatch_seconds", Help: "TLS/TCP gameplay dispatch duration.", Buckets: prometheus.DefBuckets}, []string{"message_id", "outcome"}),
+		tcpInFlight:            prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_tcp_gameplay_in_flight", Help: "TLS/TCP gameplay operations currently in flight."}),
+		tcpQueues:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_queue_total", Help: "TLS/TCP gameplay queue results."}, []string{"outcome"}),
+		tcpQueueItems:          prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_queue_items", Help: "TLS/TCP gameplay queued items.", Buckets: prometheus.ExponentialBuckets(1, 2, 8)}),
+		tcpQueueBytes:          prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_queue_bytes", Help: "TLS/TCP gameplay queued bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 16)}),
+		tcpPushes:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_pushes_total", Help: "TLS/TCP gameplay push results."}, []string{"message_id", "outcome"}),
+		tcpCloses:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_closes_total", Help: "TLS/TCP gameplay close reasons."}, []string{"reason"}),
+		tcpInvalidations:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_invalidations_total", Help: "TLS/TCP gameplay invalidation results."}, []string{"outcome"}),
 	}
-	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations)
+	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations)
 	return metrics
 }
 
@@ -234,6 +268,84 @@ func (metrics *Metrics) ObserveWSSClose(reason string) {
 func (metrics *Metrics) ObserveWSSInvalidation(outcome string) {
 	requireMetricLabel(outcome, "no_active_connection", "closed", "notify_failed_closed")
 	metrics.websocketInvalidations.WithLabelValues(outcome).Inc()
+}
+
+// ObserveTCPHandshake 记录TLS/preface/ticket/admission/register固定阶段与结果。
+func (metrics *Metrics) ObserveTCPHandshake(stage string, outcome string) {
+	requireMetricLabel(stage, "accept", "tls", "preface", "ticket", "admission", "register")
+	requireMetricLabel(outcome, "accepted", "rejected", "remote_rejected", "capacity_rejected", "rate_limited", "scope_rejected", "rejected_after_ticket", "dependency_defect", "binding_rejected")
+	metrics.tcpHandshakes.WithLabelValues(stage, outcome).Inc()
+}
+
+// SetTCPConnections 更新指定transport状态的连接数量。
+func (metrics *Metrics) SetTCPConnections(state string, value int) {
+	requireMetricLabel(state, "pending", "active", "returning", "closing")
+	if value < 0 {
+		panic("invalid tcp gameplay connection count")
+	}
+	metrics.tcpConnections.WithLabelValues(state).Set(float64(value))
+}
+
+// ObserveTCPFrame 记录方向、稳定结果与完整frame字节数。
+func (metrics *Metrics) ObserveTCPFrame(direction string, outcome string, bytes int) {
+	requireMetricLabel(direction, "c2s", "s2c")
+	requireMetricLabel(outcome, "accepted", "rejected", "sent", "write_failed")
+	if bytes < 0 {
+		panic("invalid tcp gameplay frame size")
+	}
+	metrics.tcpFrames.WithLabelValues(direction, outcome).Inc()
+	metrics.tcpFrameBytes.WithLabelValues(direction, outcome).Observe(float64(bytes))
+}
+
+// ObserveTCPDispatch 记录已登记C2S message、固定处理结果与端到端耗时。
+func (metrics *Metrics) ObserveTCPDispatch(messageID uint32, outcome string, duration time.Duration) {
+	message := fmt.Sprintf("%d", messageID)
+	requireMetricLabel(message, "2000", "2103", "2105", "2107", "2109", "2111", "2113", "2115", "2117", "2119")
+	requireMetricLabel(outcome, "ok", "state_rejected", "rate_limited", "in_flight_rejected", "application_error", "queue_rejected", "panic")
+	if duration < 0 {
+		panic("invalid tcp gameplay dispatch duration")
+	}
+	metrics.tcpDispatches.WithLabelValues(message, outcome).Inc()
+	metrics.tcpDispatchSeconds.WithLabelValues(message, outcome).Observe(duration.Seconds())
+}
+
+// AddTCPInFlight 调整执行中operation gauge；调用方必须严格成对增加与归还。
+func (metrics *Metrics) AddTCPInFlight(delta int) {
+	if delta != 1 && delta != -1 {
+		panic("invalid tcp gameplay in-flight delta")
+	}
+	metrics.tcpInFlight.Add(float64(delta))
+}
+
+// ObserveTCPQueue 记录双预算队列结果和瞬时占用。
+func (metrics *Metrics) ObserveTCPQueue(outcome string, items int, bytes int) {
+	requireMetricLabel(outcome, "accepted", "rejected")
+	if items < 0 || bytes < 0 {
+		panic("invalid tcp gameplay queue observation")
+	}
+	metrics.tcpQueues.WithLabelValues(outcome).Inc()
+	metrics.tcpQueueItems.Observe(float64(items))
+	metrics.tcpQueueBytes.Observe(float64(bytes))
+}
+
+// ObserveTCPPush 记录三个登记gameplay PUSH的稳定结果。
+func (metrics *Metrics) ObserveTCPPush(messageID uint32, outcome string) {
+	message := fmt.Sprintf("%d", messageID)
+	requireMetricLabel(message, "2002", "2121", "2122")
+	requireMetricLabel(outcome, "enqueued", "target_rejected", "queue_rejected")
+	metrics.tcpPushes.WithLabelValues(message, outcome).Inc()
+}
+
+// ObserveTCPClose 记录不含peer文本的固定关闭原因。
+func (metrics *Metrics) ObserveTCPClose(reason string) {
+	requireMetricLabel(reason, "server_draining", "slow_consumer", "rate_limited", "protocol_violation", "idle_timeout", "peer_closed", "io_failed", "panic")
+	metrics.tcpCloses.WithLabelValues(reason).Inc()
+}
+
+// ObserveTCPInvalidation 记录Session旧epoch连接清理结果。
+func (metrics *Metrics) ObserveTCPInvalidation(outcome string) {
+	requireMetricLabel(outcome, "closed", "deadline")
+	metrics.tcpInvalidations.WithLabelValues(outcome).Inc()
 }
 
 // requireMetricLabel 只接受编译期固定枚举；非法值视为 programmer error 并 panic。

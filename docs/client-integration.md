@@ -67,12 +67,13 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 
 ### 4. TLS/TCP Business
 
-- length framing
-- unique receive pump and serialized writer
-- pending request registry
-- push dispatcher
-- route/error mapping
-- reconnect and backpressure
+- 先通过 HTTPS 分别取得 `TLS_TCP`/`GAMEPLAY` ticket 与 world admission；客户端连接 advertised endpoint，production 使用 TLS 1.3，本地明文只允许 loopback
+- TLS 建立后先发送 `tcp-preface.json` 定义的 `IHTP` v1 preface：4-byte big-endian 长度、purpose、32 字节 ticket 与 48 字节 admission；认证失败不会向客户端公开提交阶段，客户端不得猜测或重用任一 credential，必须重新签发完整凭据组
+- preface 成功后才发送 `ReliableEnvelope`；每条业务 frame 同样使用 4-byte big-endian 长度，不得假设一次 socket read 等于一个 frame
+- 使用唯一 receive pump 与 serialized writer，维护严格单调的双向 sequence、有界 pending request/command registry 和 writer backpressure
+- `OWN_WORLD` 可直接请求 snapshot；`JOIN`/`RECONNECT` 必须把同一 admission 放入首个匹配 command，并在 response 前保持 pending
+- 只接收登记的 response/error 与 2002、2121、2122 push；`VISIT_SAFE_RETURN_PUSH` 到达后立即停止旧 target mutation，等待有界关闭并进入受控返回流程
+- ticket、admission、完整 payload 和 assignment 私有字段不得进入客户端日志；session epoch 失效时同时关闭 WSS/TCP
 
 ### 5. Account/PersonalWorld/VisitSession Services
 

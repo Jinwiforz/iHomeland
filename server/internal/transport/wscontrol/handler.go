@@ -168,7 +168,11 @@ func (handler *Handler) ServeHTTP(response http.ResponseWriter, request *http.Re
 	}
 	connectionID, err := handler.registry.registerAuth(reserved, auth, connection)
 	if err != nil {
-		handler.closeUnregistered(connection, websocket.StatusTryAgainLater, "connection unavailable")
+		code, reason := websocket.StatusTryAgainLater, "connection unavailable"
+		if errors.Is(err, ErrRegistryStopped) {
+			code, reason = websocket.StatusGoingAway, "server draining"
+		}
+		handler.closeUnregistered(connection, code, reason)
 		handler.observer.ObserveWSSHandshake("registration_failed")
 		handler.config.Logger.Info("websocket control handshake ended", "operation", "handshake", "outcome", "registration_failed")
 		return
@@ -191,22 +195,21 @@ func Mux(httpHandler http.Handler, websocketHandler http.Handler) (http.Handler,
 	}), nil
 }
 
-// closeUnregistered 有界关闭尚未转移给registry的socket，避免close握手阻塞HTTP handler。
+// closeUnregistered 有界关闭尚未转移给registry的socket，使HTTP shutdown等待close frame写出。
 func (handler *Handler) closeUnregistered(connection *websocket.Conn, code websocket.StatusCode, reason string) {
+	closeDone := make(chan struct{})
 	go func() {
-		closeDone := make(chan struct{})
-		go func() {
-			_ = connection.Close(code, reason)
-			close(closeDone)
-		}()
-		timer := time.NewTimer(handler.config.Policy.CloseTimeout)
-		defer timer.Stop()
-		select {
-		case <-closeDone:
-		case <-timer.C:
-			go func() { _ = connection.CloseNow() }()
-		}
+		_ = connection.Close(code, reason)
+		close(closeDone)
 	}()
+	timer := time.NewTimer(handler.config.Policy.CloseTimeout)
+	defer timer.Stop()
+	select {
+	case <-closeDone:
+	case <-timer.C:
+		// CloseNow可能与Close共享内部owner，不能把有界handler再次阻塞在强制关闭上。
+		go func() { _ = connection.CloseNow() }()
+	}
 }
 
 // ticketCredential 只接受固定scheme和32位小写hex，不复制到日志或错误。

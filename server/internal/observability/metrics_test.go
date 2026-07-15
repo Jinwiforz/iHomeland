@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestStorageMetricLabelsRejectUnboundedValues 防止 endpoint、key、identity 或原始错误成为 label。
@@ -46,4 +47,38 @@ func TestWebSocketMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	for _, reason := range []string{"server_draining", "session_invalidated", "slow_consumer", "protocol_violation", "heartbeat_timeout", "idle_timeout", "peer_closed", "io_failed", "panic", "local_close"} {
 		metrics.ObserveWSSClose(reason)
 	}
+}
+
+// TestTCPGameplayMetricLabelsAcceptFixedVocabulary 保护TCP握手、dispatch、队列与关闭实际枚举。
+func TestTCPGameplayMetricLabelsAcceptFixedVocabulary(t *testing.T) {
+	t.Parallel()
+
+	metrics := NewMetrics()
+	metrics.ObserveTCPHandshake("preface", "accepted")
+	metrics.SetTCPConnections("pending", 1)
+	metrics.ObserveTCPFrame("c2s", "accepted", 128)
+	metrics.ObserveTCPDispatch(2000, "ok", time.Millisecond)
+	metrics.AddTCPInFlight(1)
+	metrics.AddTCPInFlight(-1)
+	metrics.ObserveTCPQueue("accepted", 1, 128)
+	metrics.ObserveTCPPush(2122, "enqueued")
+	metrics.ObserveTCPClose("slow_consumer")
+	metrics.ObserveTCPInvalidation("closed")
+}
+
+// TestTCPGameplayMetricLabelsRejectCredential 防止credential或动态target进入label。
+func TestTCPGameplayMetricLabelsRejectCredential(t *testing.T) {
+	t.Parallel()
+
+	const sensitive = "wad1_sensitive-admission-material"
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("credential metric label 应被拒绝")
+		}
+		if strings.Contains(fmt.Sprint(recovered), sensitive) {
+			t.Fatalf("metric label panic 泄露原值：%v", recovered)
+		}
+	}()
+	NewMetrics().ObserveTCPHandshake("preface", sensitive)
 }

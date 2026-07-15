@@ -126,11 +126,7 @@ func (connection *connection) run(parent context.Context) {
 	ctx, cancel := context.WithCancelCause(parent)
 	connection.cancelMu.Lock()
 	connection.cancel = cancel
-	stopCause := connection.stopCause
 	connection.cancelMu.Unlock()
-	if stopCause != nil {
-		cancel(stopCause)
-	}
 	connection.socket.SetReadLimit(1)
 	errorsChannel := make(chan error, 2)
 	go func() { errorsChannel <- recoverConnectionLoop(func() error { return connection.readLoop(ctx) }) }()
@@ -284,11 +280,7 @@ func (connection *connection) stop(code websocket.StatusCode, reason string) {
 		cause := errors.New(reason)
 		connection.cancelMu.Lock()
 		connection.stopCause = cause
-		cancel := connection.cancel
 		connection.cancelMu.Unlock()
-		if cancel != nil {
-			cancel(cause)
-		}
 		go func() {
 			defer close(connection.stopDone)
 			closeDone := make(chan struct{})
@@ -303,6 +295,14 @@ func (connection *connection) stop(code websocket.StatusCode, reason string) {
 			case <-timer.C:
 				// coder/websocket的并发CloseNow可能等待同一个内部owner，因此不能同步阻塞关闭协调者。
 				go func() { _ = connection.socket.CloseNow() }()
+			}
+			// Read context取消可能立即释放底层连接；必须在close frame完成或超时后再终止I/O，
+			// 否则正常draining会退化为客户端不可分类的EOF。
+			connection.cancelMu.Lock()
+			cancel := connection.cancel
+			connection.cancelMu.Unlock()
+			if cancel != nil {
+				cancel(cause)
 			}
 		}()
 	})

@@ -85,6 +85,27 @@ publicApi:
     pongTimeout: 10s
     idleTimeout: 45s
     closeTimeout: 3s
+  gameplayTcp:
+    address: 127.0.0.1:8444
+    preAuthRate: { requests: 60, window: 1m, burst: 10 }
+    maxConnections: 4096
+    maxPerRemote: 32
+    maxPerSession: 4
+    maxPerPlayer: 8
+    maxPerTarget: 64
+    maxRemoteEntries: 4096
+    remoteIdleTtl: 10m
+    handshakeBytes: 8192
+    readBatchFrames: 16
+    queueItems: 64
+    queueBytes: 1048576
+    handshakeTimeout: 5s
+    readTimeout: 15s
+    writeTimeout: 5s
+    keepAlive: 15s
+    idleTimeout: 45s
+    closeTimeout: 3s
+    shutdownTimeout: 8s
 storage:
   mysql:
     address: 127.0.0.1:3306

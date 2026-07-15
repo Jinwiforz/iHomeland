@@ -4,7 +4,7 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含 world/visit Protobuf 与 HTTPS/WSS registry/fixture 契约、协议校验、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement、VisitSession 和 WorldAdmission core。公开 component 已用 production adapters 接线 10 个冻结 HTTP operation 和共享 listener 上的认证 WSS control；WSS 原子消费一次性 Redis ticket、只投递 9 类已登记 binary PUSH，并由有界 connection registry 处理背压、心跳、Session 失效与关闭。TLS/TCP、world admission consume 及完整 world/visit gameplay 竖切仍未实现。
+当前 module 包含 world/visit Protobuf 与 HTTPS/WSS/TLS-TCP registry/fixture 契约、协议校验、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement、VisitSession 和 WorldAdmission core。公开 component 已用 production adapters 接线 10 个冻结 HTTP operation、认证 WSS control 和独立 gameplay TCP listener；TCP 使用固定 preface 依次消费一次性 GAMEPLAY ticket 与 WorldAdmission，并以有界 registry/queue/dispatcher 接入冻结的 world/visit route。完整 producer、cleanup/orchestration 与 Go 协议资格客户端仍未实现。
 
 Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。`internal/storage/session` 已用共享 Redis client、严格 key/Hash codec 与原子 Lua scripts 实现 `SessionStore`；后续 transport adapter 不能另建 token、ticket 或 epoch 语义。
 
@@ -18,9 +18,9 @@ WorldInstance placement core 位于 `internal/placement/`。它建立独立 `Wor
 
 VisitSession core 位于 `internal/visitsession/`。它建立独立且默认脱敏的 session/invite/command/connection-binding identities，不可变绑定 Owner、PersonalWorld 与完整 current assignment stamp，并实现有界 invite、reservation、join、leave/kick、Owner/Visitor disconnect/reconnect/expiry、expected revision、command replay/commit-unknown 和确定性 safe-return。Invite 与 `AdmissionIntent` 都不是 gameplay credential；Join 与 VisitorReconnect 都要求由 worldadmission verifier hydration 的 purpose-scoped qualification，并继续二次验证 membership、lineage、deadline 与 current assignment。Visitor 对未登记 gameplay mutation 默认没有权限。
 
-VisitSession 的并发 reference store 与 fake reader/clock/ID 只存在于 `_test.go`。`internal/storage/visitsession` 已用共享 standalone Redis client、versioned active/session/command schemas、完整 snapshot/result codec 与 owner Lua scripts 实现 production `VisitSessionStore`。Redis 进程重启只能读取自身仍保留的合法运行态；flush 或 key 丢失后旧 invite、membership、binding 与 replay 不从其他来源补回。Adapter 不拥有 client、timer/goroutine、admission credential、generated protocol、listener 或 memory fallback；正式 Composition Root 当前仅为 HTTP accept/admission 读取构造该 service，不运行 semantic cleanup task。
+VisitSession 的并发 reference store 与 fake reader/clock/ID 只存在于 `_test.go`。`internal/storage/visitsession` 已用共享 standalone Redis client、versioned active/session/command schemas、完整 snapshot/result codec 与 owner Lua scripts 实现 production `VisitSessionStore`。Redis 进程重启只能读取自身仍保留的合法运行态；flush 或 key 丢失后旧 invite、membership、binding 与 replay 不从其他来源补回。Adapter 不拥有 client、timer/goroutine、admission credential、generated protocol、listener 或 memory fallback；正式 Composition Root 为 HTTP accept/admission 与 TLS/TCP snapshot/mutation 构造同一个 service，但尚不运行 semantic cleanup 或完整 producer 编排。
 
-World admission runtime 位于 `internal/worldadmission/`。它用注入的至少 256-bit key、稳定 issuance ID 与完整 binding fingerprint 确定性派生短期 opaque credential；`internal/storage/worldadmission` 只保存 digest、受信 binding 与 consume tombstone，并用 owner Lua 原子处理幂等签发、精确 response-loss 重试和重放拒绝。Verifier 比较 AuthContext、purpose、TLS/TCP endpoint/channel 后烧毁 credential，再复核 current full assignment；Visitor qualification 仍交给 VisitSession 二次验证。正式 Composition Root 已接线 HTTP 签发和 WSS control，但 TLS/TCP 及 world admission consume 仍未接线，因此当前实现不表示 visit-world gameplay 已经可用。
+World admission runtime 位于 `internal/worldadmission/`。它用注入的至少 256-bit key、稳定 issuance ID 与完整 binding fingerprint 确定性派生短期 opaque credential；`internal/storage/worldadmission` 只保存 digest、受信 binding 与 consume tombstone，并用 owner Lua 原子处理幂等签发、精确 response-loss 重试和重放拒绝。Verifier 比较 AuthContext、purpose、TLS/TCP endpoint/channel 后烧毁 credential，再复核 current full assignment；Visitor qualification 仍交给 VisitSession 二次验证。正式 Composition Root 已接线 HTTP 签发与 TCP consume；这只证明 transport capability，不表示完整 visit-world producer 与流程已经可用。
 
 PersonalWorld 与 placement core 已有独立 production storage adapter：`internal/storage/personalworld`
 借用共享 MySQL pool 保存 identity、immutable owner、lifecycle、revision 与 archive replay；
@@ -67,7 +67,7 @@ Storage contract 与真实 Docker integration 入口：
 & .\tools\storage\storage.ps1 -Action verify -TimeoutSeconds 600
 ```
 
-`verify` 使用 `versions.yaml` 锁定的 tag + linux/amd64 digest，覆盖空库/并发 migration、dirty/checksum/lock 拒绝、MySQL/Redis restart、Redis flush、依赖持续中断、commit-unknown、真实 WSS ticket 消费/重放/logout invalidation、进程恢复与 ownership cleanup。所有状态和 secret 只存在于已忽略的 `.local/storage/<run-id>/`。
+`verify` 使用 `versions.yaml` 锁定的 tag + linux/amd64 digest，覆盖空库/并发 migration、dirty/checksum/lock 拒绝、MySQL/Redis restart、Redis flush、依赖持续中断、commit-unknown、真实 WSS/TCP ticket 消费、TCP admission 与 `OWN_WORLD`/`JOIN`/`RECONNECT` wire、重放、logout 跨通道 invalidation、进程恢复与 ownership cleanup。所有状态和 secret 只存在于已忽略的 `.local/storage/<run-id>/`。
 
 `TimeoutSeconds` 同时约束 setup/tests 与每次 Docker CLI 调用；显式 `down` 也使用同一总预算。`verify` 的 `finally` cleanup 另有最多 60 秒预算，避免主阶段耗尽 deadline 后跳过回收。若 Docker daemon 失联使 ownership 无法确认，入口会终止挂起的 `docker.exe`、保留 `.local/storage/<run-id>/state.json` 并返回非零；Docker 恢复后使用日志中的 RunId 执行 `-Action down -RunId <run-id>`，不得手工删除未知 Docker resource。
 
@@ -98,13 +98,13 @@ try {
 推荐诊断默认地址为 `127.0.0.1:8081`：
 
 - `/healthz`：进程存活，不代表可以接收业务
-- `/readyz`：diagnostic、MySQL、Redis 与共享公开 HTTP/WSS listener 全部 ready 后返回 200；不表示 advertised TLS/TCP endpoint 可以连接
+- `/readyz`：diagnostic、MySQL、Redis、公开 HTTP/WSS 与独立 gameplay TCP listener 全部 ready 后返回 200
 - `/version`：有界构建身份
 - `/metrics`：低基数 Prometheus/OpenMetrics 指标
 
 该 listener 不承载账号、个人世界或其他公开业务 API。绑定非 loopback 地址时必须使用部署网络策略限制访问。
 
-公开本地入口默认监听 `127.0.0.1:8080`：普通请求只承载 `shared/contracts/http/v1/openapi.yaml` 登记的 10 个 operation，精确 `/v1/control` 承载 WSS upgrade；local advertised WSS 同样使用 `localhost:8080`，可以直接连接。部署环境的 `publicApi.endpoints.wss` 可因 ingress/port mapping 与 bind 不同，但必须显式配置；`endpoints.tlsTcp` 仍只是后续 TLS/TCP 部署投影。Production 必须启用 TLS 1.3，并通过 secret reference 提供 private key。WSS 各项资源字段的长期语义由 `docs/network-transport-architecture.md` 统一维护。
+公开本地入口默认监听 `127.0.0.1:8080`：普通请求只承载 `shared/contracts/http/v1/openapi.yaml` 登记的 10 个 operation，精确 `/v1/control` 承载 WSS upgrade；gameplay TCP 独立监听 `127.0.0.1:8444`。客户端始终使用 `endpoints.wss` 与 `endpoints.tlsTcp` 的 advertised 值，二者可因 ingress/port mapping 与 bind 不同但必须显式配置。Production 必须启用 TLS 1.3，并通过 secret reference 提供 private key；本地明文 TCP 只接受 loopback remote。资源与 preface 语义由 `docs/network-transport-architecture.md` 统一维护。
 
 推荐值被占用时，通过所选配置文件或白名单环境变量 `IHOMELAND_DIAGNOSTIC_ADDRESS`、`IHOMELAND_PUBLIC_ADDRESS` 显式覆盖对应 listener。进程不会静默寻找其他端口；绑定冲突会在启动阶段返回非零结果。完整规划见 `docs/network-port-allocation.md`。
 

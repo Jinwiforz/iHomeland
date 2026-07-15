@@ -250,8 +250,12 @@ func (visit VisitSession) Join(visitor Actor, qualification JoinQualification, b
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeNotFound)
 	}
 	membership := visit.snapshot.memberships[index]
-	if membership.state != MembershipStateReserved || membership.sessionID != visitor.sessionID || membership.epoch != visitor.epoch || !membership.reservationExpiresAt.Equal(intent.expiresAt) {
+	if membership.state != MembershipStateReserved || membership.sessionID != visitor.sessionID || membership.epoch != visitor.epoch {
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeInvalidState)
+	}
+	// Credential lifetime可以短于reservation，但绝不能把原membership deadline向后延长。
+	if intent.expiresAt.After(membership.reservationExpiresAt) {
+		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeStale)
 	}
 	joined, _ := NewMembershipSnapshot(visitor.playerID, membership.inviteID, MembershipStateJoined, visitor.sessionID, visitor.epoch, bindingID, time.Time{}, 0, time.Time{})
 	memberships := visit.snapshot.Memberships()
@@ -370,7 +374,7 @@ func (visit VisitSession) VisitorReconnect(visitor Actor, qualification JoinQual
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeStale)
 	}
 	intent := qualification.intent
-	if intent.visitSessionID != visit.ID() || intent.visitorID != visitor.playerID || intent.sessionID != visitor.sessionID || intent.epoch != visitor.epoch || !intent.assignment.Equal(visit.Assignment()) || !intent.expiresAt.Equal(membership.reconnectExpiresAt) || expiredAt(observedAt, intent.expiresAt) {
+	if intent.visitSessionID != visit.ID() || intent.visitorID != visitor.playerID || intent.sessionID != visitor.sessionID || intent.epoch != visitor.epoch || !intent.assignment.Equal(visit.Assignment()) || intent.expiresAt.After(membership.reconnectExpiresAt) || expiredAt(observedAt, intent.expiresAt) {
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeStale)
 	}
 	joined, _ := NewMembershipSnapshot(visitor.playerID, membership.inviteID, MembershipStateJoined, visitor.sessionID, visitor.epoch, newBindingID, time.Time{}, 0, time.Time{})

@@ -65,6 +65,8 @@ type Registry struct {
 	cancel context.CancelCauseFunc
 	// mu 保护全部索引、remote state与停止状态。
 	mu sync.Mutex
+	// draining 先拒绝新reservation，同时允许已经开始的upgrade完成注册并进入统一关闭。
+	draining bool
 	// stopped 使draining后的所有入口fail closed。
 	stopped bool
 	// reserved 是尚未消费ticket/upgrade的全局预算。
@@ -81,6 +83,8 @@ type Registry struct {
 	remotes map[string]*remoteState
 	// wg 等待所有已注册connection run退出。
 	wg sync.WaitGroup
+	// handshakes 等待已取得reservation的HTTP handler完成或归还预算。
+	handshakes sync.WaitGroup
 }
 
 // NewRegistry 构造不启动listener或goroutine的连接owner。
@@ -124,7 +128,7 @@ func (registry *Registry) reserve(remoteKey string) (*reservation, error) {
 	now := registry.clock.Now().UTC()
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
-	if registry.stopped {
+	if registry.draining || registry.stopped {
 		return nil, ErrRegistryStopped
 	}
 	registry.evictIdleRemotes(now)
@@ -147,6 +151,7 @@ func (registry *Registry) reserve(remoteKey string) (*reservation, error) {
 	}
 	registry.reserved++
 	state.reserved++
+	registry.handshakes.Add(1)
 	return &reservation{registry: registry, remoteKey: remoteKey}, nil
 }
 
@@ -225,7 +230,11 @@ func (registry *Registry) register(reservation *reservation, sessionID string, p
 	}
 	connectionID := "con_" + material
 	registry.mu.Lock()
-	if reservation.done || registry.stopped || reservation.sessionID != sessionID || reservation.playerID != playerID {
+	if registry.stopped {
+		registry.mu.Unlock()
+		return "", ErrRegistryStopped
+	}
+	if reservation.done || reservation.sessionID != sessionID || reservation.playerID != playerID {
 		registry.mu.Unlock()
 		return "", ErrConnectionLimit
 	}
@@ -264,9 +273,9 @@ func (registry *Registry) PublishConnection(connectionID string, messageID uint3
 	}
 	registry.mu.Lock()
 	entry := registry.connections[connectionID]
-	stopped := registry.stopped
+	unavailable := registry.draining || registry.stopped
 	registry.mu.Unlock()
-	if stopped {
+	if unavailable {
 		return DeliveryResult{}, ErrRegistryStopped
 	}
 	if entry == nil {
@@ -313,7 +322,7 @@ func (registry *Registry) PublishPlayer(playerID string, messageID uint32, paylo
 
 // Invalidate 实现Session提交后ConnectionInvalidator；通知失败也不会保留旧epoch连接。
 func (registry *Registry) Invalidate(ctx context.Context, invalidation session.Invalidation) error {
-	if !invalidation.SessionID.Valid() || !invalidation.Epoch.Valid() || invalidation.Reason == session.InvalidationReasonUnspecified {
+	if ctx == nil || !invalidation.SessionID.Valid() || !invalidation.Epoch.Valid() || invalidation.Reason == session.InvalidationReasonUnspecified {
 		return errors.New("websocket control invalidation is invalid")
 	}
 	entries, stopped := registry.snapshot(registry.bySession, invalidation.SessionID.String())
@@ -374,9 +383,25 @@ waitForNotifications:
 // Stop 先拒绝新注册和投递，再graceful close并等待全部连接退出。
 func (registry *Registry) Stop(ctx context.Context) error {
 	registry.mu.Lock()
-	if !registry.stopped {
-		registry.stopped = true
+	if registry.stopped {
+		registry.mu.Unlock()
+		select {
+		case <-registryConnectionWait(&registry.wg):
+			return nil
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
 	}
+	registry.draining = true
+	registry.mu.Unlock()
+	var handshakeErr error
+	select {
+	case <-registryConnectionWait(&registry.handshakes):
+	case <-ctx.Done():
+		handshakeErr = fmt.Errorf("wait for websocket control handshakes: %w", context.Cause(ctx))
+	}
+	registry.mu.Lock()
+	registry.stopped = true
 	entries := make([]*connection, 0, len(registry.connections))
 	for _, entry := range registry.connections {
 		entries = append(entries, entry)
@@ -390,14 +415,14 @@ func (registry *Registry) Stop(ctx context.Context) error {
 	select {
 	case <-done:
 		registry.cancel(errors.New("websocket control registry stopped"))
-		return nil
+		return handshakeErr
 	case <-ctx.Done():
 		registry.cancel(errors.New("websocket control registry stopped"))
 		for _, entry := range entries {
 			// CloseNow可能与正在进行的graceful Close共享内部owner，必须避免逐连接同步放大总deadline。
 			go func(entry *connection) { _ = entry.socket.CloseNow() }(entry)
 		}
-		return fmt.Errorf("wait for websocket control connections: %w", context.Cause(ctx))
+		return errors.Join(handshakeErr, fmt.Errorf("wait for websocket control connections: %w", context.Cause(ctx)))
 	}
 }
 
@@ -428,7 +453,7 @@ func (registry *Registry) snapshot(index map[string]map[string]struct{}, key str
 			entries = append(entries, entry)
 		}
 	}
-	return entries, registry.stopped
+	return entries, registry.draining || registry.stopped
 }
 
 // remove 线性化删除主索引、反向索引和remote active预算。
@@ -490,6 +515,17 @@ func (registry *Registry) releaseReserved(reservation *reservation) {
 	if reservation.playerID != "" {
 		decrementReservation(registry.reservedByPlayer, reservation.playerID)
 	}
+	registry.handshakes.Done()
+}
+
+// registryConnectionWait 把只在关闭阶段读取的WaitGroup投影为channel。
+func registryConnectionWait(group *sync.WaitGroup) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		group.Wait()
+		close(done)
+	}()
+	return done
 }
 
 // invalidationPush 把安全Session reason映射到已登记generated payload。

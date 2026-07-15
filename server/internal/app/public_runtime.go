@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jinwiforz/ihomeland/server/internal/account"
@@ -25,6 +26,7 @@ import (
 	storagevisitsession "github.com/jinwiforz/ihomeland/server/internal/storage/visitsession"
 	storageworldadmission "github.com/jinwiforz/ihomeland/server/internal/storage/worldadmission"
 	"github.com/jinwiforz/ihomeland/server/internal/transport/httpapi"
+	"github.com/jinwiforz/ihomeland/server/internal/transport/tcpgameplay"
 	"github.com/jinwiforz/ihomeland/server/internal/transport/wscontrol"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 	"github.com/jinwiforz/ihomeland/server/internal/worldadmission"
@@ -65,12 +67,16 @@ type publicRuntimeComponent struct {
 	tasks httpapi.TaskOwner
 	// websocketTasks 监督control连接owner，不与HTTP Serve任务混用。
 	websocketTasks wscontrol.TaskOwner
+	// tcpTasks 监督独立gameplay accept loop，不与HTTP/WSS任务混用。
+	tcpTasks tcpgameplay.TaskOwner
 	// logger 只接收公开HTTP/WSS transport允许的低敏字段。
 	logger *slog.Logger
 	// component 只在Start完整构图成功后存在。
 	component *httpapi.Component
 	// websocketRegistry 显式拥有http.Server无法等待的hijacked连接。
 	websocketRegistry *wscontrol.Registry
+	// tcpServer 显式拥有独立listener、连接registry与关闭顺序。
+	tcpServer *tcpgameplay.Server
 }
 
 // Name 返回lifecycle稳定component名。
@@ -130,6 +136,22 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 		_ = websocketRegistry.Stop(cleanupContext)
 		_ = component.websocketTasks.Stop(cleanupContext, errors.New("websocket control startup rolled back"))
 	}()
+	tcpConfig := tcpgameplay.Config{
+		Policy: component.settings.PublicAPI.GameplayTCP, FrameBytes: component.settings.PublicAPI.Limits.RealtimeFrameBytes,
+		AllowPlaintext: !component.settings.PublicAPI.TLS.Enabled, Logger: component.logger.With("transport", "tcp_gameplay"),
+	}
+	tcpCodec, err := tcpgameplay.NewCodec(contract.TLSGameplayCatalog(), tcpConfig.FrameBytes, component.clock)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay codec: %w", err)
+	}
+	tcpRegistry, err := tcpgameplay.NewRegistry(tcpConfig, tcpCodec, component.clock, component.ids, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay registry: %w", err)
+	}
+	connectionInvalidator, err := session.NewCompositeConnectionInvalidator(websocketRegistry, tcpRegistry)
+	if err != nil {
+		return fmt.Errorf("construct realtime invalidator: %w", err)
+	}
 	sessionStore, err := storagesession.New(client, keyspace, component.metrics)
 	if err != nil {
 		return fmt.Errorf("construct session store: %w", err)
@@ -138,7 +160,7 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct session policy: %w", err)
 	}
-	sessionService, err := session.NewService(sessionStore, endpointProvider, websocketRegistry, component.clock, component.ids, session.CryptoSecretGenerator{}, sessionPolicy)
+	sessionService, err := session.NewService(sessionStore, endpointProvider, connectionInvalidator, component.clock, component.ids, session.CryptoSecretGenerator{}, sessionPolicy)
 	if err != nil {
 		return fmt.Errorf("construct session service: %w", err)
 	}
@@ -202,6 +224,22 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct world entry service: %w", err)
 	}
+	tcpApplication, err := newTCPGameplayApplication(worldRepository, placementStore, visitService, tcpEndpoint, component.clock)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay application: %w", err)
+	}
+	tcpHandshake, err := tcpgameplay.NewHandshake(sessionService, admissionService, tcpEndpoint, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay handshake: %w", err)
+	}
+	tcpDispatcher, err := tcpgameplay.NewDispatcher(tcpApplication, tcpHandshake, tcpRegistry, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay dispatcher: %w", err)
+	}
+	tcpServer, err := tcpgameplay.NewServer(tcpConfig, component.prepared.tlsConfig, tcpRegistry, tcpHandshake, tcpDispatcher, component.tcpTasks, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay server: %w", err)
+	}
 	router, err := httpapi.NewRouter(accountService, sessionService, worldEntry, httpapi.RouterConfig{
 		ServerVersion:        component.info.Version,
 		ProtocolVersion:      publicProtocolVersion,
@@ -231,29 +269,62 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct public HTTP component: %w", err)
 	}
+	if err := tcpServer.Start(ctx); err != nil {
+		return err
+	}
+	cleanupTCP := true
+	defer func() {
+		if cleanupTCP {
+			cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.GameplayTCP.ShutdownTimeout)
+			defer cancel()
+			_ = tcpServer.Stop(cleanupContext)
+		}
+	}()
 	if err := httpComponent.Start(ctx); err != nil {
 		return err
 	}
 	component.component = httpComponent
 	component.websocketRegistry = websocketRegistry
+	component.tcpServer = tcpServer
+	cleanupTCP = false
 	cleanupWebSocket = false
 	return nil
 }
 
-// Stop 先关闭并等待hijacked WSS，再关闭HTTP，最后由外层lifecycle释放Redis与MySQL。
+// Stop 在全局readiness已进入draining后并行关闭实时连接，再停止公开listener并排空HTTP请求。
 func (component *publicRuntimeComponent) Stop(ctx context.Context) error {
-	var websocketErr error
-	if component.websocketRegistry != nil {
-		websocketErr = component.websocketRegistry.Stop(ctx)
+	if ctx == nil {
+		return errors.New("public runtime stop context is nil")
 	}
-	if component.websocketTasks != nil {
-		websocketErr = errors.Join(websocketErr, component.websocketTasks.Stop(ctx, errors.New("websocket control component stopped")))
+	var realtime sync.WaitGroup
+	var tcpErr, websocketErr error
+	if component.tcpServer != nil {
+		realtime.Add(1)
+		go func() {
+			defer realtime.Done()
+			tcpContext, cancel := context.WithTimeout(ctx, component.settings.PublicAPI.GameplayTCP.ShutdownTimeout)
+			defer cancel()
+			tcpErr = component.tcpServer.Stop(tcpContext)
+		}()
 	}
+	if component.websocketRegistry != nil || component.websocketTasks != nil {
+		realtime.Add(1)
+		go func() {
+			defer realtime.Done()
+			if component.websocketRegistry != nil {
+				websocketErr = component.websocketRegistry.Stop(ctx)
+			}
+			if component.websocketTasks != nil {
+				websocketErr = errors.Join(websocketErr, component.websocketTasks.Stop(ctx, errors.New("websocket control component stopped")))
+			}
+		}()
+	}
+	realtime.Wait()
 	var httpErr error
 	if component.component != nil {
 		httpErr = component.component.Stop(ctx)
 	}
-	return errors.Join(websocketErr, httpErr)
+	return errors.Join(tcpErr, websocketErr, httpErr)
 }
 
 // Address 返回公开listener实际地址；未启动时为空。

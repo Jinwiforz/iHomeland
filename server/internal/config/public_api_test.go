@@ -56,6 +56,12 @@ func TestPublicAPIValidationRejectsUnsafeCrossFieldValues(t *testing.T) {
 		{name: "WSS deadline 逆序", mutate: func(value *Config) {
 			value.PublicAPI.WebSocketControl.PongTimeout = value.PublicAPI.WebSocketControl.IdleTimeout
 		}, want: "deadlines"},
+		{name: "gameplay 与公开端口冲突", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.Address = "127.0.0.1:8080" }, want: "publicApi.address"},
+		{name: "gameplay 与诊断端口冲突", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.Address = "127.0.0.1:8081" }, want: "diagnostic.address"},
+		{name: "gameplay 本地明文暴露公网", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.Address = "0.0.0.0:8444" }, want: "loopback"},
+		{name: "gameplay 握手超过 frame", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.HandshakeBytes = 128 * 1024 }, want: "handshake budget"},
+		{name: "gameplay queue 不足一个 frame", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.QueueBytes = 65536 }, want: "queue budget"},
+		{name: "gameplay deadline 逆序", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.KeepAlive = value.PublicAPI.GameplayTCP.IdleTimeout }, want: "deadlines"},
 	}
 	for _, test := range tests {
 		test := test
@@ -83,6 +89,9 @@ func TestPublicAPIEnvironmentOverridesAreExplicit(t *testing.T) {
 		"IHOMELAND_PASSWORD_HASH_CONCURRENCY":     "3",
 		"IHOMELAND_WSS_ALLOWED_HOSTS":             "control.example.test:9443",
 		"IHOMELAND_WSS_MAX_CONNECTIONS":           "2048",
+		"IHOMELAND_GAMEPLAY_TCP_ADDRESS":          "127.0.0.1:0",
+		"IHOMELAND_GAMEPLAY_TCP_MAX_CONNECTIONS":  "1024",
+		"IHOMELAND_GAMEPLAY_TCP_KEEPALIVE":        "10s",
 		"IHOMELAND_UNREGISTERED_PUBLIC_API_VALUE": "ignored",
 	}
 	settings, err := Load(path, func(key string) (string, bool) { value, ok := values[key]; return value, ok })
@@ -90,7 +99,8 @@ func TestPublicAPIEnvironmentOverridesAreExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if settings.PublicAPI.Address != "127.0.0.1:0" || settings.PublicAPI.Endpoints.WSS.Port != 9443 || settings.PublicAPI.Account.MaxConcurrentHashes != 3 ||
-		settings.PublicAPI.WebSocketControl.MaxConnections != 2048 || len(settings.PublicAPI.WebSocketControl.AllowedHosts) != 1 {
+		settings.PublicAPI.WebSocketControl.MaxConnections != 2048 || len(settings.PublicAPI.WebSocketControl.AllowedHosts) != 1 ||
+		settings.PublicAPI.GameplayTCP.Address != "127.0.0.1:0" || settings.PublicAPI.GameplayTCP.MaxConnections != 1024 || settings.PublicAPI.GameplayTCP.KeepAlive != 10*time.Second {
 		t.Fatalf("public API overrides not applied: %+v", settings.PublicAPI)
 	}
 

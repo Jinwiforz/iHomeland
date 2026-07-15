@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,9 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/buildinfo"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
+	commonv1 "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/common/v1"
+	visitv1 "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/visit/v1"
+	worldv1 "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/world/v1"
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
 	"github.com/jinwiforz/ihomeland/server/internal/protocol"
@@ -34,8 +38,11 @@ import (
 	storageplacement "github.com/jinwiforz/ihomeland/server/internal/storage/placement"
 	storagesession "github.com/jinwiforz/ihomeland/server/internal/storage/session"
 	storagevisitsession "github.com/jinwiforz/ihomeland/server/internal/storage/visitsession"
+	"github.com/jinwiforz/ihomeland/server/internal/transport/tcpgameplay"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
+	"github.com/jinwiforz/ihomeland/server/internal/worldadmission"
 	redisclient "github.com/redis/go-redis/v9"
+	"google.golang.org/protobuf/proto"
 )
 
 // TestStorageRequiredReadinessDrainingAndProcessRecovery 验证 storage 启动/运行失败、逆序关闭和新进程恢复。
@@ -96,54 +103,247 @@ func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
 	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "http-integration-admission-key-material")
 	diagnosticAddress, publicAddress := reserveAddress(t), reserveAddress(t)
 	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
+	certificatePath, privateKey := writeTestCertificate(t)
+	t.Setenv("IHOMELAND_TEST_TCP_PRIVATE_KEY", string(privateKey))
+	enableIntegrationTLS(t, configPath, certificatePath, "IHOMELAND_TEST_TCP_PRIVATE_KEY")
+	client := newIntegrationTLSClient(t, certificatePath)
+	gameplayTLS := newIntegrationTLSConfig(t, certificatePath)
 	ctx, stop := context.WithCancelCause(context.Background())
 	resultChannel := make(chan Result, 1)
 	go func() { resultChannel <- Run(ctx, integrationOptions(configPath)) }()
 	waitForReady(t, diagnosticAddress)
-	baseURL := "http://" + publicAddress
+	_, publicPort, err := net.SplitHostPort(publicAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "https://localhost:" + publicPort
+	request := func(method string, url string, body string, authorization string, status int) map[string]any {
+		return requestJSONWithClient(t, client, method, url, body, authorization, status)
+	}
+	requestIdempotent := func(method string, url string, body string, authorization string, key string, status int) map[string]any {
+		return requestJSONWithClientAndIdempotency(t, client, method, url, body, authorization, key, status)
+	}
 
-	requestJSON(t, http.MethodGet, baseURL+"/v1/version", "", "", http.StatusOK)
-	requestJSON(t, http.MethodGet, baseURL+"/v1/config", "", "", http.StatusOK)
-	visitor := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/register", `{"username":"http-visitor","password":"integration-password","displayName":"HTTP Visitor"}`, "", http.StatusCreated)
+	request(http.MethodGet, baseURL+"/v1/version", "", "", http.StatusOK)
+	request(http.MethodGet, baseURL+"/v1/config", "", "", http.StatusOK)
+	visitor := request(http.MethodPost, baseURL+"/v1/auth/register", `{"username":"http-visitor","password":"integration-password","displayName":"HTTP Visitor"}`, "", http.StatusCreated)
 	if visitor["tokens"] == nil {
 		t.Fatalf("register response omitted tokens: %#v", visitor)
 	}
-	loggedIn := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/login", `{"username":"http-visitor","password":"integration-password"}`, "", http.StatusOK)
+	loggedIn := request(http.MethodPost, baseURL+"/v1/auth/login", `{"username":"http-visitor","password":"integration-password"}`, "", http.StatusOK)
 	loginTokens := loggedIn["tokens"].(map[string]any)
-	refreshed := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/refresh", `{"refreshToken":"`+loginTokens["refreshToken"].(string)+`"}`, "", http.StatusOK)
+	refreshed := request(http.MethodPost, baseURL+"/v1/auth/refresh", `{"refreshToken":"`+loginTokens["refreshToken"].(string)+`"}`, "", http.StatusOK)
 	visitorAccess := refreshed["accessToken"].(string)
 	visitorAuthorization := "Bearer " + visitorAccess
-	requestJSON(t, http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
-	visitorBootstrap := requestJSON(t, http.MethodGet, baseURL+"/v1/world/bootstrap", "", visitorAuthorization, http.StatusOK)
+	visitorTicket := request(http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
+	visitorBootstrap := request(http.MethodGet, baseURL+"/v1/world/bootstrap", "", visitorAuthorization, http.StatusOK)
 
-	owner := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/register", `{"username":"http-owner","password":"integration-password","displayName":"HTTP Owner"}`, "", http.StatusCreated)
+	owner := request(http.MethodPost, baseURL+"/v1/auth/register", `{"username":"http-owner","password":"integration-password","displayName":"HTTP Owner"}`, "", http.StatusCreated)
 	ownerTokens := owner["tokens"].(map[string]any)
 	ownerAccess := ownerTokens["accessToken"].(string)
 	ownerAuthorization := "Bearer " + ownerAccess
-	ownerBootstrap := requestJSON(t, http.MethodGet, baseURL+"/v1/world/bootstrap", "", ownerAuthorization, http.StatusOK)
+	ownerBootstrap := request(http.MethodGet, baseURL+"/v1/world/bootstrap", "", ownerAuthorization, http.StatusOK)
 
 	visitID, inviteID, revision := seedHTTPVisit(t, visitorBootstrap, ownerBootstrap, visitorAccess, ownerAccess)
+	ownerTicket := request(http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, ownerAuthorization, http.StatusCreated)
+	ownerAdmission := requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", `{"kind":"OWN_WORLD"}`, ownerAuthorization, "integration-own-admission-1", http.StatusCreated)
+	exerciseTCPOwnWorld(t, gameplayTLS, ownerTicket, ownerAdmission, ownerBootstrap)
 	acceptPath := baseURL + "/v1/visits/" + visitID + "/invites/" + inviteID + "/accept"
 	acceptBody := fmt.Sprintf(`{"expectedRevision":%d}`, revision)
-	accepted := requestJSONWithIdempotency(t, http.MethodPost, acceptPath, acceptBody, visitorAuthorization, "integration-accept-key-01", http.StatusOK)
-	replayed := requestJSONWithIdempotency(t, http.MethodPost, acceptPath, acceptBody, visitorAuthorization, "integration-accept-key-01", http.StatusOK)
+	accepted := requestIdempotent(http.MethodPost, acceptPath, acceptBody, visitorAuthorization, "integration-accept-key-01", http.StatusOK)
+	replayed := requestIdempotent(http.MethodPost, acceptPath, acceptBody, visitorAuthorization, "integration-accept-key-01", http.StatusOK)
 	if fmt.Sprint(accepted) != fmt.Sprint(replayed) {
 		t.Fatalf("accept replay drifted: first=%#v replay=%#v", accepted, replayed)
 	}
-	requestJSONWithIdempotency(t, http.MethodPost, acceptPath, fmt.Sprintf(`{"expectedRevision":%d}`, revision+1), visitorAuthorization, "integration-accept-key-01", http.StatusConflict)
+	requestIdempotent(http.MethodPost, acceptPath, fmt.Sprintf(`{"expectedRevision":%d}`, revision+1), visitorAuthorization, "integration-accept-key-01", http.StatusConflict)
 	admissionBody := `{"kind":"VISIT_WORLD","visitSessionId":"` + visitID + `"}`
-	issuedAdmission := requestJSONWithIdempotency(t, http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-1", http.StatusCreated)
-	replayedAdmission := requestJSONWithIdempotency(t, http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-1", http.StatusCreated)
+	issuedAdmission := requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-1", http.StatusCreated)
+	replayedAdmission := requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-1", http.StatusCreated)
 	if issuedAdmission["credential"] != replayedAdmission["credential"] || issuedAdmission["expiresAtMs"] != replayedAdmission["expiresAtMs"] {
 		t.Fatalf("admission replay drifted: first=%#v replay=%#v", issuedAdmission, replayedAdmission)
 	}
-	requestJSON(t, http.MethodPost, baseURL+"/v1/auth/logout", "", visitorAuthorization, http.StatusNoContent)
-	requestJSON(t, http.MethodGet, baseURL+"/v1/world/bootstrap", "", visitorAuthorization, http.StatusUnauthorized)
+	gameplayConnection := exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, accepted, visitID)
+	reconnectRevision := transitionHTTPVisitorToReconnect(t, visitorAccess, ownerBootstrap, visitID)
+	_ = gameplayConnection.Close()
+	reconnectTicket := request(http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
+	reconnectAdmission := requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-reconnect-admission-1", http.StatusCreated)
+	if reconnectAdmission["purpose"] != "RECONNECT" {
+		t.Fatalf("reconnect admission purpose=%v", reconnectAdmission["purpose"])
+	}
+	gameplayConnection = exerciseTCPReconnect(t, gameplayTLS, reconnectTicket, reconnectAdmission, reconnectRevision, visitID)
+	request(http.MethodPost, baseURL+"/v1/auth/logout", "", visitorAuthorization, http.StatusNoContent)
+	_ = gameplayConnection.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := gameplayConnection.Read(make([]byte, 1)); err == nil {
+		t.Fatal("logout did not close old TCP gameplay connection")
+	}
+	_ = gameplayConnection.Close()
+	request(http.MethodGet, baseURL+"/v1/world/bootstrap", "", visitorAuthorization, http.StatusUnauthorized)
 
 	stop(ErrSignalShutdown)
 	if result := <-resultChannel; result.Kind != ResultClean {
 		t.Fatalf("public HTTP integration shutdown=%+v", result)
 	}
+}
+
+// exerciseTCPOwnWorld 穿过真实listener与双credential握手读取Owner的PersonalWorld快照。
+func exerciseTCPOwnWorld(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, bootstrap map[string]any) {
+	t.Helper()
+	connection := dialTCPGameplay(t, tlsConfig, ticket)
+	defer connection.Close()
+	preface, err := tcpgameplay.EncodePreface(ticket["ticket"].(string), admission["credential"].(string), worldadmission.PurposeOwnWorld)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind := commonv1.MessageKind_MESSAGE_KIND_REQUEST
+	envelope := commonv1.ReliableEnvelope_builder{
+		ProtocolVersion: proto.Uint32(1), MessageId: proto.Uint32(2000), Kind: &kind,
+		RequestId: bytes.Repeat([]byte{0x20}, 16), Sequence: proto.Uint64(1), TimestampMs: proto.Int64(time.Now().UnixMilli()),
+	}.Build()
+	writeTCPPrefaceAndEnvelope(t, connection, preface, envelope)
+	responseEnvelope, err := protocol.UnmarshalEnvelope(readTCPFrame(t, connection))
+	if err != nil || responseEnvelope.GetMessageId() != 2001 || responseEnvelope.GetKind() != commonv1.MessageKind_MESSAGE_KIND_RESPONSE || !bytes.Equal(responseEnvelope.GetRequestId(), envelope.GetRequestId()) {
+		t.Fatalf("unexpected TCP OWN_WORLD response: envelope=%v err=%v", responseEnvelope, err)
+	}
+	response := new(worldv1.WorldSnapshotResponse)
+	if err := proto.Unmarshal(responseEnvelope.GetPayload(), response); err != nil {
+		t.Fatal(err)
+	}
+	world := bootstrap["world"].(map[string]any)
+	if response.GetSnapshot() == nil || response.GetSnapshot().GetWorld() == nil || response.GetSnapshot().GetWorld().GetPersonalWorldId() != world["personalWorldId"] {
+		t.Fatalf("TCP OWN_WORLD response target drifted: %v", response)
+	}
+}
+
+// exerciseTCPJoin 穿过真实listener、Redis ticket/admission与VisitSession store执行一次JOIN。
+func exerciseTCPJoin(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, accepted map[string]any, visitID string) net.Conn {
+	t.Helper()
+	connection := dialTCPGameplay(t, tlsConfig, ticket)
+	preface, err := tcpgameplay.EncodePreface(ticket["ticket"].(string), admission["credential"].(string), worldadmission.PurposeJoin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := accepted["reservation"].(map[string]any)
+	command := visitv1.VisitJoinCommand_builder{
+		AdmissionCredential: proto.String(admission["credential"].(string)),
+		ExpectedRevision:    proto.Uint64(uint64(reservation["revision"].(float64))),
+	}.Build()
+	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind := commonv1.MessageKind_MESSAGE_KIND_COMMAND
+	envelope := commonv1.ReliableEnvelope_builder{
+		ProtocolVersion: proto.Uint32(1), MessageId: proto.Uint32(2109), Kind: &kind,
+		CommandId: bytes.Repeat([]byte{0x21}, 16), Sequence: proto.Uint64(1), TimestampMs: proto.Int64(time.Now().UnixMilli()), Payload: payload,
+	}.Build()
+	// 单次write故意合并preface与首个业务frame，验证server不会把TCP read边界当作消息边界。
+	writeTCPPrefaceAndEnvelope(t, connection, preface, envelope)
+	responseBytes := readTCPFrame(t, connection)
+	responseEnvelope, err := protocol.UnmarshalEnvelope(responseBytes)
+	if err != nil || responseEnvelope.GetMessageId() != 2110 || responseEnvelope.GetKind() != commonv1.MessageKind_MESSAGE_KIND_RESPONSE || !bytes.Equal(responseEnvelope.GetCommandId(), envelope.GetCommandId()) {
+		t.Fatalf("unexpected TCP JOIN response: envelope=%v err=%v", responseEnvelope, err)
+	}
+	response := new(visitv1.VisitJoinResponse)
+	if err := proto.Unmarshal(responseEnvelope.GetPayload(), response); err != nil {
+		t.Fatal(err)
+	}
+	if response.GetResult() == nil || response.GetResult().GetSnapshot() == nil || response.GetResult().GetSnapshot().GetVisitSessionId() != visitID {
+		t.Fatalf("TCP JOIN response target drifted: %v", response)
+	}
+	foundVisitor := false
+	for _, visitor := range response.GetResult().GetSnapshot().GetVisitors() {
+		if visitor.GetState() == visitv1.VisitMembershipState_VISIT_MEMBERSHIP_STATE_JOINED {
+			foundVisitor = true
+		}
+	}
+	if !foundVisitor {
+		t.Fatal("TCP JOIN response omitted joined visitor")
+	}
+	return connection
+}
+
+// exerciseTCPReconnect 使用新ticket与RECONNECT admission恢复Visitor binding。
+func exerciseTCPReconnect(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, revision uint64, visitID string) net.Conn {
+	t.Helper()
+	connection := dialTCPGameplay(t, tlsConfig, ticket)
+	preface, err := tcpgameplay.EncodePreface(ticket["ticket"].(string), admission["credential"].(string), worldadmission.PurposeReconnect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := visitv1.VisitReconnectCommand_builder{
+		AdmissionCredential: proto.String(admission["credential"].(string)),
+		ExpectedRevision:    proto.Uint64(revision),
+	}.Build()
+	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind := commonv1.MessageKind_MESSAGE_KIND_COMMAND
+	envelope := commonv1.ReliableEnvelope_builder{
+		ProtocolVersion: proto.Uint32(1), MessageId: proto.Uint32(2115), Kind: &kind,
+		CommandId: bytes.Repeat([]byte{0x22}, 16), Sequence: proto.Uint64(1), TimestampMs: proto.Int64(time.Now().UnixMilli()), Payload: payload,
+	}.Build()
+	writeTCPPrefaceAndEnvelope(t, connection, preface, envelope)
+	responseEnvelope, err := protocol.UnmarshalEnvelope(readTCPFrame(t, connection))
+	if err != nil || responseEnvelope.GetMessageId() != 2116 || responseEnvelope.GetKind() != commonv1.MessageKind_MESSAGE_KIND_RESPONSE || !bytes.Equal(responseEnvelope.GetCommandId(), envelope.GetCommandId()) {
+		t.Fatalf("unexpected TCP RECONNECT response: envelope=%v err=%v", responseEnvelope, err)
+	}
+	response := new(visitv1.VisitReconnectResponse)
+	if err := proto.Unmarshal(responseEnvelope.GetPayload(), response); err != nil {
+		t.Fatal(err)
+	}
+	if response.GetResult() == nil || response.GetResult().GetSnapshot() == nil || response.GetResult().GetSnapshot().GetVisitSessionId() != visitID {
+		t.Fatalf("TCP RECONNECT response target drifted: %v", response)
+	}
+	return connection
+}
+
+// dialTCPGameplay 使用ticket公开的受信advertised endpoint连接真实gameplay listener。
+func dialTCPGameplay(t *testing.T, tlsConfig *tls.Config, ticket map[string]any) net.Conn {
+	t.Helper()
+	endpoint := ticket["endpoint"].(map[string]any)
+	address := net.JoinHostPort(endpoint["host"].(string), fmt.Sprintf("%.0f", endpoint["port"].(float64)))
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	connection, err := tls.DialWithDialer(dialer, "tcp", address, tlsConfig.Clone())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return connection
+}
+
+// writeTCPPrefaceAndEnvelope 在一个write中验证preface与首个业务frame的粘包解析。
+func writeTCPPrefaceAndEnvelope(t *testing.T, connection net.Conn, preface []byte, envelope *commonv1.ReliableEnvelope) {
+	t.Helper()
+	encoded, err := protocol.MarshalEnvelope(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := protocol.EncodeFrame(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Write(append(preface, frame...)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// readTCPFrame 有界读取单个4-byte大端length-prefixed response。
+func readTCPFrame(t *testing.T, connection net.Conn) []byte {
+	t.Helper()
+	_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var prefix [4]byte
+	if _, err := io.ReadFull(connection, prefix[:]); err != nil {
+		t.Fatal(err)
+	}
+	length := binary.BigEndian.Uint32(prefix[:])
+	if length == 0 || length > protocol.MaximumFrameSize {
+		t.Fatalf("invalid TCP response frame length %d", length)
+	}
+	payload := make([]byte, int(length))
+	if _, err := io.ReadFull(connection, payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload
 }
 
 // TestPublicWebSocketControlConsumesTicketAndInvalidates 验证真实Redis ticket、WSS upgrade、重放拒绝与logout关闭。
@@ -156,7 +356,7 @@ func TestPublicWebSocketControlConsumesTicketAndInvalidates(t *testing.T) {
 	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
 	certificatePath, privateKey := writeTestCertificate(t)
 	t.Setenv("IHOMELAND_TEST_WSS_PRIVATE_KEY", string(privateKey))
-	enableIntegrationTLS(t, configPath, certificatePath)
+	enableIntegrationTLS(t, configPath, certificatePath, "IHOMELAND_TEST_WSS_PRIVATE_KEY")
 	client := newIntegrationTLSClient(t, certificatePath)
 	ctx, stop := context.WithCancelCause(context.Background())
 	resultChannel := make(chan Result, 1)
@@ -398,6 +598,85 @@ func seedHTTPVisit(t *testing.T, visitorBootstrap map[string]any, ownerBootstrap
 	return created.Snapshot().ID().Value(), created.Invite().ID().Value(), uint64(created.Snapshot().Revision())
 }
 
+// transitionHTTPVisitorToReconnect 通过production store建立真实reconnecting事实，供TCP恢复wire验收使用。
+// 当前切片尚未把socket close编排为VisitSession command，因此测试显式执行该application边界。
+func transitionHTTPVisitorToReconnect(t *testing.T, visitorAccess string, ownerBootstrap map[string]any, visitID string) uint64 {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client := openHTTPIntegrationRedis(t)
+	defer func() { _ = client.Close() }()
+	keyspace, err := storageall.NewRedisKeyspace("local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := config.Default().PublicAPI
+	observer := integrationStorageObserver{}
+	sessionStore, err := storagesession.New(client, keyspace, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wss, _ := session.NewEndpoint(session.ChannelWSS, policy.Endpoints.WSS.Host, uint16(policy.Endpoints.WSS.Port))
+	tlsTCP, _ := session.NewEndpoint(session.ChannelTLSTCP, policy.Endpoints.TLSTCP.Host, uint16(policy.Endpoints.TLSTCP.Port))
+	endpoints, _ := session.NewStaticEndpointProvider(wss, tlsTCP)
+	sessionPolicy, _ := session.NewPolicy(policy.Session.TicketTTL, policy.Session.AccessTTL, policy.Session.RefreshTTL, policy.Session.SessionTTL)
+	sessions, err := session.NewService(sessionStore, endpoints, session.NoActiveRealtimeConnections{}, SystemClock{}, RandomIDGenerator{}, session.CryptoSecretGenerator{}, sessionPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := sessions.AuthenticateHTTPS(ctx, visitorAccess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visitStore, err := storagevisitsession.New(client, keyspace, SystemClock{}, policy.VisitSession.ReplayRetention, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capacity, _ := visitsession.NewCapacity(uint8(policy.VisitSession.Capacity))
+	visitPolicy, _ := visitsession.NewPolicy(capacity, policy.VisitSession.SessionLifetime, policy.VisitSession.InviteLifetime, policy.VisitSession.ReservationLifetime, policy.VisitSession.OwnerGrace, policy.VisitSession.VisitorReconnectGrace)
+	visits, err := visitsession.NewService(visitStore, integrationOwnedWorldReader{}, integrationAssignmentReader{}, SystemClock{}, RandomIDGenerator{}, visitPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worldID, err := personalworld.NewPersonalWorldID(ownerBootstrap["world"].(map[string]any)["personalWorldId"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, found, err := visits.ResolveActive(ctx, worldID)
+	if err != nil || !found || snapshot.ID().Value() != visitID {
+		t.Fatalf("resolve reconnect visit: found=%v snapshot=%v err=%v", found, snapshot.Valid(), err)
+	}
+	playerID, err := account.NewPlayerID(authenticated.AuthContext().Principal().PlayerID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bindingID visitsession.ConnectionBindingID
+	for _, membership := range snapshot.Memberships() {
+		if membership.VisitorID() == playerID && membership.State() == visitsession.MembershipStateJoined {
+			bindingID = membership.BindingID()
+			break
+		}
+	}
+	if !bindingID.Valid() {
+		t.Fatal("joined Visitor binding was not persisted before reconnect transition")
+	}
+	commandID, _ := visitsession.NewCommandID("vcmd_httpIntegrationDisconnect")
+	result, err := visits.VisitorDisconnect(ctx, authenticated.AuthContext(), snapshot.ID(), bindingID, time.Now().UTC().Add(30*time.Second), snapshot.Revision(), commandID)
+	if err != nil {
+		t.Fatalf("transition Visitor to reconnecting: err=%v", err)
+	}
+	reconnecting := false
+	for _, membership := range result.Snapshot().Memberships() {
+		if membership.VisitorID() == playerID && membership.State() == visitsession.MembershipStateReconnecting {
+			reconnecting = true
+		}
+	}
+	if !reconnecting {
+		t.Fatal("Visitor disconnect did not persist reconnecting membership")
+	}
+	return uint64(result.Snapshot().Revision())
+}
+
 // openHTTPIntegrationDB 使用harness file secret连接隔离MySQL。
 func openHTTPIntegrationDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -500,6 +779,7 @@ func integrationOptions(configPath string) Options {
 func writeIntegrationConfig(t *testing.T, diagnosticAddress string, publicAddress string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "server.yaml")
+	gameplayAddress := reserveAddress(t)
 	body := fmt.Sprintf(`environment: local
 runtime:
   startupTimeout: 3s
@@ -512,11 +792,18 @@ publicApi:
     wss:
       host: 127.0.0.1
       port: %s
+    tlsTcp:
+      host: 127.0.0.1
+      port: %s
   websocketControl:
     allowedHosts:
       - %s
       - localhost:%s
     closeTimeout: 200ms
+  gameplayTcp:
+    address: %s
+    closeTimeout: 200ms
+    shutdownTimeout: 1s
 storage:
   mysql:
     address: %s
@@ -532,14 +819,14 @@ storage:
       interval: 100ms
       timeout: 50ms
       failureThreshold: 2
-`, diagnosticAddress, publicAddress, integrationPort(t, publicAddress), publicAddress, integrationPort(t, publicAddress), os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
+`, diagnosticAddress, publicAddress, integrationPort(t, publicAddress), integrationPort(t, gameplayAddress), publicAddress, integrationPort(t, publicAddress), gameplayAddress, os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-// integrationPort 返回临时public listener端口，保证advertised WSS endpoint与实际入口一致。
+// integrationPort 返回临时listener端口，保证advertised WSS/TLS_TCP endpoint与实际入口一致。
 func integrationPort(t *testing.T, address string) string {
 	t.Helper()
 	_, port, err := net.SplitHostPort(address)
@@ -557,15 +844,15 @@ func integrationResponseStatus(response *http.Response) int {
 	return response.StatusCode
 }
 
-// enableIntegrationTLS 将临时identity接入单条storage/WSS进程配置。
-func enableIntegrationTLS(t *testing.T, path string, certificatePath string) {
+// enableIntegrationTLS 将临时identity接入单条storage公开进程及gameplay TCP配置。
+func enableIntegrationTLS(t *testing.T, path string, certificatePath string, privateKeyEnvironment string) {
 	t.Helper()
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	marker := []byte("publicApi:\n")
-	tlsPolicy := []byte(fmt.Sprintf("publicApi:\n  tls:\n    enabled: true\n    certificateFile: '%s'\n    privateKeySecret: env:IHOMELAND_TEST_WSS_PRIVATE_KEY\n", strings.ReplaceAll(certificatePath, "'", "''")))
+	tlsPolicy := []byte(fmt.Sprintf("publicApi:\n  tls:\n    enabled: true\n    certificateFile: '%s'\n    privateKeySecret: env:%s\n", strings.ReplaceAll(certificatePath, "'", "''"), privateKeyEnvironment))
 	updated := bytes.Replace(body, marker, tlsPolicy, 1)
 	if bytes.Equal(updated, body) {
 		t.Fatal("publicApi marker is missing from integration config")
@@ -578,6 +865,12 @@ func enableIntegrationTLS(t *testing.T, path string, certificatePath string) {
 // newIntegrationTLSClient 只信任本测试临时自签名证书并强制TLS 1.3。
 func newIntegrationTLSClient(t *testing.T, certificatePath string) *http.Client {
 	t.Helper()
+	return &http.Client{Transport: &http.Transport{TLSClientConfig: newIntegrationTLSConfig(t, certificatePath)}, Timeout: 5 * time.Second}
+}
+
+// newIntegrationTLSConfig 只信任本测试临时自签名证书并强制TLS 1.3与localhost identity。
+func newIntegrationTLSConfig(t *testing.T, certificatePath string) *tls.Config {
+	t.Helper()
 	certificate, err := os.ReadFile(certificatePath)
 	if err != nil {
 		t.Fatal(err)
@@ -586,8 +879,7 @@ func newIntegrationTLSClient(t *testing.T, certificatePath string) *http.Client 
 	if !roots.AppendCertsFromPEM(certificate) {
 		t.Fatal("append integration certificate failed")
 	}
-	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, ServerName: "localhost"}}
-	return &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	return &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, ServerName: "localhost"}
 }
 
 // reserveAddress 让 OS 选择 loopback 端口后立即释放，供单进程 listener rollback 验收使用。

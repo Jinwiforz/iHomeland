@@ -162,6 +162,8 @@ Route Registry 的字段与通道选择原则由 `docs/network-transport-archite
 
 WSS control 只发送 registry 登记的 9 类 `SERVER_TO_CLIENT/PUSH`，每条消息使用 deterministic payload 和 protocol version 1 `ReliableEnvelope`，且完整 envelope 同时满足 route `maxSize` 与全局 realtime frame 上限。每连接 sequence 从 1 单调递增，push 不携带 request/command correlation；unknown message、错误 generated payload 类型、TLS/TCP route 或客户端 application frame 必须 fail closed。
 
+TLS/TCP gameplay 在 `ReliableEnvelope` stream 前使用版本化 `IHTP` authentication preface。preface 使用独立 4-byte big-endian frame、固定 ticket/admission 语法和封闭 purpose，不登记业务 message ID；格式基线由 `shared/contracts/fixtures/realtime/tcp-preface.json` 持有。后续 stream 只接受 registry 中 2000-2002、2103-2122 的精确 TLS_TCP route：C2S REQUEST/COMMAND 与 S2C RESPONSE/ERROR/PUSH 不能调换方向、kind、correlation 或 generated payload type。response/error 必须回显原 request/command identity，push 不携带 correlation。
+
 ## World/Visit 公开投影与 credential 分层
 
 - Client-safe assignment 只公开 PersonalWorldID、WorldInstanceID、TLS/TCP endpoint、generation 与 lease expiry；RuntimeNodeID、FencingToken 和完整 AssignmentStamp 只保留在服务端 binding。

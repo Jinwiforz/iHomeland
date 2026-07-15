@@ -290,6 +290,61 @@ func TestRegistryStopClosesConnectionsInParallel(t *testing.T) {
 	}
 }
 
+// TestRegistryStopWaitsForReservedHandshake 验证关闭快照不会漏掉已经取得预算但尚未完成upgrade的连接。
+func TestRegistryStopWaitsForReservedHandshake(t *testing.T) {
+	registry := newTestRegistry(t, testConfig())
+	reserved, err := registry.reserve("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopResult := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		stopResult <- registry.Stop(ctx)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		registry.mu.Lock()
+		draining := registry.draining
+		registry.mu.Unlock()
+		if draining {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("registry did not enter draining state")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-stopResult:
+		t.Fatalf("shutdown returned before reserved handshake completed: %v", err)
+	default:
+	}
+	if _, err := registry.PublishConnection("reserved", 500, controlv1.MaintenancePush_builder{}.Build()); !errors.Is(err, ErrRegistryStopped) {
+		t.Fatalf("PublishConnection during draining error=%v", err)
+	}
+
+	socket := newTestSocket()
+	if _, err := registry.register(reserved, "ses_handshake", "ply_handshake", 1, socket); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-stopResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not complete after reserved handshake registered")
+	}
+	select {
+	case <-socket.closed:
+	default:
+		t.Fatal("connection committed during draining was omitted from graceful close")
+	}
+}
+
 // mustSessionID 构造测试session索引键。
 func mustSessionID(t *testing.T, value string) session.SessionID {
 	t.Helper()

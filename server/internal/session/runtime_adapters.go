@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"sync"
 )
 
 // StaticEndpointProvider 公开启动时已验证且之后不可变的 realtime endpoint manifest。
@@ -51,4 +52,54 @@ func (NoActiveRealtimeConnections) Invalidate(_ context.Context, invalidation In
 		return errors.New("session invalidation is incomplete")
 	}
 	return nil
+}
+
+// CompositeConnectionInvalidator 在同一context内并行通知全部transport registry。
+//
+// 一个通道失败不会跳过另一个通道；返回值聚合owner错误，调用方不得据此回滚已提交epoch。
+type CompositeConnectionInvalidator struct {
+	// invalidators 是构图时冻结且非空的transport owner集合。
+	invalidators []ConnectionInvalidator
+}
+
+// NewCompositeConnectionInvalidator 拒绝空集合与nil owner，避免静默遗漏某个实时通道。
+func NewCompositeConnectionInvalidator(invalidators ...ConnectionInvalidator) (*CompositeConnectionInvalidator, error) {
+	if len(invalidators) < 2 {
+		return nil, errors.New("composite connection invalidator requires at least two owners")
+	}
+	copyValues := append([]ConnectionInvalidator(nil), invalidators...)
+	for _, invalidator := range copyValues {
+		if invalidator == nil {
+			return nil, errors.New("composite connection invalidator contains nil owner")
+		}
+	}
+	return &CompositeConnectionInvalidator{invalidators: copyValues}, nil
+}
+
+// Invalidate 并行尝试全部owner并等待共享deadline，顺序不影响是否被调用。
+func (composite *CompositeConnectionInvalidator) Invalidate(ctx context.Context, invalidation Invalidation) error {
+	if composite == nil || ctx == nil || !invalidation.SessionID.Valid() || !invalidation.Epoch.Valid() || invalidation.Reason == InvalidationReasonUnspecified {
+		return errors.New("composite connection invalidation is invalid")
+	}
+	results := make(chan error, len(composite.invalidators))
+	var started sync.WaitGroup
+	started.Add(len(composite.invalidators))
+	for _, invalidator := range composite.invalidators {
+		owner := invalidator
+		go func() {
+			started.Done()
+			results <- owner.Invalidate(ctx, invalidation)
+		}()
+	}
+	started.Wait()
+	var result error
+	for range composite.invalidators {
+		select {
+		case err := <-results:
+			result = errors.Join(result, err)
+		case <-ctx.Done():
+			return errors.Join(result, context.Cause(ctx))
+		}
+	}
+	return result
 }
