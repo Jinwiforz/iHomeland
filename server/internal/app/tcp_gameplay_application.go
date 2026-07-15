@@ -32,6 +32,21 @@ type gameplayAssignmentReader interface {
 	Resolve(context.Context, personalworld.PersonalWorldID, time.Time) (placement.AssignmentSnapshot, placement.ResolveOutcome, error)
 }
 
+// visitResultCoordinator 统一消费已经提交或读取到的 VisitSession 事实。
+//
+// 回调发生在领域 owner 返回成功之后，因此实现不得把投递失败反向伪装成 command 失败；
+// deadline、通知和 safe-return 必须依赖 result 中的权威 snapshot 幂等收敛。
+type visitResultCoordinator interface {
+	// OpenCommitted 消费首次创建或幂等解析的 active snapshot。
+	OpenCommitted(context.Context, visitsession.OpenResult)
+	// OwnerOpened 防止新连接抢占仍存活的 Owner binding，并恢复已失联旧 binding。
+	OwnerOpened(context.Context, session.AuthContext, string, visitsession.OpenResult) (visitsession.Snapshot, error)
+	// MutationCommitted 消费首次提交或幂等 replay 的完整结果。
+	MutationCommitted(context.Context, visitsession.MutationResult)
+	// SnapshotResolved 对只读边界执行 lazy deadline reconciliation。
+	SnapshotResolved(context.Context, visitsession.Snapshot)
+}
+
 // tcpGameplayApplication 把transport逐operation端口适配到既有领域owner。
 type tcpGameplayApplication struct {
 	// worlds 只读PersonalWorld持久事实，不拥有repository生命周期。
@@ -40,6 +55,8 @@ type tcpGameplayApplication struct {
 	assignments gameplayAssignmentReader
 	// visits 是VisitSession mutation与replay唯一owner。
 	visits *visitsession.Service
+	// results 在事实提交后统一登记deadline并投递跨通道副作用。
+	results visitResultCoordinator
 	// endpoint 是受信advertised TLS_TCP投影。
 	endpoint session.Endpoint
 	// clock 与领域service共享绝对时间来源。
@@ -47,11 +64,11 @@ type tcpGameplayApplication struct {
 }
 
 // newTCPGameplayApplication 构造无socket、无缓存且不启动任务的application bridge。
-func newTCPGameplayApplication(worlds gameplayWorldReader, assignments gameplayAssignmentReader, visits *visitsession.Service, endpoint session.Endpoint, clock Clock) (*tcpGameplayApplication, error) {
-	if worlds == nil || assignments == nil || visits == nil || !endpoint.Valid() || endpoint.Channel() != session.ChannelTLSTCP || clock == nil {
+func newTCPGameplayApplication(worlds gameplayWorldReader, assignments gameplayAssignmentReader, visits *visitsession.Service, results visitResultCoordinator, endpoint session.Endpoint, clock Clock) (*tcpGameplayApplication, error) {
+	if worlds == nil || assignments == nil || visits == nil || results == nil || !endpoint.Valid() || endpoint.Channel() != session.ChannelTLSTCP || clock == nil {
 		return nil, errors.New("tcp gameplay application dependencies are incomplete")
 	}
-	return &tcpGameplayApplication{worlds: worlds, assignments: assignments, visits: visits, endpoint: endpoint, clock: clock}, nil
+	return &tcpGameplayApplication{worlds: worlds, assignments: assignments, visits: visits, results: results, endpoint: endpoint, clock: clock}, nil
 }
 
 // WorldSnapshot 读取connection binding唯一世界并验证current assignment完整相等。
@@ -81,6 +98,7 @@ func (application *tcpGameplayApplication) VisitSnapshot(ctx context.Context, op
 	if err != nil {
 		return nil, err
 	}
+	application.results.SnapshotResolved(ctx, snapshot)
 	projected, err := application.projectVisit(ctx, snapshot)
 	if err != nil {
 		return nil, err
@@ -101,7 +119,11 @@ func (application *tcpGameplayApplication) VisitOpen(ctx context.Context, operat
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
-	projected, err := application.projectVisit(ctx, result.Snapshot())
+	snapshot, err := application.results.OwnerOpened(ctx, operation.Auth, operation.ConnectionID, result)
+	if err != nil {
+		return nil, err
+	}
+	projected, err := application.projectVisit(ctx, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +149,7 @@ func (application *tcpGameplayApplication) VisitCreateInvite(ctx context.Context
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
+	application.results.MutationCommitted(ctx, result)
 	projected, err := application.projectMutation(ctx, result)
 	if err != nil {
 		return nil, err
@@ -153,6 +176,7 @@ func (application *tcpGameplayApplication) VisitRevokeInvite(ctx context.Context
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
+	application.results.MutationCommitted(ctx, result)
 	projected, err := application.projectMutation(ctx, result)
 	if err != nil {
 		return nil, err
@@ -175,6 +199,7 @@ func (application *tcpGameplayApplication) VisitLeave(ctx context.Context, opera
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
+	application.results.MutationCommitted(ctx, result)
 	projected, err := application.projectMutation(ctx, result)
 	if err != nil {
 		return nil, err
@@ -196,6 +221,7 @@ func (application *tcpGameplayApplication) VisitKick(ctx context.Context, operat
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
+	application.results.MutationCommitted(ctx, result)
 	projected, err := application.projectMutation(ctx, result)
 	if err != nil {
 		return nil, err
@@ -222,6 +248,7 @@ func (application *tcpGameplayApplication) VisitClose(ctx context.Context, opera
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
+	application.results.MutationCommitted(ctx, result)
 	projected, err := application.projectMutation(ctx, result)
 	if err != nil {
 		return nil, err
@@ -248,6 +275,7 @@ func (application *tcpGameplayApplication) joinOrReconnect(ctx context.Context, 
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
+	application.results.MutationCommitted(ctx, result)
 	projected, err := application.projectMutation(ctx, result)
 	if err != nil {
 		return nil, err
@@ -283,19 +311,20 @@ func (application *tcpGameplayApplication) resolveVisit(ctx context.Context, ope
 		return visitsession.Snapshot{}, mapVisitError(err)
 	}
 	if !found || (binding.VisitSessionID().Valid() && snapshot.ID() != binding.VisitSessionID()) {
-		return visitsession.Snapshot{}, tcpgameplay.PublicError{Code: 2100, MessageKey: "error.visit.not_found"}
+		return visitsession.Snapshot{}, tcpgameplay.PublicError{Code: 2100, MessageKey: "error.visit.not_found", CloseConnection: true}
 	}
+	application.results.SnapshotResolved(ctx, snapshot)
 	return snapshot, nil
 }
 
 // binding 验证transport传入的只读上下文内部一致。
 func (application *tcpGameplayApplication) binding(operation tcpgameplay.OperationContext) (worldadmission.Binding, error) {
 	if operation.ConnectionID == "" || !operation.Auth.Valid() || !operation.Qualification.Valid() {
-		return worldadmission.Binding{}, forbiddenPublicError()
+		return worldadmission.Binding{}, tcpgameplay.PublicError{Code: 101, MessageKey: "error.auth.forbidden", CloseConnection: true}
 	}
 	binding := operation.Qualification.Binding()
 	if binding.PlayerID().String() != operation.Auth.Principal().PlayerID() || binding.SessionID() != operation.Auth.SessionID() || binding.Epoch() != operation.Auth.Epoch() || !binding.Endpoint().Equal(application.endpoint) {
-		return worldadmission.Binding{}, forbiddenPublicError()
+		return worldadmission.Binding{}, tcpgameplay.PublicError{Code: 101, MessageKey: "error.auth.forbidden", CloseConnection: true}
 	}
 	return binding, nil
 }
@@ -307,7 +336,7 @@ func (application *tcpGameplayApplication) currentAssignment(ctx context.Context
 		return placement.AssignmentSnapshot{}, dependencyPublicError()
 	}
 	if outcome != placement.ResolveOutcomeFound || !current.Valid() || !current.Stamp().Equal(binding.Assignment()) {
-		return placement.AssignmentSnapshot{}, tcpgameplay.PublicError{Code: 2002, MessageKey: "error.world.assignment_stale"}
+		return placement.AssignmentSnapshot{}, tcpgameplay.PublicError{Code: 2002, MessageKey: "error.world.assignment_stale", CloseConnection: true}
 	}
 	return current, nil
 }
@@ -338,7 +367,7 @@ func (application *tcpGameplayApplication) projectVisit(ctx context.Context, sna
 		return nil, dependencyPublicError()
 	}
 	if outcome != placement.ResolveOutcomeFound || !current.Valid() || !current.Stamp().Equal(snapshot.Assignment()) {
-		return nil, tcpgameplay.PublicError{Code: 2002, MessageKey: "error.world.assignment_stale"}
+		return nil, tcpgameplay.PublicError{Code: 2002, MessageKey: "error.world.assignment_stale", CloseConnection: true}
 	}
 	lifecycle := visitv1.VisitLifecycle(snapshot.Lifecycle())
 	visitors := make([]*visitv1.VisitVisitorSummary, 0, len(snapshot.Memberships()))
@@ -431,7 +460,7 @@ func mapVisitError(err error) error {
 		if domain.Operation() == visitsession.OperationRevokeInvite || domain.Operation() == visitsession.OperationAcceptInvite {
 			return tcpgameplay.PublicError{Code: 2101, MessageKey: "error.visit.invite_not_found"}
 		}
-		return tcpgameplay.PublicError{Code: 2100, MessageKey: "error.visit.not_found"}
+		return tcpgameplay.PublicError{Code: 2100, MessageKey: "error.visit.not_found", CloseConnection: true}
 	case visitsession.ErrorCodeInvalidState:
 		return tcpgameplay.PublicError{Code: 2104, MessageKey: "error.visit.state_conflict"}
 	case visitsession.ErrorCodeExpired:
@@ -448,7 +477,7 @@ func mapVisitError(err error) error {
 	case visitsession.ErrorCodeStale:
 		switch domain.Operation() {
 		case visitsession.OperationResolve, visitsession.OperationJoin, visitsession.OperationVisitorReconnect:
-			return tcpgameplay.PublicError{Code: 2002, MessageKey: "error.world.assignment_stale"}
+			return tcpgameplay.PublicError{Code: 2002, MessageKey: "error.world.assignment_stale", CloseConnection: true}
 		}
 		return tcpgameplay.PublicError{Code: 2105, MessageKey: "error.visit.revision_conflict"}
 	case visitsession.ErrorCodeRevisionConflict:
@@ -472,7 +501,7 @@ func forbiddenPublicError() error {
 	return tcpgameplay.PublicError{Code: 101, MessageKey: "error.auth.forbidden"}
 }
 
-// dependencyPublicError 返回不含backend文本的可重试依赖错误。
+// dependencyPublicError 返回不含 backend 文本的可重试错误，并关闭无法继续证明资格的旧 connection。
 func dependencyPublicError() error {
-	return tcpgameplay.PublicError{Code: 500, MessageKey: "error.dependency.unavailable", Retryable: true}
+	return tcpgameplay.PublicError{Code: 500, MessageKey: "error.dependency.unavailable", Retryable: true, CloseConnection: true}
 }

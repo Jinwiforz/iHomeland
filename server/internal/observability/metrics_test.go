@@ -63,7 +63,21 @@ func TestTCPGameplayMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveTCPQueue("accepted", 1, 128)
 	metrics.ObserveTCPPush(2122, "enqueued")
 	metrics.ObserveTCPClose("slow_consumer")
+	metrics.ObserveTCPClose("application_return")
+	metrics.ObserveTCPClose("fail_closed")
 	metrics.ObserveTCPInvalidation("closed")
+}
+
+// TestPersonalWorldSliceMetricLabelsAcceptFixedVocabulary 保护竖切资源与结果的封闭标签集合。
+func TestPersonalWorldSliceMetricLabelsAcceptFixedVocabulary(t *testing.T) {
+	t.Parallel()
+	metrics := NewMetrics()
+	metrics.SetWorldRuntimes(1)
+	metrics.SetSemanticDeadlines(2)
+	metrics.ObserveWorldLease("renewed")
+	metrics.ObserveSemanticDeadline("owner_grace", "executed")
+	metrics.ObserveVisitLifecycle("disconnect", "stale")
+	metrics.ObserveVisitDelivery("safe_return", "offline")
 }
 
 // TestTCPGameplayMetricLabelsRejectCredential 防止credential或动态target进入label。

@@ -103,6 +103,17 @@ func validateOwnerRanges(ranges []OwnerRange) error {
 	return nil
 }
 
+// tlsGameplayCommonErrorProfiles 固定TLS/TCP dispatcher可公开的通用错误。
+// 未被可靠业务通道使用的账号和票据错误不会进入运行时投影，避免扩大adapter可发送的协议面。
+var tlsGameplayCommonErrorProfiles = map[uint32]ErrorEntry{
+	1:   {Code: 1, Name: "PROTOCOL_INVALID_ENVELOPE", Owner: "common", Category: "PROTOCOL", MessageKey: "error.protocol.invalid_envelope", Retryable: false, HTTPStatus: 400},
+	101: {Code: 101, Name: "AUTH_FORBIDDEN", Owner: "session", Category: "AUTH", MessageKey: "error.auth.forbidden", Retryable: false, HTTPStatus: 403},
+	200: {Code: 200, Name: "VALIDATION_FAILED", Owner: "common", Category: "VALIDATION", MessageKey: "error.validation.failed", Retryable: false, HTTPStatus: 400},
+	400: {Code: 400, Name: "RATE_LIMITED", Owner: "common", Category: "RATE_LIMIT", MessageKey: "error.rate_limited", Retryable: true, HTTPStatus: 429},
+	500: {Code: 500, Name: "DEPENDENCY_UNAVAILABLE", Owner: "common", Category: "DEPENDENCY", MessageKey: "error.dependency.unavailable", Retryable: true, HTTPStatus: 503},
+	501: {Code: 501, Name: "INTERNAL_ERROR", Owner: "common", Category: "INTERNAL", MessageKey: "error.internal", Retryable: true, HTTPStatus: 500},
+}
+
 // worldVisitErrorProfiles 固定首批 world/visit public error 的完整恢复语义。
 var worldVisitErrorProfiles = map[uint32]ErrorEntry{
 	2000: {Code: 2000, Name: "WORLD_NOT_FOUND", Owner: "world", Category: "NOT_FOUND", MessageKey: "error.world.not_found", Retryable: false, HTTPStatus: 404},
@@ -122,6 +133,28 @@ var worldVisitErrorProfiles = map[uint32]ErrorEntry{
 	2107: {Code: 2107, Name: "VISIT_MEMBERSHIP_REQUIRED", Owner: "visit", Category: "AUTH", MessageKey: "error.visit.membership_required", Retryable: false, HTTPStatus: 403},
 	2108: {Code: 2108, Name: "VISIT_OWNER_UNAVAILABLE", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.owner_unavailable", Retryable: false, HTTPStatus: 409},
 	2109: {Code: 2109, Name: "VISIT_RECONNECT_EXPIRED", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.reconnect_expired", Retryable: false, HTTPStatus: 410},
+}
+
+// tlsGameplayErrorRegistry 按错误码升序构造TLS/TCP运行时允许公开的冻结错误投影。
+// 固定code缺少profile属于不可恢复的编程错误，因此构造阶段立即panic，禁止服务带着不完整目录启动。
+func tlsGameplayErrorRegistry() ErrorRegistry {
+	codes := [...]uint32{
+		1, 101, 200, 400, 500, 501,
+		2000, 2001, 2002, 2003, 2004, 2005, 2006,
+		2100, 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109,
+	}
+	registry := ErrorRegistry{SchemaVersion: registrySchemaVersion, Errors: make([]ErrorEntry, 0, len(codes))}
+	for _, code := range codes {
+		entry, exists := tlsGameplayCommonErrorProfiles[code]
+		if !exists {
+			entry, exists = worldVisitErrorProfiles[code]
+		}
+		if !exists {
+			panic(fmt.Sprintf("TLS/TCP public error profile %d is missing", code))
+		}
+		registry.Errors = append(registry.Errors, entry)
+	}
+	return registry
 }
 
 // validateWorldVisitErrors 拒绝首批稳定错误被改名、改 owner 或改变客户端恢复语义。

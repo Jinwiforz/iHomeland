@@ -53,8 +53,10 @@ type PublicError struct {
 	Code uint32
 	// MessageKey 必须与登记错误语义一致。
 	MessageKey string
-	// Retryable 决定客户端是否可保持输入稍后重试。
+	// Retryable 决定客户端是否可保持输入，并在必要的重连后稍后重试。
 	Retryable bool
+	// CloseConnection 要求唯一 writer 在安全错误写出后关闭已失效 target。
+	CloseConnection bool
 }
 
 // Error 返回固定文本，避免调用路径误把内部cause编码进payload。
@@ -86,13 +88,25 @@ func (dispatcher *Dispatcher) Dispatch(parent context.Context, entry *connection
 		return errors.New("tcp gameplay dispatch input is invalid")
 	}
 	startedAt := time.Now()
+	dispatchStarted := false
+	dispatchFinished := false
+	responseEnqueued := false
 	observe := func(outcome string) {
 		dispatcher.observer.ObserveTCPDispatch(message.route.MessageID, outcome, time.Since(startedAt))
 	}
 	defer func() {
 		if recover() != nil {
 			observe("panic")
-			err = dispatcher.enqueueError(entry, message, PublicError{Code: 501, MessageKey: "error.internal", Retryable: true})
+			enqueueErr := dispatcher.enqueueError(entry, message, PublicError{Code: 501, MessageKey: "error.internal", Retryable: true})
+			responseEnqueued = enqueueErr == nil
+			err = enqueueErr
+			if dispatchStarted && !dispatchFinished {
+				err = errors.Join(err, entry.finishDispatch(responseEnqueued))
+				dispatchFinished = true
+			}
+		}
+		if dispatchStarted && !dispatchFinished {
+			err = errors.Join(err, entry.finishDispatch(responseEnqueued))
 		}
 	}()
 	if err := dispatcher.authorizeState(entry, message.route.MessageID); err != nil {
@@ -113,6 +127,11 @@ func (dispatcher *Dispatcher) Dispatch(parent context.Context, entry *connection
 	deadline := time.Duration(message.route.TimeoutMS) * time.Millisecond
 	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
+	if err := entry.beginDispatch(); err != nil {
+		observe("state_rejected")
+		return err
+	}
+	dispatchStarted = true
 	operation := OperationContext{ConnectionID: entry.id, Auth: entry.auth, Qualification: entry.qualification}
 	responseID, response, callErr := dispatcher.call(ctx, entry, operation, message)
 	if callErr != nil {
@@ -123,14 +142,90 @@ func (dispatcher *Dispatcher) Dispatch(parent context.Context, entry *connection
 			public = PublicError{Code: 500, MessageKey: "error.dependency.unavailable", Retryable: true}
 		}
 		observe("application_error")
-		return dispatcher.enqueueError(entry, message, public)
+		enqueueErr := dispatcher.enqueueError(entry, message, public)
+		responseEnqueued = enqueueErr == nil
+		finishErr := entry.finishDispatch(responseEnqueued)
+		dispatchFinished = true
+		return errors.Join(enqueueErr, finishErr)
 	}
 	if err := entry.enqueue(responseID, response, message.correlation, nil); err != nil {
+		finishErr := entry.finishDispatch(false)
+		dispatchFinished = true
+		observe("queue_rejected")
+		return errors.Join(err, finishErr)
+	}
+	responseEnqueued = true
+	if err := entry.finishDispatch(true); err != nil {
+		dispatchFinished = true
 		observe("queue_rejected")
 		return err
 	}
+	dispatchFinished = true
 	observe("ok")
 	return nil
+}
+
+// beginDispatch 标记当前同步command，使自身safe-return延迟到response入队之后。
+func (entry *connection) beginDispatch() error {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.dispatching || len(entry.pendingPushes) != 0 {
+		return errors.New("tcp gameplay connection already dispatches a command")
+	}
+	entry.dispatching = true
+	return nil
+}
+
+// finishDispatch 清除同步 command 标记；仅在 response 已入队时原子追加暂存 PUSH。
+func (entry *connection) finishDispatch(flush bool) error {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if !entry.dispatching {
+		return nil
+	}
+	pending := entry.pendingPushes
+	entry.pendingPushes = nil
+	entry.pendingPushBytes = 0
+	entry.dispatching = false
+	if !flush {
+		return nil
+	}
+	var resultErr error
+	for _, push := range pending {
+		resultErr = errors.Join(resultErr, entry.enqueueLocked(push.messageID, push.payload, Correlation{}, nil, push.closeAfter))
+	}
+	return resultErr
+}
+
+// pendingDispatchPush 保存尚未分配S2C sequence的有界PUSH。
+type pendingDispatchPush struct {
+	// messageID 必须已经通过 publisher target 校验。
+	messageID uint32
+	// payload 是尚未分配 S2C sequence 的不可变消息。
+	payload proto.Message
+	// closeAfter 只允许safe-return在写出后关闭旧target。
+	closeAfter bool
+}
+
+// enqueuePush 在当前command执行期间延迟PUSH；其他时刻直接进入serialized writer队列。
+func (entry *connection) enqueuePush(messageID uint32, payload proto.Message, closeAfter bool) error {
+	entry.mu.Lock()
+	if entry.dispatching {
+		estimatedBytes := proto.Size(payload) + 256
+		if len(entry.pendingPushes) >= cap(entry.queue.items) || entry.pendingPushBytes+estimatedBytes > entry.queue.byteLimit {
+			entry.mu.Unlock()
+			return ErrQueueFull
+		}
+		entry.pendingPushes = append(entry.pendingPushes, pendingDispatchPush{messageID: messageID, payload: proto.Clone(payload), closeAfter: closeAfter})
+		entry.pendingPushBytes += estimatedBytes
+		entry.mu.Unlock()
+		return nil
+	}
+	entry.mu.Unlock()
+	if closeAfter {
+		return entry.enqueueAndClose(messageID, payload)
+	}
+	return entry.enqueue(messageID, payload, Correlation{}, nil)
 }
 
 // call 把每个message ID集中映射到唯一typed application method和response ID。
@@ -214,11 +309,15 @@ func (dispatcher *Dispatcher) authorizeState(entry *connection, messageID uint32
 
 // enqueueError 只编码登记code/key/retry语义，不包含application错误文本。
 func (dispatcher *Dispatcher) enqueueError(entry *connection, message DecodedMessage, public PublicError) error {
+	closeConnection := public.CloseConnection
 	registered, err := entryCodec(entry).catalog.LookupError(public.Code)
 	if err != nil || registered.MessageKey != public.MessageKey || registered.Retryable != public.Retryable {
-		public = PublicError{Code: 501, MessageKey: "error.internal", Retryable: true}
+		public = PublicError{Code: 501, MessageKey: "error.internal", Retryable: true, CloseConnection: closeConnection}
 	}
 	payload := commonv1.ErrorPayload_builder{Code: proto.Uint32(public.Code), MessageKey: proto.String(public.MessageKey), Retryable: proto.Bool(public.Retryable), RequestId: append([]byte(nil), message.correlation.RequestID...)}.Build()
+	if closeConnection {
+		return entry.enqueueErrorAndClose(message.route.MessageID+1, payload, message.correlation)
+	}
 	return entry.enqueueError(message.route.MessageID+1, payload, message.correlation, nil)
 }
 
@@ -264,11 +363,16 @@ func allowRoute(entry *connection, policy string, now time.Time) (bool, bool) {
 func (entry *connection) enqueue(messageID uint32, payload proto.Message, correlation Correlation, completion chan<- error) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	return entry.enqueueLocked(messageID, payload, correlation, completion, false)
+}
+
+// enqueueLocked 在 connection 临界区内分配 sequence；调用方必须已经持有 entry.mu。
+func (entry *connection) enqueueLocked(messageID uint32, payload proto.Message, correlation Correlation, completion chan<- error, closeAfter bool) error {
 	encoded, err := entryCodec(entry).Encode(messageID, payload, correlation, entry.nextServerSequence)
 	if err != nil {
 		return err
 	}
-	if err := entry.queue.tryPush(encoded, completion); err != nil {
+	if err := entry.queue.tryPushWithClose(encoded, completion, closeAfter); err != nil {
 		items, bytes := entry.queue.snapshot()
 		entry.observer.ObserveTCPQueue("rejected", items, bytes)
 		return err
@@ -279,15 +383,36 @@ func (entry *connection) enqueue(messageID uint32, payload proto.Message, correl
 	return nil
 }
 
+// enqueueAndClose 与普通push共享sequence，但让serialized writer成功写出后关闭旧target。
+func (entry *connection) enqueueAndClose(messageID uint32, payload proto.Message) error {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.enqueueLocked(messageID, payload, Correlation{}, nil, true)
+}
+
 // enqueueError 与普通response共享sequence与writer所有权。
 func (entry *connection) enqueueError(messageID uint32, payload *commonv1.ErrorPayload, correlation Correlation, completion chan<- error) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	return entry.enqueueErrorLocked(messageID, payload, correlation, completion, false)
+}
+
+// enqueueErrorAndClose 原子封闭失效 target，并让 writer 在安全错误写出后结束连接。
+func (entry *connection) enqueueErrorAndClose(messageID uint32, payload *commonv1.ErrorPayload, correlation Correlation) error {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	entry.state = ConnectionStateClosing
+	entry.closeClass = CloseClassInvalidated
+	return entry.enqueueErrorLocked(messageID, payload, correlation, nil, true)
+}
+
+// enqueueErrorLocked 在 connection 临界区内编码错误；调用方必须已经持有 entry.mu。
+func (entry *connection) enqueueErrorLocked(messageID uint32, payload *commonv1.ErrorPayload, correlation Correlation, completion chan<- error, closeAfter bool) error {
 	encoded, err := entryCodec(entry).EncodeError(messageID, payload, correlation, entry.nextServerSequence)
 	if err != nil {
 		return err
 	}
-	if err := entry.queue.tryPush(encoded, completion); err != nil {
+	if err := entry.queue.tryPushWithClose(encoded, completion, closeAfter); err != nil {
 		items, bytes := entry.queue.snapshot()
 		entry.observer.ObserveTCPQueue("rejected", items, bytes)
 		return err

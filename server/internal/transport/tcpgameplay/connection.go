@@ -20,12 +20,33 @@ var (
 	errTCPReadFailed        = errors.New("tcp gameplay read failed")
 	errTCPWriteFailed       = errors.New("tcp gameplay write failed")
 	errTCPLoopPanic         = errors.New("tcp gameplay loop panic")
+	errTCPApplicationReturn = errors.New("tcp gameplay application return")
+	errTCPFailClosed        = errors.New("tcp gameplay target failed closed")
 )
 
 // StartConnection 为已注册entry启动恰好一个reader与一个serialized writer owner。
 func (registry *Registry) StartConnection(entry *connection, dispatcher *Dispatcher) error {
 	if entry == nil || dispatcher == nil || entry.socket == nil {
 		return errors.New("tcp gameplay connection dependencies are incomplete")
+	}
+	view := LifecycleView{connectionID: entry.id, auth: entry.auth, binding: entry.qualification.Binding()}
+	registry.mu.Lock()
+	if registry.stopped || registry.connections[entry.id] != entry || entry.startRejected || entry.started {
+		registry.mu.Unlock()
+		return ErrConnectionNotFound
+	}
+	lifecycle := registry.lifecycle
+	registry.mu.Unlock()
+	if lifecycle != nil {
+		if !view.Valid() {
+			return errors.New("tcp gameplay lifecycle view is invalid")
+		}
+		lifecycleContext, cancel := context.WithTimeout(context.Background(), registry.config.Policy.CloseTimeout)
+		err := lifecycle.Connected(lifecycleContext, view)
+		cancel()
+		if err != nil {
+			return errors.New("tcp gameplay lifecycle connect rejected")
+		}
 	}
 	registry.mu.Lock()
 	if registry.stopped || registry.connections[entry.id] != entry || entry.startRejected || entry.started {
@@ -61,8 +82,16 @@ func (registry *Registry) runConnection(entry *connection, dispatcher *Dispatche
 	entry.queue.release()
 	entry.mu.Lock()
 	entry.state = ConnectionStateClosing
+	closeClass := entry.closeClass
 	entry.mu.Unlock()
 	registry.observer.ObserveTCPClose(stableCloseReason(first))
+	if registry.lifecycle != nil {
+		lifecycleContext, lifecycleCancel := context.WithTimeout(context.Background(), registry.config.Policy.CloseTimeout)
+		if err := registry.lifecycle.Disconnected(lifecycleContext, LifecycleView{connectionID: entry.id, auth: entry.auth, binding: entry.qualification.Binding()}, closeClass); err != nil {
+			registry.config.Logger.Warn("tcp gameplay lifecycle disconnect failed", "operation", "lifecycle_disconnect", "connection_id", entry.id, "outcome", "failed", "close_class", closeClass.String())
+		}
+		lifecycleCancel()
+	}
 }
 
 // readLoop 按frame prefix/payload分别设置idle与partial-frame deadline并同步dispatch。
@@ -145,6 +174,19 @@ func (registry *Registry) writeLoop(ctx context.Context, entry *connection) erro
 				return errTCPWriteFailed
 			}
 			registry.observer.ObserveTCPFrame("s2c", "sent", message.encoded.Size())
+			if message.closeAfter {
+				entry.mu.Lock()
+				closeClass := entry.closeClass
+				entry.mu.Unlock()
+				switch closeClass {
+				case CloseClassApplicationReturn:
+					return errTCPApplicationReturn
+				case CloseClassDraining:
+					return context.Canceled
+				default:
+					return errTCPFailClosed
+				}
+			}
 		}
 	}
 }
@@ -186,6 +228,10 @@ func stableCloseReason(err error) string {
 		return "rate_limited"
 	case errors.Is(err, errTCPLoopPanic):
 		return "panic"
+	case errors.Is(err, errTCPApplicationReturn):
+		return "application_return"
+	case errors.Is(err, errTCPFailClosed):
+		return "fail_closed"
 	case errors.Is(err, context.Canceled):
 		return "server_draining"
 	default:

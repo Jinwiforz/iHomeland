@@ -44,7 +44,7 @@ func mustVisitSessionID(t *testing.T, value string) visitsession.VisitSessionID 
 	return id
 }
 
-// TestBootstrapOwnWorldReturnsClientSafeAssignment 验证bootstrap允许world-only并隐藏node/fence。
+// TestBootstrapOwnWorldReturnsClientSafeAssignment 验证bootstrap必须激活runtime并隐藏node/fence。
 func TestBootstrapOwnWorldReturnsClientSafeAssignment(t *testing.T) {
 	fixture := newWorldEntryFixture(t)
 	service, err := NewService(fixture.worlds, fixture.assignments, fixture.visits, fixture.admissions, fixture.endpoints, fixture.clock, 30*time.Second)
@@ -58,10 +58,29 @@ func TestBootstrapOwnWorldReturnsClientSafeAssignment(t *testing.T) {
 	if result.Assignment.InstanceID != fixture.assignment.InstanceID().String() || result.Assignment.Generation != uint64(fixture.assignment.Generation()) {
 		t.Fatalf("assignment projection mismatch: %#v", result.Assignment)
 	}
-	fixture.assignments.outcome, fixture.assignments.snapshot = placement.ResolveOutcomeNotFound, placement.AssignmentSnapshot{}
+	fixture.assignments.snapshot = placement.AssignmentSnapshot{}
 	result, err = service.BootstrapOwnWorld(context.Background(), fixture.authenticated)
-	if err != nil || !result.Valid() || result.Assignment.Valid() {
-		t.Fatalf("world-only bootstrap=%#v err=%v", result, err)
+	if err == nil || result.Valid() {
+		t.Fatalf("missing assignment bootstrap=%#v err=%v", result, err)
+	}
+}
+
+// TestBootstrapObservesAssignmentAfterActivation 验证本次新建assignment不会被调用前时间误判为not-ready。
+func TestBootstrapObservesAssignmentAfterActivation(t *testing.T) {
+	fixture := newWorldEntryFixture(t)
+	fixture.assignments.onEnsure = func() {
+		fixture.clock.now = fixture.clock.now.Add(time.Millisecond)
+		stamp := fixture.assignment.Stamp()
+		fixture.assignment, _ = placement.NewAssignmentSnapshot(stamp, placement.PhaseActive, fixture.clock.now, fixture.clock.now.Add(time.Minute), fixture.clock.now)
+		fixture.assignments.snapshot = fixture.assignment
+	}
+	service, err := NewService(fixture.worlds, fixture.assignments, fixture.visits, fixture.admissions, fixture.endpoints, fixture.clock, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.BootstrapOwnWorld(context.Background(), fixture.authenticated)
+	if err != nil || !result.Valid() {
+		t.Fatalf("new assignment bootstrap=%v err=%v", result.Valid(), err)
 	}
 }
 
@@ -190,12 +209,25 @@ func (ensurer *fakeWorldEnsurer) EnsurePrimary(_ context.Context, ownerID accoun
 	return ensurer.snapshot, nil
 }
 
-// fakeAssignmentReader 返回可切换的placement outcome。
+// fakeAssignmentReader 返回可切换的placement activation与读取结果。
 type fakeAssignmentReader struct {
 	// snapshot 是预设current assignment。
 	snapshot placement.AssignmentSnapshot
 	// outcome 是预设封闭读取决议。
 	outcome placement.ResolveOutcome
+	// onEnsure 模拟activation期间绝对时间和snapshot推进。
+	onEnsure func()
+}
+
+// EnsureActive 返回预设activation结果；零值用于验证bootstrap fail closed。
+func (reader *fakeAssignmentReader) EnsureActive(context.Context, personalworld.PersonalWorldID) (placement.AssignmentSnapshot, error) {
+	if reader.onEnsure != nil {
+		reader.onEnsure()
+	}
+	if !reader.snapshot.Valid() {
+		return placement.AssignmentSnapshot{}, errors.New("assignment activation failed")
+	}
+	return reader.snapshot, nil
 }
 
 // Resolve 返回预设current事实。

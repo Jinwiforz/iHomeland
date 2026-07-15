@@ -51,8 +51,10 @@ func (adapter *PersonalWorldServiceAdapter) EnsurePrimary(ctx context.Context, o
 	return result.World().Snapshot(), nil
 }
 
-// AssignmentReader 是placement owner提供的current只读端口。
-type AssignmentReader interface {
+// AssignmentOwner 是world-entry消费的placement activation与current读取窄端口。
+type AssignmentOwner interface {
+	// EnsureActive 幂等确保本进程runtime ready且store已发布current active assignment。
+	EnsureActive(ctx context.Context, worldID personalworld.PersonalWorldID) (placement.AssignmentSnapshot, error)
 	// Resolve 返回observedAt时刻的current assignment事实。
 	Resolve(ctx context.Context, worldID personalworld.PersonalWorldID, observedAt time.Time) (placement.AssignmentSnapshot, placement.ResolveOutcome, error)
 }
@@ -82,7 +84,7 @@ type Service struct {
 	// worlds 提供持久primary world事实。
 	worlds WorldEnsurer
 	// assignments 提供current assignment与lease。
-	assignments AssignmentReader
+	assignments AssignmentOwner
 	// visits 提供reservation与membership资格。
 	visits VisitSessionOwner
 	// admissions 是opaque credential唯一owner。
@@ -96,14 +98,14 @@ type Service struct {
 }
 
 // NewService 校验world-entry全部真实owner端口与短期签发策略。
-func NewService(worlds WorldEnsurer, assignments AssignmentReader, visits VisitSessionOwner, admissions AdmissionIssuer, endpoints session.EndpointProvider, clock Clock, admissionLifetime time.Duration) (*Service, error) {
+func NewService(worlds WorldEnsurer, assignments AssignmentOwner, visits VisitSessionOwner, admissions AdmissionIssuer, endpoints session.EndpointProvider, clock Clock, admissionLifetime time.Duration) (*Service, error) {
 	if worlds == nil || assignments == nil || visits == nil || admissions == nil || endpoints == nil || clock == nil || admissionLifetime <= 0 || admissionLifetime > 5*time.Minute {
 		return nil, errors.New("world entry dependencies are incomplete")
 	}
 	return &Service{worlds: worlds, assignments: assignments, visits: visits, admissions: admissions, endpoints: endpoints, clock: clock, admissionLifetime: admissionLifetime}, nil
 }
 
-// BootstrapOwnWorld 幂等确保primary world并返回可选client-safe current assignment。
+// BootstrapOwnWorld 幂等确保primary world与本进程active runtime，并返回client-safe assignment。
 func (service *Service) BootstrapOwnWorld(ctx context.Context, authenticated session.AuthenticatedSession) (BootstrapResult, error) {
 	if service == nil || ctx == nil || !authenticated.Valid() {
 		return BootstrapResult{}, operationError(ErrorCodeValidation, nil)
@@ -116,31 +118,20 @@ func (service *Service) BootstrapOwnWorld(ctx context.Context, authenticated ses
 	if err != nil || !world.Valid() || world.OwnerID() != playerID || world.Lifecycle() != personalworld.LifecycleActive {
 		return BootstrapResult{}, dependencyError(err)
 	}
-	now := service.clock.Now().UTC().Truncate(time.Microsecond)
-	assignment, outcome, err := service.assignments.Resolve(ctx, world.ID(), now)
+	assignment, err := service.assignments.EnsureActive(ctx, world.ID())
 	if err != nil {
 		return BootstrapResult{}, dependencyError(err)
 	}
-	result := BootstrapResult{World: world}
-	switch outcome {
-	case placement.ResolveOutcomeNotFound:
-		if assignment.Valid() {
-			return BootstrapResult{}, operationError(ErrorCodeDependencyDefect, nil)
-		}
-	case placement.ResolveOutcomeFound:
-		if !assignment.Valid() || assignment.WorldID() != world.ID() {
-			return BootstrapResult{}, operationError(ErrorCodeDependencyDefect, nil)
-		}
-		if assignment.ValidAt(now) && assignment.Phase() == placement.PhaseActive {
-			projection, projectionErr := service.projectAssignment(ctx, assignment, world.ID(), now)
-			if projectionErr != nil {
-				return BootstrapResult{}, projectionErr
-			}
-			result.Assignment = projection
-		}
-	default:
+	if !assignment.Valid() || assignment.WorldID() != world.ID() {
 		return BootstrapResult{}, operationError(ErrorCodeDependencyDefect, nil)
 	}
+	// Activation 可以在本次调用中创建 assignment；投影观察时间必须晚于其 CreatedAt。
+	now := service.clock.Now().UTC().Truncate(time.Microsecond)
+	projection, err := service.projectAssignment(ctx, assignment, world.ID(), now)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	result := BootstrapResult{World: world, Assignment: projection}
 	if !result.Valid() {
 		return BootstrapResult{}, operationError(ErrorCodeDependencyDefect, nil)
 	}

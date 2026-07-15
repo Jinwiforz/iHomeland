@@ -224,7 +224,7 @@ World admission 与 session bearer、`ConnectionTicket`、invite、`AdmissionInt
 
 Admission 是短期、一次性 opaque credential。Issuer/verifier 必须绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorldID、可选 VisitSessionID、`OWN_WORLD`/`JOIN`/`RECONNECT` purpose、完整 current AssignmentStamp、endpoint、`TLS_TCP` channel、issued-at 与 expiry。原子消费使用 credential digest 与稳定 consume identity，不复用 ConnectionTicket nonce。`JOIN` 只允许 active reserved membership，`RECONNECT` 只允许 active reconnecting membership；expiry、replay、旧 assignment/epoch 或错误 endpoint/channel 均 fail closed。
 
-`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root 已接线 HTTP issuance 与 TLS/TCP consume。通道可用仍不等于完整 world/visit 竖切完成：业务 producer、Owner grace/expiry cleanup、safe-return 目的地加载和 Go 资格客户端属于后续 change。
+`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root 已接线 HTTP issuance、TLS/TCP consume、业务 producer、Owner/Visitor grace 与 expiry cleanup、assignment invalidation 和 safe-return。该竖切完成不替代 `qualify-server-v1` 的独立 Go 协议客户端与全量故障资格验收。
 
 ### Connection Context
 
@@ -358,4 +358,4 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 
 所有网络模拟必须可重复并记录参数。
 
-当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 HTTP operation、真实 Redis WSS/TCP ticket 一次性消费、TCP world admission、真实 wire `OWN_WORLD`/`JOIN`/`RECONNECT`、重放拒绝、logout 跨通道失效，以及 Session/VisitSession/WorldAdmission 的重放、冲突与依赖故障。通过表示 HTTP bootstrap、WSS control 与 TLS/TCP transport capability 可用，仍不表示完整 world/visit 业务竖切已经完成。
+当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 HTTP operation、真实 Redis WSS/TCP ticket 一次性消费、TCP world admission，以及真实 wire `OWN_WORLD` snapshot 与 VisitSession `OPEN`/`CREATE_INVITE`/HTTP `ACCEPT`/`JOIN`/断线 `RECONNECT`/`LEAVE`/`KICK`/`CLOSE`。同一 harness 还验证 response/push 顺序、精确 safe-return 后关闭、stale admission、assignment replacement、Redis flush、进程重建、跨通道 logout 失效和资源清理。通过表示个人世界服务端业务竖切可用，不表示 `qualify-server-v1` 的独立协议客户端、压力/故障全矩阵或 Unity gate 已完成。

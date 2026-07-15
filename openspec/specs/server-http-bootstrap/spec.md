@@ -67,15 +67,19 @@ Bearer 认证 MUST 调用 SessionStore 原子解析 access token 并取得不可
 - **THEN** SessionStore 仍原子递增 epoch 并撤销旧 token/ticket，显式 no-active-connections invalidator 完成空集合通知且不伪造 connection 状态
 
 ### Requirement: World bootstrap 与准入签发必须由窄应用编排派生权威事实
-Transport-independent world-entry application MUST 拥有 `BootstrapOwnWorld`、`AcceptVisitInvite` 与 `IssueWorldAdmission` 三个公开编排用例。Bootstrap MUST 确保认证 Player 唯一 primary PersonalWorld 存在并只读取 current placement；没有 active assignment 时 MUST 返回 world 且省略 assignment。Invite accept MUST 由 VisitSession owner 验证目标 actor、invite、revision、capacity、owner availability 和 current assignment，并把 reservation deadline 限制为 session、invite、VisitSession、assignment 与配置上限的最早值。Admission issuance MUST 从认证 session、own-world 或 current Visitor membership、完整 current AssignmentStamp 及受信 TLS_TCP endpoint 派生既有 WorldAdmission binding；payload MUST 只能选择 own-world 或 VisitSessionID。
+Transport-independent world-entry application MUST 拥有 `BootstrapOwnWorld`、`AcceptVisitInvite` 与 `IssueWorldAdmission` 三个公开编排用例。Bootstrap MUST 确保认证 Player 唯一 primary PersonalWorld 存在，并通过 production Placement owner 幂等确保本进程可承载的 current active assignment；只有 runtime ready 且 assignment 已原子发布 active 后才返回 world 与 assignment，不得返回缺少 assignment 的成功投影。Invite accept MUST 由 VisitSession owner 验证目标 actor、invite、revision、capacity、owner availability 和 current assignment，并把 reservation deadline 限制为 session、invite、VisitSession、assignment 与配置上限的最早值。Admission issuance MUST 从认证 session、own-world 或 current Visitor membership、完整 current AssignmentStamp 及受信 TLS_TCP endpoint 派生既有 WorldAdmission binding；payload MUST 只能选择 own-world 或 VisitSessionID。
 
 #### Scenario: 首次查询 own-world bootstrap
 - **WHEN** 有效 HTTPS actor 尚无 primary PersonalWorld 且请求 bootstrap
-- **THEN** application 幂等创建唯一 primary world 并返回该 actor 的安全投影，不接受客户端指定 owner/world 且不启动 WorldInstance
+- **THEN** application 幂等创建唯一 primary world、启动并发布唯一 current active assignment，再返回该 actor 的安全投影；不接受客户端指定 owner/world
 
-#### Scenario: Bootstrap 暂无 active assignment
-- **WHEN** primary PersonalWorld 存在但 placement 没有可证明的 current active assignment
-- **THEN** bootstrap 返回 world 并省略可选 assignment；同一状态下请求 own-world admission 返回 `WORLD_NOT_READY` 且不签发 credential
+#### Scenario: Bootstrap 启动 runtime 失败
+- **WHEN** primary PersonalWorld 已存在但 runtime capacity、placement dependency、commit状态或ready条件无法证明active assignment
+- **THEN** bootstrap返回既有稳定dependency/capacity error并省略伪成功结果，不签发credential、不留下可写starting assignment或memory fallback
+
+#### Scenario: 并发重复 bootstrap
+- **WHEN** 同一 Player 对相同 primary PersonalWorld并发或在response丢失后重复请求bootstrap
+- **THEN** Placement原子决议并返回同一current active assignment，不启动第二个WorldInstance或改变已提交generation/fence
 
 #### Scenario: 接受临近到期 invite
 - **WHEN** 目标 Visitor 以正确 expected revision 接受 pending invite 且 invite、session 或 assignment 的剩余寿命短于默认 reservation lifetime

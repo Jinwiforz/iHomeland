@@ -97,9 +97,10 @@ type remoteState struct {
 	lastRefill time.Time
 	// lastSeen 是有界idle回收基点。
 	lastSeen time.Time
-	// reserved与active共同受MaxPerRemote约束。
+	// reserved 是尚未完成认证的连接预算。
 	reserved int
-	active   int
+	// active 是已提交认证的连接预算。
+	active int
 }
 
 // connection 保存只读认证摘要、唯一socket、队列和transport状态。
@@ -108,14 +109,18 @@ type connection struct {
 	id string
 	// remoteKey 只用于进程内预算回收。
 	remoteKey string
-	// auth与qualification来自production service且永不由payload覆盖。
-	auth          session.AuthContext
+	// auth 来自 production Session service 且永不由 payload 覆盖。
+	auth session.AuthContext
+	// qualification 来自 admission service 并冻结完整 binding。
 	qualification worldadmission.Qualification
-	// sessionID、playerID、worldID与visitID只用于反向索引。
+	// sessionID 只用于 Session 失效反向索引。
 	sessionID string
-	playerID  string
-	worldID   string
-	visitID   string
+	// playerID 只用于玩家连接反向索引。
+	playerID string
+	// worldID 只用于 PersonalWorld 连接反向索引。
+	worldID string
+	// visitID 只用于 VisitSession 连接反向索引。
+	visitID string
 	// socket 由恰好一个reader和serialized writer共同拥有。
 	socket net.Conn
 	// queue 隔离publisher/dispatcher与阻塞写操作。
@@ -145,8 +150,17 @@ type connection struct {
 	doneOnce sync.Once
 	// done 在I/O owner完成全部资源清理后关闭。
 	done chan struct{}
-	// started与startRejected受registry.mu保护，封闭commit到I/O owner启动之间的失效窗口。
-	started       bool
+	// closeClass 由invalidation、safe-return或draining覆盖默认unexpected语义。
+	closeClass CloseClass
+	// dispatching 表示当前 connection 正在执行一条 command。
+	dispatching bool
+	// pendingPushes 暂存必须排在当前 response 之后的 PUSH。
+	pendingPushes []pendingDispatchPush
+	// pendingPushBytes 是暂存 PUSH 的估算字节总量。
+	pendingPushBytes int
+	// started 由 registry.mu 保护，表示 I/O owner 已启动。
+	started bool
+	// startRejected 封闭 commit 到 I/O owner 启动之间的失效窗口。
 	startRejected bool
 }
 
@@ -169,10 +183,14 @@ type Registry struct {
 	config Config
 	// codec 为每连接sequence编码response与push。
 	codec *Codec
-	// clock、ids和observer不拥有网络副作用。
-	clock    Clock
-	ids      IDGenerator
+	// clock 提供 token bucket 与 idle 回收时间。
+	clock Clock
+	// ids 生成 CSPRNG ConnectionID。
+	ids IDGenerator
+	// observer 只接收低基数 transport 结果。
 	observer Observer
+	// lifecycle 在startup绑定，只观察受信connection view。
+	lifecycle LifecycleSink
 
 	// mu 保护全部索引、remote state与停止状态。
 	mu sync.Mutex
@@ -182,15 +200,32 @@ type Registry struct {
 	reserved int
 	// connections 是ConnectionID主索引。
 	connections map[string]*connection
-	// 反向索引只保存ConnectionID，不复制socket或credential。
+	// bySession 只保存 ConnectionID，不复制 socket 或 credential。
 	bySession map[string]map[string]struct{}
-	byPlayer  map[string]map[string]struct{}
-	byWorld   map[string]map[string]struct{}
-	byVisit   map[string]map[string]struct{}
+	// byPlayer 按 PlayerID 保存 ConnectionID 集合。
+	byPlayer map[string]map[string]struct{}
+	// byWorld 按 PersonalWorldID 保存 ConnectionID 集合。
+	byWorld map[string]map[string]struct{}
+	// byVisit 按 VisitSessionID 保存 ConnectionID 集合。
+	byVisit map[string]map[string]struct{}
 	// remotes 是有界pre-auth与连接预算状态。
 	remotes map[string]*remoteState
 	// wg 等待已启动连接owner退出。
 	wg sync.WaitGroup
+}
+
+// BindLifecycleSink 在首条连接前一次性绑定application lifecycle consumer。
+func (registry *Registry) BindLifecycleSink(sink LifecycleSink) error {
+	if registry == nil || sink == nil {
+		return errors.New("tcp gameplay lifecycle sink is invalid")
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if registry.lifecycle != nil || registry.reserved != 0 || len(registry.connections) != 0 || registry.stopped {
+		return errors.New("tcp gameplay lifecycle sink cannot be rebound")
+	}
+	registry.lifecycle = sink
+	return nil
 }
 
 // routeRateState 是单连接固定policy token bucket，不包含identity或动态label。
@@ -299,8 +334,8 @@ func (registry *Registry) Commit(reserved *reservation, auth session.AuthContext
 		id: reserved.connectionID, remoteKey: reserved.remoteKey, auth: auth, qualification: qualification,
 		sessionID: sessionID, playerID: playerID, worldID: worldID, visitID: visitID, socket: socket,
 		queue: newSendQueue(registry.config.Policy.QueueItems, registry.config.Policy.QueueBytes), state: state,
-		codec:              registry.codec,
-		observer:           registry.observer,
+		codec:    registry.codec,
+		observer: registry.observer, closeClass: CloseClassUnexpected,
 		nextServerSequence: 1, nextClientSequence: 1, routeRates: make(map[string]*routeRateState), pendingDeadline: binding.ExpiresAt(), done: make(chan struct{}),
 	}
 	registry.connections[entry.id] = entry
@@ -313,6 +348,14 @@ func (registry *Registry) Commit(reserved *reservation, auth session.AuthContext
 	registry.observer.SetTCPConnections(state.String(), registry.countStateLocked(state))
 	registry.config.Logger.Info("tcp gameplay connection registered", "operation", "register", "connection_id", entry.id, "outcome", state.String())
 	return entry, nil
+}
+
+// HasConnection 报告ConnectionID是否仍在当前registry主索引且未进入closing。
+func (registry *Registry) HasConnection(connectionID string) bool {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	entry := registry.connections[connectionID]
+	return entry != nil && entry.State() != ConnectionStateClosing
 }
 
 // ActivatePending 只允许与preface完整相等的Join/Reconnect资格在application成功后转active。
@@ -407,6 +450,9 @@ func (registry *Registry) Stop(ctx context.Context) error {
 	}
 	registry.mu.Unlock()
 	for _, entry := range entries {
+		entry.mu.Lock()
+		entry.closeClass = CloseClassDraining
+		entry.mu.Unlock()
 		entry.queue.close()
 		entry.closeOnce.Do(func() { _ = entry.socket.Close() })
 	}

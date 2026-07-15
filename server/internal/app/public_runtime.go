@@ -69,6 +69,8 @@ type publicRuntimeComponent struct {
 	websocketTasks wscontrol.TaskOwner
 	// tcpTasks 监督独立gameplay accept loop，不与HTTP/WSS任务混用。
 	tcpTasks tcpgameplay.TaskOwner
+	// sliceTasks 监督PersonalWorld竖切的deadline与reconciliation worker。
+	sliceTasks *TaskOwner
 	// logger 只接收公开HTTP/WSS transport允许的低敏字段。
 	logger *slog.Logger
 	// component 只在Start完整构图成功后存在。
@@ -77,6 +79,10 @@ type publicRuntimeComponent struct {
 	websocketRegistry *wscontrol.Registry
 	// tcpServer 显式拥有独立listener、连接registry与关闭顺序。
 	tcpServer *tcpgameplay.Server
+	// worldRuntime 拥有本进程全部可推导逻辑WorldInstance。
+	worldRuntime *processWorldRuntime
+	// deadlineOwner 拥有本竖切全部semantic deadline entry。
+	deadlineOwner *semanticDeadlineOwner
 }
 
 // Name 返回lifecycle稳定component名。
@@ -123,8 +129,8 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err := websocketRegistry.Supervise(component.websocketTasks); err != nil {
 		cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.WebSocketControl.CloseTimeout)
 		defer cancel()
-		_ = websocketRegistry.Stop(cleanupContext)
-		return fmt.Errorf("supervise websocket control registry: %w", err)
+		stopErr := websocketRegistry.Stop(cleanupContext)
+		return errors.Join(fmt.Errorf("supervise websocket control registry: %w", err), stopErr)
 	}
 	cleanupWebSocket := true
 	defer func() {
@@ -133,8 +139,12 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 		}
 		cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.WebSocketControl.CloseTimeout)
 		defer cancel()
-		_ = websocketRegistry.Stop(cleanupContext)
-		_ = component.websocketTasks.Stop(cleanupContext, errors.New("websocket control startup rolled back"))
+		if stopErr := websocketRegistry.Stop(cleanupContext); stopErr != nil {
+			component.logger.Error("websocket registry startup rollback failed", "operation", "websocket_registry_stop", "outcome", "failed")
+		}
+		if stopErr := component.websocketTasks.Stop(cleanupContext, errors.New("websocket control startup rolled back")); stopErr != nil {
+			component.logger.Error("websocket task startup rollback failed", "operation", "websocket_task_stop", "outcome", "failed")
+		}
 	}()
 	tcpConfig := tcpgameplay.Config{
 		Policy: component.settings.PublicAPI.GameplayTCP, FrameBytes: component.settings.PublicAPI.Limits.RealtimeFrameBytes,
@@ -192,6 +202,66 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct placement store: %w", err)
 	}
+	nodeMaterial, err := component.ids.NewID()
+	if err != nil {
+		return fmt.Errorf("generate runtime node identity: %w", err)
+	}
+	runtimeNodeID, err := placement.NewRuntimeNodeID("rnode_" + nodeMaterial)
+	if err != nil {
+		return fmt.Errorf("construct runtime node identity: %w", err)
+	}
+	worldRuntime, err := newProcessWorldRuntime(runtimeNodeID, component.settings.PublicAPI.WorldRuntime.MaxInstances, component.ready)
+	if err != nil {
+		return fmt.Errorf("construct process world runtime: %w", err)
+	}
+	if err := worldRuntime.bindObserver(component.metrics); err != nil {
+		worldRuntime.Close()
+		return fmt.Errorf("bind process world runtime observer: %w", err)
+	}
+	placementService, err := placement.NewService(placementStore, worldRuntime, component.clock, component.ids, component.settings.PublicAPI.WorldRuntime.PlacementLeaseTTL)
+	if err != nil {
+		worldRuntime.Close()
+		return fmt.Errorf("construct placement service: %w", err)
+	}
+	deadlineOwner, err := newSemanticDeadlineOwner(component.settings.PublicAPI.WorldRuntime.DeadlineEntries, applicationSemanticClock{Clock: component.clock})
+	if err != nil {
+		worldRuntime.Close()
+		return fmt.Errorf("construct semantic deadline owner: %w", err)
+	}
+	if err := deadlineOwner.BindObserver(component.metrics); err != nil {
+		deadlineOwner.Close()
+		worldRuntime.Close()
+		return fmt.Errorf("bind semantic deadline observer: %w", err)
+	}
+	if component.sliceTasks == nil {
+		worldRuntime.Close()
+		return errors.New("personal world slice task owner is unavailable")
+	}
+	if err := component.sliceTasks.Go("semantic_deadlines", deadlineOwner.Run); err != nil {
+		deadlineOwner.Close()
+		worldRuntime.Close()
+		return fmt.Errorf("supervise semantic deadline owner: %w", err)
+	}
+	cleanupSlice := true
+	defer func() {
+		if !cleanupSlice {
+			return
+		}
+		deadlineOwner.Close()
+		cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.GameplayTCP.ShutdownTimeout)
+		defer cancel()
+		if stopErr := component.sliceTasks.Stop(cleanupContext, errors.New("personal world slice startup rolled back")); stopErr != nil {
+			component.logger.Error("personal world slice startup rollback failed", "operation", "slice_task_stop", "outcome", "failed")
+		}
+		worldRuntime.Close()
+	}()
+	assignmentCoordinator, err := newWorldAssignmentCoordinator(placementService, placementStore, worldRuntime, deadlineOwner, component.clock, component.ids, runtimeNodeID, nil)
+	if err != nil {
+		return fmt.Errorf("construct world assignment coordinator: %w", err)
+	}
+	if err := assignmentCoordinator.bindObserver(component.metrics); err != nil {
+		return fmt.Errorf("bind world assignment observer: %w", err)
+	}
 	visitStore, err := storagevisitsession.New(client, keyspace, component.clock, component.settings.PublicAPI.VisitSession.ReplayRetention, component.metrics)
 	if err != nil {
 		return fmt.Errorf("construct visit session store: %w", err)
@@ -208,6 +278,19 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct visit session service: %w", err)
 	}
+	tcpPublisher, err := tcpgameplay.NewPublisher(tcpRegistry, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct tcp gameplay publisher: %w", err)
+	}
+	visitCoordinator, err := newPersonalWorldVisitCoordinator(
+		visitService, deadlineOwner, component.clock, visitPolicy, websocketRegistry, tcpPublisher, tcpRegistry,
+		component.logger.With("owner", "visit_session"), component.metrics, component.settings.PublicAPI.WorldRuntime.DeadlineEntries,
+		component.failClosedPersonalWorldSlice,
+	)
+	if err != nil {
+		return fmt.Errorf("construct visit session coordinator: %w", err)
+	}
+	assignmentCoordinator.onLoss = visitCoordinator.InvalidateAssignment
 	admissionStore, err := storageworldadmission.New(client, keyspace, component.metrics)
 	if err != nil {
 		return fmt.Errorf("construct world admission store: %w", err)
@@ -220,13 +303,21 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct world admission service: %w", err)
 	}
-	worldEntry, err := worldentry.NewService(worldAdapter, placementStore, visitService, admissionService, endpointProvider, component.clock, component.settings.PublicAPI.WorldAdmission.MaximumLifetime)
+	worldEntryVisits := coordinatedWorldEntryVisits{visits: visitService, coordinator: visitCoordinator}
+	worldEntryAssignments := coordinatedWorldEntryAssignments{assignments: assignmentCoordinator, visits: visitService, coordinator: visitCoordinator}
+	worldEntry, err := worldentry.NewService(worldAdapter, worldEntryAssignments, worldEntryVisits, admissionService, endpointProvider, component.clock, component.settings.PublicAPI.WorldAdmission.MaximumLifetime)
 	if err != nil {
 		return fmt.Errorf("construct world entry service: %w", err)
 	}
-	tcpApplication, err := newTCPGameplayApplication(worldRepository, placementStore, visitService, tcpEndpoint, component.clock)
+	tcpApplication, err := newTCPGameplayApplication(worldRepository, placementStore, visitService, visitCoordinator, tcpEndpoint, component.clock)
 	if err != nil {
 		return fmt.Errorf("construct tcp gameplay application: %w", err)
+	}
+	if err := visitCoordinator.BindProjector(tcpApplication.projectVisit); err != nil {
+		return fmt.Errorf("bind visit snapshot projector: %w", err)
+	}
+	if err := tcpRegistry.BindLifecycleSink(visitCoordinator); err != nil {
+		return fmt.Errorf("bind tcp gameplay lifecycle: %w", err)
 	}
 	tcpHandshake, err := tcpgameplay.NewHandshake(sessionService, admissionService, tcpEndpoint, component.metrics)
 	if err != nil {
@@ -277,7 +368,9 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 		if cleanupTCP {
 			cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.GameplayTCP.ShutdownTimeout)
 			defer cancel()
-			_ = tcpServer.Stop(cleanupContext)
+			if stopErr := tcpServer.Stop(cleanupContext); stopErr != nil {
+				component.logger.Error("tcp gameplay startup rollback failed", "operation", "tcp_server_stop", "outcome", "failed")
+			}
 		}
 	}()
 	if err := httpComponent.Start(ctx); err != nil {
@@ -286,15 +379,28 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	component.component = httpComponent
 	component.websocketRegistry = websocketRegistry
 	component.tcpServer = tcpServer
+	component.worldRuntime = worldRuntime
+	component.deadlineOwner = deadlineOwner
 	cleanupTCP = false
 	cleanupWebSocket = false
+	cleanupSlice = false
 	return nil
 }
 
-// Stop 在全局readiness已进入draining后并行关闭实时连接，再停止公开listener并排空HTTP请求。
+// Stop 在全局 readiness 已进入 draining 后先停止语义 worker 与本地 runtime，再关闭实时连接和 HTTP。
 func (component *publicRuntimeComponent) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("public runtime stop context is nil")
+	}
+	if component.deadlineOwner != nil {
+		component.deadlineOwner.Close()
+	}
+	var sliceErr error
+	if component.sliceTasks != nil {
+		sliceErr = component.sliceTasks.Stop(ctx, errors.New("personal world slice component stopped"))
+	}
+	if component.worldRuntime != nil {
+		component.worldRuntime.Close()
 	}
 	var realtime sync.WaitGroup
 	var tcpErr, websocketErr error
@@ -324,7 +430,14 @@ func (component *publicRuntimeComponent) Stop(ctx context.Context) error {
 	if component.component != nil {
 		httpErr = component.component.Stop(ctx)
 	}
-	return errors.Join(tcpErr, websocketErr, httpErr)
+	return errors.Join(tcpErr, websocketErr, httpErr, sliceErr)
+}
+
+// failClosedPersonalWorldSlice 撤销 readiness；重复 draining/stopped 只记录稳定结果，不吞掉异常状态。
+func (component *publicRuntimeComponent) failClosedPersonalWorldSlice() {
+	if err := component.readiness.BeginDraining(); err != nil {
+		component.logger.Error("personal world slice fail-closed transition failed", "operation", "readiness_draining", "outcome", "failed")
+	}
 }
 
 // Address 返回公开listener实际地址；未启动时为空。

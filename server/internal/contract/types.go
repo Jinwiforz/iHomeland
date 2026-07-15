@@ -251,8 +251,8 @@ func WSSPushCatalog() Catalog {
 
 // TLSGameplayCatalog 返回编译进服务端的world/visit可靠业务路由投影。
 //
-// 该投影必须由contract测试与registry逐字段比较。它不包含WSS消息、握手preface、
-// 未登记heartbeat或generic world action，因此adapter无法在运行时扩张协议面。
+// 该投影必须由contract测试与registry逐字段比较。它同时携带dispatcher可能公开的最小错误集合，
+// 但不包含WSS消息、握手preface、未登记heartbeat或generic world action，因此adapter无法在运行时扩张协议面。
 func TLSGameplayCatalog() Catalog {
 	profiles := []ProjectedRoute{
 		tlsGameplayProfile(2000, "WORLD_SNAPSHOT_REQUEST", "world", "ihomeland.world.v1.WorldSnapshotRequest", "REQUEST", "CLIENT_TO_SERVER", 4096, "world_read", "REQUEST_ID", 10000),
@@ -279,7 +279,11 @@ func TLSGameplayCatalog() Catalog {
 		tlsGameplayProfile(2121, "VISIT_SNAPSHOT_PUSH", "visit", "ihomeland.visit.v1.VisitSnapshotPush", "PUSH", "SERVER_TO_CLIENT", 65536, "server_world", "NONE", 0),
 		tlsGameplayProfile(2122, "VISIT_SAFE_RETURN_PUSH", "visit", "ihomeland.visit.v1.VisitSafeReturnPush", "PUSH", "SERVER_TO_CLIENT", 16384, "server_world", "NONE", 0),
 	}
-	catalog := Catalog{Messages: MessageRegistry{SchemaVersion: 1}, Routes: RouteRegistry{SchemaVersion: 1}}
+	catalog := Catalog{
+		Messages: MessageRegistry{SchemaVersion: 1},
+		Errors:   tlsGameplayErrorRegistry(),
+		Routes:   RouteRegistry{SchemaVersion: 1},
+	}
 	for _, profile := range profiles {
 		catalog.Messages.Messages = append(catalog.Messages.Messages, profile.MessageEntry)
 		catalog.Routes.Routes = append(catalog.Routes.Routes, profile.RouteEntry)

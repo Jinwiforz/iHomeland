@@ -54,8 +54,9 @@ type Metrics struct {
 	websocketPushBytes *prometheus.HistogramVec
 	// websocketQueues 统计有界队列接受或拒绝结果。
 	websocketQueues *prometheus.CounterVec
-	// websocketQueueItems 和 websocketQueueBytes 观察瞬时队列占用。
+	// websocketQueueItems 观察瞬时队列条目数。
 	websocketQueueItems prometheus.Histogram
+	// websocketQueueBytes 观察瞬时队列字节数。
 	websocketQueueBytes prometheus.Histogram
 	// websocketHeartbeats 统计ping/pong稳定结果。
 	websocketHeartbeats *prometheus.CounterVec
@@ -67,22 +68,40 @@ type Metrics struct {
 	tcpHandshakes *prometheus.CounterVec
 	// tcpConnections 按transport状态观察连接数。
 	tcpConnections *prometheus.GaugeVec
-	// tcpFrames 与 tcpFrameBytes 观察方向、结果和完整frame大小。
-	tcpFrames     *prometheus.CounterVec
+	// tcpFrames 观察固定方向与稳定结果。
+	tcpFrames *prometheus.CounterVec
+	// tcpFrameBytes 观察完整 frame 大小。
 	tcpFrameBytes *prometheus.HistogramVec
-	// tcpDispatches 与 tcpDispatchSeconds 按登记message ID和稳定结果观察application dispatch。
-	tcpDispatches      *prometheus.CounterVec
+	// tcpDispatches 按登记 message ID 和稳定结果观察 application dispatch。
+	tcpDispatches *prometheus.CounterVec
+	// tcpDispatchSeconds 观察 application dispatch 耗时。
 	tcpDispatchSeconds *prometheus.HistogramVec
 	// tcpInFlight 观察当前进程尚未完成的gameplay operation数量。
 	tcpInFlight prometheus.Gauge
-	// tcpQueues 及其histogram观察双预算队列。
-	tcpQueues     *prometheus.CounterVec
+	// tcpQueues 统计双预算队列接受与拒绝结果。
+	tcpQueues *prometheus.CounterVec
+	// tcpQueueItems 观察队列条目数。
 	tcpQueueItems prometheus.Histogram
+	// tcpQueueBytes 观察队列字节数。
 	tcpQueueBytes prometheus.Histogram
-	// tcpPushes、tcpCloses与tcpInvalidations记录运行时稳定结果。
-	tcpPushes        *prometheus.CounterVec
-	tcpCloses        *prometheus.CounterVec
+	// tcpPushes 记录 PUSH 投递稳定结果。
+	tcpPushes *prometheus.CounterVec
+	// tcpCloses 记录连接关闭类别。
+	tcpCloses *prometheus.CounterVec
+	// tcpInvalidations 记录失效联动结果。
 	tcpInvalidations *prometheus.CounterVec
+	// worldRuntimes 观察进程内逻辑 WorldInstance 数量。
+	worldRuntimes prometheus.Gauge
+	// semanticDeadlines 观察进程内语义任务数量。
+	semanticDeadlines prometheus.Gauge
+	// worldLeases 记录 lease 封闭结果。
+	worldLeases *prometheus.CounterVec
+	// deadlineRuns 记录语义任务封闭结果。
+	deadlineRuns *prometheus.CounterVec
+	// visitLifecycles 记录连接生命周期协调结果。
+	visitLifecycles *prometheus.CounterVec
+	// visitDeliveries 记录跨通道副作用投递结果。
+	visitDeliveries *prometheus.CounterVec
 }
 
 // NewMetrics 注册运行时固定指标集合；私有 registry 使重复构造不会污染 package global 状态。
@@ -125,8 +144,14 @@ func NewMetrics() *Metrics {
 		tcpPushes:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_pushes_total", Help: "TLS/TCP gameplay push results."}, []string{"message_id", "outcome"}),
 		tcpCloses:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_closes_total", Help: "TLS/TCP gameplay close reasons."}, []string{"reason"}),
 		tcpInvalidations:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_invalidations_total", Help: "TLS/TCP gameplay invalidation results."}, []string{"outcome"}),
+		worldRuntimes:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_world_runtimes", Help: "Process-local logical WorldInstance runtimes."}),
+		semanticDeadlines:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_semantic_deadlines", Help: "Scheduled semantic deadline entries."}),
+		worldLeases:            prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_world_lease_total", Help: "World assignment lease outcomes."}, []string{"outcome"}),
+		deadlineRuns:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_semantic_deadline_total", Help: "Semantic deadline execution outcomes."}, []string{"kind", "outcome"}),
+		visitLifecycles:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_visit_lifecycle_total", Help: "Visit connection lifecycle outcomes."}, []string{"operation", "outcome"}),
+		visitDeliveries:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_visit_delivery_total", Help: "Visit cross-channel delivery outcomes."}, []string{"kind", "outcome"}),
 	}
-	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations)
+	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries)
 	return metrics
 }
 
@@ -338,7 +363,7 @@ func (metrics *Metrics) ObserveTCPPush(messageID uint32, outcome string) {
 
 // ObserveTCPClose 记录不含peer文本的固定关闭原因。
 func (metrics *Metrics) ObserveTCPClose(reason string) {
-	requireMetricLabel(reason, "server_draining", "slow_consumer", "rate_limited", "protocol_violation", "idle_timeout", "peer_closed", "io_failed", "panic")
+	requireMetricLabel(reason, "server_draining", "slow_consumer", "rate_limited", "protocol_violation", "idle_timeout", "peer_closed", "io_failed", "panic", "application_return", "fail_closed")
 	metrics.tcpCloses.WithLabelValues(reason).Inc()
 }
 
@@ -346,6 +371,49 @@ func (metrics *Metrics) ObserveTCPClose(reason string) {
 func (metrics *Metrics) ObserveTCPInvalidation(outcome string) {
 	requireMetricLabel(outcome, "closed", "deadline")
 	metrics.tcpInvalidations.WithLabelValues(outcome).Inc()
+}
+
+// SetWorldRuntimes 更新当前进程逻辑 WorldInstance 数量。
+func (metrics *Metrics) SetWorldRuntimes(value int) {
+	if value < 0 {
+		panic("invalid world runtime count")
+	}
+	metrics.worldRuntimes.Set(float64(value))
+}
+
+// SetSemanticDeadlines 更新单 worker 当前持有的语义 deadline 数量。
+func (metrics *Metrics) SetSemanticDeadlines(value int) {
+	if value < 0 {
+		panic("invalid semantic deadline count")
+	}
+	metrics.semanticDeadlines.Set(float64(value))
+}
+
+// ObserveWorldLease 记录 lease 续约与失效的封闭结果。
+func (metrics *Metrics) ObserveWorldLease(outcome string) {
+	requireMetricLabel(outcome, "renewed", "retry", "lost", "expired", "failed")
+	metrics.worldLeases.WithLabelValues(outcome).Inc()
+}
+
+// ObserveSemanticDeadline 记录封闭 kind 的执行结果。
+func (metrics *Metrics) ObserveSemanticDeadline(kind string, outcome string) {
+	requireMetricLabel(kind, "assignment_renew", "assignment_expiry", "visit_session", "invite", "reservation", "owner_grace", "visitor_grace")
+	requireMetricLabel(outcome, "executed", "retry", "stale", "failed")
+	metrics.deadlineRuns.WithLabelValues(kind, outcome).Inc()
+}
+
+// ObserveVisitLifecycle 记录受信 TCP lifecycle callback 的低基数结果。
+func (metrics *Metrics) ObserveVisitLifecycle(operation string, outcome string) {
+	requireMetricLabel(operation, "connect", "disconnect", "assignment_invalidate")
+	requireMetricLabel(outcome, "applied", "ignored", "stale", "failed")
+	metrics.visitLifecycles.WithLabelValues(operation, outcome).Inc()
+}
+
+// ObserveVisitDelivery 记录跨通道投递类型与稳定结果。
+func (metrics *Metrics) ObserveVisitDelivery(kind string, outcome string) {
+	requireMetricLabel(kind, "wss_push", "tcp_connection_push", "tcp_visit_push", "safe_return")
+	requireMetricLabel(outcome, "delivered", "offline", "failed")
+	metrics.visitDeliveries.WithLabelValues(kind, outcome).Inc()
 }
 
 // requireMetricLabel 只接受编译期固定枚举；非法值视为 programmer error 并 panic。

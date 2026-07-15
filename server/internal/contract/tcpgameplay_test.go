@@ -13,6 +13,9 @@ func TestTLSGameplayCatalogMatchesRegistry(t *testing.T) {
 	if len(runtime.Messages.Messages) != 23 || len(runtime.Routes.Routes) != 23 {
 		t.Fatalf("runtime TLS/TCP catalog count drifted: messages=%d routes=%d", len(runtime.Messages.Messages), len(runtime.Routes.Routes))
 	}
+	if len(runtime.Errors.Errors) != 23 {
+		t.Fatalf("runtime TLS/TCP error count drifted: errors=%d", len(runtime.Errors.Errors))
+	}
 	for _, message := range runtime.Messages.Messages {
 		want, err := source.LookupTLSGameplay(message.ID, message.Direction)
 		if err != nil {
@@ -24,6 +27,15 @@ func TestTLSGameplayCatalogMatchesRegistry(t *testing.T) {
 		}
 		if got != want {
 			t.Fatalf("runtime TLS/TCP profile %d drifted: got=%+v want=%+v", message.ID, got, want)
+		}
+	}
+	for _, publicError := range runtime.Errors.Errors {
+		want, err := source.LookupError(publicError.Code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if publicError != want {
+			t.Fatalf("runtime TLS/TCP public error %d drifted: got=%+v want=%+v", publicError.Code, publicError, want)
 		}
 	}
 }

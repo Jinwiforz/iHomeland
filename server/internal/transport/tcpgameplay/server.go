@@ -168,6 +168,7 @@ func (server *Server) handleConnection(parent context.Context, raw net.Conn, res
 	}
 	_ = connection.SetDeadline(time.Time{})
 	if err := server.registry.StartConnection(entry, server.dispatcher); err != nil {
+		server.observer.ObserveTCPHandshake("register", "rejected")
 		server.registry.Remove(entry.id)
 		return
 	}

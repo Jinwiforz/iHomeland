@@ -246,7 +246,11 @@ A0 Project Baseline
 
 ### `complete-server-personal-world-slice`
 
-连接 Account、Session、PersonalWorld、Placement、Storage、VisitSession 与三个公开通道，交付 own-world 和 visit-world 的端到端服务端竖切。
+**进入条件：**Account、Session、PersonalWorld、Placement、VisitSession、WorldAdmission、MySQL/Redis runtime 与 HTTPS/WSS/TLS-TCP adapters 已分别完成并通过自身 contract/integration 验收。
+
+**产出：**连接 Account、Session、PersonalWorld、Placement、Storage、VisitSession 与三个公开通道；增加有界 WorldInstance runtime、assignment lease owner、单 worker semantic deadline owner、TCP lifecycle coordinator、跨通道 result effect 与精确 safe-return，交付 own-world 和 visit-world 的端到端服务端竖切。
+
+**完成条件：**真实 MySQL/Redis、临时 TLS 与 production Composition Root 下，wire client 可以完成 bootstrap/admission/snapshot、invite/accept/join、断线恢复、leave/kick/close；stale admission、assignment replacement、Redis flush、process reconstruction 和逆序清理 fail closed。该完成条件不包含独立资格客户端、全量压力/故障矩阵或 Unity runtime；前两项由 `qualify-server-v1` 接管，Unity runtime 必须等待 C0 之后的 change。
 
 ## Q0：服务端 v1 资格验收
 

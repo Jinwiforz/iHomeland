@@ -138,6 +138,40 @@ func TestDispatcherProducesResponseErrorAndPanicBoundary(t *testing.T) {
 	}
 }
 
+// TestDispatcherClosesInvalidatedTargetAfterError 验证运行态丢失时先入队安全错误再封闭旧 connection。
+func TestDispatcherClosesInvalidatedTargetAfterError(t *testing.T) {
+	t.Parallel()
+	config, codec, registry := testRuntime(t)
+	application := &dispatcherApplication{worldError: PublicError{Code: 2002, MessageKey: "error.world.assignment_stale", CloseConnection: true}}
+	dispatcher, err := NewDispatcher(application, new(Handshake), registry, new(testObserver))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := &connection{
+		id: "tcp_00000000000000000000000000000001", codec: codec, observer: new(testObserver), queue: newSendQueue(8, config.Policy.QueueBytes),
+		state: ConnectionStateActive, closeClass: CloseClassUnexpected, nextServerSequence: 1, nextClientSequence: 1, routeRates: make(map[string]*routeRateState), done: make(chan struct{}),
+	}
+	if err := dispatcher.Dispatch(context.Background(), entry, decodeWorldRequest(t, codec, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	queued := <-entry.queue.items
+	entry.queue.take(queued)
+	if !queued.closeAfter || entry.State() != ConnectionStateClosing || entry.closeClass != CloseClassInvalidated {
+		t.Fatalf("fail-closed queue=%v state=%v class=%v", queued.closeAfter, entry.State(), entry.closeClass)
+	}
+	envelope, err := protocol.UnmarshalEnvelope(queued.encoded.frame[4:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := new(commonv1.ErrorPayload)
+	if err := proto.Unmarshal(envelope.GetPayload(), payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.GetCode() != 2002 || payload.GetMessageKey() != "error.world.assignment_stale" || payload.GetRetryable() {
+		t.Fatalf("fail-closed public error=%v", payload)
+	}
+}
+
 // TestDispatcherRoutesEveryNonAdmissionOperation 验证集中catalog不会遗漏或串错任一普通C2S operation。
 // JOIN与RECONNECT需要不可伪造Qualification，分别由真实storage/TCP集成测试覆盖。
 func TestDispatcherRoutesEveryNonAdmissionOperation(t *testing.T) {

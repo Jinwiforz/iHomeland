@@ -44,6 +44,70 @@ var (
 	ErrConnectionNotFound = errors.New("tcp gameplay target not found")
 )
 
+// CloseClass 是application可依赖的低基数连接结束语义，不包含I/O或backend错误文本。
+type CloseClass uint8
+
+const (
+	// CloseClassUnexpected 表示peer、I/O、idle、protocol或slow-consumer导致的连接丢失。
+	CloseClassUnexpected CloseClass = iota + 1
+	// CloseClassInvalidated 表示Session owner提交新epoch后关闭旧连接。
+	CloseClassInvalidated
+	// CloseClassApplicationReturn 表示committed leave/close/safe-return主动结束旧target。
+	CloseClassApplicationReturn
+	// CloseClassDraining 表示进程关闭，不应建立新的reconnect grace。
+	CloseClassDraining
+)
+
+// String 返回日志与metrics使用的稳定名称。
+func (class CloseClass) String() string {
+	switch class {
+	case CloseClassUnexpected:
+		return "unexpected"
+	case CloseClassInvalidated:
+		return "invalidated"
+	case CloseClassApplicationReturn:
+		return "application_return"
+	case CloseClassDraining:
+		return "draining"
+	default:
+		return "unspecified"
+	}
+}
+
+// LifecycleView 是双credential认证后不可由payload覆盖的连接事实值副本。
+type LifecycleView struct {
+	// connectionID 是transport生成的当前connection binding材料。
+	connectionID string
+	// auth 是Session owner验证的只读身份与epoch。
+	auth session.AuthContext
+	// binding 是WorldAdmission owner验证的完整target与AssignmentStamp。
+	binding worldadmission.Binding
+}
+
+// ConnectionID 返回服务端生成的连接identity。
+func (view LifecycleView) ConnectionID() string { return view.connectionID }
+
+// Auth 返回不可变AuthContext值副本。
+func (view LifecycleView) Auth() session.AuthContext { return view.auth }
+
+// Binding 返回不可变WorldAdmission binding值副本。
+func (view LifecycleView) Binding() worldadmission.Binding { return view.binding }
+
+// Valid 报告view是否保持同一session/player binding。
+func (view LifecycleView) Valid() bool {
+	return view.connectionID != "" && view.auth.Valid() && view.binding.Valid() &&
+		view.binding.SessionID() == view.auth.SessionID() && uint64(view.binding.Epoch()) == uint64(view.auth.Epoch()) &&
+		view.binding.PlayerID().String() == view.auth.Principal().PlayerID()
+}
+
+// LifecycleSink 接收受信连接建立/移除事件，但不拥有socket或transport registry。
+type LifecycleSink interface {
+	// Connected 在I/O owner启动前执行application reconciliation；失败必须fail closed。
+	Connected(context.Context, LifecycleView) error
+	// Disconnected 只根据不可变view与低基数class处理当前binding丢失。
+	Disconnected(context.Context, LifecycleView, CloseClass) error
+}
+
 // Clock 为envelope timestamp、deadline与限流回收提供共享时间。
 type Clock interface {
 	// Now 返回当前时间；生产实现必须使用系统时钟。

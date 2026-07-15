@@ -22,6 +22,12 @@ const (
 	maximumRateRequests = 10000
 	// maximumRateEntries 限制进程内 limiter 的身份基数。
 	maximumRateEntries = 100000
+	// fixedDeadlineEntriesPerRuntime 覆盖 2 个 assignment、1 个 session、1 个 Owner grace 与最多 64 个 pending invite deadline。
+	fixedDeadlineEntriesPerRuntime = 68
+	// maximumWorldRuntimeInstances 限制单进程逻辑WorldInstance registry规模。
+	maximumWorldRuntimeInstances = 10000
+	// maximumSemanticDeadlineEntries 限制单worker持有的语义任务总数。
+	maximumSemanticDeadlineEntries = 1000000
 )
 
 // publicHostPattern 限制客户端可见DNS name为无scheme、path、空label或首尾连字符的安全ASCII形式。
@@ -65,6 +71,8 @@ type PublicAPI struct {
 	Session SessionPolicy `yaml:"session"`
 	// PlacementReplayTTL 限制placement幂等证据保留时间。
 	PlacementReplayTTL time.Duration `yaml:"placementReplayTtl"`
+	// WorldRuntime 定义进程内WorldInstance与语义deadline资源策略。
+	WorldRuntime WorldRuntimePolicy `yaml:"worldRuntime"`
 	// VisitSession 定义访问aggregate与store策略。
 	VisitSession VisitSessionPolicy `yaml:"visitSession"`
 	// WorldAdmission 定义签发与响应丢失恢复策略。
@@ -73,6 +81,16 @@ type PublicAPI struct {
 	WebSocketControl WebSocketControlPolicy `yaml:"websocketControl"`
 	// GameplayTCP 定义独立TLS/TCP gameplay listener的认证、并发和生命周期预算。
 	GameplayTCP GameplayTCPPolicy `yaml:"gameplayTcp"`
+}
+
+// WorldRuntimePolicy 定义单进程PersonalWorld承载与semantic deadline硬预算。
+type WorldRuntimePolicy struct {
+	// PlacementLeaseTTL 是current assignment单次lease寿命；续约时点由实现确定性派生。
+	PlacementLeaseTTL time.Duration `yaml:"placementLeaseTtl"`
+	// MaxInstances 限制本进程同时登记的逻辑WorldInstance数量。
+	MaxInstances int `yaml:"maxInstances"`
+	// DeadlineEntries 限制单一semantic deadline owner持有的任务数量。
+	DeadlineEntries int `yaml:"deadlineEntries"`
 }
 
 // PublicTLS 定义公开 HTTP server TLS material reference。
@@ -279,6 +297,11 @@ func DefaultPublicAPI() PublicAPI {
 			SessionTTL: 30 * 24 * time.Hour,
 		},
 		PlacementReplayTTL: 10 * time.Minute,
+		WorldRuntime: WorldRuntimePolicy{
+			PlacementLeaseTTL: 30 * time.Second,
+			MaxInstances:      512,
+			DeadlineEntries:   65536,
+		},
 		VisitSession: VisitSessionPolicy{
 			Capacity:              4,
 			SessionLifetime:       24 * time.Hour,
@@ -374,6 +397,9 @@ func (public PublicAPI) validate(environment string, diagnosticAddress string) e
 	if err := public.VisitSession.validate(); err != nil {
 		return err
 	}
+	if err := public.WorldRuntime.validate(public.VisitSession.Capacity); err != nil {
+		return err
+	}
 	if err := public.WorldAdmission.validate(); err != nil {
 		return err
 	}
@@ -381,6 +407,21 @@ func (public PublicAPI) validate(environment string, diagnosticAddress string) e
 		return err
 	}
 	return public.GameplayTCP.Validate(public.Limits.RealtimeFrameBytes, public.Address, diagnosticAddress, public.TLS.Enabled, environment == "test")
+}
+
+// validate 约束runtime、lease与deadline容量，并校验queue可覆盖所有可达业务deadline。
+func (policy WorldRuntimePolicy) validate(visitCapacity int) error {
+	if policy.PlacementLeaseTTL < time.Second || policy.PlacementLeaseTTL > 5*time.Minute {
+		return errors.New("worldRuntime.placementLeaseTtl must be between 1s and 5m")
+	}
+	if policy.MaxInstances < 1 || policy.MaxInstances > maximumWorldRuntimeInstances {
+		return fmt.Errorf("worldRuntime.maxInstances must be between 1 and %d", maximumWorldRuntimeInstances)
+	}
+	minimumEntries := policy.MaxInstances * (fixedDeadlineEntriesPerRuntime + visitCapacity)
+	if policy.DeadlineEntries < minimumEntries || policy.DeadlineEntries > maximumSemanticDeadlineEntries {
+		return fmt.Errorf("worldRuntime.deadlineEntries must be between %d and %d", minimumEntries, maximumSemanticDeadlineEntries)
+	}
+	return nil
 }
 
 // Validate 约束gameplay listener地址、连接、frame、队列和deadline，且不产生任何外部副作用。
@@ -648,6 +689,9 @@ func publicAPIEnvironmentOverrides(config *Config) []environmentOverride {
 		{key: "IHOMELAND_PUBLIC_TLS_TCP_PORT", apply: intSetter(&config.PublicAPI.Endpoints.TLSTCP.Port)},
 		{key: "IHOMELAND_WORLD_ADMISSION_KEY_SECRET", apply: stringSetter(&config.PublicAPI.WorldAdmission.DerivationKeySecret)},
 		{key: "IHOMELAND_PASSWORD_HASH_CONCURRENCY", apply: intSetter(&config.PublicAPI.Account.MaxConcurrentHashes)},
+		{key: "IHOMELAND_PLACEMENT_LEASE_TTL", apply: durationSetter(&config.PublicAPI.WorldRuntime.PlacementLeaseTTL)},
+		{key: "IHOMELAND_WORLD_RUNTIME_MAX_INSTANCES", apply: intSetter(&config.PublicAPI.WorldRuntime.MaxInstances)},
+		{key: "IHOMELAND_SEMANTIC_DEADLINE_ENTRIES", apply: intSetter(&config.PublicAPI.WorldRuntime.DeadlineEntries)},
 		{key: "IHOMELAND_WSS_ALLOWED_HOSTS", apply: stringListSetter(&config.PublicAPI.WebSocketControl.AllowedHosts)},
 		{key: "IHOMELAND_WSS_ALLOWED_ORIGINS", apply: stringListSetter(&config.PublicAPI.WebSocketControl.AllowedOrigins)},
 		{key: "IHOMELAND_WSS_MAX_CONNECTIONS", apply: intSetter(&config.PublicAPI.WebSocketControl.MaxConnections)},

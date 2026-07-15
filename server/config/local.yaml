@@ -54,6 +54,10 @@ publicApi:
     refreshTtl: 720h
     sessionTtl: 720h
   placementReplayTtl: 10m
+  worldRuntime:
+    placementLeaseTtl: 30s
+    maxInstances: 512
+    deadlineEntries: 65536
   visitSession:
     capacity: 4
     sessionLifetime: 24h

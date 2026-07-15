@@ -8,6 +8,8 @@ type queuedMessage struct {
 	encoded EncodedMessage
 	// completion 仅由writer或release路径写入一次；普通response/push不必分配。
 	completion chan<- error
+	// closeAfter 让唯一writer在frame成功写出后结束旧target连接。
+	closeAfter bool
 }
 
 // sendQueue 同时限制待发送item与完整encoded frame bytes，所有操作均非阻塞。
@@ -31,6 +33,11 @@ func newSendQueue(itemLimit int, byteLimit int) *sendQueue {
 
 // tryPush 复制frame并在任一预算不足时fail closed。
 func (queue *sendQueue) tryPush(message EncodedMessage, completion chan<- error) error {
+	return queue.tryPushWithClose(message, completion, false)
+}
+
+// tryPushWithClose 只供safe-return登记写后关闭，不创建额外goroutine/timer。
+func (queue *sendQueue) tryPushWithClose(message EncodedMessage, completion chan<- error, closeAfter bool) error {
 	copyMessage := EncodedMessage{messageID: message.messageID, frame: append([]byte(nil), message.frame...)}
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
@@ -40,7 +47,7 @@ func (queue *sendQueue) tryPush(message EncodedMessage, completion chan<- error)
 	if len(queue.items) == cap(queue.items) || queue.bytes+copyMessage.Size() > queue.byteLimit {
 		return ErrQueueFull
 	}
-	queue.items <- queuedMessage{encoded: copyMessage, completion: completion}
+	queue.items <- queuedMessage{encoded: copyMessage, completion: completion, closeAfter: closeAfter}
 	queue.bytes += copyMessage.Size()
 	return nil
 }

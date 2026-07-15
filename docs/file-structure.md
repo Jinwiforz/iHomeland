@@ -137,7 +137,7 @@ VisitSession 独立拥有定向 invite、Visitor membership/capacity、connectio
 
 生产 package 只包含纯 Go domain/application、消费侧 `VisitSessionStore`/world/assignment ports、稳定 command fingerprint 与严格 outcome/result 校验。并发 reference store、fake reader/clock/ID 与 admission qualification fixture 只存在于 `_test.go`；package 不启动 timer/goroutine，不拥有 socket、PersonalWorld 持久 mutation 或 placement lifecycle。
 
-VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 已为 HTTP accept/admission 与 TLS/TCP snapshot/mutation 构造同一个 VisitSession service；完整 producer、cleanup 与 safe-return 目的地编排仍由后续竖切 change 交付。
+VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 为 HTTP 与 TLS/TCP 构造同一个 VisitSession service；`internal/app` 中的窄 coordinator 拥有 semantic deadline、connection lifecycle、结果副作用去重、跨通道通知与 safe-return 编排，transport 和 storage adapter 均不反向拥有这些事实。
 
 ### `internal/worldadmission`
 

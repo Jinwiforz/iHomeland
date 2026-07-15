@@ -18,6 +18,21 @@ func TestDefaultPublicAPIValidates(t *testing.T) {
 	}
 }
 
+// TestWorldRuntimeDeadlineBudgetIncludesOwnerGrace 验证最小预算覆盖 assignment、session、invite、Owner grace 与全部 Visitor slot。
+func TestWorldRuntimeDeadlineBudgetIncludesOwnerGrace(t *testing.T) {
+	t.Parallel()
+	settings := Default()
+	minimum := settings.PublicAPI.WorldRuntime.MaxInstances * (fixedDeadlineEntriesPerRuntime + settings.PublicAPI.VisitSession.Capacity)
+	settings.PublicAPI.WorldRuntime.DeadlineEntries = minimum
+	if err := settings.Validate(); err != nil {
+		t.Fatalf("minimum deadline budget rejected: %v", err)
+	}
+	settings.PublicAPI.WorldRuntime.DeadlineEntries--
+	if err := settings.Validate(); err == nil || !strings.Contains(err.Error(), "deadlineEntries") {
+		t.Fatalf("undersized deadline budget error = %v", err)
+	}
+}
+
 // TestPublicAPIValidationRejectsUnsafeCrossFieldValues 覆盖 TLS、地址、endpoint、rate 与 TTL 约束。
 func TestPublicAPIValidationRejectsUnsafeCrossFieldValues(t *testing.T) {
 	t.Parallel()
@@ -44,6 +59,9 @@ func TestPublicAPIValidationRejectsUnsafeCrossFieldValues(t *testing.T) {
 			value.PublicAPI.Rates["loginAccount"] = RatePolicy{Requests: 1, Window: time.Minute, Burst: 2}
 		}, want: "requests/burst"},
 		{name: "session TTL 逆序", mutate: func(value *Config) { value.PublicAPI.Session.AccessTTL = value.PublicAPI.Session.TicketTTL }, want: "TTL order"},
+		{name: "Placement lease 过短", mutate: func(value *Config) { value.PublicAPI.WorldRuntime.PlacementLeaseTTL = 0 }, want: "placementLeaseTtl"},
+		{name: "World runtime 容量为零", mutate: func(value *Config) { value.PublicAPI.WorldRuntime.MaxInstances = 0 }, want: "maxInstances"},
+		{name: "Semantic deadline 容量不足", mutate: func(value *Config) { value.PublicAPI.WorldRuntime.DeadlineEntries = 1 }, want: "deadlineEntries"},
 		{name: "VisitSession reservation 超出领域上限", mutate: func(value *Config) { value.PublicAPI.VisitSession.ReservationLifetime = 3 * time.Minute }, want: "reservationLifetime"},
 		{name: "VisitSession Owner grace 超出领域上限", mutate: func(value *Config) { value.PublicAPI.VisitSession.OwnerGrace = 6 * time.Minute }, want: "ownerGrace"},
 		{name: "非法 derivation reference", mutate: func(value *Config) { value.PublicAPI.WorldAdmission.DerivationKeySecret = "raw-key" }, want: "reference"},
@@ -87,6 +105,9 @@ func TestPublicAPIEnvironmentOverridesAreExplicit(t *testing.T) {
 		"IHOMELAND_PUBLIC_TLS_TCP_HOST":           "game.example.test",
 		"IHOMELAND_PUBLIC_TLS_TCP_PORT":           "9444",
 		"IHOMELAND_PASSWORD_HASH_CONCURRENCY":     "3",
+		"IHOMELAND_PLACEMENT_LEASE_TTL":           "45s",
+		"IHOMELAND_WORLD_RUNTIME_MAX_INSTANCES":   "256",
+		"IHOMELAND_SEMANTIC_DEADLINE_ENTRIES":     "32768",
 		"IHOMELAND_WSS_ALLOWED_HOSTS":             "control.example.test:9443",
 		"IHOMELAND_WSS_MAX_CONNECTIONS":           "2048",
 		"IHOMELAND_GAMEPLAY_TCP_ADDRESS":          "127.0.0.1:0",
@@ -100,6 +121,7 @@ func TestPublicAPIEnvironmentOverridesAreExplicit(t *testing.T) {
 	}
 	if settings.PublicAPI.Address != "127.0.0.1:0" || settings.PublicAPI.Endpoints.WSS.Port != 9443 || settings.PublicAPI.Account.MaxConcurrentHashes != 3 ||
 		settings.PublicAPI.WebSocketControl.MaxConnections != 2048 || len(settings.PublicAPI.WebSocketControl.AllowedHosts) != 1 ||
+		settings.PublicAPI.WorldRuntime.PlacementLeaseTTL != 45*time.Second || settings.PublicAPI.WorldRuntime.MaxInstances != 256 || settings.PublicAPI.WorldRuntime.DeadlineEntries != 32768 ||
 		settings.PublicAPI.GameplayTCP.Address != "127.0.0.1:0" || settings.PublicAPI.GameplayTCP.MaxConnections != 1024 || settings.PublicAPI.GameplayTCP.KeepAlive != 10*time.Second {
 		t.Fatalf("public API overrides not applied: %+v", settings.PublicAPI)
 	}
