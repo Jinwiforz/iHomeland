@@ -123,6 +123,8 @@ type AuthSnapshot struct {
 	AccessExpiresAt time.Time
 	// RefreshExpiresAt 是受 session 总寿命约束后的新 refresh expiry。
 	RefreshExpiresAt time.Time
+	// SessionExpiresAt 是认证时原子读取到的 session 绝对失效时间。
+	SessionExpiresAt time.Time
 }
 
 // InvalidationReason 是连接边界可安全记录和幂等处理的失效原因。

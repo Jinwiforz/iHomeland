@@ -36,6 +36,35 @@ type IssueRecord struct {
 	PhysicalExpiresAt time.Time
 }
 
+// IssueSnapshot 是按IssueID解析到的首次签发事实与credential状态。
+type IssueSnapshot struct {
+	// Fingerprint 是首次签发语义摘要。
+	Fingerprint Digest
+	// CredentialDigest 是可重新确定性派生credential的校验摘要。
+	CredentialDigest Digest
+	// Binding 是首次提交且后续不可延长的完整授权事实。
+	Binding Binding
+	// Consumed 表示credential已被首次连接烧毁。
+	Consumed bool
+}
+
+// Valid 报告解析结果是否包含完整首次签发事实。
+func (snapshot IssueSnapshot) Valid() bool {
+	return snapshot.Fingerprint.Valid() && snapshot.CredentialDigest.Valid() && snapshot.Binding.Valid()
+}
+
+// IssueResolveOutcome 表达按IssueID读取首次签发事实的封闭结果。
+type IssueResolveOutcome uint8
+
+const (
+	// IssueResolveOutcomeUnspecified 表示adapter没有返回有效决议。
+	IssueResolveOutcomeUnspecified IssueResolveOutcome = iota
+	// IssueResolveOutcomeFound 表示首次签发事实仍在有界重放窗口内。
+	IssueResolveOutcomeFound
+	// IssueResolveOutcomeNotFound 表示该IssueID没有保留的签发事实。
+	IssueResolveOutcomeNotFound
+)
+
 // Valid 报告 record 是否完整且physical retention不短于业务expiry。
 func (record IssueRecord) Valid() bool {
 	return record.IssueID.Valid() && record.Fingerprint.Valid() && record.CredentialDigest.Valid() && record.Binding.Valid() && !record.PhysicalExpiresAt.IsZero() && !record.PhysicalExpiresAt.Before(record.Binding.ExpiresAt())
@@ -110,6 +139,8 @@ const (
 
 // Store 由 worldadmission 消费侧定义原子签发与消费边界。
 type Store interface {
+	// ResolveIssue 按IssueID读取首次签发事实，使服务端派生时间变化不破坏HTTP精确重放。
+	ResolveIssue(ctx context.Context, issueID IssueID) (IssueSnapshot, IssueResolveOutcome, error)
 	// Issue 原子创建或重放 issuance/credential records；返回error时outcome必须说明提交确定性。
 	Issue(ctx context.Context, record IssueRecord, observedAt time.Time) (IssueOutcome, error)
 	// Consume 原子比较静态binding并写入首次consume identity；Applied/Replay必须返回完整Binding。

@@ -105,6 +105,20 @@ redis.call('PEXPIREAT',KEYS[2],ARGV[18])
 return {'created'}
 `
 
+// resolveIssueScriptSource 交叉读取issue与credential并返回首次完整绑定。
+var resolveIssueScriptSource = luaPrelude + `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {'not_found'} end
+if not issue_complete(KEYS[1]) then return {'defect'} end
+local credential_key = ARGV[1] .. redis.call('HGET', KEYS[1], 'digest')
+if redis.call('EXISTS', credential_key) == 0 or not credential_complete(credential_key) then return {'defect'} end
+if redis.call('HGET', KEYS[1], 'expires_us') ~= redis.call('HGET', credential_key, 'expires_us') then return {'defect'} end
+local reply = binding_reply('found', credential_key)
+table.insert(reply, 2, redis.call('HGET', KEYS[1], 'fingerprint'))
+table.insert(reply, 3, redis.call('HGET', KEYS[1], 'digest'))
+table.insert(reply, 4, redis.call('HGET', credential_key, 'status'))
+return reply
+`
+
 // consumeScriptSource 在写入tombstone前比较全部静态连接binding。
 var consumeScriptSource = luaPrelude + `
 if redis.call('EXISTS', KEYS[1]) == 0 then return {'not_found'} end
@@ -125,6 +139,8 @@ return binding_reply('applied',KEYS[1])
 var (
 	// issueScript 缓存不可变脚本文本与SHA，不创建连接。
 	issueScript = redisclient.NewScript(issueScriptSource)
+	// resolveIssueScript 缓存按IssueID解析首次签发事实的只读脚本。
+	resolveIssueScript = redisclient.NewScript(resolveIssueScriptSource)
 	// consumeScript 缓存不可变脚本文本与SHA，不创建连接。
 	consumeScript = redisclient.NewScript(consumeScriptSource)
 )

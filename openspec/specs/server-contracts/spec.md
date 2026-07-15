@@ -71,11 +71,15 @@ Contract fixtures MUST 覆盖 HTTPS request/response/error、control push、game
 - **THEN** 每个 packet 都能完成 registry lookup 或明确的通用 envelope decode、deterministic re-encode 与摘要校验，negative manifest 中每个原因都有对应的真实拒绝测试
 
 ### Requirement: Account HTTP 契约必须与领域验证和唯一冲突一致
-OpenAPI register/login username MUST 声明 3-64 characters、ASCII letter/digit/`.`/`_`/`-`、首尾 letter/digit 的可执行 pattern，并说明服务端使用 ASCII lowercase canonical key。DisplayName MUST 说明 Unicode normalization 与安全字符边界。Error registry MUST 新增唯一、稳定、owner 为 account 的 code 104 `ACCOUNT_USERNAME_TAKEN` conflict error，HTTP status 为 409 且 retryable 为 false；已有编号、响应结构和 `AUTH_INVALID_CREDENTIALS` 语义不得改变。
+OpenAPI register/login username MUST 声明 3-64 characters、ASCII letter/digit/`.`/`_`/`-`、首尾 letter/digit 的可执行 pattern，并说明服务端使用 ASCII lowercase canonical key。DisplayName MUST 说明 Unicode normalization 与安全字符边界。Register/login password MUST 保持原始 UTF-8 bytes、不执行 trim 或 Unicode normalization，并在标准 character length 之外以机器可读扩展声明 Account 领域共同的 128-byte 上限。Error registry MUST 新增唯一、稳定、owner 为 account 的 code 104 `ACCOUNT_USERNAME_TAKEN` conflict error，HTTP status 为 409 且 retryable 为 false；已有编号、响应结构和 `AUTH_INVALID_CREDENTIALS` 语义不得改变。
 
 #### Scenario: OpenAPI 拒绝非法 username
 - **WHEN** contract validation 输入包含空白、非 ASCII、首尾标点或超出长度的 register/login username
 - **THEN** schema validation 在进入 application 前拒绝输入，并与 account normalization 接受集合一致
+
+#### Scenario: Password 超过领域 byte budget
+- **WHEN** register/login password 虽未超过 OpenAPI character maxLength 但其原始 UTF-8 编码超过 128 bytes
+- **THEN** HTTP adapter 在进入 Account application 与 password hasher 前拒绝输入，且 contract validator 要求 schema 保留机器可读 128-byte 约束
 
 #### Scenario: 注册 username 冲突映射
 - **WHEN** account application 返回 username conflict

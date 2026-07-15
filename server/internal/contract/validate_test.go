@@ -458,9 +458,12 @@ func TestValidateAccountHTTPSchemasRejectsLooseUsername(t *testing.T) {
 	validUsername := func() map[string]any {
 		return map[string]any{"type": "string", "minLength": 3, "maxLength": 64, "pattern": accountUsernamePattern, "description": "canonical ASCII username"}
 	}
+	validPassword := func() map[string]any {
+		return map[string]any{"type": "string", "maxLength": 128, "x-ihomeland-max-bytes": 128, "description": "raw UTF-8 byte budget"}
+	}
 	document := map[string]any{"components": map[string]any{"schemas": map[string]any{
-		"RegisterRequest": map[string]any{"properties": map[string]any{"username": validUsername(), "displayName": map[string]any{"description": "normalized Unicode display name"}}},
-		"LoginRequest":    map[string]any{"properties": map[string]any{"username": validUsername()}},
+		"RegisterRequest": map[string]any{"properties": map[string]any{"username": validUsername(), "password": validPassword(), "displayName": map[string]any{"description": "normalized Unicode display name"}}},
+		"LoginRequest":    map[string]any{"properties": map[string]any{"username": validUsername(), "password": validPassword()}},
 	}}}
 	if err := validateAccountHTTPSchemas(document); err != nil {
 		t.Fatalf("valid account schema rejected: %v", err)
@@ -469,6 +472,11 @@ func TestValidateAccountHTTPSchemasRejectsLooseUsername(t *testing.T) {
 	register["properties"].(map[string]any)["username"].(map[string]any)["pattern"] = `^.*$`
 	if err := validateAccountHTTPSchemas(document); err == nil {
 		t.Fatal("loose username pattern unexpectedly accepted")
+	}
+	register["properties"].(map[string]any)["username"] = validUsername()
+	register["properties"].(map[string]any)["password"].(map[string]any)["x-ihomeland-max-bytes"] = 256
+	if err := validateAccountHTTPSchemas(document); err == nil {
+		t.Fatal("loose password byte budget unexpectedly accepted")
 	}
 }
 

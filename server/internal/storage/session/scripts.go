@@ -107,6 +107,12 @@ local function auth_reply(code, session_key)
   return {code, redis.call('HGET', session_key, 'account'), redis.call('HGET', session_key, 'player'),
     string.match(session_key, '([^:]+)$'), redis.call('HGET', session_key, 'epoch')}
 end
+local function access_auth_reply(code, session_key, access_key)
+  local reply = auth_reply(code, session_key)
+  table.insert(reply, redis.call('HGET', access_key, 'expires_us'))
+  table.insert(reply, redis.call('HGET', session_key, 'expires_us'))
+  return reply
+end
 local function session_outcome(session_key, epoch, now_us)
   if redis.call('EXISTS', session_key) == 0 then return 'not_found' end
   if not session_complete(session_key) then return 'defect' end
@@ -175,7 +181,7 @@ local session_key = ARGV[2] .. redis.call('HGET', KEYS[1], 'session')
 local outcome = session_outcome(session_key, redis.call('HGET', KEYS[1], 'epoch'), ARGV[1])
 if outcome ~= 'applied' then return {outcome} end
 if decimal_compare(redis.call('HGET', KEYS[1], 'expires_us'), redis.call('HGET', session_key, 'expires_us')) > 0 then return {'defect'} end
-return auth_reply('applied', session_key)
+return access_auth_reply('applied', session_key, KEYS[1])
 `
 
 const rotateRefreshScriptSource = luaPrelude + `

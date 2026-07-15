@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 )
 
 // maximumIdentifierBytes 限制身份索引、日志关联值和未来存储 key 的大小。
@@ -237,6 +238,47 @@ type AuthContext struct {
 	// scopes 是构造时冻结的 capability 集合。
 	scopes ScopeSet
 }
+
+// AuthenticatedSession 是 HTTPS 认证边界交给 application service 的可信会话快照。
+//
+// deadline 来自与身份相同的原子 store 读取，业务层可据此限制会跨越认证时刻的
+// 状态变更；该值不包含 raw credential，也不会延长 session 生命周期。
+type AuthenticatedSession struct {
+	// auth 是经过验证且固定为 HTTPS channel 的身份上下文。
+	auth AuthContext
+	// deadline 是 access 与 session 两个绝对失效时间中的较早者。
+	deadline time.Time
+}
+
+// newAuthenticatedSession 只接受完整 HTTPS 身份和未来的绝对截止时间。
+func newAuthenticatedSession(auth AuthContext, deadline time.Time, now time.Time) (AuthenticatedSession, error) {
+	if !auth.Valid() || auth.Channel() != ChannelHTTPS || deadline.IsZero() || now.IsZero() || !now.Before(deadline) {
+		return AuthenticatedSession{}, errors.New("authenticated session requires a valid HTTPS identity and future deadline")
+	}
+	return AuthenticatedSession{auth: auth, deadline: deadline}, nil
+}
+
+// Valid 报告快照是否包含完整 HTTPS 身份与绝对截止时间。
+func (session AuthenticatedSession) Valid() bool {
+	return session.auth.Valid() && session.auth.Channel() == ChannelHTTPS && !session.deadline.IsZero()
+}
+
+// AuthContext 返回不可变身份值副本。
+func (session AuthenticatedSession) AuthContext() AuthContext { return session.auth }
+
+// Deadline 返回本次认证可用于业务变更的最晚绝对时间。
+func (session AuthenticatedSession) Deadline() time.Time { return session.deadline }
+
+// String 返回不包含 principal、credential 与截止时间的安全摘要。
+func (session AuthenticatedSession) String() string {
+	return "AuthenticatedSession{session=" + session.auth.SessionID().String() + "}"
+}
+
+// GoString 与 String 保持相同安全格式化边界。
+func (session AuthenticatedSession) GoString() string { return session.String() }
+
+// LogValue 复用 AuthContext 的脱敏日志边界，不记录认证截止时间。
+func (session AuthenticatedSession) LogValue() slog.Value { return session.auth.LogValue() }
 
 // newAuthContext 只允许 session 认证流程构造 AuthContext，防止其他 package 伪造可信身份。
 func newAuthContext(principal Principal, sessionID SessionID, epoch Epoch, channel Channel, scopes ScopeSet) (AuthContext, error) {

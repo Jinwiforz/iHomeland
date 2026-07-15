@@ -211,7 +211,12 @@ func (service *Service) AcceptInvite(ctx context.Context, auth session.AuthConte
 	if err != nil {
 		return MutationResult{}, err
 	}
-	fingerprint := commandFingerprint(OperationAcceptInvite, visitID, expected, actorFields(actor), inviteID.value, timeField(reservationExpiresAt), assignmentFields(assignment.Stamp()))
+	return service.acceptInvite(ctx, actor, observedAt, snapshot, assignment, inviteID, reservationExpiresAt, expected, commandID)
+}
+
+// acceptInvite 在一次权威读取后进入统一原子提交路径。
+func (service *Service) acceptInvite(ctx context.Context, actor Actor, observedAt time.Time, snapshot Snapshot, assignment placement.AssignmentSnapshot, inviteID InviteID, reservationExpiresAt time.Time, expected Revision, commandID CommandID) (MutationResult, error) {
+	fingerprint := commandFingerprint(OperationAcceptInvite, snapshot.ID(), expected, actorFields(actor), inviteID.value, timeField(reservationExpiresAt), assignmentFields(assignment.Stamp()))
 	return service.commit(ctx, snapshot, expected, commandID, fingerprint, OperationAcceptInvite, func(visit VisitSession) (mutationProposal, error) {
 		if policyErr := validatePolicyDeadline(OperationAcceptInvite, observedAt, reservationExpiresAt, minimumReservationLifetime, service.policy.reservationLifetime); policyErr != nil {
 			return mutationProposal{}, policyErr
@@ -220,6 +225,156 @@ func (service *Service) AcceptInvite(ctx context.Context, auth session.AuthConte
 		return mutationProposal{visit: target, admission: admission}, applyErr
 	})
 }
+
+// AcceptInviteFromHTTP 由 VisitSession owner计算公开 accept 的最早 reservation deadline。
+//
+// deadline 同时受 policy、invite、aggregate、current assignment lease 与认证 session约束；
+// transport 不能提交或延长该值。HTTP fingerprint只包含调用语义与权威assignment，不包含
+// 每次重试都会变化的observedAt派生deadline；首次提交的完整结果仍由store原子保存并重放。
+func (service *Service) AcceptInviteFromHTTP(ctx context.Context, authenticated session.AuthenticatedSession, visitID VisitSessionID, inviteID InviteID, expected Revision, commandID CommandID) (MutationResult, error) {
+	if !authenticated.Valid() {
+		return MutationResult{}, domainError(OperationAcceptInvite, ErrorCodeInvalidArgument)
+	}
+	auth := authenticated.AuthContext()
+	actor, observedAt, err := service.actorAndTime(ctx, auth, OperationAcceptInvite)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	snapshot, err := service.find(ctx, visitID, OperationAcceptInvite)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	assignment, err := service.currentAssignment(ctx, snapshot.WorldID(), observedAt, OperationAcceptInvite)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	var invite InviteSnapshot
+	for _, candidate := range snapshot.Invites() {
+		if candidate.ID() == inviteID {
+			invite = candidate
+			break
+		}
+	}
+	if !invite.Valid() {
+		return MutationResult{}, domainError(OperationAcceptInvite, ErrorCodeNotFound)
+	}
+	if invite.TargetID() != actor.playerID {
+		return MutationResult{}, domainError(OperationAcceptInvite, ErrorCodeForbidden)
+	}
+	deadline := earliestDeadline(
+		observedAt.Add(service.policy.reservationLifetime),
+		invite.ExpiresAt(),
+		snapshot.ExpiresAt(),
+		assignment.Lease().ExpiresAt(),
+		authenticated.Deadline(),
+	)
+	fingerprint := commandFingerprint(OperationAcceptInvite, snapshot.ID(), expected, actorFields(actor), inviteID.value, assignmentFields(assignment.Stamp()))
+	if replay, resolved, replayErr := service.resolveCommandBeforeApply(ctx, snapshot, expected, commandID, fingerprint, OperationAcceptInvite); resolved {
+		return replay, replayErr
+	}
+	if !assignment.Stamp().Equal(snapshot.Assignment()) {
+		return MutationResult{}, domainError(OperationAcceptInvite, ErrorCodeStale)
+	}
+	return service.commit(ctx, snapshot, expected, commandID, fingerprint, OperationAcceptInvite, func(visit VisitSession) (mutationProposal, error) {
+		if policyErr := validatePolicyDeadline(OperationAcceptInvite, observedAt, deadline, minimumReservationLifetime, service.policy.reservationLifetime); policyErr != nil {
+			return mutationProposal{}, policyErr
+		}
+		target, admission, applyErr := visit.AcceptInvite(actor, inviteID, deadline, assignment, observedAt)
+		return mutationProposal{visit: target, admission: admission}, applyErr
+	})
+}
+
+// resolveCommandBeforeApply 让HTTP幂等identity在领域precondition之前由store原子决议。
+//
+// 无result probe在command不存在且revision匹配时返回InvalidState，表示可以继续构造首次
+// target；其他outcome均为已提交replay/conflict或真实失败。并发首次请求仍由后续完整
+// Commit在线性化点收敛，不能依据本次只读式probe声称尚未提交。
+func (service *Service) resolveCommandBeforeApply(ctx context.Context, snapshot Snapshot, expected Revision, commandID CommandID, fingerprint CommandFingerprint, operation Operation) (MutationResult, bool, error) {
+	probe, err := NewConflictProbe(operation, snapshot.ID(), expected, commandID, fingerprint)
+	if err != nil {
+		return MutationResult{}, true, &Error{operation: operation, code: ErrorCodeDependencyDefect, cause: err}
+	}
+	result, outcome, storeErr := service.store.Commit(ctx, probe)
+	if outcome == MutationOutcomeInvalidState && storeErr == nil && mutationResultEmpty(result) && snapshot.Revision() == expected {
+		return MutationResult{}, false, nil
+	}
+	returnResult, validationErr := service.validateMutation(snapshot, probe, MutationResult{}, result, outcome, storeErr)
+	return returnResult, true, validationErr
+}
+
+// ResolveAdmissionEligibility 只读解析当前 actor 的 JOIN 或 RECONNECT 签发资格。
+//
+// 方法不创建 credential、membership、command或后台状态；assignment变更、lineage不匹配、
+// deadline达到或非 reserved/reconnecting state 均 fail closed。
+func (service *Service) ResolveAdmissionEligibility(ctx context.Context, authenticated session.AuthenticatedSession, visitID VisitSessionID) (AdmissionEligibility, error) {
+	if !authenticated.Valid() {
+		return AdmissionEligibility{}, domainError(OperationResolve, ErrorCodeInvalidArgument)
+	}
+	actor, observedAt, err := service.actorAndTime(ctx, authenticated.AuthContext(), OperationResolve)
+	if err != nil {
+		return AdmissionEligibility{}, err
+	}
+	snapshot, err := service.find(ctx, visitID, OperationResolve)
+	if err != nil {
+		return AdmissionEligibility{}, err
+	}
+	assignment, err := service.currentAssignment(ctx, snapshot.WorldID(), observedAt, OperationResolve)
+	if err != nil {
+		return AdmissionEligibility{}, err
+	}
+	if !assignment.Stamp().Equal(snapshot.Assignment()) {
+		return AdmissionEligibility{}, domainError(OperationResolve, ErrorCodeStale)
+	}
+	var member MembershipSnapshot
+	for _, candidate := range snapshot.Memberships() {
+		if candidate.VisitorID() == actor.playerID {
+			member = candidate
+			break
+		}
+	}
+	if !member.Valid() {
+		return AdmissionEligibility{}, domainError(OperationResolve, ErrorCodeNotFound)
+	}
+	if member.SessionID() != authSessionID(actor) || member.Epoch() != authEpoch(actor) {
+		return AdmissionEligibility{}, domainError(OperationResolve, ErrorCodeStale)
+	}
+	var purpose AdmissionPurpose
+	var memberDeadline time.Time
+	switch member.State() {
+	case MembershipStateReserved:
+		purpose, memberDeadline = AdmissionPurposeJoin, member.ReservationExpiresAt()
+	case MembershipStateReconnecting:
+		purpose, memberDeadline = AdmissionPurposeReconnect, member.ReconnectExpiresAt()
+	default:
+		return AdmissionEligibility{}, domainError(OperationResolve, ErrorCodeInvalidState)
+	}
+	deadline := earliestDeadline(memberDeadline, snapshot.ExpiresAt(), assignment.Lease().ExpiresAt(), authenticated.Deadline())
+	if !observedAt.Before(deadline) {
+		return AdmissionEligibility{}, domainError(OperationResolve, ErrorCodeExpired)
+	}
+	intent, err := HydrateAdmissionIntent(snapshot.ID(), actor.playerID, authSessionID(actor), authEpoch(actor), assignment.Stamp(), deadline)
+	if err != nil {
+		return AdmissionEligibility{}, &Error{operation: OperationResolve, code: ErrorCodeDependencyDefect, cause: err}
+	}
+	return AdmissionEligibility{intent: intent, purpose: purpose}, nil
+}
+
+// earliestDeadline 返回非空绝对时间中的最早值。
+func earliestDeadline(deadlines ...time.Time) time.Time {
+	var earliest time.Time
+	for _, deadline := range deadlines {
+		if !deadline.IsZero() && (earliest.IsZero() || deadline.Before(earliest)) {
+			earliest = deadline
+		}
+	}
+	return earliest
+}
+
+// authSessionID 从包内actor读取可信session lineage，集中避免桥接层重复访问私有字段。
+func authSessionID(actor Actor) session.SessionID { return actor.sessionID }
+
+// authEpoch 从包内actor读取可信撤销屏障。
+func authEpoch(actor Actor) session.Epoch { return actor.epoch }
 
 // Join 只消费包内受信 admission qualification，并重新确认 current assignment 与 lease。
 func (service *Service) Join(ctx context.Context, auth session.AuthContext, visitID VisitSessionID, qualification JoinQualification, bindingID ConnectionBindingID, expected Revision, commandID CommandID) (MutationResult, error) {

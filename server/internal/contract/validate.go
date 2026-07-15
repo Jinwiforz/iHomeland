@@ -641,6 +641,13 @@ func validateAccountHTTPSchemas(root map[string]any) error {
 		if description, ok := username["description"].(string); !ok || strings.TrimSpace(description) == "" {
 			return fmt.Errorf("OpenAPI schema %s username requires canonicalization description", schemaName)
 		}
+		password, ok := properties["password"].(map[string]any)
+		if !ok || password["type"] != "string" || password["maxLength"] != 128 || password["x-ihomeland-max-bytes"] != 128 {
+			return fmt.Errorf("OpenAPI schema %s password must preserve the account byte budget", schemaName)
+		}
+		if description, ok := password["description"].(string); !ok || strings.TrimSpace(description) == "" {
+			return fmt.Errorf("OpenAPI schema %s password requires byte semantics description", schemaName)
+		}
 	}
 	register := schemas["RegisterRequest"].(map[string]any)
 	properties := register["properties"].(map[string]any)
@@ -997,6 +1004,8 @@ type languageVersionCatalog struct {
 
 // libraryVersionCatalog 收集运行时代码直接依赖且需要中央治理的基础库版本。
 type libraryVersionCatalog struct {
+	// GinGo 锁定公开 HTTP transport 使用的 Gin router。
+	GinGo versionValue `yaml:"gin_go"`
 	// PrometheusClientGo 锁定诊断 metrics 使用的官方 Go client。
 	PrometheusClientGo versionValue `yaml:"prometheus_client_go"`
 	// GoText 锁定账号 Unicode normalization 使用的官方扩展库。
@@ -1035,7 +1044,7 @@ func ValidateVersions(root string) error {
 	if versions.Protocols.OpenAPI.Version == "" || versions.Protocols.Edition.Version == "" ||
 		versions.Toolchains.BufCLI.Version == "" || versions.Toolchains.BufConfig.Version == "" ||
 		versions.Toolchains.ProtobufGoGenerator.Version == "" || versions.Toolchains.Protoc.Version == "" ||
-		versions.Libraries.PrometheusClientGo.Version == "" || versions.Libraries.GoText.Version == "" ||
+		versions.Libraries.GinGo.Version == "" || versions.Libraries.PrometheusClientGo.Version == "" || versions.Libraries.GoText.Version == "" ||
 		versions.Libraries.GoCrypto.Version == "" || versions.Languages.Go.Version == "" {
 		return errors.New("versions.yaml is missing a required protocol, toolchain, library, or language version")
 	}
@@ -1054,6 +1063,7 @@ func ValidateVersions(root string) error {
 		{filepath.Join(root, "shared", "contracts", "http", "v1", "openapi.yaml"), "openapi: " + versions.Protocols.OpenAPI.Version},
 		{filepath.Join(root, "server", "go.mod"), "go " + versions.Languages.Go.Version},
 		{filepath.Join(root, "server", "go.mod"), "google.golang.org/protobuf v" + versions.Toolchains.ProtobufGoGenerator.Version},
+		{filepath.Join(root, "server", "go.mod"), "github.com/gin-gonic/gin v" + versions.Libraries.GinGo.Version},
 		{filepath.Join(root, "server", "go.mod"), "github.com/prometheus/client_golang v" + versions.Libraries.PrometheusClientGo.Version},
 		{filepath.Join(root, "server", "go.mod"), "golang.org/x/text v" + versions.Libraries.GoText.Version},
 		{filepath.Join(root, "server", "go.mod"), "golang.org/x/crypto v" + versions.Libraries.GoCrypto.Version},

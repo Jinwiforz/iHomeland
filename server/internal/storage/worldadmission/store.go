@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	storageredis "github.com/jinwiforz/ihomeland/server/internal/storage/redis"
@@ -29,6 +30,8 @@ type Store struct {
 	keyspace *storageredis.Keyspace
 	// observer 只接收固定低基数结果。
 	observer Observer
+	// credentialPrefix 只用于owner Lua按issue digest定位对应credential Hash。
+	credentialPrefix string
 }
 
 var _ domain.Store = (*Store)(nil)
@@ -46,7 +49,52 @@ func New(client *redisclient.Client, keyspace *storageredis.Keyspace, observer O
 			return nil, errors.New("world admission keyspace is missing required definitions")
 		}
 	}
-	return &Store{client: client, keyspace: keyspace, observer: observer}, nil
+	credentialPrefix, err := admissionKeyPrefix(keyspace, credentialDefinitionName)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{client: client, keyspace: keyspace, observer: observer, credentialPrefix: credentialPrefix}, nil
+}
+
+// ResolveIssue 原子读取issue与其digest指向的credential，任一半缺失或损坏均fail closed。
+func (store *Store) ResolveIssue(ctx context.Context, issueID domain.IssueID) (domain.IssueSnapshot, domain.IssueResolveOutcome, error) {
+	if !issueID.Valid() {
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "invalid", errors.New("world admission issue ID is invalid"))
+	}
+	issueKey, err := store.keyspace.Build(issueDefinitionName, storageredis.DigestIdentity([]byte(issueID.Value())))
+	if err != nil {
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "key_failed", err)
+	}
+	value, evalErr := resolveIssueScript.Run(ctx, store.client, []string{issueKey.Value()}, store.credentialPrefix).Result()
+	if evalErr != nil {
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "read_failed", evalErr)
+	}
+	items, err := resultStrings(value)
+	if err != nil || len(items) == 0 {
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "defect", errors.New("world admission issue resolve result is invalid"))
+	}
+	switch items[0] {
+	case "not_found":
+		store.observer.RecordStorageOperation("worldadmission", "issue", "not_found")
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeNotFound, nil
+	case "found":
+		if len(items) != 20 {
+			return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "defect", errors.New("world admission issue resolve shape is invalid"))
+		}
+		fingerprint, fingerprintErr := domain.ParseDigestHex(items[1])
+		digest, digestErr := domain.ParseDigestHex(items[2])
+		binding, bindingErr := decodeBindingReply(items[4:])
+		snapshot := domain.IssueSnapshot{Fingerprint: fingerprint, CredentialDigest: digest, Binding: binding, Consumed: items[3] == "consumed"}
+		if fingerprintErr != nil || digestErr != nil || bindingErr != nil || (items[3] != "issued" && items[3] != "consumed") || !snapshot.Valid() {
+			return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "codec_failed", errors.New("world admission issue resolve payload is invalid"))
+		}
+		store.observer.RecordStorageOperation("worldadmission", "issue", "found")
+		return snapshot, domain.IssueResolveOutcomeFound, nil
+	case "defect":
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "defect", errors.New("world admission issue state is corrupt"))
+	default:
+		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "defect", errors.New("world admission issue resolve outcome is unknown"))
+	}
 }
 
 // Issue 使用 owner Lua script 原子创建或重放 issuance/credential Hash。
@@ -153,6 +201,19 @@ func (store *Store) Consume(ctx context.Context, request domain.ConsumeRequest) 
 func (store *Store) issueResult(operation string, outcome domain.IssueOutcome, label string) (domain.IssueOutcome, error) {
 	store.observer.RecordStorageOperation("worldadmission", operation, label)
 	return outcome, nil
+}
+
+// admissionKeyPrefix 从已登记示例key安全派生同owner动态寻址前缀。
+func admissionKeyPrefix(keyspace *storageredis.Keyspace, definitionName string) (string, error) {
+	const marker = "validation"
+	key, err := keyspace.Build(definitionName, marker)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasSuffix(key.Value(), marker) {
+		return "", errors.New("world admission key prefix derivation failed")
+	}
+	return strings.TrimSuffix(key.Value(), marker), nil
 }
 
 // consumeResult 记录不携带binding的确定性拒绝决议。

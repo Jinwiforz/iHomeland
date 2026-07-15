@@ -123,12 +123,19 @@ func (store *Store) ResolveAccess(ctx context.Context, digest domain.Digest, now
 		store.observe("resolve_access", items[0])
 		return domain.AuthSnapshot{}, outcome, nil
 	}
-	if len(items) != 5 {
+	if len(items) != 7 {
 		return domain.AuthSnapshot{}, domain.StoreOutcomeUnspecified, store.failure("resolve_access", "defect", errors.New("access result has invalid shape"))
 	}
 	snapshot, err := parseAuthIdentity(items, 1)
 	if err != nil {
 		return domain.AuthSnapshot{}, domain.StoreOutcomeUnspecified, store.failure("resolve_access", "codec_failed", err)
+	}
+	snapshot.AccessExpiresAt, err = parseMicroTime(items[5])
+	if err == nil {
+		snapshot.SessionExpiresAt, err = parseMicroTime(items[6])
+	}
+	if err != nil || !now.Before(snapshot.AccessExpiresAt) || !now.Before(snapshot.SessionExpiresAt) || snapshot.AccessExpiresAt.After(snapshot.SessionExpiresAt) {
+		return domain.AuthSnapshot{}, domain.StoreOutcomeUnspecified, store.failure("resolve_access", "codec_failed", errors.New("access result has invalid expiry"))
 	}
 	store.observe("resolve_access", "applied")
 	return snapshot, domain.StoreOutcomeApplied, nil

@@ -12,6 +12,60 @@ diagnostic:
   writeTimeout: 10s
   idleTimeout: 30s
   maxHeaderBytes: 8192
+publicApi:
+  address: 127.0.0.1:8080
+  readHeaderTimeout: 3s
+  readTimeout: 15s
+  writeTimeout: 15s
+  idleTimeout: 30s
+  maxHeaderBytes: 8192
+  tls:
+    enabled: false
+    certificateFile: ""
+    privateKeySecret: ""
+  endpoints:
+    wss:
+      host: localhost
+      port: 8443
+    tlsTcp:
+      host: localhost
+      port: 8444
+  limits:
+    httpBodyBytes: 4096
+    realtimeFrameBytes: 65536
+  rates:
+    getVersion: { requests: 120, window: 1m, burst: 20 }
+    getBootstrapConfig: { requests: 120, window: 1m, burst: 20 }
+    registerAccount: { requests: 10, window: 1m, burst: 3 }
+    loginAccount: { requests: 20, window: 1m, burst: 5 }
+    refreshSession: { requests: 120, window: 1m, burst: 20 }
+    logoutSession: { requests: 120, window: 1m, burst: 20 }
+    issueConnectionTicket: { requests: 120, window: 1m, burst: 20 }
+    getWorldBootstrap: { requests: 120, window: 1m, burst: 20 }
+    acceptVisitInvite: { requests: 120, window: 1m, burst: 20 }
+    issueWorldAdmission: { requests: 120, window: 1m, burst: 20 }
+  rateMaxEntries: 4096
+  rateIdleTtl: 10m
+  account:
+    maxConcurrentHashes: 2
+  session:
+    ticketTtl: 30s
+    accessTtl: 15m
+    refreshTtl: 720h
+    sessionTtl: 720h
+  placementReplayTtl: 10m
+  visitSession:
+    capacity: 4
+    sessionLifetime: 24h
+    inviteLifetime: 5m
+    reservationLifetime: 1m
+    ownerGrace: 2m
+    visitorReconnectGrace: 2m
+    replayRetention: 10m
+  worldAdmission:
+    maximumLifetime: 30s
+    replayRetention: 5m
+    derivationKeySecret: env:IHOMELAND_WORLD_ADMISSION_KEY
 storage:
   mysql:
     address: 127.0.0.1:3306

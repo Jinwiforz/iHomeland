@@ -66,6 +66,7 @@ func TestProductionStorageRequiresVerifiedTLS(t *testing.T) {
 
 	config.Storage.MySQL.TLS = StorageTLS{Enabled: true, ServerName: "mysql.internal", CAFile: `C:\certs\mysql-ca.pem`}
 	config.Storage.Redis.TLS = StorageTLS{Enabled: true, ServerName: "redis.internal", CAFile: `C:\certs\redis-ca.pem`}
+	config.PublicAPI.TLS = PublicTLS{Enabled: true, CertificateFile: `C:\certs\public.pem`, PrivateKeySecret: "env:PUBLIC_KEY"}
 	if err := config.Validate(); err != nil {
 		t.Fatalf("production verified TLS 配置应有效：%v", err)
 	}

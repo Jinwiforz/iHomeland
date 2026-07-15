@@ -40,8 +40,12 @@ ih:<env>:<owner>:<kind>:<identity...>
 | `ih:<env>:visitsession:active:<personalWorldID>` | visitsession | PersonalWorld 当前 VisitSession 索引 | 进程重启可读取 Redis 仍保留的合法值；terminal transition 主动删除，丢失后旧访问资格失效 |
 | `ih:<env>:visitsession:session:<visitSessionID>` | visitsession | Visitor membership、revision、expiry、Owner grace 与完整运行快照 | 进程重启只读取 Redis 仍保留的合法值；丢失后访问安全结束，不影响持久世界事实 |
 | `ih:<env>:visitsession:command:<commandID>` | visitsession | Create/transition 首次完整结果与重放证据 | 进程重启只读取 Redis 仍保留的合法值；丢失后禁止猜测首次提交结果 |
+| `ih:<env>:worldadmission:issue:<issueIdDigest>` | worldadmission | 签发 identity、binding fingerprint 与首次 credential digest | 不恢复；保留到业务 expiry 加 replay retention，用于解析 response loss |
+| `ih:<env>:worldadmission:credential:<credentialDigest>` | worldadmission | 一次性 credential binding 与 consume tombstone | 不恢复；业务到期即失效，physical TTL 只保留有界重放证据 |
 | `ih:<env>:rate:<scope>:<identity>` | owning adapter | 限流窗口 | 丢失后最多放宽一个窗口 |
 | `ih:<env>:lock:<owner>:<resourceID>` | owning module | 必要短租约 | 不恢复，必须有 TTL 与 fencing/idempotency |
+
+当前公开 HTTP limiter 使用有容量上限的进程内 token bucket，并未创建规划中的 `rate` key；任何分布式限流落地都必须通过独立 change 明确 owner、TTL、原子操作与多实例语义。
 
 ### 已实现的 session definitions
 

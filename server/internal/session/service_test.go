@@ -185,6 +185,25 @@ func TestSessionCreateAuthenticateAndRotate(t *testing.T) {
 	}
 }
 
+// TestAuthenticateHTTPSReturnsEarliestDeadline 验证 HTTP 认证返回 access/session共同有效截止时间且默认脱敏。
+func TestAuthenticateHTTPSReturnsEarliestDeadline(t *testing.T) {
+	fixture := newServiceFixture(t)
+	created, err := fixture.service.CreateSession(context.Background(), mustPrincipal(t, "https-deadline"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := fixture.service.AuthenticateHTTPS(context.Background(), created.Tokens.Access.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !authenticated.Valid() || !authenticated.Deadline().Equal(created.Tokens.AccessExpiresAt) {
+		t.Fatalf("unexpected authenticated deadline: %v", authenticated.Deadline())
+	}
+	if got := authenticated.String(); got == "" || got == created.Tokens.Access.Reveal() || got == authenticated.AuthContext().Principal().AccountID() {
+		t.Fatalf("authenticated session formatting leaked sensitive data: %q", got)
+	}
+}
+
 // TestAccessExpiresAtBoundary 验证达到绝对 expiry 时不再创建 AuthContext。
 func TestAccessExpiresAtBoundary(t *testing.T) {
 	fixture := newServiceFixture(t)

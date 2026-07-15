@@ -36,6 +36,12 @@ type Metrics struct {
 	storageMigrationTotal *prometheus.CounterVec
 	// storageOperationTotal 记录 transaction/command 的固定 operation 与 outcome。
 	storageOperationTotal *prometheus.CounterVec
+	// publicRequestsTotal 按operation、status class与稳定outcome统计公开HTTP请求。
+	publicRequestsTotal *prometheus.CounterVec
+	// publicRequestSeconds 观察公开HTTP端到端处理时间。
+	publicRequestSeconds *prometheus.HistogramVec
+	// publicResponseBytes 观察编码后响应大小，不读取响应正文。
+	publicResponseBytes *prometheus.HistogramVec
 }
 
 // NewMetrics 注册运行时固定指标集合；私有 registry 使重复构造不会污染 package global 状态。
@@ -52,8 +58,11 @@ func NewMetrics() *Metrics {
 		storageProbeSeconds:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_storage_probe_seconds", Help: "Required storage probe duration.", Buckets: prometheus.DefBuckets}, []string{"dependency", "outcome"}),
 		storageMigrationTotal: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_migration_total", Help: "MySQL migration results."}, []string{"outcome"}),
 		storageOperationTotal: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_operation_total", Help: "Storage transaction and command results."}, []string{"dependency", "operation", "outcome"}),
+		publicRequestsTotal:   prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_public_http_requests_total", Help: "Public HTTP requests by bounded operation and outcome."}, []string{"operation", "status_class", "outcome"}),
+		publicRequestSeconds:  prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_public_http_request_seconds", Help: "Public HTTP request duration.", Buckets: prometheus.DefBuckets}, []string{"operation", "status_class", "outcome"}),
+		publicResponseBytes:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_public_http_response_bytes", Help: "Public HTTP response bytes.", Buckets: prometheus.ExponentialBuckets(128, 2, 10)}, []string{"operation", "status_class"}),
 	}
-	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal)
+	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes)
 	return metrics
 }
 
@@ -89,22 +98,22 @@ func (metrics *Metrics) ObserveLifecycle(phase string, component string, seconds
 
 // SetStoragePool 记录 mysql|redis 的 open|idle|in_use 连接数，不接收 endpoint 或 identity。
 func (metrics *Metrics) SetStoragePool(dependency string, state string, value int) {
-	requireStorageLabel(dependency, "mysql", "redis")
-	requireStorageLabel(state, "open", "idle", "in_use")
+	requireMetricLabel(dependency, "mysql", "redis")
+	requireMetricLabel(state, "open", "idle", "in_use")
 	metrics.storagePool.WithLabelValues(dependency, state).Set(float64(value))
 }
 
 // ObserveStorageProbe 记录 mysql|redis 与 ok|failed 的次数和耗时。
 func (metrics *Metrics) ObserveStorageProbe(dependency string, outcome string, seconds float64) {
-	requireStorageLabel(dependency, "mysql", "redis")
-	requireStorageLabel(outcome, "ok", "failed")
+	requireMetricLabel(dependency, "mysql", "redis")
+	requireMetricLabel(outcome, "ok", "failed")
 	metrics.storageProbeTotal.WithLabelValues(dependency, outcome).Inc()
 	metrics.storageProbeSeconds.WithLabelValues(dependency, outcome).Observe(seconds)
 }
 
 // ObserveMigration 记录 applied|failed outcome；count 不作为 label，避免基数增长。
 func (metrics *Metrics) ObserveMigration(outcome string, count int) {
-	requireStorageLabel(outcome, "applied", "failed")
+	requireMetricLabel(outcome, "applied", "failed")
 	metrics.storageMigrationTotal.WithLabelValues(outcome).Add(float64(count))
 }
 
@@ -113,26 +122,42 @@ func (metrics *Metrics) ObserveMigration(outcome string, count int) {
 // PersonalWorld/placement adapter 只上报此处枚举的流程结果；identity、SQL、key、fence、
 // idempotency material 与原始错误永远不能成为 label。
 func (metrics *Metrics) RecordStorageOperation(adapter string, operation string, outcome string) {
-	requireStorageLabel(adapter, "mysql", "redis", "personalworld", "placement")
-	requireStorageLabel(operation,
+	requireMetricLabel(adapter, "mysql", "redis", "account", "session", "personalworld", "placement", "visitsession", "worldadmission")
+	requireMetricLabel(operation,
 		"transaction", "command", "script", "ensure_primary", "find_by_id", "archive", "allocation",
-		"resolve", "acquire", "activate", "renew", "revoke", "replace", "qualify_write")
-	requireStorageLabel(outcome,
+		"resolve", "acquire", "activate", "renew", "revoke", "replace", "qualify_write", "create",
+		"find_for_authentication", "resolve_access", "rotate_refresh", "issue_ticket", "consume_ticket",
+		"invalidate_session", "invalidate_principal", "resolve_active", "commit", "issue", "consume")
+	requireMetricLabel(outcome,
 		"ok", "failed", "invalid", "defect", "dependency_defect", "codec_failed", "key_failed", "read_failed",
 		"current_read_failed", "replay_read_failed", "allocation_read_failed", "not_committed", "pre_commit_transient",
 		"commit_unknown", "allocation_not_committed", "allocation_commit_unknown", "not_applied", "created", "existing",
 		"applied", "replay", "in_progress", "not_found", "conflict", "expired", "revision_conflict",
-		"idempotency_conflict", "invalid_state", "found", "burned")
+		"idempotency_conflict", "invalid_state", "found", "burned", "username_conflict", "replayed",
+		"invalidated", "epoch_mismatch", "consumed", "binding_mismatch", "corrupt", "stale")
 	metrics.storageOperationTotal.WithLabelValues(adapter, operation, outcome).Inc()
 }
 
-// requireStorageLabel 只接受编译期固定枚举；非法值视为 programmer error 并 panic。
+// ObservePublicHTTP 记录固定operation、status class与三值outcome，不接受URL、identity或错误文本。
+func (metrics *Metrics) ObservePublicHTTP(operation string, statusClass string, outcome string, seconds float64, responseBytes int) {
+	requireMetricLabel(operation, "getVersion", "getBootstrapConfig", "registerAccount", "loginAccount", "refreshSession", "logoutSession", "issueConnectionTicket", "getWorldBootstrap", "acceptVisitInvite", "issueWorldAdmission")
+	requireMetricLabel(statusClass, "2xx", "4xx", "5xx")
+	requireMetricLabel(outcome, "success", "client_error", "server_error")
+	metrics.publicRequestsTotal.WithLabelValues(operation, statusClass, outcome).Inc()
+	metrics.publicRequestSeconds.WithLabelValues(operation, statusClass, outcome).Observe(seconds)
+	if responseBytes < 0 {
+		responseBytes = 0
+	}
+	metrics.publicResponseBytes.WithLabelValues(operation, statusClass).Observe(float64(responseBytes))
+}
+
+// requireMetricLabel 只接受编译期固定枚举；非法值视为 programmer error 并 panic。
 // panic 信息不回显可能敏感的调用方原值。
-func requireStorageLabel(value string, allowed ...string) {
+func requireMetricLabel(value string, allowed ...string) {
 	for _, candidate := range allowed {
 		if value == candidate {
 			return
 		}
 	}
-	panic("invalid storage metric label")
+	panic("invalid metric label")
 }

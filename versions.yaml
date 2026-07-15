@@ -1,5 +1,5 @@
 schema_version: 1
-verified_at: "2026-07-13"
+verified_at: "2026-07-15"
 policy:
   channel: stable
   update_rule: latest-compatible
@@ -33,15 +33,18 @@ toolchains:
     source: "https://github.com/protocolbuffers/protobuf/releases/tag/v35.0"
     windows_amd64_sha256: "d1cede9e308cc3eb072392af1c02ccae4bdd3d2f374ec2970dbd8cdfdaa91363"
 libraries:
+  gin_go:
+    version: "1.12.0"
+    source: "https://github.com/gin-gonic/gin/releases/tag/v1.12.0"
   prometheus_client_go:
     version: "1.23.2"
     source: "https://github.com/prometheus/client_golang/releases/tag/v1.23.2"
   golang_x_text:
-    version: "0.28.0"
-    source: "https://pkg.go.dev/golang.org/x/text@v0.28.0"
+    version: "0.34.0"
+    source: "https://pkg.go.dev/golang.org/x/text@v0.34.0"
   golang_x_crypto:
-    version: "0.41.0"
-    source: "https://pkg.go.dev/golang.org/x/crypto@v0.41.0"
+    version: "0.48.0"
+    source: "https://pkg.go.dev/golang.org/x/crypto@v0.48.0"
   mysql_driver_go:
     version: "1.10.0"
     source: "https://github.com/go-sql-driver/mysql/releases/tag/v1.10.0"

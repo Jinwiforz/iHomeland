@@ -58,9 +58,10 @@ func TestProductionPackageHasNoInfrastructureWiring(t *testing.T) {
 	}
 }
 
-// TestProductionCompositionHasNoAdmissionWiring 保证本 change 不提前接入正式启动图。
-func TestProductionCompositionHasNoAdmissionWiring(t *testing.T) {
+// TestProductionCompositionWiresAdmissionOnlyInPublicRuntime 保证credential owner只在唯一公开graph接线。
+func TestProductionCompositionWiresAdmissionOnlyInPublicRuntime(t *testing.T) {
 	t.Parallel()
+	found := false
 	for _, root := range []string{filepath.Join("..", "..", "cmd"), filepath.Join("..", "app")} {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 			if walkErr != nil {
@@ -76,7 +77,10 @@ func TestProductionCompositionHasNoAdmissionWiring(t *testing.T) {
 			for _, imported := range file.Imports {
 				value, _ := strconv.Unquote(imported.Path.Value)
 				if strings.Contains(value, "/internal/worldadmission") || strings.Contains(value, "/internal/storage/worldadmission") {
-					t.Fatalf("%s wires world admission before its transport change", path)
+					if filepath.Base(path) != "public_runtime.go" {
+						t.Fatalf("%s wires world admission outside public runtime", path)
+					}
+					found = true
 				}
 			}
 			return nil
@@ -84,5 +88,8 @@ func TestProductionCompositionHasNoAdmissionWiring(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+	if !found {
+		t.Fatal("public runtime is missing world admission production wiring")
 	}
 }

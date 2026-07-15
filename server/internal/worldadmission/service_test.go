@@ -36,6 +36,35 @@ func TestCredentialAndBindingAreRedacted(t *testing.T) {
 	}
 }
 
+// TestIssueAcceptsEarlierRequestSnapshot 验证相邻application与owner时钟读取无需微秒完全相等。
+func TestIssueAcceptsEarlierRequestSnapshot(t *testing.T) {
+	fixture := newAdmissionFixture(t)
+	fixture.clock.now = fixture.binding.IssuedAt().Add(time.Microsecond)
+	result, err := fixture.service.Issue(context.Background(), mustIssueID(t, "issue_adjacent_clock"), fixture.binding)
+	if err != nil || !result.Valid() {
+		t.Fatalf("issue with earlier request snapshot: result=%#v err=%v", result, err)
+	}
+}
+
+// TestIssueReplaysFirstWindowWhenRequestClockAdvances 验证HTTP重试不会因now派生窗口变化而冲突或延长。
+func TestIssueReplaysFirstWindowWhenRequestClockAdvances(t *testing.T) {
+	fixture := newAdmissionFixture(t)
+	issueID := mustIssueID(t, "issue_advancing_clock")
+	first, err := fixture.service.Issue(context.Background(), issueID, fixture.binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.clock.now = fixture.now.Add(time.Microsecond)
+	later, err := NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, fixture.stamp, fixture.endpoint, fixture.clock.now, fixture.binding.ExpiresAt().Add(time.Microsecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := fixture.service.Issue(context.Background(), issueID, later)
+	if err != nil || !replayed.Replayed() || replayed.Credential().Value() != first.Credential().Value() || !replayed.Binding().Equal(first.Binding()) {
+		t.Fatalf("advancing clock replay=%#v err=%v", replayed, err)
+	}
+}
+
 // TestIssueIsDeterministicAndIdempotent 验证response-loss后只返回首次credential。
 func TestIssueIsDeterministicAndIdempotent(t *testing.T) {
 	fixture := newAdmissionFixture(t)
@@ -299,6 +328,11 @@ type defectiveConsumeStore struct {
 	binding Binding
 }
 
+// ResolveIssue 标记本缺陷adapter测试没有既有签发事实。
+func (defectiveConsumeStore) ResolveIssue(context.Context, IssueID) (IssueSnapshot, IssueResolveOutcome, error) {
+	return IssueSnapshot{}, IssueResolveOutcomeNotFound, nil
+}
+
 // Issue 标记本缺陷 adapter 测试不会执行签发。
 func (defectiveConsumeStore) Issue(context.Context, IssueRecord, time.Time) (IssueOutcome, error) {
 	return IssueOutcomeUnspecified, errors.New("unused")
@@ -312,6 +346,21 @@ func (store defectiveConsumeStore) Consume(context.Context, ConsumeRequest) (Bin
 // newMemoryAdmissionStore 创建隔离的线性化内存模型，不承担 production recovery 语义。
 func newMemoryAdmissionStore() *memoryAdmissionStore {
 	return &memoryAdmissionStore{issues: map[string]IssueRecord{}, credentials: map[string]storedCredential{}}
+}
+
+// ResolveIssue 返回首次record与当前credential状态，不暴露raw credential。
+func (store *memoryAdmissionStore) ResolveIssue(_ context.Context, issueID IssueID) (IssueSnapshot, IssueResolveOutcome, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	record, ok := store.issues[issueID.Value()]
+	if !ok {
+		return IssueSnapshot{}, IssueResolveOutcomeNotFound, nil
+	}
+	credential, ok := store.credentials[record.CredentialDigest.Hex()]
+	if !ok {
+		return IssueSnapshot{}, IssueResolveOutcomeUnspecified, errors.New("credential is missing")
+	}
+	return IssueSnapshot{Fingerprint: record.Fingerprint, CredentialDigest: record.CredentialDigest, Binding: record.Binding, Consumed: credential.status == "consumed"}, IssueResolveOutcomeFound, nil
 }
 
 // Issue 模拟首次写入、精确幂等重放、语义冲突与提交后响应丢失。

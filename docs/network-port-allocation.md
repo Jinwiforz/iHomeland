@@ -19,8 +19,9 @@
 | Edge/Public API | 生产 HTTPS 与 WSS | TCP | `443` | 公网 | HTTPS 与 WSS 优先复用同一 TLS 入口 |
 | Public API | 本地 HTTP | TCP | `8080` | 本机或开发网 | 仅用于不要求 TLS 的本地开发 |
 | Public API | 本地 HTTPS 与 WSS | TCP | `8443` | 本机或开发网 | 项目推荐值，不是正式 HTTPS 端口 |
+| Realtime | 本地 TLS/TCP | TCP | `8444` | 本机或开发网 | 仓库 local 配置的可覆盖推荐值，客户端仍以 endpoint/ticket 为准 |
 | Server Runtime | 健康、就绪、版本与 metrics | TCP | `8081` | 默认仅 loopback | 不承载公开业务；生产环境限制在管理网络 |
-| Realtime | TLS/TCP | TCP | 不预留固定值 | 按部署配置 | 由 endpoint/ticket 下发，客户端不得硬编码 |
+| Realtime | 部署 TLS/TCP | TCP | 不预留固定值 | 按部署配置 | 由 endpoint/ticket 下发，客户端不得硬编码 |
 | Battle | 裸 UDP | UDP | 尚未分配 | 按部署配置 | 等 battle simulation model 与 network profile |
 | Battle | KCP | UDP | 尚未分配 | 按部署配置 | listener、ticket 与 QoS 关系由后续 change 决定 |
 | MySQL | 持久化数据库 | TCP | `3306` | 内网 | 实际连接端口可由环境配置或端口映射覆盖 |
@@ -31,7 +32,7 @@
 | Node Exporter | 主机 metrics | TCP | `9100` | 管理网络 | 仅部署该组件时使用 |
 | Grafana | 可观测界面 | TCP | `3000` | 管理网络 | 生产环境应经过认证入口 |
 
-`8080` 是通用的备用 HTTP 端口；`8081`、`8443` 等属于易识别的工程约定，不具有不可覆盖的协议含义。自定义 TLS/TCP、UDP 和 KCP 没有适合本项目直接继承的行业默认端口，因此不得为了形式统一过早冻结号码。
+`8080` 是通用的备用 HTTP 端口；`8081`、`8443`、`8444` 等属于易识别的工程约定，不具有不可覆盖的协议含义。自定义 TLS/TCP、UDP 和 KCP 没有适合本项目直接继承的行业默认端口，因此不得为了形式统一过早冻结生产号码。
 
 ## 覆盖与映射
 

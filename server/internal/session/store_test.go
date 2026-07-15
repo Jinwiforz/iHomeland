@@ -97,7 +97,12 @@ func (store *testSessionStore) ResolveAccess(_ context.Context, digest Digest, n
 	if !now.Before(token.ExpiresAt) {
 		return AuthSnapshot{}, StoreOutcomeExpired, nil
 	}
-	return store.resolveSession(token.SessionID, token.Epoch, now)
+	snapshot, outcome, err := store.resolveSession(token.SessionID, token.Epoch, now)
+	if outcome == StoreOutcomeApplied {
+		snapshot.AccessExpiresAt = token.ExpiresAt
+		snapshot.SessionExpiresAt = store.sessions[token.SessionID].ExpiresAt
+	}
+	return snapshot, outcome, err
 }
 
 // RotateRefresh 在同一锁内处理 expiry、replay invalidation 与新 token pair。

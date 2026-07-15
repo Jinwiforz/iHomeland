@@ -184,15 +184,9 @@ func writeProcessConfig(t *testing.T) (string, string) {
 // writeProcessConfigWithTimeouts 允许 shutdown 测试独立控制总预算和慢 header 时间。
 func writeProcessConfigWithTimeouts(t *testing.T, shutdownTimeout time.Duration, readHeaderTimeout time.Duration) (string, string) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	contents := fmt.Sprintf("environment: test\nruntime:\n  startupTimeout: 5s\n  shutdownTimeout: %s\nlogging:\n  level: info\n  format: text\ndiagnostic:\n  address: %s\n  readHeaderTimeout: %s\n  readTimeout: 10s\n  writeTimeout: 2s\n  idleTimeout: 2s\n  maxHeaderBytes: 4096\n", shutdownTimeout, address, readHeaderTimeout)
+	address := reserveProcessAddress(t)
+	publicAddress := reserveProcessAddress(t)
+	contents := fmt.Sprintf("environment: test\nruntime:\n  startupTimeout: 5s\n  shutdownTimeout: %s\nlogging:\n  level: info\n  format: text\ndiagnostic:\n  address: %s\n  readHeaderTimeout: %s\n  readTimeout: 10s\n  writeTimeout: 2s\n  idleTimeout: 2s\n  maxHeaderBytes: 4096\npublicApi:\n  address: %s\n", shutdownTimeout, address, readHeaderTimeout, publicAddress)
 	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") == "1" {
 		contents += fmt.Sprintf("storage:\n  mysql:\n    address: %s\n    passwordSecret: 'file:%s'\n  redis:\n    address: %s\n    passwordSecret: 'file:%s'\n", os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
 	}
@@ -203,6 +197,20 @@ func writeProcessConfigWithTimeouts(t *testing.T, shutdownTimeout time.Duration,
 	return path, address
 }
 
+// reserveProcessAddress 让OS选择并释放独立loopback端口，避免诊断与公开listener冲突。
+func reserveProcessAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return address
+}
+
 // startReadyProcess 启动真实 binary，并只对临时地址被抢占执行有界重试。
 func startReadyProcess(t *testing.T, executable string, configFactory func() (string, string)) *testProcess {
 	t.Helper()
@@ -211,6 +219,7 @@ func startReadyProcess(t *testing.T, executable string, configFactory func() (st
 		output := new(bytes.Buffer)
 		errorOutput := new(bytes.Buffer)
 		command := exec.Command(executable, "--config", configPath)
+		command.Env = append(os.Environ(), "IHOMELAND_WORLD_ADMISSION_KEY=cmd-server-integration-admission-key")
 		prepareProcess(command)
 		command.Stdout = output
 		command.Stderr = errorOutput

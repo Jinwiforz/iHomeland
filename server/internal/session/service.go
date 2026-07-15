@@ -152,16 +152,9 @@ func (service *Service) CreateSession(ctx context.Context, principal Principal) 
 // raw 只允许在入站认证边界短暂存在，方法不会把它放入错误、日志或 AuthContext。
 // Store dependency failure 必须 fail closed，不能退化为仅校验 token 格式。
 func (service *Service) AuthenticateAccess(ctx context.Context, raw string) (AuthContext, error) {
-	secret, err := ParseSecret(SecretKindAccess, raw)
+	snapshot, _, err := service.authenticateSnapshot(ctx, raw)
 	if err != nil {
-		return AuthContext{}, newError(ErrorKindUnauthenticated, "authenticate", nil)
-	}
-	snapshot, outcome, err := service.store.ResolveAccess(ctx, secret.Digest(), service.clock.Now())
-	if err != nil {
-		return AuthContext{}, newError(ErrorKindDependencyUnavailable, "authenticate", err)
-	}
-	if outcome != StoreOutcomeApplied {
-		return AuthContext{}, outcomeError("authenticate", outcome)
+		return AuthContext{}, err
 	}
 	emptyScopes, _ := NewScopeSet()
 	auth, err := newAuthContext(snapshot.Principal, snapshot.SessionID, snapshot.Epoch, ChannelHTTPS, emptyScopes)
@@ -169,6 +162,48 @@ func (service *Service) AuthenticateAccess(ctx context.Context, raw string) (Aut
 		return AuthContext{}, newError(ErrorKindDependencyUnavailable, "authenticate", err)
 	}
 	return auth, nil
+}
+
+// AuthenticateHTTPS 原子验证 access 与 session，并返回身份和共同有效截止时间。
+//
+// HTTP transport 应使用该方法把截止时间传入可能提交状态的 application service；
+// AuthenticateAccess 仅作为不跨认证时刻提交状态的兼容入口。
+func (service *Service) AuthenticateHTTPS(ctx context.Context, raw string) (AuthenticatedSession, error) {
+	snapshot, now, err := service.authenticateSnapshot(ctx, raw)
+	if err != nil {
+		return AuthenticatedSession{}, err
+	}
+	emptyScopes, _ := NewScopeSet()
+	auth, err := newAuthContext(snapshot.Principal, snapshot.SessionID, snapshot.Epoch, ChannelHTTPS, emptyScopes)
+	if err != nil {
+		return AuthenticatedSession{}, newError(ErrorKindDependencyUnavailable, "authenticate", err)
+	}
+	deadline := snapshot.AccessExpiresAt
+	if snapshot.SessionExpiresAt.Before(deadline) {
+		deadline = snapshot.SessionExpiresAt
+	}
+	authenticated, err := newAuthenticatedSession(auth, deadline, now)
+	if err != nil {
+		return AuthenticatedSession{}, newError(ErrorKindDependencyUnavailable, "authenticate", err)
+	}
+	return authenticated, nil
+}
+
+// authenticateSnapshot 统一解析 secret并取得当前原子store快照，避免两个认证入口语义漂移。
+func (service *Service) authenticateSnapshot(ctx context.Context, raw string) (AuthSnapshot, time.Time, error) {
+	secret, err := ParseSecret(SecretKindAccess, raw)
+	if err != nil {
+		return AuthSnapshot{}, time.Time{}, newError(ErrorKindUnauthenticated, "authenticate", nil)
+	}
+	now := service.clock.Now()
+	snapshot, outcome, err := service.store.ResolveAccess(ctx, secret.Digest(), now)
+	if err != nil {
+		return AuthSnapshot{}, time.Time{}, newError(ErrorKindDependencyUnavailable, "authenticate", err)
+	}
+	if outcome != StoreOutcomeApplied {
+		return AuthSnapshot{}, time.Time{}, outcomeError("authenticate", outcome)
+	}
+	return snapshot, now, nil
 }
 
 // Refresh 原子替换 token pair；重放会先提交 epoch 失效再通知连接边界。

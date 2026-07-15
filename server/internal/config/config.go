@@ -42,6 +42,8 @@ type Config struct {
 	Logging Logging `yaml:"logging"`
 	// Diagnostic 定义与公开业务面隔离的诊断 listener。
 	Diagnostic Diagnostic `yaml:"diagnostic"`
+	// PublicAPI 定义公开启动、账号与世界准入 HTTPS 面。
+	PublicAPI PublicAPI `yaml:"publicApi"`
 	// Storage 定义 MySQL 与 Redis 的非敏感连接、资源和探针策略。
 	Storage Storage `yaml:"storage"`
 }
@@ -92,7 +94,8 @@ func Default() Config {
 			IdleTimeout:       30 * time.Second,
 			MaxHeaderBytes:    8192,
 		},
-		Storage: DefaultStorage(),
+		PublicAPI: DefaultPublicAPI(),
+		Storage:   DefaultStorage(),
 	}
 }
 
@@ -168,6 +171,9 @@ func (config Config) Validate() error {
 	if config.Diagnostic.MaxHeaderBytes < 1024 || config.Diagnostic.MaxHeaderBytes > 65536 {
 		return errors.New("diagnostic.maxHeaderBytes must be between 1024 and 65536")
 	}
+	if err := config.PublicAPI.validate(config.Environment, config.Diagnostic.Address); err != nil {
+		return fmt.Errorf("publicApi: %w", err)
+	}
 	if err := config.Storage.validate(config.Environment); err != nil {
 		return err
 	}
@@ -215,6 +221,7 @@ func applyEnvironment(config *Config, lookup LookupEnv) error {
 		}},
 	}
 	overrides = append(overrides, storageEnvironmentOverrides(config)...)
+	overrides = append(overrides, publicAPIEnvironmentOverrides(config)...)
 	for _, override := range overrides {
 		value, exists := lookup(override.key)
 		if !exists {

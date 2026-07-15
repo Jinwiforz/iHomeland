@@ -99,8 +99,8 @@ func (IssueResult) GoString() string { return admissionPlaceholder }
 //
 // issueID 必须来自 application 已验证的幂等键，binding 必须完全由 AuthContext、领域 owner
 // 与 placement 事实派生。方法读取 current assignment，并通过 Store 原子创建或重放 Redis
-// issuance/credential records；相同 issueID 与 binding 返回相同 credential，改变任一授权事实
-// 返回幂等冲突。
+// issuance/credential records；相同 issueID、相同授权事实且未收紧权威deadline时重放首次
+// credential与较短binding。改变授权事实或收紧deadline返回幂等冲突，重试时钟推进不能延长资格。
 //
 // ctx 取消或 Redis 错误不能证明 mutation 未提交，此时返回 ErrorCodeCommitUnknown 且绝不返回
 // raw credential。调用方只能使用相同 issueID 与完全相同的 binding 重试解析首次结果。
@@ -110,11 +110,18 @@ func (service *Service) Issue(ctx context.Context, issueID IssueID, binding Bind
 		return IssueResult{}, operationError(operation, ErrorCodeInvalidArgument, nil)
 	}
 	now := canonicalTime(service.clock.Now())
-	if now.IsZero() || binding.IssuedAt() != now || binding.ExpiresAt().Sub(now) > service.policy.maximumLifetime {
+	if now.IsZero() || binding.IssuedAt().After(now) || !now.Before(binding.ExpiresAt()) || binding.ExpiresAt().Sub(binding.IssuedAt()) > service.policy.maximumLifetime {
 		return IssueResult{}, operationError(operation, ErrorCodeInvalidArgument, nil)
 	}
 	if err := service.verifyCurrentAssignment(ctx, binding, now); err != nil {
 		return IssueResult{}, err
+	}
+	if existing, outcome, resolveErr := service.store.ResolveIssue(ctx, issueID); resolveErr != nil {
+		return IssueResult{}, operationError(operation, ErrorCodeDependency, resolveErr)
+	} else if outcome == IssueResolveOutcomeFound {
+		return service.replayIssue(issueID, binding, existing, now)
+	} else if outcome != IssueResolveOutcomeNotFound {
+		return IssueResult{}, operationError(operation, ErrorCodeDependencyDefect, nil)
 	}
 	fingerprint := fingerprintBinding(binding)
 	credential, err := service.deriveCredential(issueID, fingerprint)
@@ -134,7 +141,14 @@ func (service *Service) Issue(ctx context.Context, issueID IssueID, binding Bind
 	case IssueOutcomeConsumed:
 		return IssueResult{}, operationError(operation, ErrorCodeReplayed, nil)
 	case IssueOutcomeIdempotencyConflict:
-		return IssueResult{}, operationError(operation, ErrorCodeIdempotencyConflict, nil)
+		existing, resolveOutcome, resolveErr := service.store.ResolveIssue(ctx, issueID)
+		if resolveErr != nil {
+			return IssueResult{}, operationError(operation, ErrorCodeDependency, resolveErr)
+		}
+		if resolveOutcome != IssueResolveOutcomeFound {
+			return IssueResult{}, operationError(operation, ErrorCodeDependencyDefect, nil)
+		}
+		return service.replayIssue(issueID, binding, existing, now)
 	case IssueOutcomeNotCommitted:
 		return IssueResult{}, operationError(operation, ErrorCodeDependency, storeErr)
 	case IssueOutcomeCommitUnknown:
@@ -142,6 +156,35 @@ func (service *Service) Issue(ctx context.Context, issueID IssueID, binding Bind
 	default:
 		return IssueResult{}, operationError(operation, ErrorCodeDependencyDefect, nil)
 	}
+}
+
+// replayIssue 对比不随重试时钟变化的授权事实，并返回首次较短binding与credential。
+//
+// 候选deadline早于首次deadline表示权威上限已经收紧，必须冲突；普通稍后重试得到的
+// now+TTL更晚，只重放首次更短结果，不延长已签发资格。
+func (service *Service) replayIssue(issueID IssueID, candidate Binding, existing IssueSnapshot, now time.Time) (IssueResult, error) {
+	const operation = "issue"
+	if !existing.Valid() || !sameBindingAuthority(candidate, existing.Binding) || candidate.ExpiresAt().Before(existing.Binding.ExpiresAt()) {
+		return IssueResult{}, operationError(operation, ErrorCodeIdempotencyConflict, nil)
+	}
+	if existing.Consumed {
+		return IssueResult{}, operationError(operation, ErrorCodeReplayed, nil)
+	}
+	if !now.Before(existing.Binding.ExpiresAt()) {
+		return IssueResult{}, operationError(operation, ErrorCodeExpired, nil)
+	}
+	credential, err := service.deriveCredential(issueID, existing.Fingerprint)
+	if err != nil || !credential.Digest().Equal(existing.CredentialDigest) {
+		return IssueResult{}, operationError(operation, ErrorCodeDependencyDefect, err)
+	}
+	return IssueResult{credential: credential, binding: existing.Binding, replayed: true}, nil
+}
+
+// sameBindingAuthority 比较除服务端签发窗口外全部不可变授权事实。
+func sameBindingAuthority(left Binding, right Binding) bool {
+	return left.PlayerID() == right.PlayerID() && left.SessionID() == right.SessionID() && left.Epoch() == right.Epoch() &&
+		left.Role() == right.Role() && left.WorldID() == right.WorldID() && left.VisitSessionID() == right.VisitSessionID() &&
+		left.Purpose() == right.Purpose() && left.Assignment().Equal(right.Assignment()) && left.Endpoint().Equal(right.Endpoint())
 }
 
 // Verify 原子消费静态 binding，随后复核 current full assignment 并返回只读资格。

@@ -55,6 +55,10 @@ func TestStoreIssueConsumeAndReplay(t *testing.T) {
 	if outcome, err := store.Issue(ctx, record, now); err != nil || outcome != domain.IssueOutcomeCreated {
 		t.Fatalf("issue outcome=%v err=%v", outcome, err)
 	}
+	resolved, resolveOutcome, resolveErr := store.ResolveIssue(ctx, issueID)
+	if resolveErr != nil || resolveOutcome != domain.IssueResolveOutcomeFound || !resolved.Valid() || !resolved.Binding.Equal(binding) || !resolved.Fingerprint.Equal(fingerprint) || !resolved.CredentialDigest.Equal(credential.Digest()) || resolved.Consumed {
+		t.Fatalf("resolve issue outcome=%v snapshot=%#v err=%v", resolveOutcome, resolved, resolveErr)
+	}
 	if outcome, err := store.Issue(ctx, record, now); err != nil || outcome != domain.IssueOutcomeReplay {
 		t.Fatalf("issue replay outcome=%v err=%v", outcome, err)
 	}

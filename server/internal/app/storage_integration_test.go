@@ -3,7 +3,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -14,7 +17,20 @@ import (
 	"testing"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
+	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/buildinfo"
+	"github.com/jinwiforz/ihomeland/server/internal/config"
+	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
+	"github.com/jinwiforz/ihomeland/server/internal/placement"
+	"github.com/jinwiforz/ihomeland/server/internal/session"
+	storageall "github.com/jinwiforz/ihomeland/server/internal/storage"
+	storagepersonalworld "github.com/jinwiforz/ihomeland/server/internal/storage/personalworld"
+	storageplacement "github.com/jinwiforz/ihomeland/server/internal/storage/placement"
+	storagesession "github.com/jinwiforz/ihomeland/server/internal/storage/session"
+	storagevisitsession "github.com/jinwiforz/ihomeland/server/internal/storage/visitsession"
+	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
+	redisclient "github.com/redis/go-redis/v9"
 )
 
 // TestStorageRequiredReadinessDrainingAndProcessRecovery 验证 storage 启动/运行失败、逆序关闭和新进程恢复。
@@ -22,8 +38,10 @@ func TestStorageRequiredReadinessDrainingAndProcessRecovery(t *testing.T) {
 	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") != "1" {
 		t.Skip("storage integration harness is required")
 	}
+	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "storage-integration-admission-key-material")
 	diagnosticAddress := reserveAddress(t)
-	configPath := writeIntegrationConfig(t, diagnosticAddress)
+	publicAddress := reserveAddress(t)
+	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
 	redisContainer := os.Getenv("IHOMELAND_TEST_REDIS_CONTAINER")
 
 	runDocker(t, "stop", "--time", "1", redisContainer)
@@ -65,13 +83,292 @@ func TestStorageRequiredReadinessDrainingAndProcessRecovery(t *testing.T) {
 	assertAddressReusable(t, diagnosticAddress)
 }
 
+// TestPublicHTTPProductionGraphHitsAllOperations 验证10个冻结operation穿过真实listener与production storage graph。
+func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
+	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") != "1" {
+		t.Skip("storage integration harness is required")
+	}
+	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "http-integration-admission-key-material")
+	diagnosticAddress, publicAddress := reserveAddress(t), reserveAddress(t)
+	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
+	ctx, stop := context.WithCancelCause(context.Background())
+	resultChannel := make(chan Result, 1)
+	go func() { resultChannel <- Run(ctx, integrationOptions(configPath)) }()
+	waitForReady(t, diagnosticAddress)
+	baseURL := "http://" + publicAddress
+
+	requestJSON(t, http.MethodGet, baseURL+"/v1/version", "", "", http.StatusOK)
+	requestJSON(t, http.MethodGet, baseURL+"/v1/config", "", "", http.StatusOK)
+	visitor := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/register", `{"username":"http-visitor","password":"integration-password","displayName":"HTTP Visitor"}`, "", http.StatusCreated)
+	if visitor["tokens"] == nil {
+		t.Fatalf("register response omitted tokens: %#v", visitor)
+	}
+	loggedIn := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/login", `{"username":"http-visitor","password":"integration-password"}`, "", http.StatusOK)
+	loginTokens := loggedIn["tokens"].(map[string]any)
+	refreshed := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/refresh", `{"refreshToken":"`+loginTokens["refreshToken"].(string)+`"}`, "", http.StatusOK)
+	visitorAccess := refreshed["accessToken"].(string)
+	visitorAuthorization := "Bearer " + visitorAccess
+	requestJSON(t, http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
+	visitorBootstrap := requestJSON(t, http.MethodGet, baseURL+"/v1/world/bootstrap", "", visitorAuthorization, http.StatusOK)
+
+	owner := requestJSON(t, http.MethodPost, baseURL+"/v1/auth/register", `{"username":"http-owner","password":"integration-password","displayName":"HTTP Owner"}`, "", http.StatusCreated)
+	ownerTokens := owner["tokens"].(map[string]any)
+	ownerAccess := ownerTokens["accessToken"].(string)
+	ownerAuthorization := "Bearer " + ownerAccess
+	ownerBootstrap := requestJSON(t, http.MethodGet, baseURL+"/v1/world/bootstrap", "", ownerAuthorization, http.StatusOK)
+
+	visitID, inviteID, revision := seedHTTPVisit(t, visitorBootstrap, ownerBootstrap, visitorAccess, ownerAccess)
+	acceptPath := baseURL + "/v1/visits/" + visitID + "/invites/" + inviteID + "/accept"
+	acceptBody := fmt.Sprintf(`{"expectedRevision":%d}`, revision)
+	accepted := requestJSONWithIdempotency(t, http.MethodPost, acceptPath, acceptBody, visitorAuthorization, "integration-accept-key-01", http.StatusOK)
+	replayed := requestJSONWithIdempotency(t, http.MethodPost, acceptPath, acceptBody, visitorAuthorization, "integration-accept-key-01", http.StatusOK)
+	if fmt.Sprint(accepted) != fmt.Sprint(replayed) {
+		t.Fatalf("accept replay drifted: first=%#v replay=%#v", accepted, replayed)
+	}
+	requestJSONWithIdempotency(t, http.MethodPost, acceptPath, fmt.Sprintf(`{"expectedRevision":%d}`, revision+1), visitorAuthorization, "integration-accept-key-01", http.StatusConflict)
+	admissionBody := `{"kind":"VISIT_WORLD","visitSessionId":"` + visitID + `"}`
+	issuedAdmission := requestJSONWithIdempotency(t, http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-1", http.StatusCreated)
+	replayedAdmission := requestJSONWithIdempotency(t, http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-1", http.StatusCreated)
+	if issuedAdmission["credential"] != replayedAdmission["credential"] || issuedAdmission["expiresAtMs"] != replayedAdmission["expiresAtMs"] {
+		t.Fatalf("admission replay drifted: first=%#v replay=%#v", issuedAdmission, replayedAdmission)
+	}
+	requestJSON(t, http.MethodPost, baseURL+"/v1/auth/logout", "", visitorAuthorization, http.StatusNoContent)
+	requestJSON(t, http.MethodGet, baseURL+"/v1/world/bootstrap", "", visitorAuthorization, http.StatusUnauthorized)
+
+	stop(ErrSignalShutdown)
+	if result := <-resultChannel; result.Kind != ResultClean {
+		t.Fatalf("public HTTP integration shutdown=%+v", result)
+	}
+}
+
+// integrationStorageObserver 丢弃adapter低基数观测；测试直接断言公开协议结果。
+type integrationStorageObserver struct{}
+
+// RecordStorageOperation 满足production storage adapter observer契约。
+func (integrationStorageObserver) RecordStorageOperation(string, string, string) {}
+
+// integrationOwnedWorldReader 返回HTTP已创建并经MySQL重新解析的Owner world事实。
+type integrationOwnedWorldReader struct {
+	// snapshot 是Owner的active primary world。
+	snapshot personalworld.Snapshot
+}
+
+// ResolveOwnedWorld 只允许对应Owner解析预设world。
+func (reader integrationOwnedWorldReader) ResolveOwnedWorld(_ context.Context, ownerID account.PlayerID) (personalworld.Snapshot, visitsession.OwnedWorldOutcome, error) {
+	if reader.snapshot.OwnerID() != ownerID {
+		return personalworld.Snapshot{}, visitsession.OwnedWorldOutcomeNotFound, nil
+	}
+	return reader.snapshot, visitsession.OwnedWorldOutcomeFound, nil
+}
+
+// integrationAssignmentReader 返回已通过production placement store激活的current assignment。
+type integrationAssignmentReader struct {
+	// snapshot 是测试在MySQL/Redis中提交的active assignment。
+	snapshot placement.AssignmentSnapshot
+}
+
+// ResolveCurrent 只允许matching PersonalWorld读取预设current assignment。
+func (reader integrationAssignmentReader) ResolveCurrent(_ context.Context, worldID personalworld.PersonalWorldID, _ time.Time) (placement.AssignmentSnapshot, visitsession.AssignmentOutcome, error) {
+	if reader.snapshot.WorldID() != worldID {
+		return placement.AssignmentSnapshot{}, visitsession.AssignmentOutcomeNotFound, nil
+	}
+	return reader.snapshot, visitsession.AssignmentOutcomeFound, nil
+}
+
+// seedHTTPVisit 使用production MySQL/Redis adapters创建active assignment、VisitSession与定向邀请。
+func seedHTTPVisit(t *testing.T, visitorBootstrap map[string]any, ownerBootstrap map[string]any, visitorAccess string, ownerAccess string) (string, string, uint64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := openHTTPIntegrationDB(t)
+	defer func() { _ = db.Close() }()
+	client := openHTTPIntegrationRedis(t)
+	defer func() { _ = client.Close() }()
+	keyspace, err := storageall.NewRedisKeyspace("local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := integrationStorageObserver{}
+	policy := config.Default().PublicAPI
+	worldData := ownerBootstrap["world"].(map[string]any)
+	worldID, err := personalworld.NewPersonalWorldID(worldData["personalWorldId"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID, err := account.NewPlayerID(worldData["ownerPlayerId"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	visitorData := visitorBootstrap["world"].(map[string]any)
+	visitorID, err := account.NewPlayerID(visitorData["ownerPlayerId"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worldRepository, err := storagepersonalworld.New(db, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worldService, err := personalworld.NewService(worldRepository, SystemClock{}, RandomIDGenerator{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worldResult, err := worldService.EnsurePrimaryWorld(ctx, ownerID)
+	if err != nil || worldResult.World().ID() != worldID {
+		t.Fatalf("resolve owner world: result=%v err=%v", worldResult.Valid(), err)
+	}
+	placementStore, err := storageplacement.New(db, client, keyspace, policy.PlacementReplayTTL, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	instanceID, _ := placement.NewWorldInstanceID("winst_httpIntegration")
+	nodeID, _ := placement.NewRuntimeNodeID("rnode_httpIntegration")
+	candidate, err := placement.NewAssignmentCandidate(worldID, instanceID, nodeID, now, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquireRequest, _ := placement.NewAcquireRequest(candidate, now)
+	starting, outcome, err := placementStore.Acquire(ctx, acquireRequest)
+	if err != nil || outcome != placement.StoreOutcomeApplied {
+		t.Fatalf("acquire HTTP assignment: outcome=%v err=%v", outcome, err)
+	}
+	activateRequest, _ := placement.NewStampRequest(starting.Stamp(), now)
+	active, outcome, err := placementStore.Activate(ctx, activateRequest)
+	if err != nil || outcome != placement.StoreOutcomeApplied {
+		t.Fatalf("activate HTTP assignment: outcome=%v err=%v", outcome, err)
+	}
+	sessionStore, err := storagesession.New(client, keyspace, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wss, _ := session.NewEndpoint(session.ChannelWSS, policy.Endpoints.WSS.Host, uint16(policy.Endpoints.WSS.Port))
+	tlsTCP, _ := session.NewEndpoint(session.ChannelTLSTCP, policy.Endpoints.TLSTCP.Host, uint16(policy.Endpoints.TLSTCP.Port))
+	endpoints, _ := session.NewStaticEndpointProvider(wss, tlsTCP)
+	sessionPolicy, _ := session.NewPolicy(policy.Session.TicketTTL, policy.Session.AccessTTL, policy.Session.RefreshTTL, policy.Session.SessionTTL)
+	sessionService, err := session.NewService(sessionStore, endpoints, session.NoActiveRealtimeConnections{}, SystemClock{}, RandomIDGenerator{}, session.CryptoSecretGenerator{}, sessionPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerAuth, err := sessionService.AuthenticateHTTPS(ctx, ownerAccess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessionService.AuthenticateHTTPS(ctx, visitorAccess); err != nil {
+		t.Fatal(err)
+	}
+	visitStore, err := storagevisitsession.New(client, keyspace, SystemClock{}, policy.VisitSession.ReplayRetention, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capacity, _ := visitsession.NewCapacity(uint8(policy.VisitSession.Capacity))
+	visitPolicy, _ := visitsession.NewPolicy(capacity, policy.VisitSession.SessionLifetime, policy.VisitSession.InviteLifetime, policy.VisitSession.ReservationLifetime, policy.VisitSession.OwnerGrace, policy.VisitSession.VisitorReconnectGrace)
+	visitService, err := visitsession.NewService(visitStore, integrationOwnedWorldReader{snapshot: worldResult.World().Snapshot()}, integrationAssignmentReader{snapshot: active}, SystemClock{}, RandomIDGenerator{}, visitPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingID, _ := visitsession.NewConnectionBindingID("vbind_httpIntegrationOwner")
+	openCommand, _ := visitsession.NewCommandID("vcmd_httpIntegrationOpen")
+	opened, err := visitService.Open(ctx, ownerAuth.AuthContext(), bindingID, openCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inviteCommand, _ := visitsession.NewCommandID("vcmd_httpIntegrationInvite")
+	created, err := visitService.CreateInvite(ctx, ownerAuth.AuthContext(), visitorID, now.Add(3*time.Minute), opened.Snapshot().Revision(), inviteCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return created.Snapshot().ID().Value(), created.Invite().ID().Value(), uint64(created.Snapshot().Revision())
+}
+
+// openHTTPIntegrationDB 使用harness file secret连接隔离MySQL。
+func openHTTPIntegrationDB(t *testing.T) *sql.DB {
+	t.Helper()
+	password, err := os.ReadFile(os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	driverConfig := mysqldriver.NewConfig()
+	driverConfig.User = "ihomeland"
+	driverConfig.Passwd = string(password)
+	driverConfig.Net = "tcp"
+	driverConfig.Addr = os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS")
+	driverConfig.DBName = "ihomeland"
+	driverConfig.Timeout = 3 * time.Second
+	driverConfig.ParseTime = true
+	driverConfig.Loc = time.UTC
+	driverConfig.Params = map[string]string{"time_zone": "'+00:00'", "sql_mode": "'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'"}
+	connector, err := mysqldriver.NewConnector(driverConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sql.OpenDB(connector)
+}
+
+// openHTTPIntegrationRedis 使用harness file secret连接隔离Redis且禁用自动重试。
+func openHTTPIntegrationRedis(t *testing.T) *redisclient.Client {
+	t.Helper()
+	password, err := os.ReadFile(os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := redisclient.NewClient(&redisclient.Options{Addr: os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), Password: string(password), DialTimeout: 3 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, MaxRetries: -1})
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		_ = client.Close()
+		t.Fatal(err)
+	}
+	return client
+}
+
+// requestJSON 执行有界integration请求并返回object响应；204返回空object。
+func requestJSON(t *testing.T, method string, url string, body string, authorization string, expectedStatus int) map[string]any {
+	t.Helper()
+	return requestJSONWithIdempotency(t, method, url, body, authorization, "", expectedStatus)
+}
+
+// requestJSONWithIdempotency 增加可选Bearer与Idempotency-Key并验证状态。
+func requestJSONWithIdempotency(t *testing.T, method string, url string, body string, authorization string, idempotencyKey string, expectedStatus int) map[string]any {
+	t.Helper()
+	request, err := http.NewRequest(method, url, bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if authorization != "" {
+		request.Header.Set("Authorization", authorization)
+	}
+	if idempotencyKey != "" {
+		request.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	request.Header.Set("X-Request-ID", "storage-integration-request")
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != expectedStatus {
+		data, _ := io.ReadAll(response.Body)
+		t.Fatalf("%s %s status=%d want=%d body=%s", method, url, response.StatusCode, expectedStatus, data)
+	}
+	if expectedStatus == http.StatusNoContent {
+		return map[string]any{}
+	}
+	var result map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
 // integrationOptions 使用真实 production graph，只将日志丢弃以保持测试输出稳定。
 func integrationOptions(configPath string) Options {
 	return Options{ConfigPath: configPath, Output: io.Discard, BuildInfo: buildinfo.Current()}
 }
 
 // writeIntegrationConfig 将 harness endpoint 与 file secret reference 写入测试私有临时目录。
-func writeIntegrationConfig(t *testing.T, diagnosticAddress string) string {
+func writeIntegrationConfig(t *testing.T, diagnosticAddress string, publicAddress string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "server.yaml")
 	body := fmt.Sprintf(`environment: local
@@ -79,6 +376,8 @@ runtime:
   startupTimeout: 3s
   shutdownTimeout: 3s
 diagnostic:
+  address: %s
+publicApi:
   address: %s
 storage:
   mysql:
@@ -95,7 +394,7 @@ storage:
       interval: 100ms
       timeout: 50ms
       failureThreshold: 2
-`, diagnosticAddress, os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
+`, diagnosticAddress, publicAddress, os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

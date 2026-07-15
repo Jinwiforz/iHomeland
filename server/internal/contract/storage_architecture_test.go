@@ -73,12 +73,13 @@ func TestAccountSessionStorageAdaptersRemainBorrowedInfrastructure(t *testing.T)
 	}
 }
 
-// TestCompositionRootDoesNotWireAccountSessionBusinessGraph 保护当前change只应用migration而不提前开放业务能力。
-func TestCompositionRootDoesNotWireAccountSessionBusinessGraph(t *testing.T) {
+// TestCompositionRootWiresAccountSessionOnlyInPublicRuntime 保护production adapter只在唯一公开Composition Root接线。
+func TestCompositionRootWiresAccountSessionOnlyInPublicRuntime(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
+	foundAccount, foundSession := false, false
 	for _, directory := range []string{filepath.Join(root, "server", "internal", "app"), filepath.Join(root, "server", "cmd", "server")} {
 		paths, globErr := filepath.Glob(filepath.Join(directory, "*.go"))
 		if globErr != nil {
@@ -94,10 +95,22 @@ func TestCompositionRootDoesNotWireAccountSessionBusinessGraph(t *testing.T) {
 			}
 			for _, imported := range file.Imports {
 				value, _ := strconv.Unquote(imported.Path.Value)
-				if strings.Contains(value, "/internal/storage/account") || strings.Contains(value, "/internal/storage/session") {
-					t.Fatalf("%s wires account/session business adapter before public transport change", path)
+				if strings.Contains(value, "/internal/storage/account") {
+					if filepath.Base(path) != "public_runtime.go" {
+						t.Fatalf("%s wires account adapter outside public runtime", path)
+					}
+					foundAccount = true
+				}
+				if strings.Contains(value, "/internal/storage/session") {
+					if filepath.Base(path) != "public_runtime.go" {
+						t.Fatalf("%s wires session adapter outside public runtime", path)
+					}
+					foundSession = true
 				}
 			}
 		}
+	}
+	if !foundAccount || !foundSession {
+		t.Fatal("public runtime is missing account/session production adapters")
 	}
 }

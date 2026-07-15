@@ -85,7 +85,7 @@ func TestSessionStoreIntegrationLifecycle(t *testing.T) {
 	requireOutcome(t, createOutcome, createErr, domain.StoreOutcomeApplied)
 
 	snapshot, outcome, err := store.ResolveAccess(context.Background(), bundle.Access.Digest, now)
-	if err != nil || outcome != domain.StoreOutcomeApplied || snapshot.SessionID != bundle.Session.ID || snapshot.Principal.AccountID() != bundle.Session.Principal.AccountID() {
+	if err != nil || outcome != domain.StoreOutcomeApplied || snapshot.SessionID != bundle.Session.ID || snapshot.Principal.AccountID() != bundle.Session.Principal.AccountID() || !snapshot.AccessExpiresAt.Equal(bundle.Access.ExpiresAt) || !snapshot.SessionExpiresAt.Equal(bundle.Session.ExpiresAt) {
 		t.Fatalf("resolve access: outcome=%v snapshot=%+v err=%v", outcome, snapshot, err)
 	}
 	if _, expiredOutcome, expiredErr := store.ResolveAccess(context.Background(), bundle.Access.Digest, bundle.Access.ExpiresAt); expiredErr != nil || expiredOutcome != domain.StoreOutcomeExpired {

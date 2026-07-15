@@ -162,14 +162,18 @@ VisitSession MUST只授权其控制面operation：Owner可以创建/撤销 pendi
 - **THEN** 系统只使用VisitSession membership，不创建Party、Room或ActivityInstance，也不让这些未来aggregate接管访问事实
 
 ### Requirement: Store 必须原子决议revision、稳定command identity与提交不确定性
-VisitSessionStore MUST 对 active session create/resolve 与每个 state-changing transition 提供单一线性化点。Mutation MUST 携带正 expected revision、有界 CommandID 与规范 SHA-256 fingerprint；fingerprint MUST 包含 operation、existing VisitSessionID、可信 actor、目标 identity、binding 与真实目标 deadline 等稳定 command 字段，open create MUST 改为绑定目标 PersonalWorld、assignment、capacity 与 session lifetime，且 MUST NOT 包含重试时重新生成的 candidate VisitSessionID 或重新读取的 observedAt。Store MUST 先决议同 CommandID replay/conflict，再比较 active index/revision/current snapshot 并原子保存 target snapshot 与完整 result/directives。Outcome MUST 区分 created/existing、applied/replay、not-found、revision/idempotency/capacity/stale/invalid-state conflict、not-committed 与 commit-unknown；application MUST 拒绝矛盾 outcome/result 且 MUST NOT 自动重放 callback。
+VisitSessionStore MUST 对 active session create/resolve 与每个 state-changing transition 提供单一线性化点。Mutation MUST 携带正 expected revision、有界 CommandID 与规范 SHA-256 fingerprint；fingerprint MUST 包含 operation、existing VisitSessionID、可信 actor、目标 identity、binding，以及由调用方或业务命令明确提交的真实目标 deadline 等稳定 command 字段。Open create MUST 绑定目标 PersonalWorld、assignment、capacity 与 session lifetime，且 MUST NOT 包含重试时重新生成的 candidate VisitSessionID 或重新读取的 observedAt。公开 HTTP accept 的 reservation deadline 完全由服务端 observedAt、policy 与权威 invite/session/assignment/auth deadlines 派生时，该 candidate deadline MUST NOT 进入客户端 command fingerprint；相同 command 必须在领域 precondition 前由 store 决议 replay/conflict，并重放首次保存的完整 result 与较短 deadline，不能借重试时钟延长资格。Store MUST 先决议同 CommandID replay/conflict，再比较 active index/revision/current snapshot 并原子保存 target snapshot 与完整 result/directives。Outcome MUST 区分 created/existing、applied/replay、not-found、revision/idempotency/capacity/stale/invalid-state conflict、not-committed 与 commit-unknown；application MUST 拒绝矛盾 outcome/result 且 MUST NOT 自动重放 callback。
 
 #### Scenario: Mutation response 丢失后重试
 - **WHEN** 首次transition已提交但调用方未收到响应，并以相同CommandID/fingerprint重试且observedAt已经推进
 - **THEN** store返回首次完整result/directives与replay，不再次推进revision、重复占capacity或改变deadline/reason
 
+#### Scenario: HTTP accept 重试只推进服务端时钟
+- **WHEN** 公开 HTTP accept 首次提交后以相同 actor lineage、VisitSession、invite、expected revision 与 CommandID 重试，唯一变化是 observedAt 推进并产生更晚 candidate reservation deadline
+- **THEN** store 在当前领域 precondition 前重放首次 reservation、revision 与较短 deadline，不把时钟推进误判为客户端语义冲突
+
 #### Scenario: 相同 CommandID 用于不同目标
-- **WHEN** 同一actor scope内复用CommandID但operation、target Visitor、binding或目标deadline不同
+- **WHEN** 同一 actor scope 内复用 CommandID 但 operation、target Visitor、binding、调用方提交的目标 deadline 或 current assignment 等稳定授权事实不同
 - **THEN** store返回idempotency conflict且任何VisitSession事实不改变
 
 #### Scenario: Commit 结果无法确认

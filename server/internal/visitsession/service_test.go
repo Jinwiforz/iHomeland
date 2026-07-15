@@ -28,6 +28,55 @@ func TestServiceOpenAndCreateInvite(t *testing.T) {
 	}
 }
 
+// TestHTTPAcceptComputesDeadlineAndAdmissionEligibility 验证公开桥接由领域事实决定reservation与JOIN用途。
+func TestHTTPAcceptComputesDeadlineAndAdmissionEligibility(t *testing.T) {
+	fixture := newServiceFixture(t)
+	open, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_httpOpen"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.clock.Set(fixture.createdAt.Add(time.Second))
+	invited, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, fixture.visitorID, fixture.createdAt.Add(time.Minute), open.Snapshot().Revision(), mustCommandID(t, "vcmd_httpInvite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated := newTestAuthenticated(t, "acc_visitor", fixture.visitorID.String(), fixture.clock.Now())
+	accepted, err := fixture.service.AcceptInviteFromHTTP(context.Background(), authenticated, invited.Snapshot().ID(), invited.Invite().ID(), invited.Snapshot().Revision(), mustCommandID(t, "vcmd_httpAccept"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDeadline := fixture.clock.Now().Add(fixture.policy.ReservationLifetime())
+	if !accepted.AdmissionIntent().ExpiresAt().Equal(wantDeadline) {
+		t.Fatalf("reservation deadline=%v want=%v", accepted.AdmissionIntent().ExpiresAt(), wantDeadline)
+	}
+	fixture.clock.Set(fixture.clock.Now().Add(time.Second))
+	replayed, err := fixture.service.AcceptInviteFromHTTP(context.Background(), authenticated, invited.Snapshot().ID(), invited.Invite().ID(), invited.Snapshot().Revision(), mustCommandID(t, "vcmd_httpAccept"))
+	if err != nil || !replayed.AdmissionIntent().ExpiresAt().Equal(wantDeadline) || replayed.Snapshot().Revision() != accepted.Snapshot().Revision() {
+		t.Fatalf("HTTP accept replay=%#v err=%v", replayed, err)
+	}
+	if changed, changedErr := fixture.service.AcceptInviteFromHTTP(context.Background(), authenticated, invited.Snapshot().ID(), invited.Invite().ID(), accepted.Snapshot().Revision(), mustCommandID(t, "vcmd_httpAccept")); !mutationResultEmpty(changed) || !IsErrorCode(changedErr, ErrorCodeIdempotencyConflict) {
+		t.Fatalf("changed HTTP accept semantics result=%#v err=%v", changed, changedErr)
+	}
+	originalAssignment := fixture.assignments.snapshot
+	stamp := originalAssignment.Stamp()
+	replacementStamp, err := placement.NewAssignmentStamp(stamp.WorldID(), stamp.InstanceID(), stamp.NodeID(), placement.AssignmentGeneration(stamp.Generation().Uint64()+1), placement.FencingToken(stamp.FencingToken().Uint64()+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.assignments.snapshot, err = placement.NewAssignmentSnapshot(replacementStamp, placement.PhaseActive, fixture.assignments.snapshot.CreatedAt(), fixture.assignments.snapshot.Lease().ExpiresAt(), fixture.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, changedErr := fixture.service.AcceptInviteFromHTTP(context.Background(), authenticated, invited.Snapshot().ID(), invited.Invite().ID(), invited.Snapshot().Revision(), mustCommandID(t, "vcmd_httpAccept")); !mutationResultEmpty(changed) || !IsErrorCode(changedErr, ErrorCodeIdempotencyConflict) {
+		t.Fatalf("changed assignment should conflict before stale precondition: result=%#v err=%v", changed, changedErr)
+	}
+	fixture.assignments.snapshot = originalAssignment
+	eligibility, err := fixture.service.ResolveAdmissionEligibility(context.Background(), authenticated, accepted.Snapshot().ID())
+	if err != nil || !eligibility.Valid() || eligibility.Purpose() != AdmissionPurposeJoin || !eligibility.Intent().ExpiresAt().Equal(wantDeadline) {
+		t.Fatalf("eligibility=%#v err=%v", eligibility, err)
+	}
+}
+
 // TestServiceAppliesConfiguredInviteLifetime 验证 application 使用 Policy 上限，而不是只接受领域全局上限。
 func TestServiceAppliesConfiguredInviteLifetime(t *testing.T) {
 	t.Parallel()
@@ -325,6 +374,30 @@ func newTestAuth(t *testing.T, accountValue, playerValue string, now time.Time) 
 	return auth
 }
 
+// newTestAuthenticated 通过 Session service构造携带权威deadline的HTTPS认证结果。
+func newTestAuthenticated(t *testing.T, accountValue, playerValue string, now time.Time) session.AuthenticatedSession {
+	t.Helper()
+	principal, err := session.NewPrincipal(accountValue, playerValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &authSessionStore{}
+	policy, _ := session.NewPolicy(time.Second, time.Minute, time.Hour, time.Hour)
+	service, err := session.NewService(store, unusedEndpointProvider{}, unusedInvalidator{}, fixedSessionClock{now: now}, &sessionIDs{}, session.CryptoSecretGenerator{}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := service.AuthenticateHTTPS(context.Background(), created.Tokens.Access.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return authenticated
+}
+
 // authSessionStore 只实现创建与 access 解析，以公共 session API 生成测试 AuthContext。
 type authSessionStore struct {
 	// mu 保护 Create 与 ResolveAccess 共享的 session bundle。
@@ -348,7 +421,7 @@ func (store *authSessionStore) ResolveAccess(_ context.Context, digest session.D
 	if digest != store.bundle.Access.Digest {
 		return session.AuthSnapshot{}, session.StoreOutcomeNotFound, nil
 	}
-	return session.AuthSnapshot{Principal: store.bundle.Session.Principal, SessionID: store.bundle.Session.ID, Epoch: store.bundle.Session.Epoch}, session.StoreOutcomeApplied, nil
+	return session.AuthSnapshot{Principal: store.bundle.Session.Principal, SessionID: store.bundle.Session.ID, Epoch: store.bundle.Session.Epoch, AccessExpiresAt: store.bundle.Access.ExpiresAt, SessionExpiresAt: store.bundle.Session.ExpiresAt}, session.StoreOutcomeApplied, nil
 }
 
 // RotateRefresh 未被 AuthContext fixture 使用。

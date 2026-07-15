@@ -54,6 +54,12 @@ func Run(ctx context.Context, options Options) Result {
 	}
 	startupContext, cancelStartup := context.WithTimeout(ctx, settings.Runtime.StartupTimeout)
 	defer cancelStartup()
+	preparedPublic, err := preparePublicAPI(startupContext, settings.PublicAPI, secretProvider)
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultConfigError, Err: err}
+	}
+	defer preparedPublic.Destroy()
 	prepared, err := prepareStorage(startupContext, settings.Storage, secretProvider)
 	if err != nil {
 		cancelStartup()
@@ -101,6 +107,11 @@ func Run(ctx context.Context, options Options) Result {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
+	publicTasks, err := tasks.NewOwner(componentContext, "public_http")
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
 	diagnosticServer := diagnostic.New(settings.Diagnostic, readiness, options.BuildInfo, metrics, diagnosticTasks)
 	mysqlComponent, err := storagemysql.New(settings.Storage.MySQL, prepared.mysqlPassword, prepared.mysqlTLS, mysqlTasks, metrics, logger.With("component", "mysql"))
 	if err != nil {
@@ -112,7 +123,8 @@ func Run(ctx context.Context, options Options) Result {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
-	lifecycle, err := NewLifecycle([]Component{diagnosticServer, mysqlComponent, redisComponent}, clock, logger, metrics)
+	publicComponent := &publicRuntimeComponent{settings: settings, prepared: preparedPublic, mysql: mysqlComponent, redis: redisComponent, clock: clock, ids: ids, info: options.BuildInfo, readiness: readiness, metrics: metrics, tasks: publicTasks, logger: logger.With("component", "public_http")}
+	lifecycle, err := NewLifecycle([]Component{diagnosticServer, mysqlComponent, redisComponent, publicComponent}, clock, logger, metrics)
 	if err != nil {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
@@ -136,7 +148,7 @@ func Run(ctx context.Context, options Options) Result {
 		return finishStartupFailure(settings, lifecycle, tasks, readiness, cancelComponents, runtimeLogger, metrics, err)
 	}
 	metrics.RecordStartup("ready")
-	runtimeLogger.Info("server runtime ready", "operation", "startup", "address", diagnosticServer.Address(), "version", options.BuildInfo.Version)
+	runtimeLogger.Info("server runtime ready", "operation", "startup", "diagnostic_address", diagnosticServer.Address(), "public_http_address", publicComponent.Address(), "version", options.BuildInfo.Version)
 
 	var runtimeErr error
 	reason := "signal"

@@ -302,6 +302,8 @@ components:
           minLength: 12
           maxLength: 128
           format: password
+          x-ihomeland-max-bytes: 128
+          description: 保持原始UTF-8 bytes，不执行trim或Unicode normalization；除字符数约束外最多128 bytes。
         displayName:
           type: string
           minLength: 1
@@ -323,6 +325,8 @@ components:
           minLength: 1
           maxLength: 128
           format: password
+          x-ihomeland-max-bytes: 128
+          description: 保持原始UTF-8 bytes，不执行trim或Unicode normalization；除字符数约束外最多128 bytes。
     RefreshRequest:
       type: object
       additionalProperties: false

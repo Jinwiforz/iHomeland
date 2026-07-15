@@ -55,11 +55,10 @@ server/
     placement/
     worldinstance/
     visitsession/
+    worldentry/
     transport/
       diagnostic/
-      http/
-      websocket/
-      tcp/
+      httpapi/
     storage/
       mysql/
         migrations/
@@ -68,6 +67,7 @@ server/
       personalworld/
       placement/
       visitsession/
+      worldadmission/
       redis/
       tlsconfig/
     testclient/
@@ -95,6 +95,12 @@ Lifecycle component 只用于真实持有资源或后台任务的对象；成功
 ### `internal/transport/diagnostic`
 
 独立标准库 HTTP listener，只提供 health、readiness、version 和 metrics。它不依赖 application service，也不能成为公开业务 API 的临时入口。
+
+### `internal/worldentry` 与 `internal/transport/httpapi`
+
+`worldentry` 是 transport-independent 的窄用例协调器，只编排 own-world bootstrap、invite accept 与 world admission issue；账号和 Session 用例仍由各自 owner 直接提供。`transport/httpapi` 是公开 HTTP adapter，集中拥有 10 个冻结 operation 的 route metadata、closed-schema codec、稳定错误映射、认证/限流/deadline middleware 及独立 listener 生命周期。只有该 package 可以导入 Gin；它不保存账号、world、visit 或 credential 事实。
+
+本地明文只允许绑定 loopback，production 必须使用 TLS 1.3。公开 HTTP ready 不表示配置中 advertised WSS/TLS-TCP endpoint 已有 listener，也不表示 ticket/admission 已经可消费。
 
 ### `internal/session`
 
@@ -127,13 +133,13 @@ VisitSession 独立拥有定向 invite、Visitor membership/capacity、connectio
 
 生产 package 只包含纯 Go domain/application、消费侧 `VisitSessionStore`/world/assignment ports、稳定 command fingerprint 与严格 outcome/result 校验。并发 reference store、fake reader/clock/ID 与 admission qualification fixture 只存在于 `_test.go`；package 不启动 timer/goroutine，不拥有 socket、PersonalWorld 持久 mutation 或 placement lifecycle。
 
-VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 仍未构造 VisitSession service，world admission 与公开 transport 必须由后续独立 change 交付；在此之前当前进程不得宣称 visit-world 可用。
+VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 已为公开 HTTP accept/admission 查询构造 VisitSession service；邀请创建、join/reconnect 与 safe-return 仍等待后续 WSS/TLS-TCP 接线。
 
 ### `internal/worldadmission`
 
 独立拥有短期 opaque credential、role/purpose/full-assignment binding、稳定 issuance/consume identity、deterministic HMAC derivation、幂等 issuer、单次 verifier 与只读 qualification。它只接收 application 从 AuthContext、PersonalWorld/VisitSession 和 placement 派生的 domain value object；不读取请求 DTO，不拥有 socket、handler、listener、connection registry、Redis client 或业务 aggregate。
 
-Production Redis adapter 位于 `internal/storage/worldadmission`，独占 issue/credential 两类 versioned Hash、digest-only key、owner Lua 与 replay retention。Adapter 借用共享 standalone client/keyspace，不保存 raw credential/derivation key，不关闭资源、不启动 timer/goroutine，也不从 MySQL、日志或 memory 恢复 flush 后的旧资格。正式 Composition Root、HTTP issuance 与 TLS/TCP consume 仍由后续 transport changes 接线。
+Production Redis adapter 位于 `internal/storage/worldadmission`，独占 issue/credential 两类 versioned Hash、digest-only key、owner Lua 与 replay retention。Adapter 借用共享 standalone client/keyspace，不保存 raw credential/derivation key，不关闭资源、不启动 timer/goroutine，也不从 MySQL、日志或 memory 恢复 flush 后的旧资格。正式 Composition Root 与 HTTP issuance 已经接线；TLS/TCP consume 仍由后续 transport change 交付。
 
 ### 个人世界阶段目录门禁
 

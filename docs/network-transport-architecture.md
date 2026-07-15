@@ -86,6 +86,8 @@ Owner 只拥有 PersonalWorld 业务事实；全部网络通道仍终止于服�
 
 HTTP 请求必须有大小、超时、限流、幂等和结构化错误策略。
 
+当前公开 HTTP component 已实现并接线冻结 OpenAPI 中的 10 个 operation：version/config、register/login/refresh/logout、connection ticket、world bootstrap、invite accept 和 world admission issue。它使用独立于 diagnostic 的 listener、production MySQL/Redis adapters、原子 Session 认证、按 operation deadline 与两阶段限流；production 只允许 TLS 1.3，本地明文仅允许 loopback。
+
 ### WSS 带外控制面
 
 承担：
@@ -195,7 +197,7 @@ World admission 与 session bearer、`ConnectionTicket`、invite、`AdmissionInt
 
 Admission 是短期、一次性 opaque credential。Issuer/verifier 必须绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorldID、可选 VisitSessionID、`OWN_WORLD`/`JOIN`/`RECONNECT` purpose、完整 current AssignmentStamp、endpoint、`TLS_TCP` channel、issued-at 与 expiry。原子消费使用 credential digest 与稳定 consume identity，不复用 ConnectionTicket nonce。`JOIN` 只允许 active reserved membership，`RECONNECT` 只允许 active reconnecting membership；expiry、replay、旧 assignment/epoch 或错误 endpoint/channel 均 fail closed。
 
-`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root、HTTP issuance 与 TLS/TCP consume 仍等待对应 N0 transport change 接线，因此当前服务启动后尚不开放 world/visit 入口。
+`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root 与 HTTP issuance 已经接线。TLS/TCP consume 仍等待对应 N0 transport change，因此当前可以取得短期 credential，但不能据此声明 gameplay 连接或完整 world/visit 竖切可用。
 
 ### Connection Context
 
@@ -309,7 +311,7 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 
 第一阶段：
 
-- HTTP contract 与 TLS 配置
+- HTTP contract、closed-schema codec、TLS 配置与真实 MySQL/Redis integration
 - WSS auth、control push、慢消费者和关闭
 - TCP framing、并发请求、push、背压、重连和 shutdown
 - 错误通道路由拒绝
@@ -328,3 +330,5 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 - KCP 参数、重传和带宽放大
 
 所有网络模拟必须可重复并记录参数。
+
+当前 HTTP 阶段的统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 operation、Session/VisitSession/WorldAdmission 重放与冲突、Redis 丢失/损坏、陈旧 identity/assignment、依赖失败和有界清理；通过只表示 HTTP bootstrap 与签发边界可用，不表示 WSS/TLS-TCP 连接验收通过。

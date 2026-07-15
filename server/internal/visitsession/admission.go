@@ -171,6 +171,64 @@ type AdmissionIntent struct {
 	expiresAt time.Time
 }
 
+// AdmissionPurpose 区分公开签发入口允许的首次加入与断线恢复资格。
+type AdmissionPurpose uint8
+
+const (
+	// AdmissionPurposeUnspecified 禁止进入 WorldAdmission binding。
+	AdmissionPurposeUnspecified AdmissionPurpose = iota
+	// AdmissionPurposeJoin 只适用于当前 reserved membership。
+	AdmissionPurposeJoin
+	// AdmissionPurposeReconnect 只适用于当前 reconnecting membership。
+	AdmissionPurposeReconnect
+)
+
+// Valid 报告 purpose 是否属于公开签发入口的封闭集合。
+func (purpose AdmissionPurpose) Valid() bool {
+	return purpose == AdmissionPurposeJoin || purpose == AdmissionPurposeReconnect
+}
+
+// String 返回稳定低基数名称。
+func (purpose AdmissionPurpose) String() string {
+	if purpose == AdmissionPurposeJoin {
+		return "join"
+	}
+	if purpose == AdmissionPurposeReconnect {
+		return "reconnect"
+	}
+	return "unspecified"
+}
+
+// AdmissionEligibility 是 VisitSession owner 对当前 actor 的只读签发资格结论。
+//
+// 结果没有 credential、nonce 或 endpoint；WorldAdmission owner仍须独立验证 placement并签发。
+type AdmissionEligibility struct {
+	// intent 绑定当前 actor、session lineage、assignment 与最早 deadline。
+	intent AdmissionIntent
+	// purpose 由 membership state 唯一决定，payload 不能选择。
+	purpose AdmissionPurpose
+}
+
+// Intent 返回非凭据 admission intent 值副本。
+func (eligibility AdmissionEligibility) Intent() AdmissionIntent { return eligibility.intent }
+
+// Purpose 返回领域 owner 根据 membership state 决定的用途。
+func (eligibility AdmissionEligibility) Purpose() AdmissionPurpose { return eligibility.purpose }
+
+// Valid 报告结果是否包含完整 intent 与封闭 purpose。
+func (eligibility AdmissionEligibility) Valid() bool {
+	return eligibility.intent.Valid() && eligibility.purpose.Valid()
+}
+
+// String 防止默认格式化展开 actor、lineage 与 assignment。
+func (AdmissionEligibility) String() string { return admissionPlaceholder }
+
+// GoString 与 String 保持相同脱敏边界。
+func (AdmissionEligibility) GoString() string { return admissionPlaceholder }
+
+// LogValue 仅输出稳定占位文本。
+func (AdmissionEligibility) LogValue() slog.Value { return slog.StringValue(admissionPlaceholder) }
+
 // newAdmissionIntent 只允许 aggregate 在成功 accept transition 中创建 intent。
 func newAdmissionIntent(visitSessionID VisitSessionID, actor Actor, assignment placement.AssignmentStamp, expiresAt time.Time) (AdmissionIntent, error) {
 	intent := AdmissionIntent{visitSessionID: visitSessionID, visitorID: actor.playerID, sessionID: actor.sessionID, epoch: actor.epoch, assignment: assignment, expiresAt: canonicalOptionalTime(expiresAt)}

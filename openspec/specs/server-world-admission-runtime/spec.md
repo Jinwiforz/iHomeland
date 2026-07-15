@@ -18,15 +18,19 @@
 - **THEN** issuer 拒绝该 binding，不截断后静默签发也不返回部分 credential
 
 ### Requirement: Admission issuance 必须按稳定 identity 幂等且可解析提交不确定性
-issuer MUST 以稳定 issuance ID 和完整 binding fingerprint 原子创建 issuance/credential records。相同 ID 与相同 fingerprint重试 MUST返回同一 raw credential；相同 ID 改变 actor、role、target、purpose、session epoch、assignment、endpoint/channel 或 deadline MUST返回 idempotency conflict。Redis mutation无法证明提交结果时 MUST返回 commit-unknown且不返回 raw credential，调用方只能用同一 ID/语义重试解析。
+Issuer MUST 以稳定 issuance ID 和完整授权 binding fingerprint 原子创建 issuance/credential records。Fingerprint MUST 绑定 actor、role、target、purpose、session epoch、assignment、endpoint/channel 等稳定授权事实；相同 ID 改变任一稳定授权事实 MUST 返回 idempotency conflict。`IssuedAt` 与由当前服务端时钟计算的 candidate expiry 不属于客户端可变语义：仅因重试时钟推进得到更晚 candidate deadline 时，issuer MUST 重放首次 raw credential 与首次较短 expiry，MUST NOT 延长资格；当前 session、membership、assignment lease 或其他权威 deadline 收紧到早于首次 expiry 时，MUST 返回 idempotency conflict。Redis mutation 无法证明提交结果时 MUST 返回 commit-unknown 且不返回 raw credential，调用方只能用同一 ID 与语义重试解析。
 
-#### Scenario: Issuance response 丢失后重试
-- **WHEN** 首次 Redis mutation 已提交但调用方只观察到 commit-unknown，并以相同 issuance ID 与 binding 重试
-- **THEN** issuer 从注入 key 重新推导并返回与首次完全相同的 opaque credential，不创建第二条资格
+#### Scenario: Issuance response 丢失后时钟推进
+- **WHEN** 首次 Redis mutation 已提交但调用方只观察到 commit-unknown，并以相同 issuance ID 与稳定授权 binding 重试，而服务端时钟推进产生更晚 candidate expiry
+- **THEN** issuer 从注入 key 重新推导并返回与首次完全相同的 opaque credential 和首次较短 expiry，不创建第二条资格也不延长有效期
 
 #### Scenario: 相同 issuance ID 改变目标
-- **WHEN** 调用方复用 issuance ID 但把 own-world 改为另一个 VisitSession、purpose 或 assignment
-- **THEN** store 返回稳定 idempotency conflict，旧 credential record不被覆盖
+- **WHEN** 调用方复用 issuance ID 但把 own-world 改为另一个 VisitSession、purpose、assignment、endpoint 或其他稳定授权事实
+- **THEN** store 返回稳定 idempotency conflict，旧 credential record 不被覆盖
+
+#### Scenario: 权威 deadline 已经收紧
+- **WHEN** 相同 issuance ID 重试时 current session、membership 或 assignment lease 的权威 deadline 早于首次签发 expiry
+- **THEN** issuer 返回 idempotency conflict 而不重放已经超出当前权威边界的资格
 
 ### Requirement: Admission verifier 必须原子消费并绑定受信连接事实
 verifier MUST 在同一 Redis 原子操作中比较 credential、PlayerID、SessionID/epoch、role/purpose、target、TLS/TCP endpoint/channel 与业务 expiry，并写入首次 consume identity。首次匹配消费 MUST返回只读 binding；同一 consume identity/fingerprint的 response-loss重试 MAY返回同一 binding，任何不同 consume identity对已消费 credential MUST返回 replayed。credential missing、corrupt、unknown schema、过期、错误 endpoint/channel/purpose/epoch MUST fail closed。

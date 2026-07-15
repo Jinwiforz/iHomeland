@@ -226,7 +226,11 @@ A0 Project Baseline
 
 ### `add-server-http-bootstrap`
 
-交付 version/config/register/login/refresh/logout、connection ticket、world bootstrap、invite accept 和 admission issue；handler 只做 decode/validate/authorize/call/encode。
+**进入条件：**D1 的 Account/Session storage、V1 的 VisitSession storage、P0 的冻结 HTTP 契约，以及 PersonalWorld、Placement、VisitSession、WorldAdmission runtime 均已完成并可由 production adapter 构造。
+
+**产出：**交付 version/config/register/login/refresh/logout、connection ticket、world bootstrap、invite accept 和 admission issue；handler 只做 decode/validate/authorize/call/encode，公开 listener、storage 与 service graph 由唯一 Composition Root 管理。
+
+**完成条件：**10 个冻结 operation 全部接入真实 production graph，并通过 handler、contract、race、真实 MySQL/Redis 与 HTTPS lifecycle 验收；WSS/TLS-TCP listener、credential consume 和 world mutation 仍明确未完成。
 
 ### `add-server-websocket-control`
 

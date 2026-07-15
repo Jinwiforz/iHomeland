@@ -3,6 +3,7 @@ package contract
 import (
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,5 +42,39 @@ func TestWorldDomainPackagesRemainProtocolAgnostic(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestGinRemainsInsideHTTPTransport 防止路由框架渗入application、domain、storage或Composition Root。
+func TestGinRemainsInsideHTTPTransport(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 显式遍历仓库Go文件以覆盖未来目录。
+	err = filepath.Walk(filepath.Join(root, "server"), func(path string, info fs.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".go") {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			return parseErr
+		}
+		for _, imported := range file.Imports {
+			value, unquoteErr := strconv.Unquote(imported.Path.Value)
+			if unquoteErr != nil {
+				return unquoteErr
+			}
+			if value == "github.com/gin-gonic/gin" && !strings.Contains(filepath.ToSlash(path), "/internal/transport/httpapi/") {
+				t.Fatalf("%s imports Gin outside HTTP transport", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
