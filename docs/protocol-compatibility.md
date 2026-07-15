@@ -166,7 +166,7 @@ Route Registry 的字段与通道选择原则由 `docs/network-transport-archite
 - Wire 绝对时间统一使用 Unix epoch milliseconds，并在字段名使用 `_at_ms` 或 `_expires_at_ms`；这不改变服务端持久事实的时间精度。
 - HTTPS bearer 只证明 account/session lineage；`ConnectionTicket` 只允许连接一个 endpoint/channel；invite 与 `AdmissionIntent` 只表达领域资格；opaque world admission 才允许已认证 TLS/TCP connection 进入 current world target。
 - Admission purpose 必须显式为 `OWN_WORLD`、`JOIN` 或 `RECONNECT`。Visitor 的 `JOIN` 只匹配 active reserved membership，`RECONNECT` 只匹配 active reconnecting membership；GAMEPLAY scope 本身不授予 Owner/Visitor role。
-- Admission 只由 OpenAPI `WorldAdmissionResponse` 公开安全 ASCII opaque credential、endpoint、role、purpose 与 expiry；realtime schema 原样消费同一 string，不重复定义响应 DTO，也不公开可伪造 claims JSON。完整 binding、nonce 原子消费与 replay 防护规则由 `docs/network-transport-architecture.md` 的 World Admission 章节持有。
+- Admission 只由 OpenAPI `WorldAdmissionResponse` 公开安全 ASCII opaque credential、endpoint、role、purpose 与 expiry；realtime schema 原样消费同一 string，不重复定义响应 DTO，也不公开可伪造 claims JSON。完整 binding、credential digest/consume identity 原子消费与 replay 防护规则由 `docs/network-transport-architecture.md` 的 World Admission 章节持有。
 
 ## 生成与验证
 

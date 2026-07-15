@@ -190,10 +190,10 @@ func TestAdmissionSemanticCorpusIsOpaque(t *testing.T) {
 	if err := json.Unmarshal(contents, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.RuntimeImplemented {
-		t.Fatal("semantic corpus must not claim runtime admission implementation")
+	if !manifest.RuntimeImplemented {
+		t.Fatal("semantic corpus must identify the implemented runtime")
 	}
-	for _, forbiddenKey := range []string{`"credential":`, `"claims":`, `"nonce":`, `"sessionEpoch":`, `"assignmentStamp":`, `"signature":`} {
+	for _, forbiddenKey := range []string{`"credential":`, `"claims":`, `"nonce":`, `"consumeId":`, `"sessionEpoch":`, `"assignmentStamp":`, `"signature":`} {
 		if strings.Contains(string(contents), forbiddenKey) {
 			t.Fatalf("semantic corpus exposes forbidden credential detail %s", forbiddenKey)
 		}

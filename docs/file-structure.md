@@ -129,6 +129,12 @@ VisitSession 独立拥有定向 invite、Visitor membership/capacity、connectio
 
 VisitSession production Redis adapter 位于 `internal/storage/visitsession`，独占 active/session/command schemas、完整 snapshot/result codec、owner Lua CAS 与 physical TTL；共享 registry 由 `internal/storage` 组合。它不拥有 Redis client、semantic cleanup、admission credential、连接迁移或 safe-return side effect。正式 Composition Root 仍未构造 VisitSession service，world admission 与公开 transport 必须由后续独立 change 交付；在此之前当前进程不得宣称 visit-world 可用。
 
+### `internal/worldadmission`
+
+独立拥有短期 opaque credential、role/purpose/full-assignment binding、稳定 issuance/consume identity、deterministic HMAC derivation、幂等 issuer、单次 verifier 与只读 qualification。它只接收 application 从 AuthContext、PersonalWorld/VisitSession 和 placement 派生的 domain value object；不读取请求 DTO，不拥有 socket、handler、listener、connection registry、Redis client 或业务 aggregate。
+
+Production Redis adapter 位于 `internal/storage/worldadmission`，独占 issue/credential 两类 versioned Hash、digest-only key、owner Lua 与 replay retention。Adapter 借用共享 standalone client/keyspace，不保存 raw credential/derivation key，不关闭资源、不启动 timer/goroutine，也不从 MySQL、日志或 memory 恢复 flush 后的旧资格。正式 Composition Root、HTTP issuance 与 TLS/TCP consume 仍由后续 transport changes 接线。
+
 ### 个人世界阶段目录门禁
 
 每个 owner 对应的 OpenSpec change 进入实现前，不创建 `personalworld`、`worldinstance`、`placement`、`visitsession`、`activity`、`party` 或 `room` 空目录。真实实现出现时按下列职责决定 package，不把名称直接当作必须存在的层级：
@@ -158,6 +164,7 @@ VisitSession production Redis adapter 位于 `internal/storage/visitsession`，�
 - `personalworld`：借用共享 MySQL pool，实现 PersonalWorld identity/lifecycle/revision 与 actor-scoped archive replay；拥有 `personal_worlds`、`personal_world_idempotency` table，不持有 pool 或 lifecycle。
 - `placement`：借用共享 MySQL/Redis clients 与 Keyspace，拥有持久 allocation high-watermark、current assignment 与 transition replay；不关闭共享资源、不启动后台任务，也不保存通用 world state。
 - `visitsession`：借用共享 standalone Redis client 与 Keyspace，以 owner Lua scripts 原子维护 active index、完整 snapshot 与 command replay；不持有 client lifecycle、semantic cleanup 或 admission credential。
+- `worldadmission`：借用共享 standalone Redis client 与 Keyspace，以 owner Lua scripts 原子维护 issuance replay、digest-only credential binding 与 consume tombstone；不持有 raw credential、derivation key、client lifecycle 或 transport。
 - repository/cache interfaces 由业务 owner 包定义，避免 infrastructure 反向拥有业务契约。
 
 ### `internal/testclient`

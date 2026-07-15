@@ -294,8 +294,8 @@ func (service *Service) VisitorDisconnect(ctx context.Context, auth session.Auth
 	})
 }
 
-// VisitorReconnect 重新确认 current assignment 并以新 binding 恢复同一 Visitor。
-func (service *Service) VisitorReconnect(ctx context.Context, auth session.AuthContext, visitID VisitSessionID, bindingID ConnectionBindingID, expected Revision, commandID CommandID) (MutationResult, error) {
+// VisitorReconnect 只消费 RECONNECT qualification，重新确认 current assignment 后以新 binding恢复。
+func (service *Service) VisitorReconnect(ctx context.Context, auth session.AuthContext, visitID VisitSessionID, qualification JoinQualification, bindingID ConnectionBindingID, expected Revision, commandID CommandID) (MutationResult, error) {
 	actor, observedAt, err := service.actorAndTime(ctx, auth, OperationVisitorReconnect)
 	if err != nil {
 		return MutationResult{}, err
@@ -308,9 +308,10 @@ func (service *Service) VisitorReconnect(ctx context.Context, auth session.AuthC
 	if err != nil {
 		return MutationResult{}, err
 	}
-	fingerprint := commandFingerprint(OperationVisitorReconnect, visitID, expected, actorFields(actor), bindingID.value, assignmentFields(assignment.Stamp()))
+	intent := qualification.intent
+	fingerprint := commandFingerprint(OperationVisitorReconnect, visitID, expected, actorFields(actor), bindingID.value, timeField(intent.expiresAt), assignmentFields(assignment.Stamp()))
 	return service.commit(ctx, snapshot, expected, commandID, fingerprint, OperationVisitorReconnect, func(visit VisitSession) (mutationProposal, error) {
-		target, member, applyErr := visit.VisitorReconnect(actor, bindingID, assignment, observedAt)
+		target, member, applyErr := visit.VisitorReconnect(actor, qualification, bindingID, assignment, observedAt)
 		return mutationProposal{visit: target, membership: member}, applyErr
 	})
 }

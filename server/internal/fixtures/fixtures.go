@@ -91,7 +91,7 @@ type NegativeCase struct {
 type AdmissionSemanticManifest struct {
 	// SchemaVersion 选择 semantic.json 自身的结构版本。
 	SchemaVersion uint32 `json:"schemaVersion"`
-	// RuntimeImplemented 表示 production 是否已经接入签名、解密与 nonce consume。
+	// RuntimeImplemented 表示 production issuer/verifier 与 credential consume 是否已由测试验收。
 	RuntimeImplemented bool `json:"runtimeImplemented"`
 	// Cases 按稳定顺序保存 membership、purpose 与 binding condition 组合。
 	Cases []AdmissionSemanticCase `json:"cases"`
@@ -211,13 +211,13 @@ func buildNegativeManifest() NegativeManifest {
 
 // buildAdmissionSemanticManifest 冻结 admission verifier 的 state/purpose/binding 验收矩阵。
 func buildAdmissionSemanticManifest() AdmissionSemanticManifest {
-	return AdmissionSemanticManifest{SchemaVersion: 1, RuntimeImplemented: false, Cases: []AdmissionSemanticCase{
+	return AdmissionSemanticManifest{SchemaVersion: 1, RuntimeImplemented: true, Cases: []AdmissionSemanticCase{
 		{Name: "reserved-join-valid", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "MATCHING_BINDING", ExpectedOutcome: "ACCEPT"},
 		{Name: "reconnecting-reconnect-valid", MembershipState: "RECONNECTING", Purpose: "RECONNECT", Condition: "MATCHING_BINDING", ExpectedOutcome: "ACCEPT"},
 		{Name: "reserved-reconnect-purpose-mismatch", MembershipState: "RESERVED", Purpose: "RECONNECT", Condition: "PURPOSE_MISMATCH", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2003},
 		{Name: "reconnecting-join-purpose-mismatch", MembershipState: "RECONNECTING", Purpose: "JOIN", Condition: "PURPOSE_MISMATCH", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2003},
 		{Name: "expired", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "EXPIRED", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2004},
-		{Name: "replayed-nonce", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "NONCE_REPLAYED", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2005},
+		{Name: "replayed-credential", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "CREDENTIAL_REPLAYED", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2005},
 		{Name: "stale-session-epoch", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "STALE_SESSION_EPOCH", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2003},
 		{Name: "stale-full-assignment", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "STALE_ASSIGNMENT", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2002},
 		{Name: "wrong-endpoint", MembershipState: "RESERVED", Purpose: "JOIN", Condition: "WRONG_ENDPOINT", ExpectedOutcome: "REJECT", ExpectedErrorCode: 2003},
@@ -296,10 +296,10 @@ func validateNegativeFixtures(manifest NegativeManifest, registry contract.Error
 	return nil
 }
 
-// validateAdmissionSemanticFixtures 校验抽象 corpus 完整性并防止其宣称 runtime security 已实现。
+// validateAdmissionSemanticFixtures 校验已实现 runtime 的抽象 corpus 完整性且不冻结 credential 布局。
 func validateAdmissionSemanticFixtures(manifest AdmissionSemanticManifest, registry contract.ErrorRegistry) error {
-	if manifest.SchemaVersion != 1 || manifest.RuntimeImplemented || len(manifest.Cases) == 0 {
-		return errors.New("admission semantic fixtures must remain a non-runtime version 1 corpus")
+	if manifest.SchemaVersion != 1 || !manifest.RuntimeImplemented || len(manifest.Cases) == 0 {
+		return errors.New("admission semantic fixtures require the production version 1 runtime")
 	}
 	errorsByCode := make(map[uint32]struct{}, len(registry.Errors))
 	for _, entry := range registry.Errors {
@@ -307,6 +307,16 @@ func validateAdmissionSemanticFixtures(manifest AdmissionSemanticManifest, regis
 	}
 	seen := make(map[string]struct{}, len(manifest.Cases))
 	accepted := make(map[string]bool)
+	expectedErrors := map[string]uint32{
+		"PURPOSE_MISMATCH":    2003,
+		"EXPIRED":             2004,
+		"CREDENTIAL_REPLAYED": 2005,
+		"STALE_SESSION_EPOCH": 2003,
+		"STALE_ASSIGNMENT":    2002,
+		"WRONG_ENDPOINT":      2003,
+		"WRONG_CHANNEL":       2003,
+		"MEMBERSHIP_MISSING":  2107,
+	}
 	for _, fixture := range manifest.Cases {
 		if fixture.Name == "" || fixture.MembershipState == "" || fixture.Purpose == "" || fixture.Condition == "" {
 			return errors.New("admission semantic fixture is incomplete")
@@ -325,6 +335,10 @@ func validateAdmissionSemanticFixtures(manifest AdmissionSemanticManifest, regis
 		case "REJECT":
 			if fixture.ExpectedErrorCode == 0 {
 				return fmt.Errorf("admission semantic fixture %s lacks stable error", fixture.Name)
+			}
+			expectedCode, knownCondition := expectedErrors[fixture.Condition]
+			if !knownCondition || fixture.ExpectedErrorCode != expectedCode {
+				return fmt.Errorf("admission semantic fixture %s has unmapped condition or error", fixture.Name)
 			}
 			if _, exists := errorsByCode[fixture.ExpectedErrorCode]; !exists {
 				return fmt.Errorf("admission semantic fixture %s references unknown error %d", fixture.Name, fixture.ExpectedErrorCode)

@@ -224,17 +224,58 @@ func (AdmissionIntent) GoString() string { return admissionPlaceholder }
 // LogValue 让结构化日志只记录稳定占位文本。
 func (AdmissionIntent) LogValue() slog.Value { return slog.StringValue(admissionPlaceholder) }
 
-// JoinQualification 表示未来 admission verifier 已确认的单次 join 输入。
+// qualificationPurpose 区分首次加入与断线恢复，禁止同一资格跨状态复用。
+type qualificationPurpose uint8
+
+const (
+	qualificationPurposeUnspecified qualificationPurpose = iota
+	qualificationPurposeJoin
+	qualificationPurposeReconnect
+)
+
+// JoinQualification 表示 world admission verifier 已确认的单次 VisitSession 输入。
 //
-// 当前 production package 故意不导出 constructor，因此 invite 或 AdmissionIntent 不能被
-// 调用方自行提升为资格。后续 admission change 必须在本 owner 边界增加受信构造路径。
+// 名称为兼容既有 Join API 保留；qualification 同时以封闭 purpose 支持 VisitorReconnect。
+// 导出的 hydration 入口只供 worldadmission owner 在原子消费后调用，application 仍会重新
+// 验证 AuthContext、membership、deadline 与 current full assignment。
 type JoinQualification struct {
-	// intent 只由未来包内受信 verifier 路径封装，外部调用方不能写入。
+	// intent 保存 verifier 已恢复的完整 Visitor binding。
 	intent AdmissionIntent
+	// purpose 防止 JOIN 与 RECONNECT credential互换。
+	purpose qualificationPurpose
 }
 
-// valid 报告 qualification 是否由包内受信 verifier 路径构造。
-func (qualification JoinQualification) valid() bool { return qualification.intent.Valid() }
+// HydrateJoinQualification 从已验证的 JOIN binding 构造单次受信输入。
+//
+// 该导出桥接只允许 worldadmission owner 在 credential 已原子消费且复核 placement 后调用；
+// transport、payload、invite 或 AdmissionIntent 不得直接提升为 qualification。字段必须来自同一
+// verifier binding，expiresAt 是等于即失效的 UTC 微秒 deadline。
+func HydrateJoinQualification(visitSessionID VisitSessionID, visitorID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, assignment placement.AssignmentStamp, expiresAt time.Time) (JoinQualification, error) {
+	return hydrateQualification(qualificationPurposeJoin, visitSessionID, visitorID, sessionID, epoch, assignment, expiresAt)
+}
+
+// HydrateReconnectQualification 从已验证的 RECONNECT binding 构造单次受信输入。
+//
+// 该导出桥接只允许 worldadmission owner 在 credential 已原子消费且复核 placement 后调用；
+// transport、payload、invite 或 AdmissionIntent 不得直接提升为 qualification。VisitSession 仍会
+// 重新比较 AuthContext、reconnecting membership、完整 assignment 与恢复 deadline。
+func HydrateReconnectQualification(visitSessionID VisitSessionID, visitorID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, assignment placement.AssignmentStamp, expiresAt time.Time) (JoinQualification, error) {
+	return hydrateQualification(qualificationPurposeReconnect, visitSessionID, visitorID, sessionID, epoch, assignment, expiresAt)
+}
+
+// hydrateQualification 统一验证 verifier hydration 的完整字段。
+func hydrateQualification(purpose qualificationPurpose, visitSessionID VisitSessionID, visitorID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, assignment placement.AssignmentStamp, expiresAt time.Time) (JoinQualification, error) {
+	intent, err := HydrateAdmissionIntent(visitSessionID, visitorID, sessionID, epoch, assignment, expiresAt)
+	if err != nil || (purpose != qualificationPurposeJoin && purpose != qualificationPurposeReconnect) {
+		return JoinQualification{}, errors.New("visit admission qualification is incomplete")
+	}
+	return JoinQualification{intent: intent, purpose: purpose}, nil
+}
+
+// validFor 报告 qualification 是否由完整 verifier binding 构造且 purpose精确匹配。
+func (qualification JoinQualification) validFor(purpose qualificationPurpose) bool {
+	return qualification.intent.Valid() && qualification.purpose == purpose
+}
 
 // String 防止默认格式化扩散潜在 admission material。
 func (JoinQualification) String() string { return admissionPlaceholder }

@@ -155,7 +155,7 @@ func TestSensitiveBusinessValuesRedactDefaultFormatting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined, member, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent}, mustBindingID(t, "vbind_format"), fixture.assignment, fixture.createdAt.Add(2*time.Second))
+	joined, member, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, mustBindingID(t, "vbind_format"), fixture.assignment, fixture.createdAt.Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestSensitiveBusinessValuesRedactDefaultFormatting(t *testing.T) {
 	result, _ := NewMutationResult(OperationJoin, joined.Snapshot(), commandID, fingerprint, InviteSnapshot{}, AdmissionIntent{}, member, nil)
 	record, _ := NewTransitionRecord(OperationJoin, joined.ID(), reserved.Revision(), commandID, fingerprint, result)
 	createRecord, _ := NewCreateRecord(commandID, fingerprint, openFixture(t, fixture).Snapshot())
-	values := []any{fixture.ownerBinding, visit.Snapshot().Invites()[0], member, visit, visit.Snapshot(), intent, JoinQualification{intent: intent}, directive, result, record, createRecord, OpenResult{snapshot: visit.Snapshot()}}
+	values := []any{fixture.ownerBinding, visit.Snapshot().Invites()[0], member, visit, visit.Snapshot(), intent, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, directive, result, record, createRecord, OpenResult{snapshot: visit.Snapshot()}}
 	for _, value := range values {
 		for _, formatted := range []string{fmt.Sprint(value), fmt.Sprintf("%#v", value)} {
 			for _, forbidden := range []string{"ply_", "ses_", "vses_", "vinv_", "vbind_", "winst_", "rnode_"} {

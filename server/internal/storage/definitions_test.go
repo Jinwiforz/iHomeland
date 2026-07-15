@@ -12,6 +12,7 @@ func TestRedisDefinitionsComposeAllOwners(t *testing.T) {
 		"session_record": {}, "session_access": {}, "session_refresh": {}, "session_ticket": {}, "session_principal": {},
 		"placement_assignment": {}, "placement_transition": {},
 		"visitsession_active": {}, "visitsession_session": {}, "visitsession_command": {},
+		"worldadmission_issue": {}, "worldadmission_credential": {},
 	}
 	if len(definitions) != len(expected) {
 		t.Fatalf("definition count = %d", len(definitions))

@@ -6,6 +6,7 @@ import (
 	storageredis "github.com/jinwiforz/ihomeland/server/internal/storage/redis"
 	storagesession "github.com/jinwiforz/ihomeland/server/internal/storage/session"
 	storagevisit "github.com/jinwiforz/ihomeland/server/internal/storage/visitsession"
+	storageadmission "github.com/jinwiforz/ihomeland/server/internal/storage/worldadmission"
 )
 
 // RedisDefinitions 合并全部已实现owner的不可变definition值副本。
@@ -15,10 +16,12 @@ func RedisDefinitions() []storageredis.Definition {
 	sessionDefinitions := storagesession.Definitions()
 	placementDefinitions := storageplacement.Definitions()
 	visitDefinitions := storagevisit.Definitions()
-	definitions := make([]storageredis.Definition, 0, len(sessionDefinitions)+len(placementDefinitions)+len(visitDefinitions))
+	admissionDefinitions := storageadmission.Definitions()
+	definitions := make([]storageredis.Definition, 0, len(sessionDefinitions)+len(placementDefinitions)+len(visitDefinitions)+len(admissionDefinitions))
 	definitions = append(definitions, sessionDefinitions...)
 	definitions = append(definitions, placementDefinitions...)
 	definitions = append(definitions, visitDefinitions...)
+	definitions = append(definitions, admissionDefinitions...)
 	return definitions
 }
 

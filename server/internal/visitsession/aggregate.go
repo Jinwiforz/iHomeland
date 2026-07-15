@@ -238,7 +238,7 @@ func (visit VisitSession) Join(visitor Actor, qualification JoinQualification, b
 	if err := visit.requireAvailable(observedAt, operation); err != nil {
 		return VisitSession{}, MembershipSnapshot{}, err
 	}
-	if !visitor.Valid() || !qualification.valid() || !bindingID.Valid() || !visit.currentAssignment(current, observedAt) {
+	if !visitor.Valid() || !qualification.validFor(qualificationPurposeJoin) || !bindingID.Valid() || !visit.currentAssignment(current, observedAt) {
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeStale)
 	}
 	intent := qualification.intent
@@ -356,7 +356,7 @@ func (visit VisitSession) VisitorDisconnect(visitor Actor, bindingID ConnectionB
 }
 
 // VisitorReconnect 由同一 Visitor 在 deadline 前以新 binding 恢复 joined 状态。
-func (visit VisitSession) VisitorReconnect(visitor Actor, newBindingID ConnectionBindingID, current placement.AssignmentSnapshot, observedAt time.Time) (VisitSession, MembershipSnapshot, error) {
+func (visit VisitSession) VisitorReconnect(visitor Actor, qualification JoinQualification, newBindingID ConnectionBindingID, current placement.AssignmentSnapshot, observedAt time.Time) (VisitSession, MembershipSnapshot, error) {
 	const operation = OperationVisitorReconnect
 	if err := visit.requireAvailable(observedAt, operation); err != nil {
 		return VisitSession{}, MembershipSnapshot{}, err
@@ -366,7 +366,11 @@ func (visit VisitSession) VisitorReconnect(visitor Actor, newBindingID Connectio
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeNotFound)
 	}
 	membership := visit.snapshot.memberships[index]
-	if !visitor.Valid() || !newBindingID.Valid() || membership.state != MembershipStateReconnecting || membership.sessionID != visitor.sessionID || membership.epoch != visitor.epoch || expiredAt(observedAt, membership.reconnectExpiresAt) || !visit.currentAssignment(current, observedAt) {
+	if !visitor.Valid() || !qualification.validFor(qualificationPurposeReconnect) || !newBindingID.Valid() || membership.state != MembershipStateReconnecting || membership.sessionID != visitor.sessionID || membership.epoch != visitor.epoch || expiredAt(observedAt, membership.reconnectExpiresAt) || !visit.currentAssignment(current, observedAt) {
+		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeStale)
+	}
+	intent := qualification.intent
+	if intent.visitSessionID != visit.ID() || intent.visitorID != visitor.playerID || intent.sessionID != visitor.sessionID || intent.epoch != visitor.epoch || !intent.assignment.Equal(visit.Assignment()) || !intent.expiresAt.Equal(membership.reconnectExpiresAt) || expiredAt(observedAt, intent.expiresAt) {
 		return VisitSession{}, MembershipSnapshot{}, domainError(operation, ErrorCodeStale)
 	}
 	joined, _ := NewMembershipSnapshot(visitor.playerID, membership.inviteID, MembershipStateJoined, visitor.sessionID, visitor.epoch, newBindingID, time.Time{}, 0, time.Time{})

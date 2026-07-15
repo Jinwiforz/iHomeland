@@ -193,7 +193,9 @@ ticket 使用后立即失效，不能跨通道或跨 endpoint 重放。
 
 World admission 与 session bearer、`ConnectionTicket`、invite、`AdmissionIntent` 分层且不可互换：bearer 只证明 account/session lineage；ticket 只允许建立目标 endpoint/channel 的连接；invite/intent 只表达领域资格；admission 才允许该连接进入一个 current PersonalWorld/VisitSession target。GAMEPLAY scope 本身不授予 Owner/Visitor role。
 
-Admission 是短期、一次性 opaque credential。Issuer/verifier 必须绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorldID、可选 VisitSessionID、`OWN_WORLD`/`JOIN`/`RECONNECT` purpose、完整 current AssignmentStamp、endpoint、`TLS_TCP` channel、nonce、issued-at 与 expiry。`JOIN` 只允许 active reserved membership，`RECONNECT` 只允许 active reconnecting membership；expiry、replay、旧 assignment/epoch 或错误 endpoint/channel 均 fail closed。当前 P0 只冻结 OpenAPI public response 与 semantic corpus，不实现 production 签发或 nonce consume。
+Admission 是短期、一次性 opaque credential。Issuer/verifier 必须绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorldID、可选 VisitSessionID、`OWN_WORLD`/`JOIN`/`RECONNECT` purpose、完整 current AssignmentStamp、endpoint、`TLS_TCP` channel、issued-at 与 expiry。原子消费使用 credential digest 与稳定 consume identity，不复用 ConnectionTicket nonce。`JOIN` 只允许 active reserved membership，`RECONNECT` 只允许 active reconnecting membership；expiry、replay、旧 assignment/epoch 或错误 endpoint/channel 均 fail closed。
+
+`internal/worldadmission` 与 `internal/storage/worldadmission` 已实现并独立验收 issuer/verifier、digest-only Redis binding、单次消费、精确 response-loss 重试和 VisitSession 二次校验；production Composition Root、HTTP issuance 与 TLS/TCP consume 仍等待对应 N0 transport change 接线，因此当前服务启动后尚不开放 world/visit 入口。
 
 ### Connection Context
 

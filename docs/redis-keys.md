@@ -265,6 +265,59 @@ deadline 但仍在 physical retention 窗口内的 active index 会 fail closed�
 | `payload.membership` | object/omitted | 访客成员结果 | 仅join/reconnect存在，字段与snapshot membership相同 |
 | `payload.directives[]` | array | 安全返回指令集合 | 按VisitorID稳定排序；每项含`visit_session_id`、`visitor_id`与封闭`reason` |
 
+`worldadmission_issue`：
+
+- Pattern：`ih:<env>:worldadmission:issue:<issueIdDigest>`
+- Owner：`internal/storage/worldadmission`
+- Identity：`issueIdDigest` 是稳定 issuance ID 的 SHA-256 前 128 bit 小写十六进制；碰撞只会 fail closed 为 idempotency conflict
+- TTL：credential 业务 expiry 加配置的有界 replay retention，使用绝对 `PEXPIREAT`
+- 大小：Hash 全部 field/value 累计最多 1024 bytes，由 owner Lua 在读取和重放时强制校验
+- 写入/读取：issue Lua 与对应 credential Hash 在同一线性化点创建；相同 issuance ID 重试交叉验证两类 Hash
+- 恢复：仅重读 Redis 自身仍保留的合法值；key miss 后使用新 issuance identity，不从其他来源补回
+- 故障：相同 identity 改变 fingerprint/digest/expiry 返回 conflict；缺字段、未知版本、缺 TTL 或 credential 侧不一致返回 defect
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema 版本号 | 固定为 `1` |
+| `fingerprint` | lowercase hex | 签发语义指纹(SHA-256,32字节) | 绑定全部 actor/role/target/purpose/session/assignment/endpoint/deadline |
+| `digest` | lowercase hex | 凭据摘要(SHA-256,32字节) | 对 raw opaque credential 计算；不保存 raw 值 |
+| `expires_us` | canonical decimal `int64` | 凭据到期时间(UTC Unix微秒) | 等于即失效；必须与 credential Hash 一致 |
+
+`worldadmission_credential`：
+
+- Pattern：`ih:<env>:worldadmission:credential:<credentialDigest>`
+- Owner：`internal/storage/worldadmission`
+- Identity：raw credential 的完整 SHA-256 小写十六进制；Redis 不保存 raw credential 或 derivation key
+- TTL：与对应 issue Hash 相同的业务 expiry 加 replay retention；physical TTL 只保留重放证据，不延长资格
+- 大小：Hash 全部 field/value 累计最多 8192 bytes，由 owner Lua 在消费和重放时强制校验
+- 写入触发：issue Lua 创建；consume Lua 在静态 binding 全部匹配时把 `issued` 原子改为 `consumed`
+- 重放：相同 `consume_id`/`consume_fp` 返回首次 binding；其他 identity 对 consumed record返回 replayed
+- 恢复：Redis restart 只读自身仍保留的合法值；flush/key miss 使旧 credential 永久失效
+- 故障：unknown/corrupt/oversized Hash、缺 TTL、role/purpose/visit 组合矛盾或时间/assignment 字段非法全部 fail closed
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema 版本号 | 固定为 `1` |
+| `status` | enum string | 消费状态 | `issued` 或 `consumed` |
+| `consume_id` | string/`none` | 首次消费 ID | issued 为 `none`；consumed 必填安全 ASCII |
+| `consume_fp` | lowercase hex/`none` | 首次消费指纹(SHA-256,32字节) | consumed 必填，绑定 AuthContext、endpoint、purpose 与 consume ID |
+| `player` | string | 玩家 ID | 来自受信 AuthContext/domain 事实 |
+| `session` | string | 会话 ID | 绑定签发时 session lineage |
+| `epoch` | canonical decimal `uint64` | 会话世代 | 正整数，消费时必须精确匹配 |
+| `role` | enum string | 世界角色 | `owner`或`visitor` |
+| `world` | string | 个人世界 ID | 必须等于完整 assignment 的 world |
+| `visit` | string/`none` | 访客会话 ID | Owner 为 `none`；Visitor 必填 |
+| `purpose` | enum string | 准入用途 | `own_world`、`join` 或 `reconnect`，与 role/visit 组合严格匹配 |
+| `instance` | string | 世界实例 ID | 完整 AssignmentStamp 字段 |
+| `node` | string | 运行节点 ID | 完整 AssignmentStamp 内部字段，不投影给客户端 |
+| `generation` | canonical decimal `uint64` | 分配世代 | 正整数 |
+| `fence` | canonical decimal `uint64` | 隔离令牌 | 正整数，默认日志禁止输出 |
+| `channel` | enum string | 传输通道 | 固定 `tls_tcp` |
+| `host` | lowercase ASCII | 服务地址 | 规范化 DNS/IP，不含 scheme/path |
+| `port` | canonical decimal `uint16` | 服务端口 | `1..65535` |
+| `issued_us` | canonical decimal `int64` | 签发时间(UTC Unix微秒) | 必须早于expiry |
+| `expires_us` | canonical decimal `int64` | 凭据到期时间(UTC Unix微秒) | 等于即失效 |
+
 `placement_transition`：
 
 - Pattern：`ih:<env>:placement:transition:<transitionDigest>`

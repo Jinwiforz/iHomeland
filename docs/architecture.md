@@ -218,7 +218,7 @@ Owner opens invitation
   -> Visitor role connection
 ```
 
-VisitSession 拥有 immutable owner、PersonalWorldID、Visitor membership、capacity、revision、connection state 与 expiry。Invite 不是 gameplay bearer credential；admission 必须短 TTL、一次性，并绑定 Visitor、VisitSession、WorldInstance、session epoch、endpoint 与 channel。客户端 payload 不能覆盖 owner、world、instance 或 actor identity。
+VisitSession 拥有 immutable owner、PersonalWorldID、Visitor membership、capacity、revision、connection state 与 expiry。Invite 不是 gameplay bearer credential；`internal/worldadmission` 独立签发安全 ASCII opaque credential，并绑定 PlayerID、SessionID/epoch、Owner/Visitor role、PersonalWorld/可选 VisitSession、purpose、完整 AssignmentStamp、TLS/TCP endpoint/channel 与绝对 expiry。客户端 payload 不能覆盖 owner、world、instance 或 actor identity。
 
 状态按 owner 分离：
 
@@ -234,6 +234,8 @@ Visitor 默认不能修改世界配置、推进 Owner 关键任务、消费不�
 Owner 断线后进入有绝对 deadline 的 reconnect grace。Owner 在 deadline 前恢复时可继续访问；主动关闭或 grace 到期时 VisitSession 关闭，Visitor 获得明确原因并返回自己的 PersonalWorld 或安全入口。Visitor 不继承 WorldOwnerID，个人世界不执行 Room 式 host succession。
 
 `internal/storage/visitsession` 已以共享 standalone Redis 实现 production `VisitSessionStore`：active/session/command 三类 versioned Hash 在 owner Lua 线性化点内维护唯一索引、revision CAS 和完整重放结果。Adapter 不拥有 Redis client、后台 cleanup、admission credential 或 listener，也尚未接入正式 Composition Root。Redis 进程重启只能恢复其自身仍保留的合法运行态；flush 或 key 丢失后不从 MySQL 补回旧访问资格。完整 key/field/TTL 字典由 `docs/redis-keys.md` 唯一管理。
+
+World admission runtime 使用注入的至少 256-bit derivation key、稳定 issuance identity 与完整 binding fingerprint，以 HMAC-SHA-256 可重复推导短期 credential；Redis 只保存 credential digest、binding 和 consume tombstone。Issue/consume 由 `internal/storage/worldadmission` owner Lua 原子线性化，同一 consume identity 可解析响应丢失，其他重放拒绝；消费后 application 仍重新读取 current full assignment，VisitSession 仍二次验证 membership 与 deadline。该 component 尚未接入 Composition Root、HTTP 或 TLS/TCP listener，当前进程不因此开放 world/visit 入口。
 
 Party 只在需要跨场景持续队伍、队长、队伍聊天或连续活动时建立。直接访问好友个人世界只需要 VisitSession，不要求预先创建 Party 或 Room。
 

@@ -212,7 +212,8 @@ func TestVisitorReconnectCASRace(t *testing.T) {
 	base := reconnecting.Snapshot()
 	member := base.Memberships()[0]
 	newBinding := mustBindingID(t, "vbind_raceNew")
-	recovered, recoveredMember, err := reconnecting.VisitorReconnect(fixture.visitorA, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second))
+	reconnectIntent, _ := HydrateAdmissionIntent(reconnecting.ID(), fixture.visitorA.playerID, fixture.visitorA.sessionID, fixture.visitorA.epoch, reconnecting.Assignment(), member.ReconnectExpiresAt())
+	recovered, recoveredMember, err := reconnecting.VisitorReconnect(fixture.visitorA, JoinQualification{intent: reconnectIntent, purpose: qualificationPurposeReconnect}, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

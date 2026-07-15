@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "runtimeImplemented": false,
+  "runtimeImplemented": true,
   "cases": [
     {
       "name": "reserved-join-valid",
@@ -41,10 +41,10 @@
       "expectedErrorCode": 2004
     },
     {
-      "name": "replayed-nonce",
+      "name": "replayed-credential",
       "membershipState": "RESERVED",
       "purpose": "JOIN",
-      "condition": "NONCE_REPLAYED",
+      "condition": "CREDENTIAL_REPLAYED",
       "expectedOutcome": "REJECT",
       "expectedErrorCode": 2005
     },

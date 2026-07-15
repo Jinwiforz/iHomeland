@@ -222,7 +222,7 @@ A0 Project Baseline
 
 ### `establish-server-world-admission-runtime`
 
-独立交付短期一次性 opaque world admission issuer/verifier、nonce 原子消费、session epoch/assignment/endpoint/channel 绑定与 semantic fixture 验收；不得在 HTTP 或 TLS/TCP handler 中顺带发明凭据语义。
+独立交付短期一次性 opaque world admission issuer/verifier、credential digest 与 consume identity 原子消费、session epoch/assignment/endpoint/channel 绑定及 semantic fixture + VisitSession 组合验收；不得在 HTTP 或 TLS/TCP handler 中顺带发明凭据语义。
 
 ### `add-server-http-bootstrap`
 

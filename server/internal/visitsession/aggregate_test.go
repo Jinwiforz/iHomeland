@@ -70,21 +70,24 @@ func TestAcceptJoinAndReservationExpiry(t *testing.T) {
 		t.Fatalf("non-target accept should fail: %v", err)
 	}
 	binding := mustBindingID(t, "vbind_visitorA")
-	if _, _, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent}, binding, fixture.assignment, reservationDeadline); !IsErrorCode(err, ErrorCodeStale) {
+	if _, _, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, binding, fixture.assignment, reservationDeadline); !IsErrorCode(err, ErrorCodeStale) {
 		t.Fatalf("join at deadline should fail: %v", err)
 	}
-	joined, member, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent}, binding, fixture.assignment, reservationDeadline.Add(-time.Microsecond))
+	joined, member, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, binding, fixture.assignment, reservationDeadline.Add(-time.Microsecond))
 	if err != nil || member.State() != MembershipStateJoined {
 		t.Fatalf("join reservation: member=%#v err=%v", member, err)
 	}
 	if member.Role() != RoleVisitor || joined.RoleOf(fixture.visitorA) != RoleVisitor {
 		t.Fatal("joined membership did not receive the Visitor role")
 	}
+	if _, _, err := reserved.Join(fixture.visitorA, JoinQualification{intent: intent, purpose: qualificationPurposeReconnect}, binding, fixture.assignment, fixture.createdAt.Add(2*time.Second)); !IsErrorCode(err, ErrorCodeStale) {
+		t.Fatalf("reconnect qualification was accepted by join: %v", err)
+	}
 	newEpoch := testActor(t, fixture.visitorA.playerID.String(), "ses_roleNew", fixture.visitorA.epoch+1)
 	if joined.RoleOf(newEpoch) != RoleUnspecified {
 		t.Fatal("stale membership granted a changed session lineage the Visitor role")
 	}
-	if _, _, err := joined.Join(fixture.visitorA, JoinQualification{intent: intent}, binding, fixture.assignment, fixture.createdAt.Add(2*time.Second)); !IsErrorCode(err, ErrorCodeInvalidState) {
+	if _, _, err := joined.Join(fixture.visitorA, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, binding, fixture.assignment, fixture.createdAt.Add(2*time.Second)); !IsErrorCode(err, ErrorCodeInvalidState) {
 		t.Fatalf("join twice should fail: %v", err)
 	}
 
@@ -113,7 +116,11 @@ func TestVisitorLeaveKickAndReconnect(t *testing.T) {
 		t.Fatalf("disconnect visitor: %v", err)
 	}
 	newBinding := mustBindingID(t, "vbind_new")
-	recovered, member, err := reconnecting.VisitorReconnect(fixture.visitorA, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second))
+	reconnectIntent, _ := HydrateAdmissionIntent(reconnecting.ID(), fixture.visitorA.playerID, fixture.visitorA.sessionID, fixture.visitorA.epoch, reconnecting.Assignment(), reconnectDeadline)
+	if _, _, err := reconnecting.VisitorReconnect(fixture.visitorA, JoinQualification{intent: reconnectIntent, purpose: qualificationPurposeJoin}, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second)); !IsErrorCode(err, ErrorCodeStale) {
+		t.Fatalf("join qualification was accepted by reconnect: %v", err)
+	}
+	recovered, member, err := reconnecting.VisitorReconnect(fixture.visitorA, JoinQualification{intent: reconnectIntent, purpose: qualificationPurposeReconnect}, newBinding, fixture.assignment, fixture.createdAt.Add(20*time.Second))
 	if err != nil || member.BindingID() != newBinding {
 		t.Fatalf("reconnect visitor: member=%#v err=%v", member, err)
 	}
@@ -265,7 +272,7 @@ func TestAssignmentAndEpochChangesFailClosed(t *testing.T) {
 	}
 	newEpoch := fixture.visitorA
 	newEpoch.epoch++
-	if _, _, err := reserved.Join(newEpoch, JoinQualification{intent: intent}, mustBindingID(t, "vbind_epoch"), fixture.assignment, fixture.createdAt.Add(2*time.Second)); !IsErrorCode(err, ErrorCodeStale) {
+	if _, _, err := reserved.Join(newEpoch, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, mustBindingID(t, "vbind_epoch"), fixture.assignment, fixture.createdAt.Add(2*time.Second)); !IsErrorCode(err, ErrorCodeStale) {
 		t.Fatalf("new epoch must reject old qualification: %v", err)
 	}
 }
@@ -302,7 +309,7 @@ func joinedFixture(t *testing.T, fixture aggregateFixture, visitor Actor, invite
 		t.Fatal(err)
 	}
 	binding := mustBindingID(t, bindingValue)
-	joined, _, err := reserved.Join(visitor, JoinQualification{intent: intent}, binding, fixture.assignment, fixture.createdAt.Add(2*time.Second))
+	joined, _, err := reserved.Join(visitor, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, binding, fixture.assignment, fixture.createdAt.Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +329,7 @@ func addJoined(t *testing.T, visit VisitSession, fixture aggregateFixture, visit
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined, _, err := reserved.Join(visitor, JoinQualification{intent: intent}, mustBindingID(t, bindingValue), fixture.assignment, observedAt.Add(2*time.Second))
+	joined, _, err := reserved.Join(visitor, JoinQualification{intent: intent, purpose: qualificationPurposeJoin}, mustBindingID(t, bindingValue), fixture.assignment, observedAt.Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
