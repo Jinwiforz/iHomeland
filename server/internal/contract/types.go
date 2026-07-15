@@ -170,3 +170,51 @@ func (catalog Catalog) LookupRoute(messageID uint32, channel string) (MessageEnt
 	}
 	return *message, *matchedRoute, nil
 }
+
+// LookupWSSPush 返回可由control publisher发送的只读路由投影。
+//
+// 本入口同时校验channel、scope、direction、kind与无correlation策略，避免WSS adapter
+// 只检查message ID后误发TLS/TCP response、client command或需要关联的消息。
+func (catalog Catalog) LookupWSSPush(messageID uint32) (ProjectedRoute, error) {
+	message, route, err := catalog.LookupRoute(messageID, "WSS")
+	if err != nil {
+		return ProjectedRoute{}, err
+	}
+	if message.Direction != "SERVER_TO_CLIENT" || message.Kind != "PUSH" || route.AuthScope != "CONTROL" ||
+		route.QoS != "RELIABLE_ORDERED" || route.Idempotency != "NONE" || route.TimeoutMS != 0 || route.MaxSize == 0 {
+		return ProjectedRoute{}, fmt.Errorf("message %d is not a valid WSS control push", messageID)
+	}
+	return ProjectedRoute{MessageEntry: message, RouteEntry: route}, nil
+}
+
+// WSSPushCatalog 返回编译进服务端的control push只读投影。
+//
+// 该投影只包含当前registry允许由WSS发送的9个PUSH。contract测试必须把它与
+// shared/contracts/registry逐字段比对，避免运行时依赖工作区文件或维护第二套宽松路由。
+func WSSPushCatalog() Catalog {
+	profiles := []ProjectedRoute{
+		wssPushProfile(500, "CONTROL_MAINTENANCE_PUSH", "control", "ihomeland.control.v1.MaintenancePush", 4096),
+		wssPushProfile(501, "CONTROL_FORCED_LOGOUT_PUSH", "control", "ihomeland.control.v1.ForcedLogoutPush", 2048),
+		wssPushProfile(502, "CONTROL_QUEUE_STATUS_PUSH", "control", "ihomeland.control.v1.QueueStatusPush", 1024),
+		wssPushProfile(503, "CONTROL_ENDPOINT_UPDATE_PUSH", "control", "ihomeland.control.v1.EndpointUpdatePush", 8192),
+		wssPushProfile(504, "CONTROL_SESSION_INVALIDATED_PUSH", "control", "ihomeland.control.v1.SessionInvalidatedPush", 2048),
+		wssPushProfile(2003, "WORLD_ASSIGNMENT_CHANGED_PUSH", "world", "ihomeland.world.v1.WorldAssignmentChangedPush", 16384),
+		wssPushProfile(2100, "VISIT_INVITE_PUSH", "visit", "ihomeland.visit.v1.VisitInvitePush", 16384),
+		wssPushProfile(2101, "VISIT_OWNER_AVAILABILITY_PUSH", "visit", "ihomeland.visit.v1.VisitOwnerAvailabilityPush", 16384),
+		wssPushProfile(2102, "VISIT_CLOSED_NOTICE_PUSH", "visit", "ihomeland.visit.v1.VisitClosedNoticePush", 16384),
+	}
+	catalog := Catalog{Messages: MessageRegistry{SchemaVersion: 1}, Routes: RouteRegistry{SchemaVersion: 1}}
+	for _, profile := range profiles {
+		catalog.Messages.Messages = append(catalog.Messages.Messages, profile.MessageEntry)
+		catalog.Routes.Routes = append(catalog.Routes.Routes, profile.RouteEntry)
+	}
+	return catalog
+}
+
+// wssPushProfile 集中冻结所有WSS PUSH共享策略，只让身份和frame预算逐项变化。
+func wssPushProfile(id uint32, name string, owner string, protobufName string, maxSize uint32) ProjectedRoute {
+	return ProjectedRoute{
+		MessageEntry: MessageEntry{ID: id, Name: name, Owner: owner, Protobuf: protobufName, Kind: "PUSH", Direction: "SERVER_TO_CLIENT"},
+		RouteEntry:   RouteEntry{MessageID: id, Channel: "WSS", AuthScope: "CONTROL", QoS: "RELIABLE_ORDERED", MaxSize: maxSize, RatePolicy: "server_control", Idempotency: "NONE"},
+	}
+}

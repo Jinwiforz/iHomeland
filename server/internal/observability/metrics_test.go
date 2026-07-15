@@ -33,3 +33,17 @@ func TestStorageMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveMigration("applied", 1)
 	metrics.RecordStorageOperation("mysql", "transaction", "commit_unknown")
 }
+
+// TestWebSocketMetricLabelsAcceptFixedVocabulary 保护握手、心跳和关闭路径实际使用的稳定枚举。
+func TestWebSocketMetricLabelsAcceptFixedVocabulary(t *testing.T) {
+	t.Parallel()
+
+	metrics := NewMetrics()
+	metrics.ObserveWSSHandshake("tls_version_rejected")
+	metrics.ObserveWSSHandshake("panic")
+	metrics.ObserveWSSHandshake("panic_after_upgrade")
+	metrics.ObserveWSSHeartbeat("idle_timeout")
+	for _, reason := range []string{"server_draining", "session_invalidated", "slow_consumer", "protocol_violation", "heartbeat_timeout", "idle_timeout", "peer_closed", "io_failed", "panic", "local_close"} {
+		metrics.ObserveWSSClose(reason)
+	}
+}

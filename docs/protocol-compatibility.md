@@ -160,6 +160,8 @@ Route Registry 的字段与通道选择原则由 `docs/network-transport-archite
 - 每个 HTTP operation 使用 `x-ihomeland-body-limit-bytes`、`x-ihomeland-timeout-ms` 和 `x-ihomeland-idempotency` 声明 adapter 必须执行的资源与重试边界。
 - world bootstrap 不带 body；invite accept 与 admission issuance 都要求 `Idempotency-Key`。相同 key、相同语义重放首次结果，相同 key 改变语义返回稳定 conflict。
 
+WSS control 只发送 registry 登记的 9 类 `SERVER_TO_CLIENT/PUSH`，每条消息使用 deterministic payload 和 protocol version 1 `ReliableEnvelope`，且完整 envelope 同时满足 route `maxSize` 与全局 realtime frame 上限。每连接 sequence 从 1 单调递增，push 不携带 request/command correlation；unknown message、错误 generated payload 类型、TLS/TCP route 或客户端 application frame 必须 fail closed。
+
 ## World/Visit 公开投影与 credential 分层
 
 - Client-safe assignment 只公开 PersonalWorldID、WorldInstanceID、TLS/TCP endpoint、generation 与 lease expiry；RuntimeNodeID、FencingToken 和完整 AssignmentStamp 只保留在服务端 binding。

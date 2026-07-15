@@ -47,6 +47,15 @@ func TestPublicAPIValidationRejectsUnsafeCrossFieldValues(t *testing.T) {
 		{name: "VisitSession reservation 超出领域上限", mutate: func(value *Config) { value.PublicAPI.VisitSession.ReservationLifetime = 3 * time.Minute }, want: "reservationLifetime"},
 		{name: "VisitSession Owner grace 超出领域上限", mutate: func(value *Config) { value.PublicAPI.VisitSession.OwnerGrace = 6 * time.Minute }, want: "ownerGrace"},
 		{name: "非法 derivation reference", mutate: func(value *Config) { value.PublicAPI.WorldAdmission.DerivationKeySecret = "raw-key" }, want: "reference"},
+		{name: "WSS path 漂移", mutate: func(value *Config) { value.PublicAPI.WebSocketControl.Path = "/control" }, want: "frozen contract"},
+		{name: "WSS Host 含 scheme", mutate: func(value *Config) { value.PublicAPI.WebSocketControl.AllowedHosts = []string{"https://localhost"} }, want: "allowedHosts"},
+		{name: "WSS Origin 含 path", mutate: func(value *Config) {
+			value.PublicAPI.WebSocketControl.AllowedOrigins = []string{"https://client.example.test/path"}
+		}, want: "allowedOrigins"},
+		{name: "WSS queue 小于 frame", mutate: func(value *Config) { value.PublicAPI.WebSocketControl.QueueBytes = 1024 }, want: "queue budget"},
+		{name: "WSS deadline 逆序", mutate: func(value *Config) {
+			value.PublicAPI.WebSocketControl.PongTimeout = value.PublicAPI.WebSocketControl.IdleTimeout
+		}, want: "deadlines"},
 	}
 	for _, test := range tests {
 		test := test
@@ -72,13 +81,16 @@ func TestPublicAPIEnvironmentOverridesAreExplicit(t *testing.T) {
 		"IHOMELAND_PUBLIC_TLS_TCP_HOST":           "game.example.test",
 		"IHOMELAND_PUBLIC_TLS_TCP_PORT":           "9444",
 		"IHOMELAND_PASSWORD_HASH_CONCURRENCY":     "3",
+		"IHOMELAND_WSS_ALLOWED_HOSTS":             "control.example.test:9443",
+		"IHOMELAND_WSS_MAX_CONNECTIONS":           "2048",
 		"IHOMELAND_UNREGISTERED_PUBLIC_API_VALUE": "ignored",
 	}
 	settings, err := Load(path, func(key string) (string, bool) { value, ok := values[key]; return value, ok })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.PublicAPI.Address != "127.0.0.1:0" || settings.PublicAPI.Endpoints.WSS.Port != 9443 || settings.PublicAPI.Account.MaxConcurrentHashes != 3 {
+	if settings.PublicAPI.Address != "127.0.0.1:0" || settings.PublicAPI.Endpoints.WSS.Port != 9443 || settings.PublicAPI.Account.MaxConcurrentHashes != 3 ||
+		settings.PublicAPI.WebSocketControl.MaxConnections != 2048 || len(settings.PublicAPI.WebSocketControl.AllowedHosts) != 1 {
 		t.Fatalf("public API overrides not applied: %+v", settings.PublicAPI)
 	}
 

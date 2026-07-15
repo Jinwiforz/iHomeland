@@ -102,6 +102,20 @@ HTTP 请求必须有大小、超时、限流、幂等和结构化错误策略。
 
 不承担 world mutation、资产修改或经济操作。WSS 与 HTTPS 可以同进程或同端口托管，但逻辑路由必须独立。
 
+当前服务端在公开 HTTPS listener 上实现精确 `GET /v1/control`，固定 subprotocol 为 `ihomeland.control.v1`。客户端通过 `Authorization: Ticket <32 位小写十六进制 nonce>` 提交一次性资格；query、cookie、payload、错误 Host/Origin、错误 subprotocol、非 TLS 1.3 与 production 明文全部在 upgrade 前拒绝。Native 客户端可以省略 Origin，提供时必须精确命中启动配置 allowlist。
+
+连接建立后只允许服务端发送 message ID 500-504、2003、2100-2102 的 deterministic binary `ReliableEnvelope`。客户端发送任何 application text/binary frame 都会收到稳定 policy close；control connection 不提供 command dispatcher。每连接拥有独立单 reader、单 serialized writer、从 1 开始的 sequence、item/byte 双重有界队列、write/ping/pong/idle deadline 和禁压缩策略。Registry 只索引 connection/session/player 引用，不保存世界、访客、presence 或奖励事实。
+
+`publicApi.websocketControl` 的配置职责如下；默认开发值只由 `server/config/local.yaml` 维护，本文不复制数值：
+
+| 配置组 | 字段 | 约束语义 |
+|---|---|---|
+| 握手 | `path`、`subprotocol`、`allowedHosts`、`allowedOrigins` | 前两项是冻结契约；Host 必须命中白名单，native client 可省略 Origin，提供时必须命中白名单 |
+| 认证前资源 | `preAuthRate`、`maxRemoteEntries`、`remoteIdleTtl` | 以规范 remote IP 做进程内 token bucket；状态数量和空闲寿命均有硬上限，不写入 Redis |
+| 连接预算 | `maxConnections`、`maxPerRemote`、`maxPerSession`、`maxPerPlayer` | active 与 upgrade 前 reservation 共同计入限制，超限时不消费 ticket |
+| 队列预算 | `queueItems`、`queueBytes` | 同时限制待发送 envelope 数量和完整编码字节数；任一超限都关闭 slow consumer，不丢弃后继续伪装健康 |
+| I/O 与关闭 | `writeTimeout`、`pingInterval`、`pongTimeout`、`idleTimeout`、`closeTimeout` | write/ping 使用独立 deadline；idle 是自上次成功 write/ping 起的兜底上限；所有连接并行进入 close，并在一个总 shutdown deadline 内等待 |
+
 `VISIT_CLOSED_NOTICE_PUSH` 只收敛控制面 UI 和可见性，不驱动 gameplay connection 返回。`VISIT_SAFE_RETURN_PUSH` 只在 TLS/TCP 上表达当前连接的权威返回动作；两者不是同一消息的双通道副本。
 
 ### TLS/TCP 权威可靠业务面
@@ -331,4 +345,4 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 
 所有网络模拟必须可重复并记录参数。
 
-当前 HTTP 阶段的统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 operation、Session/VisitSession/WorldAdmission 重放与冲突、Redis 丢失/损坏、陈旧 identity/assignment、依赖失败和有界清理；通过只表示 HTTP bootstrap 与签发边界可用，不表示 WSS/TLS-TCP 连接验收通过。
+当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 HTTP operation、真实 Redis WSS ticket 一次性消费、重放拒绝、logout invalidation push、活动连接关闭，以及 Session/VisitSession/WorldAdmission 的重放、冲突与依赖故障。通过表示 HTTP bootstrap 与 WSS control 可用，不表示 TLS/TCP gameplay、world admission consume 或完整 world/visit 竖切已经完成。

@@ -26,7 +26,7 @@ publicApi:
   endpoints:
     wss:
       host: localhost
-      port: 8443
+      port: 8080
     tlsTcp:
       host: localhost
       port: 8444
@@ -66,6 +66,25 @@ publicApi:
     maximumLifetime: 30s
     replayRetention: 5m
     derivationKeySecret: env:IHOMELAND_WORLD_ADMISSION_KEY
+  websocketControl:
+    path: /v1/control
+    subprotocol: ihomeland.control.v1
+    allowedHosts: [127.0.0.1:8080, localhost:8080]
+    allowedOrigins: []
+    preAuthRate: { requests: 60, window: 1m, burst: 10 }
+    maxConnections: 4096
+    maxPerRemote: 32
+    maxPerSession: 4
+    maxPerPlayer: 8
+    maxRemoteEntries: 4096
+    remoteIdleTtl: 10m
+    queueItems: 64
+    queueBytes: 1048576
+    writeTimeout: 5s
+    pingInterval: 15s
+    pongTimeout: 10s
+    idleTimeout: 45s
+    closeTimeout: 3s
 storage:
   mysql:
     address: 127.0.0.1:3306

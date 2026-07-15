@@ -1012,6 +1012,8 @@ type libraryVersionCatalog struct {
 	GoText versionValue `yaml:"golang_x_text"`
 	// GoCrypto 锁定 production Argon2id password hashing 使用的官方扩展库。
 	GoCrypto versionValue `yaml:"golang_x_crypto"`
+	// CoderWebSocketGo 锁定公开WSS control transport使用的WebSocket实现。
+	CoderWebSocketGo versionValue `yaml:"coder_websocket_go"`
 }
 
 // versionCatalog 是 ValidateVersions 所需的 versions.yaml 只读投影。
@@ -1045,7 +1047,7 @@ func ValidateVersions(root string) error {
 		versions.Toolchains.BufCLI.Version == "" || versions.Toolchains.BufConfig.Version == "" ||
 		versions.Toolchains.ProtobufGoGenerator.Version == "" || versions.Toolchains.Protoc.Version == "" ||
 		versions.Libraries.GinGo.Version == "" || versions.Libraries.PrometheusClientGo.Version == "" || versions.Libraries.GoText.Version == "" ||
-		versions.Libraries.GoCrypto.Version == "" || versions.Languages.Go.Version == "" {
+		versions.Libraries.GoCrypto.Version == "" || versions.Libraries.CoderWebSocketGo.Version == "" || versions.Languages.Go.Version == "" {
 		return errors.New("versions.yaml is missing a required protocol, toolchain, library, or language version")
 	}
 	// 每项同时声明目标文件和应出现的精确锚点，使新增生态配置必须显式加入治理。
@@ -1067,6 +1069,7 @@ func ValidateVersions(root string) error {
 		{filepath.Join(root, "server", "go.mod"), "github.com/prometheus/client_golang v" + versions.Libraries.PrometheusClientGo.Version},
 		{filepath.Join(root, "server", "go.mod"), "golang.org/x/text v" + versions.Libraries.GoText.Version},
 		{filepath.Join(root, "server", "go.mod"), "golang.org/x/crypto v" + versions.Libraries.GoCrypto.Version},
+		{filepath.Join(root, "server", "go.mod"), "github.com/coder/websocket v" + versions.Libraries.CoderWebSocketGo.Version},
 		{filepath.Join(root, ".gitignore"), "/.local/"},
 		{filepath.Join(root, ".gitignore"), "/server/internal/generated/proto/"},
 		{filepath.Join(root, ".gitignore"), "/client/Assets/App/Generated/"},

@@ -3,6 +3,7 @@ module github.com/jinwiforz/ihomeland/server
 go 1.26.5
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/prometheus/client_golang v1.23.2

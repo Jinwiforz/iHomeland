@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -68,6 +69,8 @@ type PublicAPI struct {
 	VisitSession VisitSessionPolicy `yaml:"visitSession"`
 	// WorldAdmission 定义签发与响应丢失恢复策略。
 	WorldAdmission WorldAdmissionPolicy `yaml:"worldAdmission"`
+	// WebSocketControl 定义共享公开listener上的WSS控制面资源与握手策略。
+	WebSocketControl WebSocketControlPolicy `yaml:"websocketControl"`
 }
 
 // PublicTLS 定义公开 HTTP server TLS material reference。
@@ -160,6 +163,46 @@ type WorldAdmissionPolicy struct {
 	DerivationKeySecret string `yaml:"derivationKeySecret"`
 }
 
+// WebSocketControlPolicy 定义WSS控制面的固定握手与每进程资源预算。
+type WebSocketControlPolicy struct {
+	// Path 是公开listener顶层mux唯一允许的WSS upgrade路径。
+	Path string `yaml:"path"`
+	// Subprotocol 是客户端必须精确协商的协议代际。
+	Subprotocol string `yaml:"subprotocol"`
+	// AllowedHosts 是upgrade请求允许的规范Host header集合。
+	AllowedHosts []string `yaml:"allowedHosts"`
+	// AllowedOrigins 是可选Origin header允许的规范origin集合；空集合仍允许native client省略Origin。
+	AllowedOrigins []string `yaml:"allowedOrigins"`
+	// PreAuthRate 限制单remote identity在认证前的握手速率。
+	PreAuthRate RatePolicy `yaml:"preAuthRate"`
+	// MaxConnections 限制当前进程active与reserved连接总数。
+	MaxConnections int `yaml:"maxConnections"`
+	// MaxPerRemote 限制单remote identity的active与reserved连接数。
+	MaxPerRemote int `yaml:"maxPerRemote"`
+	// MaxPerSession 限制单SessionID的active连接数。
+	MaxPerSession int `yaml:"maxPerSession"`
+	// MaxPerPlayer 限制单PlayerID跨session的active连接数。
+	MaxPerPlayer int `yaml:"maxPerPlayer"`
+	// MaxRemoteEntries 限制pre-auth limiter持有的remote identity数量。
+	MaxRemoteEntries int `yaml:"maxRemoteEntries"`
+	// RemoteIdleTTL 是remote limiter entry惰性回收期限。
+	RemoteIdleTTL time.Duration `yaml:"remoteIdleTtl"`
+	// QueueItems 限制每连接待发送envelope数量。
+	QueueItems int `yaml:"queueItems"`
+	// QueueBytes 限制每连接待发送encoded bytes总量。
+	QueueBytes int `yaml:"queueBytes"`
+	// WriteTimeout 限制单次binary message写出。
+	WriteTimeout time.Duration `yaml:"writeTimeout"`
+	// PingInterval 控制server主动存活探测频率。
+	PingInterval time.Duration `yaml:"pingInterval"`
+	// PongTimeout 限制单次ping等待peer响应的时间。
+	PongTimeout time.Duration `yaml:"pongTimeout"`
+	// IdleTimeout 限制连接长期没有成功I/O的寿命。
+	IdleTimeout time.Duration `yaml:"idleTimeout"`
+	// CloseTimeout 限制close handshake与连接任务回收。
+	CloseTimeout time.Duration `yaml:"closeTimeout"`
+}
+
 // DefaultPublicAPI 返回仅绑定loopback的本地明文配置；production校验会拒绝该TLS策略。
 func DefaultPublicAPI() PublicAPI {
 	rates := make(map[string]RatePolicy, len(publicOperationIDs))
@@ -176,7 +219,7 @@ func DefaultPublicAPI() PublicAPI {
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    8192,
 		Endpoints: RealtimeEndpoints{
-			WSS:    Endpoint{Host: "localhost", Port: 8443},
+			WSS:    Endpoint{Host: "localhost", Port: 8080},
 			TLSTCP: Endpoint{Host: "localhost", Port: 8444},
 		},
 		Limits:         PublicLimits{HTTPBodyBytes: 4096, RealtimeFrameBytes: 65536},
@@ -203,6 +246,16 @@ func DefaultPublicAPI() PublicAPI {
 			MaximumLifetime:     30 * time.Second,
 			ReplayRetention:     5 * time.Minute,
 			DerivationKeySecret: "env:IHOMELAND_WORLD_ADMISSION_KEY",
+		},
+		WebSocketControl: WebSocketControlPolicy{
+			Path: "/v1/control", Subprotocol: "ihomeland.control.v1",
+			AllowedHosts:   []string{"127.0.0.1:8080", "localhost:8080"},
+			PreAuthRate:    RatePolicy{Requests: 60, Window: time.Minute, Burst: 10},
+			MaxConnections: 4096, MaxPerRemote: 32, MaxPerSession: 4, MaxPerPlayer: 8,
+			MaxRemoteEntries: 4096, RemoteIdleTTL: 10 * time.Minute,
+			QueueItems: 64, QueueBytes: 1024 * 1024,
+			WriteTimeout: 5 * time.Second, PingInterval: 15 * time.Second, PongTimeout: 10 * time.Second,
+			IdleTimeout: 45 * time.Second, CloseTimeout: 3 * time.Second,
 		},
 	}
 }
@@ -265,7 +318,97 @@ func (public PublicAPI) validate(environment string, diagnosticAddress string) e
 	if err := public.VisitSession.validate(); err != nil {
 		return err
 	}
-	return public.WorldAdmission.validate()
+	if err := public.WorldAdmission.validate(); err != nil {
+		return err
+	}
+	return public.WebSocketControl.Validate(public.Limits.RealtimeFrameBytes)
+}
+
+// Validate 冻结WSS握手契约并限制连接、队列、限流与deadline资源。
+//
+// Transport在构图时也调用本入口，确保直接构造不会维护第二套较宽松校验。
+func (policy WebSocketControlPolicy) Validate(frameBytes int) error {
+	if frameBytes < minimumPublicBodyBytes || frameBytes > maximumPublicBodyBytes {
+		return errors.New("websocketControl frame budget is invalid")
+	}
+	if policy.Path != "/v1/control" || policy.Subprotocol != "ihomeland.control.v1" {
+		return errors.New("websocketControl path and subprotocol must use the frozen contract")
+	}
+	if len(policy.AllowedHosts) < 1 || len(policy.AllowedHosts) > 32 {
+		return errors.New("websocketControl.allowedHosts must contain 1-32 entries")
+	}
+	if err := validateUniqueStrings("websocketControl.allowedHosts", policy.AllowedHosts, validWebSocketHost); err != nil {
+		return err
+	}
+	if len(policy.AllowedOrigins) > 32 {
+		return errors.New("websocketControl.allowedOrigins must contain at most 32 entries")
+	}
+	if err := validateUniqueStrings("websocketControl.allowedOrigins", policy.AllowedOrigins, validWebSocketOrigin); err != nil {
+		return err
+	}
+	if err := policy.PreAuthRate.validate(); err != nil {
+		return fmt.Errorf("websocketControl.preAuthRate: %w", err)
+	}
+	if policy.MaxConnections < 1 || policy.MaxConnections > 100000 || policy.MaxPerRemote < 1 || policy.MaxPerRemote > policy.MaxConnections ||
+		policy.MaxPerSession < 1 || policy.MaxPerSession > policy.MaxConnections || policy.MaxPerPlayer < 1 || policy.MaxPerPlayer > policy.MaxConnections {
+		return errors.New("websocketControl connection limits are invalid")
+	}
+	if policy.MaxRemoteEntries < 1 || policy.MaxRemoteEntries > maximumRateEntries || policy.RemoteIdleTTL < time.Second || policy.RemoteIdleTTL > 24*time.Hour {
+		return errors.New("websocketControl remote limiter bounds are invalid")
+	}
+	if policy.QueueItems < 1 || policy.QueueItems > 1024 || policy.QueueBytes < frameBytes || policy.QueueBytes > 16*1024*1024 {
+		return errors.New("websocketControl queue budget is invalid")
+	}
+	for name, value := range map[string]time.Duration{"writeTimeout": policy.WriteTimeout, "pingInterval": policy.PingInterval, "pongTimeout": policy.PongTimeout, "idleTimeout": policy.IdleTimeout, "closeTimeout": policy.CloseTimeout} {
+		if err := validateDuration("websocketControl."+name, value); err != nil {
+			return err
+		}
+	}
+	if policy.WriteTimeout > policy.PongTimeout || policy.PongTimeout >= policy.IdleTimeout || policy.PingInterval >= policy.IdleTimeout || policy.CloseTimeout > policy.IdleTimeout {
+		return errors.New("websocketControl deadlines are inconsistent")
+	}
+	return nil
+}
+
+// validateUniqueStrings 拒绝空白、非规范值和重复allowlist entry。
+func validateUniqueStrings(name string, values []string, valid func(string) bool) error {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value != strings.TrimSpace(value) || value != strings.ToLower(value) || !valid(value) {
+			return fmt.Errorf("%s contains an invalid entry", name)
+		}
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("%s contains a duplicate entry", name)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+// validWebSocketHost 校验规范host[:port]且禁止scheme、path与userinfo。
+func validWebSocketHost(value string) bool {
+	host := value
+	if strings.Contains(value, ":") {
+		parsedHost, port, err := net.SplitHostPort(value)
+		if err != nil {
+			return false
+		}
+		parsedPort, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || parsedPort == 0 {
+			return false
+		}
+		host = parsedHost
+	}
+	return net.ParseIP(host) != nil || (len(host) <= 253 && publicHostPattern.MatchString(host) && !strings.Contains(host, ".."))
+}
+
+// validWebSocketOrigin 只接受无path/query/fragment/userinfo的http(s) origin。
+func validWebSocketOrigin(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	return validWebSocketHost(parsed.Host)
 }
 
 // validate 强制production使用TLS，并把开发明文例外限制在显式loopback bind地址。
@@ -390,5 +533,30 @@ func publicAPIEnvironmentOverrides(config *Config) []environmentOverride {
 		{key: "IHOMELAND_PUBLIC_TLS_TCP_PORT", apply: intSetter(&config.PublicAPI.Endpoints.TLSTCP.Port)},
 		{key: "IHOMELAND_WORLD_ADMISSION_KEY_SECRET", apply: stringSetter(&config.PublicAPI.WorldAdmission.DerivationKeySecret)},
 		{key: "IHOMELAND_PASSWORD_HASH_CONCURRENCY", apply: intSetter(&config.PublicAPI.Account.MaxConcurrentHashes)},
+		{key: "IHOMELAND_WSS_ALLOWED_HOSTS", apply: stringListSetter(&config.PublicAPI.WebSocketControl.AllowedHosts)},
+		{key: "IHOMELAND_WSS_ALLOWED_ORIGINS", apply: stringListSetter(&config.PublicAPI.WebSocketControl.AllowedOrigins)},
+		{key: "IHOMELAND_WSS_MAX_CONNECTIONS", apply: intSetter(&config.PublicAPI.WebSocketControl.MaxConnections)},
+		{key: "IHOMELAND_WSS_MAX_PER_REMOTE", apply: intSetter(&config.PublicAPI.WebSocketControl.MaxPerRemote)},
+		{key: "IHOMELAND_WSS_MAX_PER_SESSION", apply: intSetter(&config.PublicAPI.WebSocketControl.MaxPerSession)},
+		{key: "IHOMELAND_WSS_MAX_PER_PLAYER", apply: intSetter(&config.PublicAPI.WebSocketControl.MaxPerPlayer)},
+		{key: "IHOMELAND_WSS_QUEUE_ITEMS", apply: intSetter(&config.PublicAPI.WebSocketControl.QueueItems)},
+		{key: "IHOMELAND_WSS_QUEUE_BYTES", apply: intSetter(&config.PublicAPI.WebSocketControl.QueueBytes)},
+		{key: "IHOMELAND_WSS_WRITE_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.WriteTimeout)},
+		{key: "IHOMELAND_WSS_PING_INTERVAL", apply: durationSetter(&config.PublicAPI.WebSocketControl.PingInterval)},
+		{key: "IHOMELAND_WSS_PONG_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.PongTimeout)},
+		{key: "IHOMELAND_WSS_IDLE_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.IdleTimeout)},
+		{key: "IHOMELAND_WSS_CLOSE_TIMEOUT", apply: durationSetter(&config.PublicAPI.WebSocketControl.CloseTimeout)},
+	}
+}
+
+// stringListSetter 按逗号解析显式allowlist覆盖；空值表示空集合而不是单个空entry。
+func stringListSetter(target *[]string) func(string) error {
+	return func(value string) error {
+		if value == "" {
+			*target = nil
+			return nil
+		}
+		*target = strings.Split(value, ",")
+		return nil
 	}
 }

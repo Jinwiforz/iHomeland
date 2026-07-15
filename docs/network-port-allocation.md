@@ -34,6 +34,8 @@
 
 `8080` 是通用的备用 HTTP 端口；`8081`、`8443`、`8444` 等属于易识别的工程约定，不具有不可覆盖的协议含义。自定义 TLS/TCP、UDP 和 KCP 没有适合本项目直接继承的行业默认端口，因此不得为了形式统一过早冻结生产号码。
 
+公开 HTTP 与 WSS control 复用同一个实际 listener：WSS 不是第二个端口，而是该入口的精确 `/v1/control` upgrade path。`publicApi.address` 决定进程 bind，`publicApi.endpoints.wss` 决定客户端可见且写入 ticket 的 advertised endpoint；两者可以因 ingress 或 port mapping 不同，但必须由部署配置显式对应，服务端不得从不受信 Host header 重建 advertised endpoint。
+
 ## 覆盖与映射
 
 推荐默认值被占用时必须显式覆盖，不能要求开发者释放系统或其他软件已经使用的端口。例如本机 MySQL 无法绑定产品默认端口时，可以采用：

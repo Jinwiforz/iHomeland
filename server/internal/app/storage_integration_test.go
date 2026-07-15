@@ -5,6 +5,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,15 +16,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/buildinfo"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
+	"github.com/jinwiforz/ihomeland/server/internal/protocol"
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 	storageall "github.com/jinwiforz/ihomeland/server/internal/storage"
 	storagepersonalworld "github.com/jinwiforz/ihomeland/server/internal/storage/personalworld"
@@ -138,6 +143,119 @@ func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
 	stop(ErrSignalShutdown)
 	if result := <-resultChannel; result.Kind != ResultClean {
 		t.Fatalf("public HTTP integration shutdown=%+v", result)
+	}
+}
+
+// TestPublicWebSocketControlConsumesTicketAndInvalidates 验证真实Redis ticket、WSS upgrade、重放拒绝与logout关闭。
+func TestPublicWebSocketControlConsumesTicketAndInvalidates(t *testing.T) {
+	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") != "1" {
+		t.Skip("storage integration harness is required")
+	}
+	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "wss-integration-admission-key-material")
+	diagnosticAddress, publicAddress := reserveAddress(t), reserveAddress(t)
+	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
+	certificatePath, privateKey := writeTestCertificate(t)
+	t.Setenv("IHOMELAND_TEST_WSS_PRIVATE_KEY", string(privateKey))
+	enableIntegrationTLS(t, configPath, certificatePath)
+	client := newIntegrationTLSClient(t, certificatePath)
+	ctx, stop := context.WithCancelCause(context.Background())
+	resultChannel := make(chan Result, 1)
+	go func() { resultChannel <- Run(ctx, integrationOptions(configPath)) }()
+	waitForReady(t, diagnosticAddress)
+	_, publicPort, err := net.SplitHostPort(publicAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "https://localhost:" + publicPort
+	websocketURL := "wss://localhost:" + publicPort + "/v1/control"
+
+	registered := requestJSONWithClient(t, client, http.MethodPost, baseURL+"/v1/auth/register", `{"username":"wss-control","password":"integration-password","displayName":"WSS Control"}`, "", http.StatusCreated)
+	tokens := registered["tokens"].(map[string]any)
+	authorization := "Bearer " + tokens["accessToken"].(string)
+	ticket := requestJSONWithClient(t, client, http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"WSS"}`, authorization, http.StatusCreated)
+	rawTicket := ticket["ticket"].(string)
+
+	header := http.Header{}
+	header.Set("Authorization", "Ticket "+rawTicket)
+	type dialResult struct {
+		connection *websocket.Conn
+		response   *http.Response
+		err        error
+	}
+	dials := make(chan dialResult, 2)
+	for range 2 {
+		go func() {
+			connection, response, err := websocket.Dial(t.Context(), websocketURL, &websocket.DialOptions{HTTPClient: client, HTTPHeader: header, Subprotocols: []string{"ihomeland.control.v1"}})
+			dials <- dialResult{connection: connection, response: response, err: err}
+		}()
+	}
+	var connection *websocket.Conn
+	accepted, rejected := 0, 0
+	for range 2 {
+		result := <-dials
+		if result.err == nil {
+			accepted++
+			connection = result.connection
+		} else if integrationResponseStatus(result.response) == http.StatusUnauthorized {
+			rejected++
+		} else {
+			t.Fatalf("unexpected concurrent WSS result: status=%d err=%v", integrationResponseStatus(result.response), result.err)
+		}
+		if result.response != nil && result.response.Body != nil {
+			_ = result.response.Body.Close()
+		}
+	}
+	if accepted != 1 || rejected != 1 {
+		t.Fatalf("atomic ticket consume results: accepted=%d rejected=%d", accepted, rejected)
+	}
+	defer connection.CloseNow()
+	if connection.Subprotocol() != "ihomeland.control.v1" {
+		t.Fatalf("negotiated subprotocol=%q", connection.Subprotocol())
+	}
+
+	type readResult struct {
+		messageType websocket.MessageType
+		encoded     []byte
+		err         error
+	}
+	reads := make(chan readResult, 1)
+	go func() {
+		readContext, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelRead()
+		messageType, encoded, err := connection.Read(readContext)
+		reads <- readResult{messageType: messageType, encoded: encoded, err: err}
+	}()
+	requestJSONWithClient(t, client, http.MethodPost, baseURL+"/v1/auth/logout", "", authorization, http.StatusNoContent)
+	read := <-reads
+	messageType, encoded, err := read.messageType, read.encoded, read.err
+	if err != nil || messageType != websocket.MessageBinary {
+		t.Fatalf("session invalidation push read failed: type=%v err=%v", messageType, err)
+	}
+	envelope, err := protocol.UnmarshalEnvelope(encoded)
+	if err != nil || envelope.GetMessageId() != 504 || envelope.GetSequence() != 1 {
+		t.Fatalf("session invalidation envelope drifted: envelope=%v err=%v", envelope, err)
+	}
+
+	shutdownAccount := requestJSONWithClient(t, client, http.MethodPost, baseURL+"/v1/auth/register", `{"username":"wss-shutdown","password":"integration-password","displayName":"WSS Shutdown"}`, "", http.StatusCreated)
+	shutdownAuthorization := "Bearer " + shutdownAccount["tokens"].(map[string]any)["accessToken"].(string)
+	shutdownTicket := requestJSONWithClient(t, client, http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"WSS"}`, shutdownAuthorization, http.StatusCreated)["ticket"].(string)
+	shutdownHeader := http.Header{}
+	shutdownHeader.Set("Authorization", "Ticket "+shutdownTicket)
+	shutdownConnection, shutdownResponse, err := websocket.Dial(t.Context(), websocketURL, &websocket.DialOptions{HTTPClient: client, HTTPHeader: shutdownHeader, Subprotocols: []string{"ihomeland.control.v1"}})
+	if err != nil {
+		t.Fatalf("shutdown WSS connection failed: status=%d err=%v", integrationResponseStatus(shutdownResponse), err)
+	}
+	defer shutdownConnection.CloseNow()
+
+	stop(ErrSignalShutdown)
+	if result := <-resultChannel; result.Kind != ResultClean {
+		t.Fatalf("WSS integration shutdown=%+v", result)
+	}
+	closeContext, cancelClose := context.WithTimeout(context.Background(), time.Second)
+	_, _, closeErr := shutdownConnection.Read(closeContext)
+	cancelClose()
+	if websocket.CloseStatus(closeErr) != websocket.StatusGoingAway {
+		t.Fatalf("shutdown close status=%v err=%v", websocket.CloseStatus(closeErr), closeErr)
 	}
 }
 
@@ -325,8 +443,20 @@ func requestJSON(t *testing.T, method string, url string, body string, authoriza
 	return requestJSONWithIdempotency(t, method, url, body, authorization, "", expectedStatus)
 }
 
+// requestJSONWithClient 使用调用方提供的TLS策略执行无幂等键HTTP操作。
+func requestJSONWithClient(t *testing.T, client *http.Client, method string, url string, body string, authorization string, expectedStatus int) map[string]any {
+	t.Helper()
+	return requestJSONWithClientAndIdempotency(t, client, method, url, body, authorization, "", expectedStatus)
+}
+
 // requestJSONWithIdempotency 增加可选Bearer与Idempotency-Key并验证状态。
 func requestJSONWithIdempotency(t *testing.T, method string, url string, body string, authorization string, idempotencyKey string, expectedStatus int) map[string]any {
+	t.Helper()
+	return requestJSONWithClientAndIdempotency(t, &http.Client{Timeout: 5 * time.Second}, method, url, body, authorization, idempotencyKey, expectedStatus)
+}
+
+// requestJSONWithClientAndIdempotency 统一编码请求并验证安全响应状态。
+func requestJSONWithClientAndIdempotency(t *testing.T, client *http.Client, method string, url string, body string, authorization string, idempotencyKey string, expectedStatus int) map[string]any {
 	t.Helper()
 	request, err := http.NewRequest(method, url, bytes.NewBufferString(body))
 	if err != nil {
@@ -342,7 +472,6 @@ func requestJSONWithIdempotency(t *testing.T, method string, url string, body st
 		request.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	request.Header.Set("X-Request-ID", "storage-integration-request")
-	client := &http.Client{Timeout: 5 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -379,6 +508,15 @@ diagnostic:
   address: %s
 publicApi:
   address: %s
+  endpoints:
+    wss:
+      host: 127.0.0.1
+      port: %s
+  websocketControl:
+    allowedHosts:
+      - %s
+      - localhost:%s
+    closeTimeout: 200ms
 storage:
   mysql:
     address: %s
@@ -394,11 +532,62 @@ storage:
       interval: 100ms
       timeout: 50ms
       failureThreshold: 2
-`, diagnosticAddress, publicAddress, os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
+`, diagnosticAddress, publicAddress, integrationPort(t, publicAddress), publicAddress, integrationPort(t, publicAddress), os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// integrationPort 返回临时public listener端口，保证advertised WSS endpoint与实际入口一致。
+func integrationPort(t *testing.T, address string) string {
+	t.Helper()
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
+}
+
+// integrationResponseStatus 安全读取可能为空的WebSocket handshake response。
+func integrationResponseStatus(response *http.Response) int {
+	if response == nil {
+		return 0
+	}
+	return response.StatusCode
+}
+
+// enableIntegrationTLS 将临时identity接入单条storage/WSS进程配置。
+func enableIntegrationTLS(t *testing.T, path string, certificatePath string) {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := []byte("publicApi:\n")
+	tlsPolicy := []byte(fmt.Sprintf("publicApi:\n  tls:\n    enabled: true\n    certificateFile: '%s'\n    privateKeySecret: env:IHOMELAND_TEST_WSS_PRIVATE_KEY\n", strings.ReplaceAll(certificatePath, "'", "''")))
+	updated := bytes.Replace(body, marker, tlsPolicy, 1)
+	if bytes.Equal(updated, body) {
+		t.Fatal("publicApi marker is missing from integration config")
+	}
+	if err := os.WriteFile(path, updated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newIntegrationTLSClient 只信任本测试临时自签名证书并强制TLS 1.3。
+func newIntegrationTLSClient(t *testing.T, certificatePath string) *http.Client {
+	t.Helper()
+	certificate, err := os.ReadFile(certificatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(certificate) {
+		t.Fatal("append integration certificate failed")
+	}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, ServerName: "localhost"}}
+	return &http.Client{Transport: transport, Timeout: 5 * time.Second}
 }
 
 // reserveAddress 让 OS 选择 loopback 端口后立即释放，供单进程 listener rollback 验收使用。

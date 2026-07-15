@@ -58,11 +58,12 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 
 ### 3. WSS Control
 
-- ticket binding
-- maintenance/kick/endpoint update
-- heartbeat/close reason
-- session invalidation
-- main-thread dispatch
+- 先通过 HTTPS 获取 `WSS` ticket，再以 `Authorization: Ticket <32 位小写十六进制 nonce>` 连接 advertised endpoint 的 `/v1/control`
+- 必须协商 `ihomeland.control.v1`，只接收 binary `ReliableEnvelope`，不得向 WSS 发送业务 application frame
+- ticket 一次性使用；upgrade 后失败、断线或重放都必须重新通过 HTTPS 签发，不能缓存或恢复旧 ticket
+- 接收 maintenance、forced logout、queue、endpoint/assignment、visit 与 session invalidation push
+- 独立执行 heartbeat、close reason、sequence 缺口检测和有界重连，并把 generated payload 投递主线程
+- session invalidation/forced logout 后关闭 WSS 与后续 TLS/TCP、清理本地 session 并回到登录流程
 
 ### 4. TLS/TCP Business
 

@@ -103,7 +103,7 @@ Readiness 固定单向迁移：
 starting -> ready -> draining -> stopped
 ```
 
-诊断 listener 最先启动、最后关闭，只提供 `/healthz`、`/readyz`、`/version` 与 `/metrics`。公开 HTTP 已由独立 lifecycle component 接线并在 MySQL/Redis 之后启动、之前关闭；WSS/TLS-TCP 仍由后续 transport change 创建。公开业务 handler 不得复用诊断 router。
+诊断 listener 最先启动、最后关闭，只提供 `/healthz`、`/readyz`、`/version` 与 `/metrics`。公开 HTTP 与 WSS control 由同一 lifecycle component、listener 和 TLS 入口承载，并在 MySQL/Redis 之后启动、之前关闭；顶层 mux 只把精确 `/v1/control` 交给 WSS，其余请求仍由冻结的 10-operation HTTP router 处理。TLS/TCP 仍由后续 transport change 创建，公开业务 handler 不得复用诊断 router。
 
 Listener 的推荐默认值、环境覆盖、容器映射与端口冲突规则统一由 `docs/network-port-allocation.md` 管理。端口不是跨环境身份：客户端通过 bootstrap、服务发现或 ticket 获得实际业务端点，基础设施 adapter 从环境配置读取实际连接地址。
 
@@ -193,7 +193,7 @@ HTTPS credentials
 
 `internal/storage/account` 已借用共享 MySQL pool 实现单表 repository，并以固定 Argon2id v19 profile、严格 PHC parser、constant-time compare 和有界并发实现 production hasher；`internal/storage/session` 已借用共享 standalone Redis client，以版本化 Hash、逻辑 UTC Unix 微秒 expiry 和 owner Lua scripts 实现 `SessionStore`。两者不拥有 pool/client、goroutine、listener 或 memory fallback。Redis flush 后旧 credential 全部 fail closed，只能基于仍在 MySQL 的账号重新登录创建新 session，不能恢复旧运行态。
 
-这些 production adapters 已接入正式 Composition Root 的公开 HTTP service graph，提供 register/login/refresh/logout 和 connection ticket 签发。当前 `EndpointProvider` 只投影部署配置，logout invalidator 明确表示尚无 realtime connection；WSS/TLS-TCP listener 与真实 connection registry 接线后必须替换该阶段性实现。`_test.go` reference adapters 永远不能进入生产接线。
+这些 production adapters 已接入正式 Composition Root，提供 register/login/refresh/logout、connection ticket 签发和认证 WSS control。WSS 使用受信 `EndpointProvider` 值消费一次性 ticket，真实进程内 registry 实现 `ConnectionInvalidator`，在 epoch 提交后尽力发送安全失效通知并无条件关闭旧连接；TLS/TCP 仍未接线。`_test.go` reference adapters 永远不能进入生产接线。
 
 ## 个人世界与访客联机
 

@@ -10,6 +10,7 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/buildinfo"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
+	"github.com/jinwiforz/ihomeland/server/internal/contract"
 	"github.com/jinwiforz/ihomeland/server/internal/observability"
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
@@ -24,6 +25,7 @@ import (
 	storagevisitsession "github.com/jinwiforz/ihomeland/server/internal/storage/visitsession"
 	storageworldadmission "github.com/jinwiforz/ihomeland/server/internal/storage/worldadmission"
 	"github.com/jinwiforz/ihomeland/server/internal/transport/httpapi"
+	"github.com/jinwiforz/ihomeland/server/internal/transport/wscontrol"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 	"github.com/jinwiforz/ihomeland/server/internal/worldadmission"
 	"github.com/jinwiforz/ihomeland/server/internal/worldentry"
@@ -61,10 +63,14 @@ type publicRuntimeComponent struct {
 	metrics *observability.Metrics
 	// tasks 监督公开Serve loop。
 	tasks httpapi.TaskOwner
-	// logger 只接收HTTP transport允许的低敏字段。
+	// websocketTasks 监督control连接owner，不与HTTP Serve任务混用。
+	websocketTasks wscontrol.TaskOwner
+	// logger 只接收公开HTTP/WSS transport允许的低敏字段。
 	logger *slog.Logger
 	// component 只在Start完整构图成功后存在。
 	component *httpapi.Component
+	// websocketRegistry 显式拥有http.Server无法等待的hijacked连接。
+	websocketRegistry *wscontrol.Registry
 }
 
 // Name 返回lifecycle稳定component名。
@@ -94,6 +100,36 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	websocketConfig := wscontrol.Config{
+		Policy:         component.settings.PublicAPI.WebSocketControl,
+		FrameBytes:     component.settings.PublicAPI.Limits.RealtimeFrameBytes,
+		AllowPlaintext: !component.settings.PublicAPI.TLS.Enabled,
+		Logger:         component.logger.With("transport", "websocket_control"),
+	}
+	websocketCodec, err := wscontrol.NewCodec(contract.WSSPushCatalog(), websocketConfig.FrameBytes, component.clock)
+	if err != nil {
+		return fmt.Errorf("construct websocket control codec: %w", err)
+	}
+	websocketRegistry, err := wscontrol.NewRegistry(websocketConfig, websocketCodec, component.clock, component.ids, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct websocket control registry: %w", err)
+	}
+	if err := websocketRegistry.Supervise(component.websocketTasks); err != nil {
+		cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.WebSocketControl.CloseTimeout)
+		defer cancel()
+		_ = websocketRegistry.Stop(cleanupContext)
+		return fmt.Errorf("supervise websocket control registry: %w", err)
+	}
+	cleanupWebSocket := true
+	defer func() {
+		if !cleanupWebSocket {
+			return
+		}
+		cleanupContext, cancel := context.WithTimeout(context.Background(), component.settings.PublicAPI.WebSocketControl.CloseTimeout)
+		defer cancel()
+		_ = websocketRegistry.Stop(cleanupContext)
+		_ = component.websocketTasks.Stop(cleanupContext, errors.New("websocket control startup rolled back"))
+	}()
 	sessionStore, err := storagesession.New(client, keyspace, component.metrics)
 	if err != nil {
 		return fmt.Errorf("construct session store: %w", err)
@@ -102,7 +138,7 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct session policy: %w", err)
 	}
-	sessionService, err := session.NewService(sessionStore, endpointProvider, session.NoActiveRealtimeConnections{}, component.clock, component.ids, session.CryptoSecretGenerator{}, sessionPolicy)
+	sessionService, err := session.NewService(sessionStore, endpointProvider, websocketRegistry, component.clock, component.ids, session.CryptoSecretGenerator{}, sessionPolicy)
 	if err != nil {
 		return fmt.Errorf("construct session service: %w", err)
 	}
@@ -183,7 +219,15 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct public HTTP router: %w", err)
 	}
-	httpComponent, err := httpapi.NewComponent(component.settings.PublicAPI, router.Handler(), component.prepared.tlsConfig, component.tasks)
+	websocketHandler, err := wscontrol.NewHandler(websocketConfig, component.ready, sessionService, wssEndpoint, websocketRegistry, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct websocket control handler: %w", err)
+	}
+	publicHandler, err := wscontrol.Mux(router.Handler(), websocketHandler)
+	if err != nil {
+		return fmt.Errorf("construct public listener mux: %w", err)
+	}
+	httpComponent, err := httpapi.NewComponent(component.settings.PublicAPI, publicHandler, component.prepared.tlsConfig, component.tasks)
 	if err != nil {
 		return fmt.Errorf("construct public HTTP component: %w", err)
 	}
@@ -191,15 +235,25 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 		return err
 	}
 	component.component = httpComponent
+	component.websocketRegistry = websocketRegistry
+	cleanupWebSocket = false
 	return nil
 }
 
-// Stop 先关闭公开请求，再由外层lifecycle继续关闭Redis与MySQL。
+// Stop 先关闭并等待hijacked WSS，再关闭HTTP，最后由外层lifecycle释放Redis与MySQL。
 func (component *publicRuntimeComponent) Stop(ctx context.Context) error {
-	if component.component == nil {
-		return nil
+	var websocketErr error
+	if component.websocketRegistry != nil {
+		websocketErr = component.websocketRegistry.Stop(ctx)
 	}
-	return component.component.Stop(ctx)
+	if component.websocketTasks != nil {
+		websocketErr = errors.Join(websocketErr, component.websocketTasks.Stop(ctx, errors.New("websocket control component stopped")))
+	}
+	var httpErr error
+	if component.component != nil {
+		httpErr = component.component.Stop(ctx)
+	}
+	return errors.Join(websocketErr, httpErr)
 }
 
 // Address 返回公开listener实际地址；未启动时为空。

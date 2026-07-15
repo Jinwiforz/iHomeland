@@ -236,6 +236,8 @@ A0 Project Baseline
 
 交付认证 WSS control、maintenance/forced logout/endpoint update、visit invite/Owner availability/assignment/close notice，以及 bounded queue、deadline、slow consumer 和 connection storm tests。WSS 不接收 world mutation，也不发送 TLS/TCP safe-return 的替代消息。
 
+**完成边界：**与 10-operation HTTP router 复用唯一公开 listener，以一次性 Redis ticket 建立 `CONTROL` 连接；9 类已登记 PUSH 通过 typed codec 可投递，production 只真实接线 Session invalidation，不制造尚不存在的业务 producer。连接 registry 只保存引用，并在 shutdown 时先于 HTTP 和 storage 关闭。TLS/TCP、world admission consume 与 world/visit mutation 继续留给后续 change。
+
 ### `add-server-tcp-gameplay`
 
 交付 TLS/TCP framing、gameplay ticket consume、world/visit admission、dispatcher、pending correlation、push、backpressure、rate/idempotency 与 reconnect/shutdown tests。

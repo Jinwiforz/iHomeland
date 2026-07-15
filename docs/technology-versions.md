@@ -23,10 +23,12 @@
 - `.proto` 的 edition 与 Buf generation template 的插件版本。
 - OpenAPI 根节点的规范版本。
 - Unity `ProjectVersion.txt` 的 Editor 版本。
-- `go.mod` 中 `github.com/go-sql-driver/mysql`、`github.com/redis/go-redis/v9` 的直接依赖版本。
+- `go.mod` 中 `github.com/go-sql-driver/mysql`、`github.com/redis/go-redis/v9`、`github.com/coder/websocket` 的直接依赖版本。
 - Docker/Compose image tag 的 MySQL、Redis 与其他服务版本；storage harness 还必须使用 `linux_amd64_digest`，不能只信任可漂移 tag。
 
 这些文件不是第二份治理源。`tools/proto/proto.ps1 verify` 和后续统一 CI 必须检查它们与 `versions.yaml` 一致。
+
+`github.com/coder/websocket` 的版本 owner 是服务端 `transport/wscontrol`，只用于共享公开 listener 的 WebSocket 协议与连接 I/O；Session、业务 owner 和 storage 不得直接依赖它。当前锁定版本采用 ISC 风格许可且无传递 module 依赖，升级时必须复核上游 license、Go 版本要求、compression/origin 默认值及 close/ping 语义。
 
 ## 项目局部 Go 环境
 

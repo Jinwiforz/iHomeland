@@ -96,11 +96,13 @@ Lifecycle component 只用于真实持有资源或后台任务的对象；成功
 
 独立标准库 HTTP listener，只提供 health、readiness、version 和 metrics。它不依赖 application service，也不能成为公开业务 API 的临时入口。
 
-### `internal/worldentry` 与 `internal/transport/httpapi`
+### `internal/worldentry`、`internal/transport/httpapi` 与 `internal/transport/wscontrol`
 
 `worldentry` 是 transport-independent 的窄用例协调器，只编排 own-world bootstrap、invite accept 与 world admission issue；账号和 Session 用例仍由各自 owner 直接提供。`transport/httpapi` 是公开 HTTP adapter，集中拥有 10 个冻结 operation 的 route metadata、closed-schema codec、稳定错误映射、认证/限流/deadline middleware 及独立 listener 生命周期。只有该 package 可以导入 Gin；它不保存账号、world、visit 或 credential 事实。
 
-本地明文只允许绑定 loopback，production 必须使用 TLS 1.3。公开 HTTP ready 不表示配置中 advertised WSS/TLS-TCP endpoint 已有 listener，也不表示 ticket/admission 已经可消费。
+`transport/wscontrol` 拥有精确握手、typed PUSH codec、双重有界队列、单 reader/writer、心跳、connection/session/player 索引和 Session 失效关闭。它不依赖业务 storage package，不保存领域事实，不接收客户端 mutation，也不注册 TLS/TCP route。HTTP 与 WSS 共享公开 listener，但两个 adapter 保持独立路由与职责。
+
+本地明文只允许绑定 loopback，production 必须使用 TLS 1.3。公开 ready 表示 HTTP 与 WSS handler 均已接线；`publicApi.endpoints.wss` 仍是可与 bind 地址不同的部署事实。TLS/TCP advertised endpoint 和 world admission consume 尚未实现。
 
 ### `internal/session`
 
