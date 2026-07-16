@@ -1,7 +1,10 @@
 using System.Collections;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using IHomeland.Client.Core.Bootstrap;
 using IHomeland.Client.Core.Composition;
+using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Scenes.Contexts;
 using NUnit.Framework;
@@ -139,6 +142,60 @@ namespace IHomeland.Client.Tests.PlayMode
         }
 
         /// <summary>
+        /// 验证缺失环境 profile 会在争用唯一 root 前安全停用 bootstrap。
+        /// </summary>
+        /// <returns>等待 Awake 完成并观察无网络对象图启动的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator MissingEnvironmentProfileFailsBeforeRootClaim()
+        {
+            var gameObject = new GameObject("MissingEnvironmentRoot");
+            gameObject.SetActive(false);
+            var root = gameObject.AddComponent<AppRoot>();
+            var bootstrap = gameObject.AddComponent<AppBootstrap>();
+            SetPrivateField(bootstrap, "_appRoot", root);
+            LogAssert.Expect(
+                LogType.Error,
+                "AppBootstrap 缺少 ClientEnvironmentProfile 直接序列化引用。");
+
+            gameObject.SetActive(true);
+            yield return null;
+
+            Assert.That(bootstrap.enabled, Is.False);
+            Assert.That(root.State, Is.EqualTo(AppLifetimeState.Created));
+        }
+
+        /// <summary>
+        /// 验证非法 Production 明文 profile 在构造对象图前失败并释放唯一 root claim。
+        /// </summary>
+        /// <returns>等待失败回滚、延迟销毁与临时 ScriptableObject 清理的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator InvalidEnvironmentProfileRollsBackClaim()
+        {
+            var profile = ScriptableObject.CreateInstance<ClientEnvironmentProfile>();
+            SetPrivateField(profile, "_environmentKind", ClientEnvironmentKind.Production);
+            SetPrivateField(profile, "_httpBaseUri", "http://127.0.0.1:8080/");
+            var gameObject = new GameObject("InvalidEnvironmentRoot");
+            gameObject.SetActive(false);
+            var root = gameObject.AddComponent<AppRoot>();
+            var bootstrap = gameObject.AddComponent<AppBootstrap>();
+            SetPrivateField(bootstrap, "_appRoot", root);
+            SetPrivateField(bootstrap, "_environmentProfile", profile);
+            LogAssert.Expect(
+                LogType.Exception,
+                new Regex("Production HTTP base URI 必须使用 HTTPS", RegexOptions.CultureInvariant));
+
+            gameObject.SetActive(true);
+            yield return null;
+            yield return null;
+
+            Assert.That(root == null, Is.True);
+            var replacement = CreateBootstrapRoot("ReplacementAfterInvalidEnvironment");
+            yield return null;
+            Assert.That(replacement.State, Is.EqualTo(AppLifetimeState.Running));
+            Object.Destroy(profile);
+        }
+
+        /// <summary>
         /// 创建一个以直接引用接线、激活后立即 bootstrap 的测试 GameObject。
         /// </summary>
         /// <param name="name">用于诊断场景层级的 GameObject 名称。</param>
@@ -149,9 +206,42 @@ namespace IHomeland.Client.Tests.PlayMode
             gameObject.SetActive(false);
             var root = gameObject.AddComponent<AppRoot>();
             var bootstrap = gameObject.AddComponent<AppBootstrap>();
-            bootstrap.ConfigureBeforeActivation(root);
+            bootstrap.ConfigureBeforeActivation(root, CreateTestEnvironment());
             gameObject.SetActive(true);
             return root;
+        }
+
+        /// <summary>
+        /// 创建不访问真实服务端的 loopback PlayMode 环境。
+        /// </summary>
+        /// <returns>协议版本为 1 的不可变测试环境。</returns>
+        private static ClientEnvironment CreateTestEnvironment()
+        {
+            return ClientEnvironment.Create(
+                ClientEnvironmentKind.Test,
+                "http://127.0.0.1:8080/",
+                "0.1.0",
+                1);
+        }
+
+        /// <summary>
+        /// 为序列化边界负向测试设置私有字段，不为 production 增加测试专用 API。
+        /// </summary>
+        /// <typeparam name="TTarget">声明字段的运行时类型。</typeparam>
+        /// <typeparam name="TValue">待写入字段的值类型。</typeparam>
+        /// <param name="target">待配置的测试对象。</param>
+        /// <param name="fieldName">与序列化字段一致的私有名称。</param>
+        /// <param name="value">测试需要模拟的序列化值。</param>
+        private static void SetPrivateField<TTarget, TValue>(
+            TTarget target,
+            string fieldName,
+            TValue value)
+        {
+            var field = typeof(TTarget).GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"找不到测试字段 {fieldName}。");
+            field.SetValue(target, value);
         }
 
         /// <summary>

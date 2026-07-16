@@ -40,7 +40,7 @@ namespace IHomeland.Client.Tests.EditMode
                 RegexOptions.CultureInvariant);
 
             Assert.That(match.Success, Is.True, "versions.yaml 缺少 client.unity.version。");
-            Assert.That(Application.unityVersion, Is.EqualTo(match.Groups[1].Value));
+            Assert.That(UnityEngine.Application.unityVersion, Is.EqualTo(match.Groups[1].Value));
 
             var projectVersion = File.ReadAllText(
                 Path.Combine(ClientRoot, "ProjectSettings", "ProjectVersion.txt"));
@@ -127,7 +127,7 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(EditorSettings.serializationMode, Is.EqualTo(SerializationMode.ForceText));
 
             var resourcesDirectories = Directory.GetDirectories(
-                Application.dataPath,
+                UnityEngine.Application.dataPath,
                 "Resources",
                 SearchOption.AllDirectories);
             Assert.That(resourcesDirectories, Is.Empty);
@@ -152,7 +152,7 @@ namespace IHomeland.Client.Tests.EditMode
         /// <summary>
         /// 获取 Unity 工程根目录的规范绝对路径。
         /// </summary>
-        private static string ClientRoot => Directory.GetParent(Application.dataPath)?.FullName ??
+        private static string ClientRoot => Directory.GetParent(UnityEngine.Application.dataPath)?.FullName ??
             throw new DirectoryNotFoundException("无法从 Application.dataPath 解析 Unity 工程根目录。");
 
         /// <summary>

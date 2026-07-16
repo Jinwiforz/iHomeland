@@ -145,7 +145,7 @@ namespace IHomeland.Client.Tests.EditMode.Protocol
         {
             get
             {
-                var clientRoot = Directory.GetParent(Application.dataPath)?.FullName ??
+                var clientRoot = Directory.GetParent(UnityEngine.Application.dataPath)?.FullName ??
                     throw new DirectoryNotFoundException("无法从 Application.dataPath 解析 Unity 工程根目录。");
                 return Directory.GetParent(clientRoot)?.FullName ??
                     throw new DirectoryNotFoundException("无法从 Unity 工程根目录解析仓库根目录。");

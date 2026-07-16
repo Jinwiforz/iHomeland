@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
+using IHomeland.Client.Core.Configuration;
 using UnityEngine;
 
 namespace IHomeland.Client.Core.Bootstrap
@@ -24,6 +25,18 @@ namespace IHomeland.Client.Core.Bootstrap
         private AppRoot _appRoot;
 
         /// <summary>
+        /// 保存 BootstrapScene 直接引用的非敏感部署环境资产。
+        /// </summary>
+        [SerializeField]
+        [Tooltip("不含 secret 的客户端环境配置；启动前复制为不可变运行快照。")]
+        private ClientEnvironmentProfile _environmentProfile = null;
+
+        /// <summary>
+        /// 保存程序化 PlayMode fixture 在激活前注入的不可变环境；正式场景保持为空。
+        /// </summary>
+        private ClientEnvironment _configuredEnvironment;
+
+        /// <summary>
         /// 在 Unity 主线程争用唯一 root、构造对象图并观察完整启动结果。
         /// </summary>
         /// <remarks>
@@ -39,6 +52,13 @@ namespace IHomeland.Client.Core.Bootstrap
                 return;
             }
 
+            if (_configuredEnvironment == null && _environmentProfile == null)
+            {
+                Debug.LogError("AppBootstrap 缺少 ClientEnvironmentProfile 直接序列化引用。", this);
+                enabled = false;
+                return;
+            }
+
             if (!_appRoot.TryClaim())
             {
                 Destroy(gameObject);
@@ -47,7 +67,10 @@ namespace IHomeland.Client.Core.Bootstrap
 
             try
             {
-                var composition = new AppComposition().Build();
+                var environment = _configuredEnvironment ?? _environmentProfile.Build(
+                    UnityEngine.Application.version,
+                    ClientContractBaseline.ProtocolVersion);
+                var composition = new AppComposition().Build(environment);
                 _appRoot.Attach(composition);
                 await _appRoot.StartAsync();
             }
@@ -72,10 +95,11 @@ namespace IHomeland.Client.Core.Bootstrap
         /// 为程序化 PlayMode fixture 在激活前提供与 Inspector 等价的直接引用。
         /// </summary>
         /// <param name="appRoot">位于同一 GameObject 且尚未启动的 AppRoot。</param>
+        /// <param name="environment">已验证且不访问 Unity 资产的测试环境快照。</param>
         /// <exception cref="ArgumentException">AppRoot 不属于同一 GameObject 时抛出。</exception>
         /// <exception cref="ArgumentNullException">AppRoot 为空时抛出。</exception>
         /// <exception cref="InvalidOperationException">组件已经激活时抛出。</exception>
-        internal void ConfigureBeforeActivation(AppRoot appRoot)
+        internal void ConfigureBeforeActivation(AppRoot appRoot, ClientEnvironment environment)
         {
             if (appRoot == null)
             {
@@ -87,12 +111,18 @@ namespace IHomeland.Client.Core.Bootstrap
                 throw new InvalidOperationException("AppBootstrap 只能在激活前配置直接引用。");
             }
 
+            if (environment == null)
+            {
+                throw new ArgumentNullException(nameof(environment));
+            }
+
             if (!ReferenceEquals(appRoot.gameObject, gameObject))
             {
                 throw new ArgumentException("AppRoot 必须与 AppBootstrap 位于同一 GameObject。", nameof(appRoot));
             }
 
             _appRoot = appRoot;
+            _configuredEnvironment = environment;
         }
 
         /// <summary>

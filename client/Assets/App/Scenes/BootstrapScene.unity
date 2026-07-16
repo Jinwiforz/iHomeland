@@ -150,6 +150,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: IHomeland.Client.Runtime::IHomeland.Client.Core.Bootstrap.AppBootstrap
   _appRoot: {fileID: 2137059879}
+  _environmentProfile: {fileID: 11400000, guid: c28166146c1f92649afb05a054c3513e, type: 2}
 --- !u!114 &2137059879
 MonoBehaviour:
   m_ObjectHideFlags: 0

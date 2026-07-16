@@ -58,6 +58,18 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - WSS/TCP connection ticket
 - timeout、cancel、retryable error
 
+当前首段实现固定只接入 version、config、register、login、refresh、logout、connection ticket 与 own-world bootstrap 八个 operation。客户端以手写不可变 projection 和显式 `System.Text.Json` codec 消费 OpenAPI/共享 fixtures，不生成或提交 HTTP C# 代码，也不提供任意 path/body escape hatch。
+
+- Production base URI 必须为 HTTPS；Local/Test 的明文例外必须同时满足显式环境和 loopback host。
+- App Scope 初始化不自动联网；后续 application flow 只能在 AppRoot Running 后显式调用 `ClientBootstrapService`。
+- Version/config 两步全部通过后才发布配置；协议或最低客户端版本不兼容时阻止认证调用。
+- Password 只存在于 register/login 调用；access token、refresh token 与 ticket 只由 `SessionCoordinator` 管理，不写入 Scene、Prefab、ScriptableObject、PlayerPrefs 或日志。
+- Refresh single-flight，并以 session generation 拒绝迟到结果；后续等待方可以独立取消。Refresh/logout commit-unknown 进入 `Unresolved`，直到新的 register/login 或显式 forget 前不得继续 authenticated operation。
+- Transport 不自动重试。Caller cancel、deadline、transport、oversized、malformed 与结构有效的 server error 保持不同结果；`Retry-After` 只作为事实返回。
+- 当前不恢复进程退出前的 refresh token；重启回到未认证状态。安全持久化需独立 capability。
+
+`acceptVisitInvite` 与 `issueWorldAdmission` 仍属于后续个人世界 Services change；WSS/TLS-TCP 也尚未接入本对象图。
+
 ### 3. WSS Control
 
 - 先通过 HTTPS 获取 `WSS` ticket，再以 `Authorization: Ticket <32 位小写十六进制 nonce>` 连接 advertised endpoint 的 `/v1/control`
@@ -115,7 +127,7 @@ UI 不展示内部 exception、SQL、Redis 或完整凭据。
 ```text
 App Start
   -> HTTPS version/config
-  -> restore/refresh access token
+  -> register/login（当前不跨进程恢复 token）
   -> acquire WSS/TCP tickets
   -> connect control/business channels
   -> resolve own-world or active visit context
@@ -123,6 +135,8 @@ App Start
 ```
 
 WSS 与 TCP 独立重连，但共享 session epoch。epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
+
+上述完整恢复序列是目标状态；当前 HTTP bootstrap 只交付前两步的强类型边界与 ticket 来源，尚未建立 WSS/TCP channel。
 
 ## 世界与访问快照
 
@@ -186,7 +200,7 @@ receive invite
 ## 验收场景
 
 - 新安装注册并登录
-- token restore 与 refresh
+- 进程内 refresh；安全持久化 capability 交付后的 token restore
 - WSS/TCP ticket 一次性使用
 - 默认进入自己的 PersonalWorld
 - 双客户端邀请、接受、访问、踢出和主动退出

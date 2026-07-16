@@ -138,6 +138,26 @@ Host 不实现业务状态机，不持有第二份业务事实。
 
 每个 channel 一个 reader；writer 必须序列化并有界。网络线程不能直接写 Unity view。
 
+### 当前 HTTP bootstrap 边界
+
+客户端首段 HTTP 能力由以下显式对象图组成：
+
+```text
+ClientEnvironmentProfile
+  -> ClientEnvironment
+      -> ClientHttpTransport
+ClientHttpTransport + ClientHttpCodec + ClientHttpOperationCatalog
+  -> ClientHttpApi
+      -> ClientBootstrapService
+      -> SessionCoordinator
+```
+
+- `AppBootstrap` 把非敏感环境资产与 build identity 复制为不可变 `ClientEnvironment`，`AppComposition` 显式创建并把可关闭资源交给既有 AppLifetime。
+- Infrastructure 只承担冻结 HTTP operation 的传输与 codec；Application 的 `ClientBootstrapService` 和 `SessionCoordinator` 分别拥有启动配置流程与唯一 session/credential lineage。
+- 初始化不自动访问网络，own-world bootstrap 也只返回一次查询投影；具体 operation、安全和失败语义由[客户端接入规范](client-integration.md)统一说明。
+
+该边界尚不实现 UI、自动网络 bootstrap、token 持久化、invite accept、world admission、WSS 或 TLS/TCP。Own-world bootstrap 只作为一次强类型查询返回，不在本层保存 PersonalWorld 最终事实。
+
 ## 状态所有权
 
 | 状态 | Owner |

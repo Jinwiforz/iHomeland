@@ -1,16 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using IHomeland.Client.Application.Bootstrap;
+using IHomeland.Client.Application.Session;
 using IHomeland.Client.Core.Lifetime;
 
 namespace IHomeland.Client.Core.Composition
 {
     /// <summary>
-    /// 保存 AppComposition 创建并转交给唯一 AppRoot 的不可变 C0 对象图。
+    /// 保存 AppComposition 创建并转交给唯一 AppRoot 的不可变 App Scope 对象图。
     /// </summary>
     /// <remarks>
-    /// 该结果不是 service locator，只暴露 AppRoot 实际驱动和拥有的生命周期能力。
-    /// feature 不能通过它按类型查找任意服务。
+    /// 该结果不是 service locator：它只暴露 Composition 明确导出的强类型入口，不提供按类型查询。
+    /// 后续 feature 应在 Composition 内显式注入窄依赖，不能经由 AppRoot 取得任意服务。
     /// </remarks>
     internal sealed class AppCompositionResult
     {
@@ -20,7 +22,17 @@ namespace IHomeland.Client.Core.Composition
         private readonly ReadOnlyCollection<IAppTickable> _tickables;
 
         /// <summary>
-        /// 创建只包含 C0 实际运行边界的对象图结果。
+        /// 保存显式启动 version/config 的强类型用例；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly ClientBootstrapService _bootstrapService;
+
+        /// <summary>
+        /// 保存账号、token lineage 与 ticket 的唯一 owner；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly SessionCoordinator _sessionCoordinator;
+
+        /// <summary>
+        /// 创建只包含宿主运行边界的对象图结果，供不接入 HTTP capability 的 isolated fixture 使用。
         /// </summary>
         /// <param name="lifetime">统一拥有 App Scope 初始化和逆序停止的生命周期。</param>
         /// <param name="dispatcher">由 AppRoot Update 有界排空的主线程队列。</param>
@@ -33,6 +45,34 @@ namespace IHomeland.Client.Core.Composition
             MainThreadDispatcher dispatcher,
             IReadOnlyList<IAppTickable> tickables,
             int maximumDispatchesPerFrame)
+            : this(
+                lifetime,
+                dispatcher,
+                tickables,
+                maximumDispatchesPerFrame,
+                bootstrapService: null,
+                sessionCoordinator: null)
+        {
+        }
+
+        /// <summary>
+        /// 创建包含 HTTP bootstrap 与唯一 Session owner 的完整 App Scope 结果。
+        /// </summary>
+        /// <param name="lifetime">统一拥有 App Scope 初始化和逆序停止的生命周期。</param>
+        /// <param name="dispatcher">由 AppRoot Update 有界排空的主线程队列。</param>
+        /// <param name="tickables">Composition 明确登记并冻结的逐帧对象。</param>
+        /// <param name="maximumDispatchesPerFrame">单帧最多执行的主线程 callback 数量。</param>
+        /// <param name="bootstrapService">显式 version/config 启动用例。</param>
+        /// <param name="sessionCoordinator">App Scope 唯一 Session owner。</param>
+        /// <exception cref="ArgumentException">单帧 callback 上限非正数时抛出。</exception>
+        /// <exception cref="ArgumentNullException">任一必需对象、集合引用或 tickable 元素为 null 时抛出。</exception>
+        internal AppCompositionResult(
+            AppLifetime lifetime,
+            MainThreadDispatcher dispatcher,
+            IReadOnlyList<IAppTickable> tickables,
+            int maximumDispatchesPerFrame,
+            ClientBootstrapService bootstrapService,
+            SessionCoordinator sessionCoordinator)
         {
             Lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
             Dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -55,6 +95,8 @@ namespace IHomeland.Client.Core.Composition
 
             _tickables = new ReadOnlyCollection<IAppTickable>(copy);
             MaximumDispatchesPerFrame = maximumDispatchesPerFrame;
+            _bootstrapService = bootstrapService;
+            _sessionCoordinator = sessionCoordinator;
         }
 
         /// <summary>
@@ -76,5 +118,19 @@ namespace IHomeland.Client.Core.Composition
         /// 获取单帧主线程 callback 执行硬上限。
         /// </summary>
         internal int MaximumDispatchesPerFrame { get; }
+
+        /// <summary>
+        /// 获取完整 Composition 显式连接的 HTTP bootstrap 用例。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 HTTP graph 时抛出。</exception>
+        internal ClientBootstrapService BootstrapService => _bootstrapService ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 HTTP bootstrap graph。");
+
+        /// <summary>
+        /// 获取完整 Composition 显式连接的唯一 Session owner。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 HTTP graph 时抛出。</exception>
+        internal SessionCoordinator SessionCoordinator => _sessionCoordinator ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 Session owner。");
     }
 }
