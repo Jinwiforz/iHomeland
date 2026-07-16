@@ -282,11 +282,13 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 **产出：**Unity PC baseline、minimal BootstrapScene、AppBootstrap/AppComposition/AppRoot、App/Scene Scope 生命周期组件、Unity Host 边界、rollback/reverse shutdown 和 EditMode/PlayMode lifecycle tests。
 
-**当前状态：**`establish-client-runtime` 已完成 EditMode 26/26、PlayMode 4/4 与 Windows Development build 验收，并于 2026-07-16 归档；`generate-client-protocol-baseline` 的进入条件已满足。
+**当前状态：**`establish-client-runtime` 已完成 EditMode 26/26、PlayMode 4/4 与 Windows Development build 验收，并于 2026-07-16 归档。
 
 ### `generate-client-protocol-baseline`
 
 生成 C# protocol，验证 Go/C# golden parity；generated code 保持忽略且可在 Unity 编译前重建。
+
+**当前状态：**已完成统一 Go/C# generation、锁定 `Google.Protobuf` 恢复、EditMode 32/32、PlayMode 4/4 与 Windows Development build 验收，并于 2026-07-16 归档；`add-client-http-bootstrap` 的进入条件已满足。
 
 ## C1：客户端网络与账号
 

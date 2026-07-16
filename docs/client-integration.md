@@ -24,20 +24,22 @@
 S0 及后续服务端 changes 共同维护以下契约入口：
 
 - `shared/proto/ihomeland/`：跨端 Protobuf schema。
-- `tools/proto/buf.gen.csharp.yaml`：已通过临时生成验证的 C# template。
+- `tools/proto/buf.gen.csharp.yaml`：由统一入口写入受控 staging 的 C# template。
 - `shared/contracts/registry/`：消息、错误与路由源；运行时投影在内存构建。
 - `shared/contracts/fixtures/`：HTTPS cases、realtime golden packets 与 negative coverage manifest。
-- `versions.yaml`：Unity、协议与生成插件版本基线。
+- `versions.yaml`：Unity、协议、生成工具与 `Google.Protobuf` C# runtime 的版本和完整性基线。
 
 ## 跨端生成
 
 - 实时消息唯一协议源是 `shared/proto/`，HTTPS 唯一协议源是 `shared/contracts/http/v1/openapi.yaml`。
-- Go/C# 使用 `versions.yaml` 锁定的 compiler/runtime/plugins。
-- C# generated code 输出到已忽略的 `client/Assets/App/Generated/`，不得成为 Scene、Prefab 或 ScriptableObject 的序列化引用。
+- Go/C# 使用 `versions.yaml` 锁定的 compiler/runtime/plugins；版本、依赖恢复与本机缓存规则由 `docs/technology-versions.md` 负责。
+- C# generated code、生成 asmdef 与锁定 runtime DLL 输出到已忽略的 `client/Assets/App/Generated/Protocol/`；该目录由 `tools/proto/` 独占，不得放手写文件，也不得成为 Scene、Prefab 或 ScriptableObject 的序列化引用。
 - 禁止手工修改 generated code。
-- C# 必须通过 Go golden packets 验证 encode/decode。
-- CI 从无 generated code 的检出状态开始，先生成再编译，并检查重复生成结果一致。
-- 客户端协议 change 必须先运行 C# generation 和 golden parity tests，不得手写或复制 generated types。
+- 手写 asmdef 只按固定名称 `IHomeland.Client.Protocol.Generated` 引用协议程序集；缺失生成目录时必须先运行统一生成入口，不能回退到 `Assembly-CSharp` 或复制类型。
+- `Google.Protobuf` 由统一入口恢复；不得手工导入 runtime DLL，完整供应链和故障诊断规则由 `docs/protocol-compatibility.md` 负责。
+- C# 必须通过 Go golden packets 验证 payload、proto-name JSON、envelope 与摘要 parity。
+- CI 从无 generated code 的检出状态开始，先执行 `tools/proto/proto.ps1 generate` 再编译，并检查重复生成结果一致及没有 tracked generated/.meta。
+- 客户端协议 change 必须先运行 C# generation 和 Unity EditMode golden parity tests，不得手写或复制 generated types。
 
 ## 接入顺序
 

@@ -2,6 +2,6 @@ version: v2
 plugins:
   - protoc_builtin: csharp
     protoc_path: .local/protoc/35.0/bin/protoc.exe
-    out: .tmp/csharp
+    out: .tmp/client-protocol-stage/Protocol/Sources
 inputs:
   - directory: shared/proto

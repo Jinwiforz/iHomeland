@@ -178,13 +178,15 @@ TLS/TCP gameplay 在 `ReliableEnvelope` stream 前使用版本化 `IHTP` authent
 
 - 遵守 `docs/technology-versions.md` 的版本、下载校验与本机缓存规则
 - 由 Buf 统一调度 Go local plugin 与受管 C# `protoc_builtin`，开发者和 CI 不直接执行 `protoc`
-- S0 在编译前生成已忽略的 Go code，并在临时目录验证 C#；客户端协议 change 将 C# 生成到已忽略的 `Generated` 目录
+- 在任何 Go/Unity 编译前重建已忽略的生成代码；C# 先进入受控 staging，通过源码、namespace、asmdef 与 runtime identity 校验后再整体发布到 `client/Assets/App/Generated/Protocol/`
 - 校验格式与 breaking rules
 - 直接对 Git 中的 Proto 源执行 breaking check，并使用生成代码注册的 descriptor 校验 route registry
-- S0 运行 Go golden packet tests 并验证 C# generation；客户端协议 change 再增加 Go/C# parity tests
-- 检查被忽略的生成结果是否可重复，并确保版本化 fixtures 没有未确认漂移
+- 运行 Go golden packet tests，并由 Unity EditMode 使用生成 descriptor 对同一 manifest 验证 payload、proto-name JSON、`ReliableEnvelope`、SHA-256 与 registry/coverage parity
+- 检查被忽略的 Go/C# 生成结果是否可重复、没有被强制跟踪，并确保版本化 fixtures 没有未确认漂移
 
 项目只使用 Buf 作为 schema 治理与 generation orchestration 的公开入口。`protoc` 是 Buf 管理下的 C# 内置 generator 后端，不构成第二套开发命令。
+
+客户端协议生成同时恢复 `versions.yaml` 锁定的官方 `Google.Protobuf` NuGet 包。工具只消费 SHA-256、目标 framework、DLL 路径和强名称身份全部匹配的项目局部缓存；不得改用系统 NuGet cache、手工复制 DLL 或 Unity 工程外的同名程序集。生成 asmdef 名称固定为 `IHomeland.Client.Protocol.Generated`，只包含生成模型；Scene、Prefab 与 ScriptableObject 不得序列化引用其中脚本。
 
 PowerShell 统一入口：
 
@@ -196,6 +198,8 @@ PowerShell 统一入口：
 ```
 
 本地开发与 CI 必须调用相同的非交互脚本，不得在外部入口中复制协议生成或验证逻辑。
+
+`generate` 失败时先查看 `[FAIL]` 前的 dependency、staging 或 publish 上下文：checksum/identity 错误表示缓存或锁定输入不匹配，下载错误表示官方源或代理不可达，输出结构错误表示 proto/template 漂移。不得通过保留半套生成目录、关闭摘要校验或手工修改 Generated 来绕过；修复输入后重新执行同一命令。
 
 ## 服务端 v1 资格冻结
 

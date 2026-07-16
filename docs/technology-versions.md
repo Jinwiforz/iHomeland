@@ -8,7 +8,7 @@
 
 - `protocols`：OpenAPI、Protobuf edition、HTTP 与 TLS。
 - `toolchains`：Buf 与 Protobuf 代码生成器。
-- `libraries`：Prometheus client、MySQL driver、Redis client 等直接影响共享运行基础的核心 library。
+- `libraries`：`Google.Protobuf` C# runtime、Prometheus client、MySQL driver、Redis client 等直接影响共享运行基础的核心 library。
 - `languages`：Go 等编程语言工具链。
 - `infrastructure`：MySQL、Redis 和后续基础设施镜像。
 - `client`：Unity Editor 与后续客户端运行时基线。
@@ -30,6 +30,8 @@
 
 `github.com/coder/websocket` 的版本 owner 是服务端 `transport/wscontrol`，只用于共享公开 listener 的 WebSocket 协议与连接 I/O；Session、业务 owner 和 storage 不得直接依赖它。当前锁定版本采用 ISC 风格许可且无传递 module 依赖，升级时必须复核上游 license、Go 版本要求、compression/origin 默认值及 close/ping 语义。
 
+`Google.Protobuf` 的版本 owner 是客户端 generated protocol assembly，只用于生成消息、descriptor、JSON 与二进制序列化。当前官方 NuGet 包采用 BSD-3-Clause；发布打包必须保留上游 copyright/license notice。其 `netstandard2.0` 资产声明的 `System.Memory`、`System.Runtime.CompilerServices.Unsafe` 及其 `System.Buffers`、`System.Numerics` 等 BCL 能力由当前 Unity 兼容运行时提供，不把对应 NuGet DLL 副本复制进 Generated；升级 Unity 或该包时必须重新执行 EditMode parity 与 Windows build，确认程序集解析没有改变。
+
 ## 项目局部 Go 环境
 
 仓库不要求系统安装 Go，也不使用全局 `go env -w`。`tools/go/go.ps1` 从 `versions.yaml` 读取版本与官方 SHA-256，下载并校验 Windows SDK，然后直接执行项目内 `go.exe`。
@@ -40,11 +42,12 @@
 - `.local/buf/<version>/`：Buf CLI。
 - `.local/protoc-gen-go/<version>/`：由项目 Go SDK 安装的 Go generator。
 - `.local/protoc/<version>/`：经官方 SHA-256 校验的 Protobuf compiler、内置 C# generator 与标准 include。
+- `.local/nuget/google.protobuf/<version>/`：经官方 nupkg SHA-256、目标路径和强名称身份校验的 C# runtime 缓存。
 - `.local/openapi/<version>/`：官方 OpenAPI validation schema。
 - `.local/cache/go/mod/`：第三方 Go modules，不存放自动下载的 Go toolchain。
 - `.local/cache/go/build/`：Go 编译缓存。
 
-Protobuf schema lint、breaking check 与 generator 调度统一由 Buf 完成，项目不维护第二套公开编译或生成命令，也不持久化 descriptor 中间产物。Go generator 与官方 `protoc` 按锁定版本安装在项目 `.local/`，C# 由 Buf 的 `protoc_builtin` 调度。开发者和 CI 不直接调用 `protoc`，全部协议动作仍只通过已跟踪的 `tools/proto/` 入口执行。
+Protobuf schema lint、breaking check 与 generator 调度统一由 Buf 完成，项目不维护第二套公开编译或生成命令，也不持久化 descriptor 中间产物。Go generator 与官方 `protoc` 按锁定版本安装在项目 `.local/`，C# 由 Buf 的 `protoc_builtin` 调度；生成程序集所需的官方 `Google.Protobuf` 从锁定 NuGet 包恢复，不通过 Unity Package Manager 或系统 NuGet 隐式解析。开发者和 CI 不直接调用 `protoc`，全部协议动作仍只通过已跟踪的 `tools/proto/` 入口执行。
 
 包装入口在进程内设置：
 

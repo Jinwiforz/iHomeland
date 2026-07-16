@@ -235,6 +235,9 @@ client/
     App/
       Generated/
         Protocol/
+          IHomeland.Client.Protocol.Generated.asmdef  # 工具生成，稳定程序集边界
+          Sources/                                    # protoc 生成 C#
+          Runtime/                                    # 锁定 Google.Protobuf.dll
         Http/
       Scripts/
         Core/
@@ -281,6 +284,10 @@ client/
 - Composition：对象创建和依赖连接。
 - Lifetime：App Scope 状态、tick、回滚和关闭。
 - Configuration：环境、endpoint、build 配置。
+
+### `Generated`
+
+`Generated/Protocol` 由 `tools/proto/proto.ps1 generate` 独占并在 Unity 编译前整体重建；源码、asmdef、runtime DLL 及 Unity 随后产生的 `.meta` 都保持 Git 忽略。这里不放手写 adapter、fixture 或配置，Scene/Prefab/ScriptableObject 不引用生成脚本。`Generated/Http` 仅为后续独立 OpenAPI 客户端生成 change 预留，当前不得提前写入。
 
 ### `Application`
 

@@ -1009,6 +1009,29 @@ type schemaVersionValue struct {
 	SchemaSHA256 string `yaml:"schema_sha256"`
 }
 
+// csharpProtobufVersionValue 锁定 Unity 编译实际消费的官方 NuGet 包及程序集身份。
+// 包摘要保护下载内容，目标框架和程序集字段防止同名 DLL 或不兼容资产被静默替换。
+type csharpProtobufVersionValue struct {
+	// Version 是与 protoc 发布线匹配的 C# runtime 版本。
+	Version string `yaml:"version"`
+	// Source 是供版本评审使用的官方 NuGet 包页面。
+	Source string `yaml:"source"`
+	// PackageURL 是工具恢复 nupkg 时唯一允许访问的不可变版本地址。
+	PackageURL string `yaml:"package_url"`
+	// PackageSHA256 是完整 nupkg 的小写十六进制 SHA-256。
+	PackageSHA256 string `yaml:"package_sha256"`
+	// TargetFramework 是 Unity 当前 API compatibility 可消费的包资产目录。
+	TargetFramework string `yaml:"target_framework"`
+	// DLLPath 是 nupkg 内相对根目录的受管程序集路径。
+	DLLPath string `yaml:"dll_path"`
+	// AssemblyName 是恢复 DLL 必须声明的程序集短名称。
+	AssemblyName string `yaml:"assembly_name"`
+	// AssemblyVersion 是恢复 DLL 必须声明的四段程序集版本。
+	AssemblyVersion string `yaml:"assembly_version"`
+	// PublicKeyToken 是官方强名称签名的稳定十六进制身份。
+	PublicKeyToken string `yaml:"public_key_token"`
+}
+
 // protocolVersionCatalog 收集会直接改变 wire 或 HTTP schema 解释的协议版本。
 type protocolVersionCatalog struct {
 	// OpenAPI 选择 shared HTTP contract 使用的 OpenAPI 规范版本。
@@ -1037,6 +1060,8 @@ type languageVersionCatalog struct {
 
 // libraryVersionCatalog 收集运行时代码直接依赖且需要中央治理的基础库版本。
 type libraryVersionCatalog struct {
+	// GoogleProtobufCSharp 锁定 Unity 生成协议使用的官方 C# runtime。
+	GoogleProtobufCSharp csharpProtobufVersionValue `yaml:"google_protobuf_csharp"`
 	// GinGo 锁定公开 HTTP transport 使用的 Gin router。
 	GinGo versionValue `yaml:"gin_go"`
 	// PrometheusClientGo 锁定诊断 metrics 使用的官方 Go client。
@@ -1079,6 +1104,7 @@ func ValidateVersions(root string) error {
 	if versions.Protocols.OpenAPI.Version == "" || versions.Protocols.Edition.Version == "" ||
 		versions.Toolchains.BufCLI.Version == "" || versions.Toolchains.BufConfig.Version == "" ||
 		versions.Toolchains.ProtobufGoGenerator.Version == "" || versions.Toolchains.Protoc.Version == "" ||
+		versions.Libraries.GoogleProtobufCSharp.Version == "" ||
 		versions.Libraries.GinGo.Version == "" || versions.Libraries.PrometheusClientGo.Version == "" || versions.Libraries.GoText.Version == "" ||
 		versions.Libraries.GoCrypto.Version == "" || versions.Libraries.CoderWebSocketGo.Version == "" || versions.Languages.Go.Version == "" {
 		return errors.New("versions.yaml is missing a required protocol, toolchain, library, or language version")
@@ -1095,6 +1121,7 @@ func ValidateVersions(root string) error {
 		{filepath.Join(root, "tools", "proto", "buf.gen.go.yaml"), "out: server/internal/generated/proto"},
 		{filepath.Join(root, "tools", "proto", "buf.gen.csharp.yaml"), "- protoc_builtin: csharp"},
 		{filepath.Join(root, "tools", "proto", "buf.gen.csharp.yaml"), "protoc_path: .local/protoc/" + versions.Toolchains.Protoc.Version + "/bin/protoc.exe"},
+		{filepath.Join(root, "tools", "proto", "buf.gen.csharp.yaml"), "out: .tmp/client-protocol-stage/Protocol/Sources"},
 		{filepath.Join(root, "shared", "contracts", "http", "v1", "openapi.yaml"), "openapi: " + versions.Protocols.OpenAPI.Version},
 		{filepath.Join(root, "server", "go.mod"), "go " + versions.Languages.Go.Version},
 		{filepath.Join(root, "server", "go.mod"), "google.golang.org/protobuf v" + versions.Toolchains.ProtobufGoGenerator.Version},
@@ -1127,6 +1154,9 @@ func ValidateVersions(root string) error {
 	}
 	if !checksumPattern.MatchString(versions.Languages.Go.WindowsAMD64SHA256) {
 		return fmt.Errorf("versions.yaml Go windows_amd64_sha256 must be 64 lowercase hexadecimal characters")
+	}
+	if err := validateCSharpProtobufRuntimeVersion(versions.Toolchains.Protoc.Version, versions.Libraries.GoogleProtobufCSharp); err != nil {
+		return err
 	}
 	for _, forbidden := range []string{
 		filepath.Join(root, "shared", "contracts", "descriptor.bin"),
@@ -1173,6 +1203,30 @@ func ValidateVersions(root string) error {
 		}
 		return nil
 	})
+}
+
+// validateCSharpProtobufRuntimeVersion 联合验证 protoc 发布线、官方包地址、摘要与 Unity DLL 身份。
+// C# runtime 使用 3.x 版本前缀，而 protoc 从 v22 起使用省略该前缀的发布号，两者后缀必须精确一致。
+func validateCSharpProtobufRuntimeVersion(protocVersion string, runtime csharpProtobufVersionValue) error {
+	expectedVersion := "3." + protocVersion
+	if runtime.Version != expectedVersion {
+		return fmt.Errorf("versions.yaml Google.Protobuf version %q must match protoc release line %q", runtime.Version, expectedVersion)
+	}
+	expectedSource := "https://www.nuget.org/packages/Google.Protobuf/" + runtime.Version
+	expectedPackageURL := "https://api.nuget.org/v3-flatcontainer/google.protobuf/" + runtime.Version + "/google.protobuf." + runtime.Version + ".nupkg"
+	if runtime.Source != expectedSource || runtime.PackageURL != expectedPackageURL {
+		return errors.New("versions.yaml Google.Protobuf source and package_url must use the locked official NuGet version")
+	}
+	if !checksumPattern.MatchString(runtime.PackageSHA256) {
+		return errors.New("versions.yaml Google.Protobuf package_sha256 must be 64 lowercase hexadecimal characters")
+	}
+	if runtime.TargetFramework != "netstandard2.0" || runtime.DLLPath != "lib/netstandard2.0/Google.Protobuf.dll" {
+		return errors.New("versions.yaml Google.Protobuf must select the Unity-compatible netstandard2.0 DLL")
+	}
+	if runtime.AssemblyName != "Google.Protobuf" || runtime.AssemblyVersion != runtime.Version+".0" || runtime.PublicKeyToken != "a7d26565bac4d604" {
+		return errors.New("versions.yaml Google.Protobuf assembly identity does not match the official signed runtime")
+	}
+	return nil
 }
 
 // containsExactLine 比较去除首尾空白后的完整配置行，避免注释或较长值中的子串误通过版本门禁。

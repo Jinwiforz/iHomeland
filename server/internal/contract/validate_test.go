@@ -21,6 +21,45 @@ func TestValidateRepository(t *testing.T) {
 	}
 }
 
+// TestValidateCSharpProtobufRuntimeVersion 覆盖官方包锁定、发布线配对、摘要和程序集身份门禁。
+func TestValidateCSharpProtobufRuntimeVersion(t *testing.T) {
+	valid := csharpProtobufVersionValue{
+		Version:         "3.35.0",
+		Source:          "https://www.nuget.org/packages/Google.Protobuf/3.35.0",
+		PackageURL:      "https://api.nuget.org/v3-flatcontainer/google.protobuf/3.35.0/google.protobuf.3.35.0.nupkg",
+		PackageSHA256:   "7dbfa99660caf55c915acf305e091f7107d4c62b338d9a56e19b1ad9077359d1",
+		TargetFramework: "netstandard2.0",
+		DLLPath:         "lib/netstandard2.0/Google.Protobuf.dll",
+		AssemblyName:    "Google.Protobuf",
+		AssemblyVersion: "3.35.0.0",
+		PublicKeyToken:  "a7d26565bac4d604",
+	}
+	if err := validateCSharpProtobufRuntimeVersion("35.0", valid); err != nil {
+		t.Fatalf("valid C# runtime lock rejected: %v", err)
+	}
+	tests := []struct {
+		// name 描述被破坏的单项供应链事实。
+		name string
+		// mutate 只改变一个字段，使失败原因保持可定位。
+		mutate func(*csharpProtobufVersionValue)
+	}{
+		{name: "release-line", mutate: func(value *csharpProtobufVersionValue) { value.Version = "3.34.1" }},
+		{name: "package-url", mutate: func(value *csharpProtobufVersionValue) { value.PackageURL = "https://example.invalid/package.nupkg" }},
+		{name: "checksum", mutate: func(value *csharpProtobufVersionValue) { value.PackageSHA256 = "invalid" }},
+		{name: "target", mutate: func(value *csharpProtobufVersionValue) { value.TargetFramework = "net5.0" }},
+		{name: "identity", mutate: func(value *csharpProtobufVersionValue) { value.PublicKeyToken = "" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := valid
+			test.mutate(&candidate)
+			if err := validateCSharpProtobufRuntimeVersion("35.0", candidate); err == nil {
+				t.Fatal("invalid C# runtime lock unexpectedly accepted")
+			}
+		})
+	}
+}
+
 // TestBuildProjectionRejectsDuplicateRoute 防止单条消息获得第二个 transport 入口。
 // 该回归会让 runtime 根据遍历顺序选择路由，因此必须在生成 projection 前确定性失败。
 func TestBuildProjectionRejectsDuplicateRoute(t *testing.T) {
