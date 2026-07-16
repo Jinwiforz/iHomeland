@@ -270,6 +270,10 @@ A0 Project Baseline
 
 **完成条件：**全量自动化通过，无未接线 production adapter 或无 owner message/table/key/listener，并输出允许启动 C0 的资格报告。
 
+Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 regression client 演进规则见 `docs/server-v1-qualification.md`。`contract` 或 `blackbox` 排障动作不能产生资格结论；只有连续可重复的完整 `verify` 和全部 owner/文档门禁可以解锁 C0。
+
+**当前状态：**`qualify-server-v1` 已通过完整资格验收并于 2026-07-16 归档，C0 进入条件已满足。
+
 ## C0：Unity 运行基础
 
 ### `establish-client-runtime`

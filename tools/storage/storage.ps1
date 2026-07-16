@@ -2,10 +2,13 @@
 # 该入口创建相互隔离的 MySQL/Redis integration runtime，并只按 run-id ownership 清理资源。
 param(
     # Action 选择完整验收、保留环境、显式清理、状态查询或纯契约检查。
-    [ValidateSet("verify", "up", "down", "status", "contract")]
+    [ValidateSet("verify", "up", "down", "status", "contract", "fault")]
     [string]$Action = "verify",
     # RunId 只用于 down/status；格式固定为 32 位小写十六进制 GUID。
     [string]$RunId = "",
+    # Fault 只在 Action=fault 时选择当前 run 的封闭资格故障动作。
+    [ValidateSet("", "redis-flush", "redis-restart", "mysql-restart")]
+    [string]$Fault = "",
     # TimeoutSeconds 是 setup/tests 或显式 down 共享的总预算；verify cleanup 另有最多 60 秒预算。
     [ValidateRange(30, 1800)]
     [int]$TimeoutSeconds = 300
@@ -438,6 +441,32 @@ function Stop-Storage {
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
 
+# Invoke-StorageFault 只操作 state manifest 登记且 ownership label 匹配的当前 run container。
+function Invoke-StorageFault {
+    param([string]$Value, [string]$Kind, [DateTime]$Deadline)
+    $state = Load-State $Value
+    switch ($Kind) {
+        "redis-flush" {
+            Assert-ResourceOwnership "container" $state.redisContainer $Value $Deadline
+            # password 只在 container 内从受控 config 读取，不进入宿主 command line 或输出。
+            Invoke-Docker @("exec", $state.redisContainer, "sh", "-c", 'redis-cli --no-auth-warning -a "$(awk ''/requirepass/{print $2}'' /usr/local/etc/redis/redis.conf)" FLUSHDB >/dev/null') -Deadline $Deadline
+        }
+        "redis-restart" {
+            Assert-ResourceOwnership "container" $state.redisContainer $Value $Deadline
+            Invoke-Docker @("container", "restart", $state.redisContainer) -Deadline $Deadline
+            Wait-Healthy $state.redisContainer $Deadline
+        }
+        "mysql-restart" {
+            Assert-ResourceOwnership "container" $state.mysqlContainer $Value $Deadline
+            Invoke-Docker @("container", "restart", $state.mysqlContainer) -Deadline $Deadline
+            Wait-Healthy $state.mysqlContainer $Deadline
+        }
+        default {
+            throw "Storage fault action is invalid"
+        }
+    }
+}
+
 # Invoke-IntegrationTests 通过项目 Go wrapper 运行显式 storage_integration build tag。
 function Invoke-IntegrationTests {
     param([object]$State, [string]$Directory, [DateTime]$Deadline)
@@ -558,6 +587,15 @@ if ($Action -eq "status") {
 if ($Action -eq "down") {
     Stop-Storage $RunId ([DateTime]::UtcNow.AddSeconds($TimeoutSeconds))
     Write-Stage "OK" "storage resources removed for run $RunId"
+    exit 0
+}
+if ($Action -eq "fault") {
+    Assert-RunId $RunId
+    if (-not $Fault) {
+        throw "Storage fault action is required"
+    }
+    Invoke-StorageFault $RunId $Fault ([DateTime]::UtcNow.AddSeconds($TimeoutSeconds))
+    Write-Stage "OK" "storage fault completed for run $RunId"
     exit 0
 }
 

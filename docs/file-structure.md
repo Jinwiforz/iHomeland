@@ -38,6 +38,8 @@ server/
   cmd/
     server/
       main.go
+    qualificationtool/
+      main.go
   internal/
     contract/
     fixtures/
@@ -77,6 +79,10 @@ server/
 ### `cmd/server`
 
 只包含进程入口、信号处理、Composition Root 调用和退出码，不包含业务规则。
+
+### `cmd/qualificationtool`
+
+只提供 Q0 独立协议客户端 CLI、临时 TLS、readiness probe 和机器报告入口；不得构造服务端业务对象图、直接操作 Docker/storage 或变成 production 管理 API。基础设施创建、故障 ownership 与精确清理由 `tools/qualification/qualification.ps1` 编排。
 
 ### `internal/app`
 
@@ -179,7 +185,7 @@ Production Redis adapter 位于 `internal/storage/worldadmission`，独占 issue
 
 ### `internal/testclient`
 
-Go 协议测试客户端和 scenario runner。它是服务端资格验收的正式消费者，不导入服务端内部业务包，只通过公开网络契约交互。
+Go 协议测试客户端和 scenario runner。它是服务端资格验收的正式消费者，不导入服务端内部业务包，只通过公开网络契约交互。Manifest/runner 双向 completeness、layered evidence catalog 漂移校验、HTTP/WSS/TLS-TCP codec、actor secret 生命周期、fault checkpoint 和低敏 report 都由该 package 拥有；Docker、服务进程与依赖故障仍属于仓库工具 owner。
 
 ### `migrations`
 
@@ -204,6 +210,7 @@ shared/
       admission/           # issuer/verifier 的抽象语义 corpus，不含 claims
       http/
       realtime/
+      qualification/       # Q0 scenario/evidence manifest、endpoint 示例与 contract freeze digest
 ```
 
 - `.proto` 是跨端消息源。
@@ -213,6 +220,8 @@ shared/
 - 不放服务端 domain model 或 Unity 类型。
 
 `server/internal/contract`、`server/internal/fixtures` 与 `server/internal/protocol` 负责协议验证，不属于进程运行时。`cmd/server` 与 `server/internal/app` 在同一 `server/go.mod` 中提供唯一进程入口和 Composition Root，不建立第二个 module。
+
+`tools/qualification/qualification.ps1` 是唯一可以产生 Q0 结论的入口；临时 binary、TLS、PID、日志和报告只写入被忽略的 `.local/qualification/<run-id>/`。资格客户端、manifest 和入口在 Q0 后长期保留，按公开 capability group 演进，不归入 `client/`，也不替代 Unity 工程。
 
 ## Unity 客户端目标结构
 

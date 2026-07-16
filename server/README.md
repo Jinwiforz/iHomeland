@@ -4,7 +4,9 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含 world/visit Protobuf 与 HTTPS/WSS/TLS-TCP registry/fixture 契约、协议校验、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement、VisitSession 和 WorldAdmission core。公开 component 已用 production adapters 接线 10 个冻结 HTTP operation、认证 WSS control 和独立 gameplay TCP listener；TCP 使用固定 preface 依次消费一次性 GAMEPLAY ticket 与 WorldAdmission，并以有界 registry/queue/dispatcher 接入冻结的 world/visit route。进程内 WorldInstance runtime、assignment lease、VisitSession lifecycle、semantic deadline、跨通道通知与精确 safe-return 已形成完整服务端竖切；独立 Go 协议资格客户端及 `qualify-server-v1` 全矩阵仍未完成。
+当前 module 包含 world/visit Protobuf 与 HTTPS/WSS/TLS-TCP registry/fixture 契约、协议校验、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement、VisitSession 和 WorldAdmission core。公开 component 已用 production adapters 接线 10 个冻结 HTTP operation、认证 WSS control 和独立 gameplay TCP listener；TCP 使用固定 preface 依次消费一次性 GAMEPLAY ticket 与 WorldAdmission，并以有界 registry/queue/dispatcher 接入冻结的 world/visit route。进程内 WorldInstance runtime、assignment lease、VisitSession lifecycle、semantic deadline、跨通道通知与精确 safe-return 已形成完整服务端竖切；`internal/testclient` 与 `cmd/qualificationtool` 作为独立公开契约消费者，通过 `tools/qualification/qualification.ps1` 聚合 contract、fuzz/race、真实 storage、黑盒故障和清理门禁。
+
+完整 Q0 命令、冻结 digest、报告解释、证据层级和长期演进规则见 `../docs/server-v1-qualification.md`。资格客户端只承担服务端自动化外部回归，不是 Unity 替代品；新增公开 capability 时按 group 扩展并保留旧 mandatory 场景，纯内部重构不复制到客户端。
 
 Session core 位于 `internal/session/`。生产代码只定义消费侧接口和安全状态编排，复用 Composition Root 的 `crypto/rand` ID generator，并由 `SecretGenerator` 生成 token/nonce；并发内存 store、fake clock、确定性 generator 和 fake invalidator 只存在于 `_test.go`。`internal/storage/session` 已用共享 Redis client、严格 key/Hash codec 与原子 Lua scripts 实现 `SessionStore`；后续 transport adapter 不能另建 token、ticket 或 epoch 语义。
 

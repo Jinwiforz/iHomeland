@@ -236,7 +236,7 @@ Owner 断线后进入有绝对 deadline 的 reconnect grace。Owner 在 deadline
 
 `internal/storage/visitsession` 已以共享 standalone Redis 实现 production `VisitSessionStore`：active/session/command 三类 versioned Hash 在 owner Lua 线性化点内维护唯一索引、revision CAS 和完整重放结果。Adapter 不拥有 Redis client、后台 cleanup、admission credential 或 listener；正式 Composition Root 由 application coordinator 把 HTTP accept/admission、TLS/TCP realtime lifecycle command、semantic deadline、WSS notice、TCP snapshot 和精确 safe-return 组合为同一结果路径。Redis 进程重启只能恢复其自身仍保留的合法运行态；flush 或 key 丢失后不从 MySQL 补回旧访问资格。完整 key/field/TTL 字典由 `docs/redis-keys.md` 唯一管理。
 
-World admission runtime 使用注入的至少 256-bit derivation key、稳定 issuance identity 与完整 binding fingerprint，以 HMAC-SHA-256 可重复推导短期 credential；Redis 只保存 credential digest、binding 和 consume tombstone。Issue/consume 由 `internal/storage/worldadmission` owner Lua 原子线性化，同一 consume identity 可解析响应丢失，其他重放拒绝；TCP 握手消费后 application 仍重新读取 current full assignment，VisitSession 仍二次验证 membership 与 deadline。Own-world/visit-world producer、cleanup 与 safe-return 已接线；独立 Go 资格客户端和服务端 v1 全矩阵仍由 `qualify-server-v1` 交付。
+World admission runtime 使用注入的至少 256-bit derivation key、稳定 issuance identity 与完整 binding fingerprint，以 HMAC-SHA-256 可重复推导短期 credential；Redis 只保存 credential digest、binding 和 consume tombstone。Issue/consume 由 `internal/storage/worldadmission` owner Lua 原子线性化，同一 consume identity 可解析响应丢失，其他重放拒绝；TCP 握手消费后 application 仍重新读取 current full assignment，VisitSession 仍二次验证 membership 与 deadline。Own-world/visit-world producer、cleanup 与 safe-return 已接线；`server/internal/testclient` 只经公开 HTTPS/WSS/TLS-TCP 验证独立 `cmd/server`，分层门禁、冻结摘要和故障 ownership 由 `docs/server-v1-qualification.md` 管理。
 
 Party 只在需要跨场景持续队伍、队长、队伍聊天或连续活动时建立。直接访问好友个人世界只需要 VisitSession，不要求预先创建 Party 或 Room。
 

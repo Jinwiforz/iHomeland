@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "qualificationVersion": "server-v1",
+  "scenarios": [
+    { "id": "contract-freeze", "group": "contract", "mandatory": true, "phase": "contract", "execution": "contract", "timeoutMs": 30000, "expectedOutcome": "pass", "evidence": "contract" },
+    { "id": "endpoint-manifest", "group": "contract", "mandatory": true, "phase": "contract", "execution": "contract", "timeoutMs": 30000, "expectedOutcome": "pass", "evidence": "contract" },
+    { "id": "auth-session-lifecycle", "group": "identity", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "wss-session-invalidation", "group": "identity", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 30000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "own-world-bootstrap", "group": "own_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "own-world-concurrent-bootstrap", "group": "own_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "own-world-admission-snapshot", "group": "own_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "visit-open-invite-join", "group": "visit_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "visit-leave", "group": "visit_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "visit-kick", "group": "visit_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "visit-close-multiple", "group": "visit_world", "mandatory": true, "phase": "functional", "execution": "black_box", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "visit-disconnect-reconnect", "group": "visit_world", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "visit-grace-expiry", "group": "visit_world", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "authorization-negative-matrix", "group": "security", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "credential-rejection-matrix", "group": "security", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "black_box" },
+    { "id": "server-process-restart", "group": "recovery", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 90000, "expectedOutcome": "pass", "evidence": "storage" },
+    { "id": "redis-loss-recovery", "group": "recovery", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 90000, "expectedOutcome": "pass", "evidence": "storage" },
+    { "id": "mysql-restart-recovery", "group": "recovery", "mandatory": true, "phase": "recovery", "execution": "black_box", "timeoutMs": 90000, "expectedOutcome": "pass", "evidence": "storage" },
+    { "id": "commit-unknown-evidence", "group": "recovery", "mandatory": true, "phase": "recovery", "execution": "layered", "timeoutMs": 30000, "expectedOutcome": "pass", "evidence": "storage" },
+    { "id": "slow-consumer-isolation", "group": "resource", "mandatory": true, "phase": "resource", "execution": "layered", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "race", "profile": { "attempts": 16, "maxConcurrency": 4, "maxBytes": 262144, "timeoutMs": 10000 } },
+    { "id": "partial-frame-backpressure", "group": "resource", "mandatory": true, "phase": "resource", "execution": "layered", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "race", "profile": { "attempts": 32, "maxConcurrency": 8, "maxBytes": 262144, "timeoutMs": 10000 } },
+    { "id": "bounded-connection-storm", "group": "resource", "mandatory": true, "phase": "resource", "execution": "layered", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "race", "profile": { "attempts": 64, "maxConcurrency": 16, "maxBytes": 1048576, "timeoutMs": 15000 } },
+    { "id": "graceful-shutdown", "group": "lifecycle", "mandatory": true, "phase": "shutdown", "execution": "layered", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "race", "profile": { "attempts": 8, "maxConcurrency": 4, "maxBytes": 262144, "timeoutMs": 10000 } },
+    { "id": "shutdown-deadline", "group": "lifecycle", "mandatory": true, "phase": "shutdown", "execution": "layered", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "race", "profile": { "attempts": 4, "maxConcurrency": 2, "maxBytes": 131072, "timeoutMs": 10000 } },
+    { "id": "process-failure-restart", "group": "lifecycle", "mandatory": true, "phase": "shutdown", "execution": "layered", "timeoutMs": 60000, "expectedOutcome": "pass", "evidence": "storage", "profile": { "attempts": 4, "maxConcurrency": 2, "maxBytes": 131072, "timeoutMs": 15000 } },
+    { "id": "diagnostic-convergence", "group": "resource", "mandatory": true, "phase": "shutdown", "execution": "layered", "timeoutMs": 45000, "expectedOutcome": "pass", "evidence": "race", "profile": { "attempts": 32, "maxConcurrency": 8, "maxBytes": 1048576, "timeoutMs": 15000 } }
+  ]
+}

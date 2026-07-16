@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "groups": [
+    {
+      "id": "commit-unknown",
+      "scenarioIds": ["commit-unknown-evidence"],
+      "packages": [
+        { "path": "./internal/account", "tests": ["TestRegisterCommitUnknownPreservesUncertainty"] },
+        { "path": "./internal/personalworld", "tests": ["TestEnsurePrimaryWorldCommitUnknownConverges", "TestArchiveWorldCommitUnknownCanReplay"] },
+        { "path": "./internal/placement", "tests": ["TestEnsureActiveRecoversCommitUnknown", "TestLeaseExpiryReplacementRejectsStaleWriter", "TestSleepCommitUnknownCanReplay", "TestReplaceCommitUnknownReusesSuccessor"] },
+        { "path": "./internal/visitsession", "tests": ["TestReferenceStoreResponseLossAndReplay", "TestServiceMutationReplayAfterResponseLoss"] }
+      ]
+    },
+    {
+      "id": "resource",
+      "scenarioIds": ["slow-consumer-isolation", "partial-frame-backpressure", "bounded-connection-storm"],
+      "packages": [
+        { "path": "./internal/transport/wscontrol", "tests": ["TestRegistryClosesSlowConsumerAndCleansIndexes", "TestConnectionSerializesPushes", "TestRegistryReservationLimitsAndRollback"] },
+        { "path": "./internal/transport/tcpgameplay", "tests": ["TestSendQueueEnforcesItemByteAndCloseBounds", "TestPendingPushDropsWhenResponseCannotQueue", "TestSerializedWriterPreservesConcurrentSequenceAndFrames", "TestRegistryReservationsStayWithinGlobalAndRemoteLimits", "TestDispatcherResourceGuards"] },
+        { "path": "./internal/transport/httpapi", "tests": ["TestRouterRateLimitIsBoundedByOperation", "TestLimiterCapacityDoesNotGrowPastBound"] },
+        { "path": "./internal/testclient", "tests": ["TestFrameHandlesPartialIOAndBounds", "TestScenarioContextPreservesCleanupFailures"] }
+      ]
+    },
+    {
+      "id": "lifecycle",
+      "scenarioIds": ["graceful-shutdown", "shutdown-deadline", "process-failure-restart"],
+      "packages": [
+        { "path": "./cmd/server", "tests": ["TestRunSecondSignalForcesExit", "TestServerProcessLifecycle", "TestServerProcessInvalidConfig", "TestServerProcessShutdownTimeout"] },
+        { "path": "./internal/app", "tests": ["TestLifecycleSharesShutdownDeadline", "TestTaskOwnerHonorsWaitDeadline"] },
+        { "path": "./internal/transport/wscontrol", "tests": ["TestRegistryStopClosesConnectionsInParallel", "TestRegistryStopWaitsForReservedHandshake"] },
+        { "path": "./internal/transport/tcpgameplay", "tests": ["TestRegistryStopRemovesPendingUnstartedConnection"] }
+      ]
+    },
+    {
+      "id": "diagnostic",
+      "scenarioIds": ["diagnostic-convergence"],
+      "packages": [
+        { "path": "./internal/observability", "tests": ["TestStorageMetricLabelsRejectUnboundedValues", "TestWebSocketMetricLabelsAcceptFixedVocabulary", "TestTCPGameplayMetricLabelsAcceptFixedVocabulary", "TestPersonalWorldSliceMetricLabelsAcceptFixedVocabulary", "TestTCPGameplayMetricLabelsRejectCredential"] },
+        { "path": "./internal/transport/diagnostic", "tests": ["TestDiagnosticLifecycleAndRoutes"] }
+      ]
+    }
+  ]
+}

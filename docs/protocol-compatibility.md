@@ -197,6 +197,12 @@ PowerShell 统一入口：
 
 本地开发与 CI 必须调用相同的非交互脚本，不得在外部入口中复制协议生成或验证逻辑。
 
+## 服务端 v1 资格冻结
+
+`shared/contracts/fixtures/qualification/manifest.json` 版本化登记服务端 v1 的 mandatory 回归场景，并用 `execution` 区分 contract、public wire 与 layered evidence；`evidence-manifest.json` 是 layered scenario 到稳定 package/test identity 的唯一映射源。`endpoint-manifest.json` 提供公开 version/config 投影示例，`freeze.json` 只保存按排序 path+raw-content 计算的 aggregate SHA-256。Digest 是交付集合完整性证据，不替代 Buf breaking policy、OpenAPI/registry owner、fixtures 或 Git 历史。
+
+完整资格入口必须先通过本节的生成与兼容门禁，再由不导入服务端业务实现的 Go client 验证 HTTPS/WSS/TLS-TCP。公开 operation、message/channel、credential、错误或恢复语义变化时，必须在同一 OpenSpec 中更新相关 source contract、fixtures、qualification capability group 与冻结摘要；纯内部重构不得为了迁就实现而修改外部预期。执行命令、当前 digest、报告和长期演进规则见 `docs/server-v1-qualification.md`。
+
 CI 必须拒绝：
 
 - 手工修改生成代码

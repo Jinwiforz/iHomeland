@@ -46,6 +46,7 @@ versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本�
 - `docs/client-architecture.md`：Unity 混合运行时
 - `docs/client-ui-architecture.md`：UI Toolkit/uGUI 规则
 - `docs/client-integration.md`：服务端交付包与 Unity 接入验收
+- `docs/server-v1-qualification.md`：Q0 唯一入口、冻结摘要与长期 Go 资格客户端边界
 - `docs/file-structure.md`：目标目录与文件职责
 - `docs/engineering-standards.md`：工程与测试标准
 - `docs/code-comment-convention.md`：Go、C#/Unity 与协议注释规范

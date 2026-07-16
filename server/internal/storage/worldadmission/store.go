@@ -187,7 +187,8 @@ func (store *Store) Consume(ctx context.Context, request domain.ConsumeRequest) 
 	case "expired":
 		return store.consumeResult(domain.ConsumeOutcomeExpired, "expired")
 	case "mismatch":
-		return store.consumeResult(domain.ConsumeOutcomeBindingMismatch, "mismatch")
+		// Lua 使用紧凑 wire outcome；metrics 使用跨 adapter 的规范低基数枚举。
+		return store.consumeResult(domain.ConsumeOutcomeBindingMismatch, "binding_mismatch")
 	case "replayed":
 		return store.consumeResult(domain.ConsumeOutcomeReplayed, "replayed")
 	case "defect":

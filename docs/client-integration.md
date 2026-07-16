@@ -203,3 +203,11 @@ receive invite
 - Visiting 返回 OwnWorld 后无旧场景订阅或 callback 回写
 
 客户端验收必须与服务端 Go test client 对同一 contract fixtures 得出一致业务结果。
+
+## Go 资格客户端的长期职责
+
+`server/internal/testclient` 与统一 qualification 入口在 `qualify-server-v1` 后继续保留，作为服务端公开契约的长期自动化消费者，不是 Unity 的临时替身或产品 SDK。服务端新增或修改公开 HTTP operation、实时 message/channel、credential、错误或恢复语义时，对应 change 必须在独立 capability group 中同步扩展资格 manifest 与 runner，并继续执行全部仍受支持的旧 mandatory 回归。只重构服务端内部 package、算法或 storage adapter 且公开行为不变时，不修改资格客户端来迁就内部结构。
+
+未来 Activity、battle 等能力分别维护自己的 qualification group，完整发布门聚合这些 group；不得把全部业务塞进单个巨型 scenario。资格客户端只验证公开网络输入输出、兼容、安全、恢复和资源边界，不拥有 Scene、Prefab、GameObject、输入、UI、表现或玩家体验，也不复制服务端领域状态机和结算规则。正式游戏客户端始终由 Unity 实现。
+
+已冻结版本需要破坏性演进时，先通过独立 OpenSpec 定义新版本、兼容窗口和迁移，再让资格客户端并行验证受支持版本。旧场景只有在对应版本正式退役后才能离开 active matrix，历史 manifest 和结果仍由 Git 保留。

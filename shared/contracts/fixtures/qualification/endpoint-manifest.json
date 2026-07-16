@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "version": {
+    "protocolVersion": 1,
+    "minimumClientVersion": "0.1.0",
+    "serverVersion": "0.1.0"
+  },
+  "config": {
+    "endpoints": [
+      { "channel": "WSS", "host": "127.0.0.1", "port": 18443 },
+      { "channel": "TLS_TCP", "host": "127.0.0.1", "port": 19443 }
+    ],
+    "limits": {
+      "httpBodyBytes": 65536,
+      "realtimeFrameBytes": 65536
+    }
+  }
+}

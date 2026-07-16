@@ -3,9 +3,7 @@
 ## Purpose
 
 定义 HTTPS 与实时消息的唯一机器可读契约、编号和路由治理、统一可靠 envelope、身份边界、版本目录以及跨端可重复生成与 fixtures 验收行为。
-
 ## Requirements
-
 ### Requirement: 契约源必须具有唯一所有权
 系统 MUST 使用 `versions.yaml` 选定的 Protobuf edition 定义实时二进制 payload、使用该目录选定的 OpenAPI 规范定义 HTTPS JSON API，并使用机器可读 registries 保存编号、错误与路由元数据；registry 只能引用 schema symbol，不能复制字段结构。每个 HTTP operation MUST 声明稳定 operation id、body limit、timeout 与幂等语义。
 
@@ -88,3 +86,18 @@ OpenAPI register/login username MUST 声明 3-64 characters、ASCII letter/digit
 #### Scenario: 合同兼容性验证
 - **WHEN** 新增 account error 与字段约束后执行协议验证
 - **THEN** error code 保持唯一、fixtures 与 OpenAPI schema 一致，既有编号和成功响应字段不发生 breaking change
+
+### Requirement: 服务端 v1 契约必须由 Q0 确定性冻结
+`qualify-server-v1` MUST 将当前 versioned Protobuf schema、HTTP OpenAPI、message/error/route registry、qualification scenario/evidence manifests、contract fixtures/golden和endpoint manifest示例定义为排序后的冻结输入集，并从已提交原始bytes计算稳定aggregate digest。Digest record、generated code、descriptor、运行报告与本机配置 MUST NOT参与输入。Contract test MUST在clean checkout重新计算相同digest并拒绝未评审漂移；digest只证明交付集完整性，Git、OpenSpec和各owner source仍是唯一语义事实。
+
+#### Scenario: Clean checkout 重算冻结摘要
+- **WHEN** 相同提交从无generated code和本机缓存的checkout执行contract freeze验证
+- **THEN** 输入文件集合、逐文件bytes与aggregate digest和资格基线一致，不需要持久化descriptor或runtime projection
+
+#### Scenario: Registry 或 fixture 静默变化
+- **WHEN** schema、OpenAPI、message/error/route registry、qualification manifest或既有fixture/golden任一内容改变但未更新资格基线并重跑Q0
+- **THEN** contract gate因digest漂移失败，C0不能继续使用旧qualified声明
+
+#### Scenario: Q0 后需要改变基础契约
+- **WHEN** 已冻结v1的field、operation、message/error ID、route、credential、endpoint或恢复语义需要不兼容修改
+- **THEN** 项目必须先创建独立OpenSpec，采用新版本或明确兼容窗口、更新fixtures与迁移说明并重新执行服务端资格，不能直接覆盖原冻结含义
