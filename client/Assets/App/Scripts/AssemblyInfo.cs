@@ -1,0 +1,4 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("IHomeland.Client.Runtime.EditModeTests")]
+[assembly: InternalsVisibleTo("IHomeland.Client.Runtime.PlayModeTests")]

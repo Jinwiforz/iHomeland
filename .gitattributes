@@ -2,8 +2,9 @@
 * text=auto
 
 # 源码、配置与文档始终按文本规范化。
+# Unity 序列化空标量会保留冒号后的空格；相关格式继续按文本管理，但不把该原生表示判为尾随空白错误。
 *.asmdef text
-*.asset text
+*.asset text whitespace=-trailing-space
 *.cs text
 *.editorconfig text
 *.gitignore text
@@ -11,15 +12,15 @@
 *.ini text
 *.json text
 *.md text
-*.meta text
-*.prefab text
+*.meta text whitespace=-trailing-space
+*.prefab text whitespace=-trailing-space
 *.proto text
 *.ps1 text
 *.sh text
 *.sql text eol=lf
 *.toml text
 *.txt text
-*.unity text
+*.unity text whitespace=-trailing-space
 *.xml text
 *.yaml text
 *.yml text

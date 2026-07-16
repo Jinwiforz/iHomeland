@@ -1,0 +1,23 @@
+{
+  "name": "IHomeland.Client.Runtime.EditModeTests",
+  "rootNamespace": "IHomeland.Client.Tests.EditMode",
+  "references": [
+    "IHomeland.Client.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

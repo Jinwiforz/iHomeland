@@ -1,0 +1,178 @@
+using System.Collections;
+using System.Threading;
+using IHomeland.Client.Core.Bootstrap;
+using IHomeland.Client.Core.Composition;
+using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Scenes.Contexts;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
+
+namespace IHomeland.Client.Tests.PlayMode
+{
+    /// <summary>
+    /// 通过实际 GameObject、Update 和 SceneManager 验证 AppRoot Unity Host 生命周期。
+    /// </summary>
+    public sealed class AppRootPlayModeTests
+    {
+        /// <summary>
+        /// 每个测试后销毁所有 AppRoot，验证 OnDestroy 清理并隔离静态唯一性状态。
+        /// </summary>
+        /// <returns>等待 Unity 完成延迟 Destroy 和生命周期 callback 的枚举器。</returns>
+        [UnityTearDown]
+        public IEnumerator TearDownRoots()
+        {
+            var roots = Object.FindObjectsByType<AppRoot>(FindObjectsInactive.Include);
+            foreach (var root in roots)
+            {
+                if (root != null)
+                {
+                    Object.Destroy(root.gameObject);
+                }
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        /// 保护重复 bootstrap 在创建第二套 Composition 前销毁重复入口。
+        /// </summary>
+        /// <returns>等待两个 Awake 和延迟 Destroy 完成的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator DuplicateBootstrapKeepsOneRunningRoot()
+        {
+            var first = CreateBootstrapRoot("PrimaryAppRoot");
+            yield return null;
+            var duplicate = CreateBootstrapRoot("DuplicateAppRoot");
+            yield return null;
+
+            var roots = Object.FindObjectsByType<AppRoot>(FindObjectsInactive.Include);
+            Assert.That(roots, Has.Length.EqualTo(1));
+            Assert.That(roots[0], Is.SameAs(first));
+            Assert.That(first.State, Is.EqualTo(AppLifetimeState.Running));
+            Assert.That(duplicate == null, Is.True);
+        }
+
+        /// <summary>
+        /// 保护 AppRoot 在活动场景切换后仍由 DontDestroyOnLoad 场景持有。
+        /// </summary>
+        /// <returns>等待场景切换和卸载完成的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator RunningRootSurvivesActiveSceneReplacement()
+        {
+            var originalScene = SceneManager.GetActiveScene();
+            var root = CreateBootstrapRoot("PersistentAppRoot");
+            yield return null;
+            var replacementScene = SceneManager.CreateScene("RuntimeReplacementScene");
+
+            Assert.That(SceneManager.SetActiveScene(replacementScene), Is.True);
+            yield return null;
+
+            Assert.That(root, Is.Not.Null);
+            Assert.That(root.State, Is.EqualTo(AppLifetimeState.Running));
+            Assert.That(root.gameObject.scene.name, Is.EqualTo("DontDestroyOnLoad"));
+
+            Assert.That(SceneManager.SetActiveScene(originalScene), Is.True);
+            yield return SceneManager.UnloadSceneAsync(replacementScene);
+        }
+
+        /// <summary>
+        /// 保护 AppRoot Update 同时有界 drain callback 并仅驱动 Composition 登记的 tickable。
+        /// </summary>
+        /// <returns>等待一个实际 Unity Update 执行的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator UpdateDrivesDispatcherAndRegisteredTickable()
+        {
+            var gameObject = new GameObject("DrivenAppRoot");
+            var root = gameObject.AddComponent<AppRoot>();
+            Assert.That(root.TryClaim(), Is.True);
+
+            var dispatcher = new MainThreadDispatcher(Thread.CurrentThread.ManagedThreadId, capacity: 4);
+            var sceneLifetimeOwner = new SceneLifetimeOwner();
+            var tickable = new CountingTickable();
+            IAppLifetimeParticipant[] participants = { dispatcher, sceneLifetimeOwner };
+            var lifetime = new AppLifetime(
+                participants,
+                System.TimeSpan.FromSeconds(2),
+                System.TimeSpan.FromSeconds(2));
+            var composition = new AppCompositionResult(
+                lifetime,
+                dispatcher,
+                new IAppTickable[] { tickable },
+                maximumDispatchesPerFrame: 2);
+            root.Attach(composition);
+            var startup = root.StartAsync();
+            Assert.That(startup.IsCompletedSuccessfully, Is.True);
+
+            var callbackExecuted = false;
+            Assert.That(
+                dispatcher.TryPost(() => callbackExecuted = true),
+                Is.EqualTo(DispatchPostResult.Accepted));
+            yield return null;
+
+            Assert.That(callbackExecuted, Is.True);
+            Assert.That(tickable.TickCount, Is.GreaterThanOrEqualTo(1));
+        }
+
+        /// <summary>
+        /// 保护销毁旧 root 后可在同一进程创建下一套对象图，验证静态 claim 的对称释放。
+        /// </summary>
+        /// <returns>等待两轮 Destroy 和 Awake callback 完成的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator DestroyedRootReleasesClaimForNextRun()
+        {
+            var first = CreateBootstrapRoot("FirstRunRoot");
+            yield return null;
+            Object.Destroy(first.gameObject);
+            yield return null;
+            yield return null;
+
+            var second = CreateBootstrapRoot("SecondRunRoot");
+            yield return null;
+
+            Assert.That(second, Is.Not.Null);
+            Assert.That(second.State, Is.EqualTo(AppLifetimeState.Running));
+            var roots = Object.FindObjectsByType<AppRoot>(FindObjectsInactive.Include);
+            Assert.That(roots, Has.Length.EqualTo(1));
+            Assert.That(roots[0], Is.SameAs(second));
+        }
+
+        /// <summary>
+        /// 创建一个以直接引用接线、激活后立即 bootstrap 的测试 GameObject。
+        /// </summary>
+        /// <param name="name">用于诊断场景层级的 GameObject 名称。</param>
+        /// <returns>已经激活并开始启动的 AppRoot。</returns>
+        private static AppRoot CreateBootstrapRoot(string name)
+        {
+            var gameObject = new GameObject(name);
+            gameObject.SetActive(false);
+            var root = gameObject.AddComponent<AppRoot>();
+            var bootstrap = gameObject.AddComponent<AppBootstrap>();
+            bootstrap.ConfigureBeforeActivation(root);
+            gameObject.SetActive(true);
+            return root;
+        }
+
+        /// <summary>
+        /// 记录由 AppRoot 实际 Update 驱动的 tick 次数。
+        /// </summary>
+        private sealed class CountingTickable : IAppTickable
+        {
+            /// <summary>
+            /// 获取当前测试运行中收到的 tick 次数。
+            /// </summary>
+            internal int TickCount { get; private set; }
+
+            /// <summary>
+            /// 记录一次由唯一 AppRoot 发出的主线程 tick。
+            /// </summary>
+            /// <param name="unscaledDeltaTimeSeconds">Unity 提供的不缩放帧间隔，单位为秒。</param>
+            public void Tick(float unscaledDeltaTimeSeconds)
+            {
+                Assert.That(unscaledDeltaTimeSeconds, Is.GreaterThanOrEqualTo(0f));
+                TickCount++;
+            }
+        }
+    }
+}
