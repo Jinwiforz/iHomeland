@@ -156,7 +156,25 @@ ClientHttpTransport + ClientHttpCodec + ClientHttpOperationCatalog
 - Infrastructure 只承担冻结 HTTP operation 的传输与 codec；Application 的 `ClientBootstrapService` 和 `SessionCoordinator` 分别拥有启动配置流程与唯一 session/credential lineage。
 - 初始化不自动访问网络，own-world bootstrap 也只返回一次查询投影；具体 operation、安全和失败语义由[客户端接入规范](client-integration.md)统一说明。
 
-该边界尚不实现 UI、自动网络 bootstrap、token 持久化、invite accept、world admission、WSS 或 TLS/TCP。Own-world bootstrap 只作为一次强类型查询返回，不在本层保存 PersonalWorld 最终事实。
+HTTP 边界本身不实现 UI、自动网络 bootstrap、token 持久化、invite accept、world admission 或 TLS/TCP。Own-world bootstrap 只作为一次强类型查询返回，不在本层保存 PersonalWorld 最终事实；WSS control 由下述独立 owner 消费这里交付的一次性 ticket。
+
+### 当前 WSS control 边界
+
+```text
+SessionCoordinator + ClientConfigurationStore
+  -> ClientControlChannel
+      -> ClientWebSocket (receive-only)
+      -> ClientControlCodec + 9-route catalog
+      -> MainThreadDispatcher
+```
+
+- `ClientControlChannel` 只在显式 `RunAsync` 后签发 WSS ticket；App Scope 初始化仍不访问网络。
+- 每次 connection attempt 都单独签发并取得一次 ticket，固定连接 `/v1/control` 与 `ihomeland.control.v1`；旧 ticket、query、cookie 和 fallback endpoint 都没有入口。
+- Runtime API 不提供 application `SendAsync`。每个 connection 只有一个 receive pump，负责有界 fragment 重组、严格连续 sequence 与 9 类 generated PUSH 解码。
+- 普通 PUSH 经既有有界 `MainThreadDispatcher` 进入 Unity 主线程；forced logout/session invalidation 先以来源 generation 与更高 epoch 清除唯一 Session owner，再终止自动恢复。
+- 只有瞬时 transport/普通 peer close 消耗固定有限 backoff；协议、授权、失效、背压与停止均 fail closed，普通 WSS 中断不擅自清除 HTTP session。
+
+该边界不拥有 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现 TLS/TCP、world admission、业务 request/response 或客户端 control command。
 
 ## 状态所有权
 

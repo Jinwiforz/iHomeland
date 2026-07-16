@@ -353,6 +353,29 @@ namespace IHomeland.Client.Application.Session
         }
 
         /// <summary>
+        /// 接受 current control connection 携带的更高权威 epoch，并原子清除对应旧 session lineage。
+        /// </summary>
+        /// <param name="sourceGeneration">WSS ticket 单次交付时捕获的本地 session generation。</param>
+        /// <param name="invalidatedEpoch">服务端 forced logout/session invalidation 公布的新 epoch。</param>
+        /// <returns>来源仍 current 且新 epoch 更高、因而已清除 snapshot 时返回 true。</returns>
+        internal bool TryInvalidateFromControl(long sourceGeneration, ulong invalidatedEpoch)
+        {
+            lock (_sync)
+            {
+                if (_state != ClientSessionOwnerState.Authenticated ||
+                    _snapshot == null ||
+                    _snapshot.Generation != sourceGeneration ||
+                    invalidatedEpoch <= (ulong)_snapshot.Session.SessionEpoch)
+                {
+                    return false;
+                }
+
+                ClearLocked(ClientSessionOwnerState.Unauthenticated);
+                return true;
+            }
+        }
+
+        /// <summary>
         /// 显式放弃本地 session lineage，不声称远端 logout 已完成。
         /// </summary>
         internal void Forget()

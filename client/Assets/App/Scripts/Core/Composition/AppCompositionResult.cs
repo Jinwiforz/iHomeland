@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using IHomeland.Client.Application.Bootstrap;
+using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Core.Lifetime;
 
@@ -32,6 +33,11 @@ namespace IHomeland.Client.Core.Composition
         private readonly SessionCoordinator _sessionCoordinator;
 
         /// <summary>
+        /// 保存只接收 WSS control PUSH 的唯一 owner；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly ClientControlChannel _controlChannel;
+
+        /// <summary>
         /// 创建只包含宿主运行边界的对象图结果，供不接入 HTTP capability 的 isolated fixture 使用。
         /// </summary>
         /// <param name="lifetime">统一拥有 App Scope 初始化和逆序停止的生命周期。</param>
@@ -51,7 +57,8 @@ namespace IHomeland.Client.Core.Composition
                 tickables,
                 maximumDispatchesPerFrame,
                 bootstrapService: null,
-                sessionCoordinator: null)
+                sessionCoordinator: null,
+                controlChannel: null)
         {
         }
 
@@ -64,6 +71,7 @@ namespace IHomeland.Client.Core.Composition
         /// <param name="maximumDispatchesPerFrame">单帧最多执行的主线程 callback 数量。</param>
         /// <param name="bootstrapService">显式 version/config 启动用例。</param>
         /// <param name="sessionCoordinator">App Scope 唯一 Session owner。</param>
+        /// <param name="controlChannel">App Scope 唯一 WSS control owner。</param>
         /// <exception cref="ArgumentException">单帧 callback 上限非正数时抛出。</exception>
         /// <exception cref="ArgumentNullException">任一必需对象、集合引用或 tickable 元素为 null 时抛出。</exception>
         internal AppCompositionResult(
@@ -72,7 +80,8 @@ namespace IHomeland.Client.Core.Composition
             IReadOnlyList<IAppTickable> tickables,
             int maximumDispatchesPerFrame,
             ClientBootstrapService bootstrapService,
-            SessionCoordinator sessionCoordinator)
+            SessionCoordinator sessionCoordinator,
+            ClientControlChannel controlChannel)
         {
             Lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
             Dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -97,6 +106,7 @@ namespace IHomeland.Client.Core.Composition
             MaximumDispatchesPerFrame = maximumDispatchesPerFrame;
             _bootstrapService = bootstrapService;
             _sessionCoordinator = sessionCoordinator;
+            _controlChannel = controlChannel;
         }
 
         /// <summary>
@@ -132,5 +142,12 @@ namespace IHomeland.Client.Core.Composition
         /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 HTTP graph 时抛出。</exception>
         internal SessionCoordinator SessionCoordinator => _sessionCoordinator ??
             throw new InvalidOperationException("当前 isolated host composition 不包含 Session owner。");
+
+        /// <summary>
+        /// 获取完整 Composition 显式连接的唯一 WSS control owner。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 control graph 时抛出。</exception>
+        internal ClientControlChannel ControlChannel => _controlChannel ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 WSS control owner。");
     }
 }

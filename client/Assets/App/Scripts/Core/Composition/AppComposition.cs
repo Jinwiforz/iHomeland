@@ -1,9 +1,11 @@
 using System;
 using IHomeland.Client.Application.Bootstrap;
+using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Client.Scenes.Contexts;
 
 namespace IHomeland.Client.Core.Composition
@@ -36,6 +38,16 @@ namespace IHomeland.Client.Core.Composition
         /// 限制正常退出时的逆序停止总等待时间。
         /// </summary>
         private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// 限制一次显式 control run 在瞬时故障后的额外尝试次数与等待时间。
+        /// </summary>
+        private static readonly TimeSpan[] ControlRetryDelays =
+        {
+            TimeSpan.FromMilliseconds(250),
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(3),
+        };
 
         /// <summary>
         /// 表示当前 Composition 已构造对象图，阻止同一实例重复 Build。
@@ -74,15 +86,27 @@ namespace IHomeland.Client.Core.Composition
                 configurationStore,
                 httpApi,
                 new SystemClientClock());
+            var controlCatalog = new ClientControlCatalog();
+            var controlCodec = new ClientControlCodec(controlCatalog);
+            var controlChannel = new ClientControlChannel(
+                environment,
+                configurationStore,
+                sessionCoordinator,
+                new SystemClientWebSocketFactory(),
+                controlCodec,
+                dispatcher,
+                new SystemClientControlDelay(),
+                ControlRetryDelays);
             var sceneLifetimeOwner = new SceneLifetimeOwner();
 
-            // 逆序停止依次撤销 Scene、Session、HTTP、Configuration，最后拒绝主线程回写。
+            // 逆序停止依次撤销 Scene、WSS、Session、HTTP、Configuration，最后拒绝主线程回写。
             IAppLifetimeParticipant[] participants =
             {
                 dispatcher,
                 configurationStore,
                 transport,
                 sessionCoordinator,
+                controlChannel,
                 sceneLifetimeOwner,
             };
 
@@ -93,7 +117,8 @@ namespace IHomeland.Client.Core.Composition
                 Array.Empty<IAppTickable>(),
                 MaximumDispatchesPerFrame,
                 bootstrapService,
-                sessionCoordinator);
+                sessionCoordinator,
+                controlChannel);
         }
     }
 }

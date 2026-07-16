@@ -161,7 +161,8 @@ namespace IHomeland.Client.Application.Session
                 _ticket.Ticket,
                 _ticket.Endpoint,
                 _ticket.Scopes,
-                _ticket.ExpiresAtMilliseconds);
+                _ticket.ExpiresAtMilliseconds,
+                _sourceGeneration);
             return true;
         }
 
@@ -187,16 +188,19 @@ namespace IHomeland.Client.Application.Session
         /// <param name="endpoint">Credential 绑定 endpoint。</param>
         /// <param name="scopes">Credential 固定 scope。</param>
         /// <param name="expiresAtMilliseconds">Ticket 绝对 Unix expiry，单位为毫秒。</param>
+        /// <param name="sourceGeneration">签发与单次取得时仍 current 的本地 session generation。</param>
         internal ClientConnectionTicketUse(
             string credential,
             ClientEndpoint endpoint,
             IReadOnlyList<ClientConnectionScope> scopes,
-            long expiresAtMilliseconds)
+            long expiresAtMilliseconds,
+            long sourceGeneration)
         {
             Credential = credential ?? throw new ArgumentNullException(nameof(credential));
             Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
             Scopes = scopes ?? throw new ArgumentNullException(nameof(scopes));
             ExpiresAtMilliseconds = expiresAtMilliseconds;
+            SourceGeneration = sourceGeneration;
         }
 
         /// <summary>
@@ -218,6 +222,11 @@ namespace IHomeland.Client.Application.Session
         /// 获取 ticket 绝对 Unix expiry，单位为毫秒。
         /// </summary>
         internal long ExpiresAtMilliseconds { get; }
+
+        /// <summary>
+        /// 获取连接结果与 control invalidation 用于阻断旧 connection callback 的来源 generation。
+        /// </summary>
+        internal long SourceGeneration { get; }
 
         /// <summary>
         /// 返回固定脱敏文本，防止 channel 诊断输出 credential。

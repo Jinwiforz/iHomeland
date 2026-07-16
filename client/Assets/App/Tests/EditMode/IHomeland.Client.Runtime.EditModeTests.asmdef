@@ -2,15 +2,18 @@
   "name": "IHomeland.Client.Runtime.EditModeTests",
   "rootNamespace": "IHomeland.Client.Tests.EditMode",
   "references": [
-    "IHomeland.Client.Runtime"
+    "IHomeland.Client.Runtime",
+    "IHomeland.Client.Protocol.Generated"
   ],
   "includePlatforms": [
     "Editor"
   ],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Google.Protobuf.dll"
+  ],
   "autoReferenced": false,
   "defineConstraints": [
     "UNITY_INCLUDE_TESTS"

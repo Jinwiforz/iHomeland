@@ -1,12 +1,16 @@
 {
   "name": "IHomeland.Client.Runtime",
   "rootNamespace": "IHomeland.Client",
-  "references": [],
+  "references": [
+    "IHomeland.Client.Protocol.Generated"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Google.Protobuf.dll"
+  ],
   "autoReferenced": true,
   "defineConstraints": [],
   "versionDefines": [],

@@ -68,7 +68,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - Transport 不自动重试。Caller cancel、deadline、transport、oversized、malformed 与结构有效的 server error 保持不同结果；`Retry-After` 只作为事实返回。
 - 当前不恢复进程退出前的 refresh token；重启回到未认证状态。安全持久化需独立 capability。
 
-`acceptVisitInvite` 与 `issueWorldAdmission` 仍属于后续个人世界 Services change；WSS/TLS-TCP 也尚未接入本对象图。
+`acceptVisitInvite` 与 `issueWorldAdmission` 仍属于后续个人世界 Services change；HTTP 对象图只向独立 WSS control owner 交付一次性 ticket，TLS/TCP 尚未接入。
 
 ### 3. WSS Control
 
@@ -78,6 +78,8 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - 接收 maintenance、forced logout、queue、endpoint/assignment、visit 与 session invalidation push
 - 独立执行 heartbeat、close reason、sequence 缺口检测和有界重连，并把 generated payload 投递主线程
 - session invalidation/forced logout 后关闭 WSS 与后续 TLS/TCP、清理本地 session 并回到登录流程
+
+当前客户端已接入只接收 WSS control owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-wss-control-边界)。本接入层继续约束初始化不自动连接、Runtime 不公开 WSS application send API，且 TLS/TCP 与 PersonalWorld/VisitSession 状态消费仍由后续 change 交付。
 
 ### 4. TLS/TCP Business
 

@@ -305,6 +305,80 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
+        /// 确认 current control connection 的更高 epoch 会清除对应 session lineage。
+        /// </summary>
+        [Test]
+        public async Task ControlInvalidation_CurrentGeneration_ClearsSession()
+        {
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, _, _) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"))),
+            };
+            var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
+            var login = await coordinator.LoginAsync("user", "password", CancellationToken.None);
+            Assert.That(login.IsSuccess, Is.True);
+
+            var invalidated = coordinator.TryInvalidateFromControl(login.Value.Generation, 2);
+
+            Assert.That(invalidated, Is.True);
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unauthenticated));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+        }
+
+        /// <summary>
+        /// 确认同 generation 的非递增 epoch 不能伪造一次新的权威失效。
+        /// </summary>
+        [Test]
+        public async Task ControlInvalidation_NonIncreasingEpoch_PreservesSession()
+        {
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, _, _) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"))),
+            };
+            var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
+            var login = await coordinator.LoginAsync("user", "password", CancellationToken.None);
+            Assert.That(login.IsSuccess, Is.True);
+
+            var invalidated = coordinator.TryInvalidateFromControl(login.Value.Generation, 1);
+
+            Assert.That(invalidated, Is.False);
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Authenticated));
+            Assert.That(coordinator.TryGetCurrent(out var current), Is.True);
+            Assert.That(current.Generation, Is.EqualTo(login.Value.Generation));
+        }
+
+        /// <summary>
+        /// 确认旧 WSS 的迟到 invalidation 不能清除后发登录建立的新 session。
+        /// </summary>
+        [Test]
+        public async Task ControlInvalidation_OldGeneration_PreservesNewLogin()
+        {
+            var authenticationQueue = new Queue<ClientAuthentication>();
+            authenticationQueue.Enqueue(CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"));
+            authenticationQueue.Enqueue(CreateAuthentication("account-b", "session-b", "access-b", "refresh-b"));
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, _, _) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
+            };
+            var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
+            var first = await coordinator.LoginAsync("user-a", "password", CancellationToken.None);
+            var second = await coordinator.LoginAsync("user-b", "password", CancellationToken.None);
+
+            var invalidated = coordinator.TryInvalidateFromControl(first.Value.Generation, 99);
+
+            Assert.That(invalidated, Is.False);
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Authenticated));
+            Assert.That(coordinator.TryGetCurrent(out var current), Is.True);
+            Assert.That(current.Generation, Is.EqualTo(second.Value.Generation));
+            Assert.That(current.Session.SessionID, Is.EqualTo("session-b"));
+        }
+
+        /// <summary>
         /// 创建初始化完成且配置 Ready 的 Session coordinator。
         /// </summary>
         /// <param name="api">受测试控制的强类型 HTTP API。</param>

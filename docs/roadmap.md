@@ -296,6 +296,8 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 实现 version/config/register/login/refresh/logout/ticket/world bootstrap，含 timeout/cancel/error mapping 和安全凭据处理。
 
+**当前状态：**已完成冻结八 operation、唯一 Session owner、ticket 单次交付、EditMode/PlayMode 与 Windows Development build 验收，并于 2026-07-16 归档；`add-client-websocket-control` 的进入条件已满足。
+
 ### `add-client-websocket-control`
 
 实现 WSS receive pump、控制通知、visit invite、epoch invalidation、主线程投递、重连与关闭。
