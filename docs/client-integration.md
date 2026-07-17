@@ -58,7 +58,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - WSS/TCP connection ticket
 - timeout、cancel、retryable error
 
-当前 HTTP 边界固定接入 version、config、register、login、refresh、logout、connection ticket、own-world bootstrap 与 world admission 九个 operation。客户端以手写不可变 projection 和显式 `System.Text.Json` codec 消费 OpenAPI/共享 fixtures，不生成或提交 HTTP C# 代码，也不提供任意 path/body escape hatch。
+当前 HTTP 边界固定接入 version、config、register、login、refresh、logout、connection ticket、own-world bootstrap、invite accept 与 world admission 十个 operation。客户端以手写不可变 projection 和显式 `System.Text.Json` codec 消费 OpenAPI/共享 fixtures，不生成或提交 HTTP C# 代码，也不提供任意 path/body escape hatch。
 
 - Production base URI 必须为 HTTPS；Local/Test 的明文例外必须同时满足显式环境和 loopback host。
 - App Scope 初始化不自动联网；后续 application flow 只能在 AppRoot Running 后显式调用 `ClientBootstrapService`。
@@ -68,7 +68,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - Transport 不自动重试。Caller cancel、deadline、transport、oversized、malformed 与结构有效的 server error 保持不同结果；`Retry-After` 只作为事实返回。
 - 当前不恢复进程退出前的 refresh token；重启回到未认证状态。安全持久化需独立 capability。
 
-`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease，不能成为 PersonalWorld 或 VisitSession 最终事实。`acceptVisitInvite` 及其业务编排仍属于后续个人世界 Services change；HTTP 对象图只向独立 WSS/TCP owner 交付凭据，不拥有 socket。
+`acceptVisitInvite` 只接受 VisitSessionID、InviteID、expected revision 与稳定 idempotency key，并返回匹配且未过期的 reservation；`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease。两者都不能成为 PersonalWorld 或 VisitSession 最终事实，HTTP 对象图不拥有 socket。
 
 ### 3. WSS Control
 
@@ -79,7 +79,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - 独立执行 heartbeat、close reason、sequence 缺口检测和有界重连，并把 generated payload 投递主线程
 - session invalidation/forced logout 后关闭 WSS 与后续 TLS/TCP、清理本地 session 并回到登录流程
 
-当前客户端已接入只接收 WSS control owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-wss-control-边界)。本接入层继续约束初始化不自动连接、Runtime 不公开 WSS application send API，PersonalWorld/VisitSession 状态消费仍由后续 change 交付。
+当前客户端已接入只接收 WSS control owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-wss-control-边界)。初始化不自动连接，Runtime 不公开 WSS application send API；assignment/visit control PUSH 由 PersonalWorld/VisitSession Services 作为收敛 hint 消费。
 
 ### 4. TLS/TCP Business
 
@@ -91,14 +91,14 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - 只接收登记的 response/error 与 2002、2121、2122 push；`VISIT_SAFE_RETURN_PUSH` 到达后立即停止旧 target mutation，等待有界关闭并进入受控返回流程
 - ticket、admission、完整 payload 和 assignment 私有字段不得进入客户端日志；session epoch 失效时同时关闭 WSS/TCP
 
-当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH，不保存 PersonalWorld/VisitSession 最终 snapshot，不提供 UI、Scene、自动重连或业务流程编排。
+当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，UI、Scene 与自动恢复仍未接入。
 
 ### 5. Account/PersonalWorld/VisitSession Services
 
-- account state from HTTPS results
-- world/visit snapshot with monotonic revision
-- semantic commands
-- no transport type in UI
+- `PersonalWorldService` 保存 primary/current world 与 assignment，完整 replacement 使用单调 revision，control assignment 只作为 refresh hint。
+- `VisitSessionService` 保存 current VisitSession、role、定向 invite inbox 与 control hint，并统一施加 Owner/Visitor 与 expected revision 写入门。
+- `WorldAdmissionCoordinator` 线性化 own-world、join visit、visiting 与 safe-return；迟到 completion 同时经过 session/target generation gate。
+- Services 只公开不可变、无 credential snapshot；后续 UI 不接触 transport type、generated message 或第二份最终事实。
 
 ### 6. UI Vertical Slice
 
@@ -140,11 +140,12 @@ App Start
 
 目标恢复策略要求 WSS 与 TCP 独立重连但共享 session epoch；epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
 
-上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS control 与显式 TLS/TCP gameplay channel，但尚未建立 token 跨进程恢复、PersonalWorld/VisitSession Services、目标状态机或独立通道重连编排。
+上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS/TLS-TCP channel、PersonalWorld/VisitSession Services 与目标状态机；token 跨进程恢复、独立通道自动恢复策略、UI 与 SceneContext 仍未建立。
 
 ## 世界与访问快照
 
 - PersonalWorld/VisitSession Service 分别保存各自最高 revision。
+- Assignment 完整撤销后保留最高 generation tombstone；同代或更旧 WorldInstance 不得复活。
 - Response 与 push 使用同一 snapshot 语义。
 - 低 revision snapshot 丢弃。
 - 同 revision 重复消息保持幂等。
@@ -215,7 +216,6 @@ receive invite
 - Redis flush 后允许的恢复/失效行为
 - 慢网络、timeout、重复 push 和低 revision
 - Windows Development/Release build
-
 - 直接邀请访问且不创建虚假 Party/Room
 - Visitor permission 与 Owner-only command 拒绝
 - Owner grace 内恢复和 deadline 到期安全返回

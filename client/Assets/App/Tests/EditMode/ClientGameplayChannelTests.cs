@@ -309,6 +309,43 @@ namespace IHomeland.Client.Tests.EditMode
             await fixture.StopAsync();
         }
 
+        /// <summary>
+        /// 验证 JOIN 首帧只能由 channel 内部注入已消费 admission，并在成功后激活 generation。
+        /// </summary>
+        /// <returns>等待 JOIN response 与 channel 停止。</returns>
+        [Test]
+        public async Task PendingJoinKeepsAdmissionInsideGameplayChannel()
+        {
+            var fixture = await GameplayFixture.CreateAsync(blockGameplayWrites: false);
+            Assert.That(await fixture.ConnectVisitAsync(), Is.True);
+            Assert.That(fixture.Channel.Snapshot.State, Is.EqualTo(ClientGameplayChannelState.Pending));
+
+            var join = fixture.Channel.JoinPendingVisitAsync(5, CancellationToken.None);
+            await fixture.Connection.WaitForWritesAsync(2);
+            var outbound = ParseFramedEnvelope(fixture.Connection.GetWrite(1));
+            var command = VisitJoinCommand.Parser.ParseFrom(outbound.Payload);
+            Assert.That(command.ExpectedRevision, Is.EqualTo(5));
+            Assert.That(command.AdmissionCredential, Is.EqualTo("wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+
+            fixture.Connection.Enqueue(ClientGameplayFramer.Frame(new ReliableEnvelope
+            {
+                ProtocolVersion = 1,
+                MessageId = 2110,
+                Kind = MessageKind.Response,
+                CommandId = outbound.CommandId,
+                Sequence = 1,
+                TimestampMs = 1,
+                Payload = new VisitJoinResponse { Result = new VisitMutationResult() }.ToByteString(),
+            }.ToByteArray()));
+
+            Assert.That((await join).IsSuccess, Is.True);
+            Assert.That(fixture.Channel.Snapshot.State, Is.EqualTo(ClientGameplayChannelState.Active));
+            Assert.That(
+                (await fixture.Channel.JoinPendingVisitAsync(6, CancellationToken.None)).Failure,
+                Is.EqualTo(ClientGameplayFailureKind.Policy));
+            await fixture.StopAsync();
+        }
+
         /// <summary>解析测试捕获的完整 framed envelope。</summary>
         /// <param name="frame">4-byte prefix 与 envelope body。</param>
         /// <returns>生成 ReliableEnvelope。</returns>
@@ -426,6 +463,17 @@ namespace IHomeland.Client.Tests.EditMode
                 return await Channel.ConnectAsync(admission.Value, CancellationToken.None);
             }
 
+            /// <summary>签发并连接 Visitor JOIN admission。</summary>
+            /// <returns>Gameplay connect 结果。</returns>
+            internal async Task<bool> ConnectVisitAsync()
+            {
+                var admission = await Session.IssueWorldAdmissionAsync(
+                    ClientWorldAdmissionTarget.VisitWorld("visit-fixture"),
+                    "fixture-visit-admission-key-01",
+                    CancellationToken.None);
+                return await Channel.ConnectAsync(admission.Value, CancellationToken.None);
+            }
+
             /// <summary>按生产逆序停止测试对象图。</summary>
             /// <returns>全部 owner 停止时完成。</returns>
             internal async Task StopAsync()
@@ -496,14 +544,19 @@ namespace IHomeland.Client.Tests.EditMode
                 throw new NotSupportedException();
 
             /// <inheritdoc />
+            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(string accessToken, ClientVisitInviteAcceptRequest request, string idempotencyKey, CancellationToken cancellationToken) =>
+                throw new NotSupportedException();
+
+            /// <inheritdoc />
             public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(string accessToken, ClientWorldAdmissionTarget target, string idempotencyKey, CancellationToken cancellationToken)
             {
+                var visit = target.Kind == ClientWorldAdmissionTargetKind.VisitWorld;
                 return Task.FromResult(ClientHttpResult<ClientWorldAdmission>.Success(
                     new ClientWorldAdmission(
                         "wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                         _endpoint,
-                        ClientWorldRole.Owner,
-                        ClientWorldAdmissionPurpose.OwnWorld,
+                        visit ? ClientWorldRole.Visitor : ClientWorldRole.Owner,
+                        visit ? ClientWorldAdmissionPurpose.Join : ClientWorldAdmissionPurpose.OwnWorld,
                         9000)));
             }
         }

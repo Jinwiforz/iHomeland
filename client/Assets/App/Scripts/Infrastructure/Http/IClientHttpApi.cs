@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 namespace IHomeland.Client.Infrastructure.Http
 {
     /// <summary>
-    /// 定义当前客户端网络阶段唯一允许上层调用的九个强类型 HTTP operation。
+    /// 定义当前客户端网络阶段唯一允许上层调用的冻结强类型 HTTP operation。
     /// </summary>
     /// <remarks>
     /// 接口由 application 消费侧拥有测试替换边界，不暴露任意 method/path/body。Bearer token 只由
@@ -93,6 +93,20 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <returns>一次性 world bootstrap 投影、服务端错误或稳定本地失败。</returns>
         Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
             string accessToken,
+            CancellationToken cancellationToken);
+
+        /// <summary>
+        /// 由当前 bearer 对应的目标 Visitor 接受一张定向 invite。
+        /// </summary>
+        /// <param name="accessToken">Session owner 当前 snapshot 的 access token。</param>
+        /// <param name="request">只包含 path identity 与 expected revision 的封闭输入。</param>
+        /// <param name="idempotencyKey">同一 accept intent 必须稳定复用的安全 ASCII key。</param>
+        /// <param name="cancellationToken">取消等待；取消不证明服务端未提交 reservation。</param>
+        /// <returns>Visitor reservation、服务端错误或稳定本地失败。</returns>
+        Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+            string accessToken,
+            ClientVisitInviteAcceptRequest request,
+            string idempotencyKey,
             CancellationToken cancellationToken);
 
         /// <summary>

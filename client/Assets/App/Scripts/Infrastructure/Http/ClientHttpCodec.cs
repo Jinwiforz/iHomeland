@@ -140,6 +140,34 @@ namespace IHomeland.Client.Infrastructure.Http
         }
 
         /// <summary>
+        /// 构造冻结 accept operation 的 path，并在创建 HTTP request 前验证两个 identity。
+        /// </summary>
+        /// <param name="request">目标 VisitSession、invite 与 expected revision。</param>
+        /// <returns>只替换两个已验证 path segment 的根相对路径。</returns>
+        /// <exception cref="ArgumentNullException">Request 为空时抛出。</exception>
+        /// <exception cref="ArgumentException">Identity 或 expected revision 无效时抛出。</exception>
+        internal string BuildVisitInviteAcceptPath(ClientVisitInviteAcceptRequest request)
+        {
+            ValidateVisitInviteAcceptRequest(request);
+            return "/v1/visits/" + Uri.EscapeDataString(request.VisitSessionID) +
+                   "/invites/" + Uri.EscapeDataString(request.InviteID) +
+                   "/accept";
+        }
+
+        /// <summary>
+        /// 编码 invite accept request，确保 body 只包含 expectedRevision。
+        /// </summary>
+        /// <param name="request">目标 VisitSession、invite 与 expected revision。</param>
+        /// <returns>只包含 expectedRevision 的 UTF-8 JSON。</returns>
+        /// <exception cref="ArgumentNullException">Request 为空时抛出。</exception>
+        /// <exception cref="ArgumentException">Identity 或 expected revision 无效时抛出。</exception>
+        internal byte[] EncodeVisitInviteAccept(ClientVisitInviteAcceptRequest request)
+        {
+            ValidateVisitInviteAcceptRequest(request);
+            return WriteObject(writer => writer.WriteNumber("expectedRevision", request.ExpectedRevision));
+        }
+
+        /// <summary>
         /// 解码 version response 并验证全部 required field。
         /// </summary>
         /// <param name="body">已通过字节上限检查的 UTF-8 JSON body。</param>
@@ -294,6 +322,42 @@ namespace IHomeland.Client.Infrastructure.Http
                 }
 
                 return new ClientWorldBootstrap(world, assignment);
+            });
+        }
+
+        /// <summary>
+        /// 解码 invite accept response，并绑定请求的 VisitSession 与 expected revision。
+        /// </summary>
+        /// <param name="body">已通过字节上限检查的 UTF-8 JSON body。</param>
+        /// <param name="request">产生该响应的封闭 accept 输入。</param>
+        /// <returns>只供后续 admission/join 使用的 reservation。</returns>
+        /// <exception cref="ArgumentNullException">Request 为空时抛出。</exception>
+        /// <exception cref="ArgumentException">Request identity 或 revision 无效时抛出。</exception>
+        /// <exception cref="ClientHttpContractException">响应 identity、revision 或 expiry 无效时抛出。</exception>
+        internal ClientVisitReservation DecodeVisitInviteAccept(
+            ReadOnlyMemory<byte> body,
+            ClientVisitInviteAcceptRequest request)
+        {
+            ValidateVisitInviteAcceptRequest(request);
+            return ReadObject(body, root =>
+            {
+                var reservationElement = ReadObjectProperty(root, "reservation");
+                var visitSessionID = ReadIdentity(reservationElement, "visitSessionId");
+                if (!string.Equals(visitSessionID, request.VisitSessionID, StringComparison.Ordinal))
+                {
+                    throw Contract("Reservation 与 accept VisitSession identity 不一致。");
+                }
+
+                var revision = ReadInt64(reservationElement, "revision", 1, long.MaxValue);
+                if (revision <= request.ExpectedRevision)
+                {
+                    throw Contract("Reservation revision 未推进 expected revision。");
+                }
+
+                return new ClientVisitReservation(
+                    visitSessionID,
+                    revision,
+                    ReadInt64(reservationElement, "reservationExpiresAtMs", 1, long.MaxValue));
             });
         }
 
@@ -819,6 +883,27 @@ namespace IHomeland.Client.Infrastructure.Http
             if (value == null || value.Length < 1 || value.Length > 128 || !IdentityPattern.IsMatch(value))
             {
                 throw new ArgumentException("Identity 不符合公开 contract。", parameterName);
+            }
+        }
+
+        /// <summary>
+        /// 验证 accept path identity 与正 expected revision，阻止创建部分请求。
+        /// </summary>
+        /// <param name="request">待编码的 accept 输入。</param>
+        /// <exception cref="ArgumentNullException">Request 为空时抛出。</exception>
+        /// <exception cref="ArgumentException">任一输入无效时抛出。</exception>
+        private static void ValidateVisitInviteAcceptRequest(ClientVisitInviteAcceptRequest request)
+        {
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            ValidateIdentity(request.VisitSessionID, nameof(request.VisitSessionID));
+            ValidateIdentity(request.InviteID, nameof(request.InviteID));
+            if (request.ExpectedRevision <= 0)
+            {
+                throw new ArgumentException("Expected revision 必须为正数。", nameof(request.ExpectedRevision));
             }
         }
 

@@ -165,7 +165,7 @@ namespace IHomeland.Client.Infrastructure.Http
             string bearerToken,
             CancellationToken cancellationToken)
         {
-            return await SendAsync(operation, requestBody, bearerToken, cancellationToken, null);
+            return await SendAsync(operation, requestBody, bearerToken, cancellationToken, null, null);
         }
 
         /// <summary>
@@ -175,7 +175,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="requestBody">JSON operation 的 UTF-8 body。</param>
         /// <param name="bearerToken">Bearer operation 的当前 access token。</param>
         /// <param name="cancellationToken">调用方取消等待的信号。</param>
-        /// <param name="idempotencyKey">仅 issueWorldAdmission 使用的安全 ASCII key。</param>
+        /// <param name="idempotencyKey">仅冻结幂等 operation 使用的安全 ASCII key。</param>
         /// <returns>完整 raw response 或稳定本地失败。</returns>
         internal async Task<ClientHttpRawResult> SendAsync(
             ClientHttpOperation operation,
@@ -184,12 +184,44 @@ namespace IHomeland.Client.Infrastructure.Http
             CancellationToken cancellationToken,
             string idempotencyKey)
         {
+            return await SendAsync(
+                operation,
+                requestBody,
+                bearerToken,
+                cancellationToken,
+                idempotencyKey,
+                null);
+        }
+
+        /// <summary>
+        /// 发送可选带冻结 path parameter 与 Idempotency-Key 的单个 operation。
+        /// </summary>
+        /// <param name="operation">Catalog 提供的不可变 descriptor。</param>
+        /// <param name="requestBody">JSON operation 的 UTF-8 body。</param>
+        /// <param name="bearerToken">Bearer operation 的当前 access token。</param>
+        /// <param name="cancellationToken">调用方取消等待的信号。</param>
+        /// <param name="idempotencyKey">仅冻结幂等 operation 使用的安全 ASCII key。</param>
+        /// <param name="requestPath">仅 acceptVisitInvite 使用的已绑定根相对 path。</param>
+        /// <returns>完整 raw response 或稳定本地失败。</returns>
+        internal async Task<ClientHttpRawResult> SendAsync(
+            ClientHttpOperation operation,
+            byte[] requestBody,
+            string bearerToken,
+            CancellationToken cancellationToken,
+            string idempotencyKey,
+            string requestPath)
+        {
             if (operation == null)
             {
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            var localFailure = ValidateRequest(operation, requestBody, bearerToken, idempotencyKey);
+            var localFailure = ValidateRequest(
+                operation,
+                requestBody,
+                bearerToken,
+                idempotencyKey,
+                requestPath);
             if (localFailure != null)
             {
                 return ClientHttpRawResult.Failed(localFailure);
@@ -207,7 +239,12 @@ namespace IHomeland.Client.Infrastructure.Http
                        cancellationToken,
                        deadlineCancellation.Token,
                        _lifetimeCancellation.Token))
-            using (var request = CreateRequest(operation, requestBody, bearerToken, idempotencyKey))
+            using (var request = CreateRequest(
+                       operation,
+                       requestBody,
+                       bearerToken,
+                       idempotencyKey,
+                       requestPath))
             {
                 try
                 {
@@ -370,12 +407,14 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="requestBody">待发送 body。</param>
         /// <param name="bearerToken">待发送 credential。</param>
         /// <param name="idempotencyKey">可选幂等 header。</param>
+        /// <param name="requestPath">可选冻结 path parameter 绑定结果。</param>
         /// <returns>违反本地策略时返回失败，否则为空。</returns>
         private static ClientHttpFailure ValidateRequest(
             ClientHttpOperation operation,
             byte[] requestBody,
             string bearerToken,
-            string idempotencyKey)
+            string idempotencyKey,
+            string requestPath)
         {
             var hasBody = requestBody != null && requestBody.Length > 0;
             if (operation.RequestBodyPolicy == ClientHttpBodyPolicy.None && hasBody)
@@ -399,11 +438,17 @@ namespace IHomeland.Client.Infrastructure.Http
                 return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
             }
 
-            var requiresIdempotencyKey = ReferenceEquals(
-                operation,
-                ClientHttpOperationCatalog.IssueWorldAdmission);
+            var requiresIdempotencyKey = ReferenceEquals(operation, ClientHttpOperationCatalog.AcceptVisitInvite) ||
+                                         ReferenceEquals(operation, ClientHttpOperationCatalog.IssueWorldAdmission);
             if (requiresIdempotencyKey != !string.IsNullOrEmpty(idempotencyKey) ||
                 (requiresIdempotencyKey && !IsValidIdempotencyKey(idempotencyKey)))
+            {
+                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+            }
+
+            var requiresBoundPath = ReferenceEquals(operation, ClientHttpOperationCatalog.AcceptVisitInvite);
+            if (requiresBoundPath != !string.IsNullOrEmpty(requestPath) ||
+                (requiresBoundPath && !IsValidVisitInviteAcceptPath(requestPath)))
             {
                 return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
             }
@@ -418,14 +463,18 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="requestBody">已通过上限验证的 JSON body。</param>
         /// <param name="bearerToken">当前 session access token。</param>
         /// <param name="idempotencyKey">可选幂等 header。</param>
+        /// <param name="requestPath">可选冻结 path parameter 绑定结果。</param>
         /// <returns>由调用方 using 释放的请求。</returns>
         private static HttpRequestMessage CreateRequest(
             ClientHttpOperation operation,
             byte[] requestBody,
             string bearerToken,
-            string idempotencyKey)
+            string idempotencyKey,
+            string requestPath)
         {
-            var request = new HttpRequestMessage(operation.Method, operation.RelativePath);
+            var request = new HttpRequestMessage(
+                operation.Method,
+                string.IsNullOrEmpty(requestPath) ? operation.RelativePath : requestPath);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             if (operation.Authentication == ClientHttpAuthentication.Bearer)
             {
@@ -462,6 +511,71 @@ namespace IHomeland.Client.Infrastructure.Http
             }
 
             foreach (var character in value)
+            {
+                if (!(character >= 'A' && character <= 'Z') &&
+                    !(character >= 'a' && character <= 'z') &&
+                    !(character >= '0' && character <= '9') &&
+                    character != '.' && character != '_' && character != ':' && character != '-')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 验证 acceptVisitInvite 的 path 只能由两个规范 identity segment 构成。
+        /// </summary>
+        /// <param name="value">待发送根相对 path。</param>
+        /// <returns>Path 与冻结模板完全匹配时返回 true。</returns>
+        private static bool IsValidVisitInviteAcceptPath(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return false;
+            }
+
+            var segments = value.Split('/');
+            return segments.Length == 7 &&
+                   segments[0].Length == 0 &&
+                   string.Equals(segments[1], "v1", StringComparison.Ordinal) &&
+                   string.Equals(segments[2], "visits", StringComparison.Ordinal) &&
+                   IsCanonicalIdentitySegment(segments[3]) &&
+                   string.Equals(segments[4], "invites", StringComparison.Ordinal) &&
+                   IsCanonicalIdentitySegment(segments[5]) &&
+                   string.Equals(segments[6], "accept", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 验证 path segment 解码后仍符合公开 identity grammar，且编码是唯一规范形式。
+        /// </summary>
+        /// <param name="segment">待验证 URI path segment。</param>
+        /// <returns>Segment 为规范安全 identity 时返回 true。</returns>
+        private static bool IsCanonicalIdentitySegment(string segment)
+        {
+            if (string.IsNullOrEmpty(segment))
+            {
+                return false;
+            }
+
+            string identity;
+            try
+            {
+                identity = Uri.UnescapeDataString(segment);
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
+
+            if (identity.Length < 1 || identity.Length > 128 ||
+                !string.Equals(Uri.EscapeDataString(identity), segment, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            foreach (var character in identity)
             {
                 if (!(character >= 'A' && character <= 'Z') &&
                     !(character >= 'a' && character <= 'z') &&

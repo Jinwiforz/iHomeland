@@ -545,6 +545,68 @@ namespace IHomeland.Client.Infrastructure.Http
     }
 
     /// <summary>
+    /// 保存目标 Visitor 接受定向 invite 所需的公开输入。
+    /// </summary>
+    internal sealed class ClientVisitInviteAcceptRequest
+    {
+        /// <summary>
+        /// 创建不包含 actor、world、assignment 或 credential 的 accept 输入。
+        /// </summary>
+        /// <param name="visitSessionID">Invite 所属 VisitSession 标识。</param>
+        /// <param name="inviteID">待接受的定向 invite 标识。</param>
+        /// <param name="expectedRevision">从 invite 读取的正 VisitSession revision。</param>
+        internal ClientVisitInviteAcceptRequest(
+            string visitSessionID,
+            string inviteID,
+            long expectedRevision)
+        {
+            VisitSessionID = visitSessionID ?? throw new ArgumentNullException(nameof(visitSessionID));
+            InviteID = inviteID ?? throw new ArgumentNullException(nameof(inviteID));
+            ExpectedRevision = expectedRevision;
+        }
+
+        /// <summary>获取 invite 所属 VisitSession 标识。</summary>
+        internal string VisitSessionID { get; }
+
+        /// <summary>获取待接受 invite 标识。</summary>
+        internal string InviteID { get; }
+
+        /// <summary>获取乐观并发 expected revision。</summary>
+        internal long ExpectedRevision { get; }
+    }
+
+    /// <summary>
+    /// 保存 accept 成功后只供 admission/join 使用的 Visitor reservation 投影。
+    /// </summary>
+    internal sealed class ClientVisitReservation
+    {
+        /// <summary>
+        /// 创建不包含 credential 或内部 membership binding 的 reservation。
+        /// </summary>
+        /// <param name="visitSessionID">Reservation 所属 VisitSession 标识。</param>
+        /// <param name="revision">Accept 首次提交后的正 revision。</param>
+        /// <param name="expiresAtMilliseconds">Reservation Unix expiry，单位为毫秒。</param>
+        internal ClientVisitReservation(
+            string visitSessionID,
+            long revision,
+            long expiresAtMilliseconds)
+        {
+            VisitSessionID = visitSessionID ?? throw new ArgumentNullException(nameof(visitSessionID));
+            Revision = revision;
+            ExpiresAtMilliseconds = expiresAtMilliseconds;
+        }
+
+        /// <summary>获取 reservation 所属 VisitSession 标识。</summary>
+        internal string VisitSessionID { get; }
+
+        /// <summary>获取 accept 后的 VisitSession revision。</summary>
+        internal long Revision { get; }
+
+        /// <summary>获取 reservation Unix expiry，单位为毫秒。</summary>
+        internal long ExpiresAtMilliseconds { get; }
+    }
+
+    /// <summary>
     /// 标识 world admission 请求的封闭目标类别。
     /// </summary>
     internal enum ClientWorldAdmissionTargetKind

@@ -250,9 +250,7 @@ client/
           Control/
           Session/
           Account/
-          PersonalWorld/
-          VisitSession/
-          WorldAdmission/
+          World/                  # PersonalWorld、VisitSession 与 admission flow 的 C2 feature slice
         Infrastructure/
           Http/
           WebSocket/
@@ -295,9 +293,9 @@ client/
 
 纯 C# session/account/personal-world/visit-session 状态与命令，不依赖具体 UI、Unity Host 或平台 socket/WebSocket 对象。Channel owner 可以依赖窄 transport interface 与冻结 codec，但不得直接持有平台网络实现或第二份业务事实。
 
-当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session/credential owner、`Application/Control` 的只接收 WSS control 状态机，以及 `Application/Gameplay` 的独立 TLS/TCP channel owner；具体行为由[客户端接入规范](client-integration.md)统一说明。
+当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session/credential owner、`Application/Control` 的只接收 WSS control 状态机、`Application/Gameplay` 的独立 TLS/TCP channel owner，以及 `Application/World` 的 C2 访问 feature slice；具体行为由[客户端接入规范](client-integration.md)统一说明。
 
-尚未出现独立业务需求的 `Account`、`PersonalWorld`、`VisitSession` 与 `WorldAdmission` 目录不得为了目标树完整而创建空壳。
+`Application/World` 只共置紧密协作的不可变 model/mapper、`PersonalWorldService`、`VisitSessionService` 与 `WorldAdmissionCoordinator`；三类 owner 的事实和转换职责仍然分离，该目录不得演变为统一 `WorldManager` 或第二套网络 router。尚未出现独立业务需求的 `Account` 及其他 application 目录不得为了目标树完整而创建空壳。
 
 ### `Infrastructure`
 
@@ -315,7 +313,7 @@ HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第
 
 只在正式场景需要应用接口时创建。SceneContext 持有 camera/world/scene UI 引用，随场景卸载。
 
-个人世界客户端只能在服务端 v1 资格验收后增加 pure C# PersonalWorld、VisitSession 与 WorldAdmission application 目录，以及 Infrastructure 下的协议 adapters。World 场景、Actor 和表现仍归 Scene Scope；不得创建持有 socket、token、world snapshot 与 GameObject 的统一 `WorldManager`。
+个人世界客户端只能在服务端 v1 资格验收后增加 pure C# PersonalWorld、VisitSession 与 WorldAdmission application owner，以及 Infrastructure 下的协议 adapters。多个 owner 可以按已批准 change 共置于窄 feature slice，但不能合并状态所有权。World 场景、Actor 和表现仍归 Scene Scope；不得创建持有 socket、token、world snapshot 与 GameObject 的统一 `WorldManager`。
 
 ## 文档结构
 

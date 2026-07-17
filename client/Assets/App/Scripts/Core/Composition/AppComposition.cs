@@ -3,6 +3,7 @@ using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
+using IHomeland.Client.Application.World;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Infrastructure.Http;
@@ -84,10 +85,11 @@ namespace IHomeland.Client.Core.Composition
             var codec = new ClientHttpCodec();
             var httpApi = new ClientHttpApi(transport, codec);
             var bootstrapService = new ClientBootstrapService(environment, httpApi, configurationStore);
+            var clock = new SystemClientClock();
             var sessionCoordinator = new SessionCoordinator(
                 configurationStore,
                 httpApi,
-                new SystemClientClock());
+                clock);
             var controlCatalog = new ClientControlCatalog();
             var controlCodec = new ClientControlCodec(controlCatalog);
             var gameplayChannel = new ClientGameplayChannel(
@@ -106,9 +108,16 @@ namespace IHomeland.Client.Core.Composition
                 new SystemClientControlDelay(),
                 ControlRetryDelays,
                 gameplayChannel.InvalidateSession);
+            var personalWorldService = new PersonalWorldService(controlChannel, gameplayChannel);
+            var visitSessionService = new VisitSessionService(controlChannel, gameplayChannel, clock);
+            var worldAdmissionCoordinator = new WorldAdmissionCoordinator(
+                sessionCoordinator,
+                gameplayChannel,
+                personalWorldService,
+                visitSessionService);
             var sceneLifetimeOwner = new SceneLifetimeOwner();
 
-            // 逆序停止依次撤销 Scene、WSS、TCP、Session、HTTP、Configuration，最后拒绝主线程回写。
+            // 逆序停止依次撤销 Scene、world flow/subscriber、WSS、TCP、Session、HTTP、Configuration，最后拒绝主线程回写。
             IAppLifetimeParticipant[] participants =
             {
                 dispatcher,
@@ -117,6 +126,9 @@ namespace IHomeland.Client.Core.Composition
                 sessionCoordinator,
                 gameplayChannel,
                 controlChannel,
+                personalWorldService,
+                visitSessionService,
+                worldAdmissionCoordinator,
                 sceneLifetimeOwner,
             };
 
@@ -129,7 +141,10 @@ namespace IHomeland.Client.Core.Composition
                 bootstrapService,
                 sessionCoordinator,
                 controlChannel,
-                gameplayChannel);
+                gameplayChannel,
+                personalWorldService,
+                visitSessionService,
+                worldAdmissionCoordinator);
         }
     }
 }

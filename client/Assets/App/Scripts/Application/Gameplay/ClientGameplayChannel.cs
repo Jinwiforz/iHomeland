@@ -418,6 +418,76 @@ namespace IHomeland.Client.Application.Gameplay
             return ClientGameplayResult<TResponse>.Failed(completion.Failure);
         }
 
+        /// <summary>
+        /// 使用 channel 内部保存的一次性 JOIN admission 构造首个 command，避免 credential 逸出到 coordinator。
+        /// </summary>
+        /// <param name="expectedRevision">Reservation 后 current VisitSession revision。</param>
+        /// <param name="cancellationToken">只取消调用方等待，不重发 mutation。</param>
+        /// <returns>强类型 JOIN result。</returns>
+        internal Task<ClientGameplayResult<VisitJoinResponse>> JoinPendingVisitAsync(
+            ulong expectedRevision,
+            CancellationToken cancellationToken)
+        {
+            string admission;
+            lock (_sync)
+            {
+                if (expectedRevision == 0 ||
+                    _snapshot.State != ClientGameplayChannelState.Pending ||
+                    _purpose != ClientWorldAdmissionPurpose.Join ||
+                    string.IsNullOrEmpty(_pendingAdmission))
+                {
+                    return Task.FromResult(
+                        ClientGameplayResult<VisitJoinResponse>.Failed(ClientGameplayFailureKind.Policy));
+                }
+
+                admission = _pendingAdmission;
+            }
+
+            return SendAsync(
+                ClientGameplayCatalog.VisitJoin,
+                new VisitJoinCommand
+                {
+                    AdmissionCredential = admission,
+                    ExpectedRevision = expectedRevision,
+                },
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// 使用 channel 内部保存的一次性 RECONNECT admission 构造首个 command，避免 credential 逸出到 Service。
+        /// </summary>
+        /// <param name="expectedRevision">Reconnect window 对应 current revision。</param>
+        /// <param name="cancellationToken">只取消调用方等待，不重发 mutation。</param>
+        /// <returns>强类型 RECONNECT result。</returns>
+        internal Task<ClientGameplayResult<VisitReconnectResponse>> ReconnectPendingVisitAsync(
+            ulong expectedRevision,
+            CancellationToken cancellationToken)
+        {
+            string admission;
+            lock (_sync)
+            {
+                if (expectedRevision == 0 ||
+                    _snapshot.State != ClientGameplayChannelState.Pending ||
+                    _purpose != ClientWorldAdmissionPurpose.Reconnect ||
+                    string.IsNullOrEmpty(_pendingAdmission))
+                {
+                    return Task.FromResult(
+                        ClientGameplayResult<VisitReconnectResponse>.Failed(ClientGameplayFailureKind.Policy));
+                }
+
+                admission = _pendingAdmission;
+            }
+
+            return SendAsync(
+                ClientGameplayCatalog.VisitReconnect,
+                new VisitReconnectCommand
+                {
+                    AdmissionCredential = admission,
+                    ExpectedRevision = expectedRevision,
+                },
+                cancellationToken);
+        }
+
         /// <summary>由 WSS control 在统一 Session owner 接受更高 epoch 后关闭匹配 gameplay generation。</summary>
         /// <param name="sourceSessionGeneration">被失效 control connection 的来源 generation。</param>
         internal void InvalidateSession(long sourceSessionGeneration)

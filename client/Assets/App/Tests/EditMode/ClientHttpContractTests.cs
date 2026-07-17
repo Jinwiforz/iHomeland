@@ -77,12 +77,12 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
-        /// 验证 catalog 只暴露当前 capability 的九个 operation，并冻结核心 metadata。
+        /// 验证 catalog 只暴露当前 capability 的十个 operation，并冻结核心 metadata。
         /// </summary>
         [Test]
-        public void CatalogFreezesNineOperations()
+        public void CatalogFreezesTenOperations()
         {
-            Assert.That(ClientHttpOperationCatalog.All, Has.Count.EqualTo(9));
+            Assert.That(ClientHttpOperationCatalog.All, Has.Count.EqualTo(10));
             AssertDescriptor(
                 ClientHttpOperationCatalog.GetVersion,
                 "getVersion",
@@ -180,6 +180,18 @@ namespace IHomeland.Client.Tests.EditMode
                 5000,
                 64 * 1024);
             AssertDescriptor(
+                ClientHttpOperationCatalog.AcceptVisitInvite,
+                "acceptVisitInvite",
+                HttpMethod.Post,
+                "/v1/visits/{visitSessionId}/invites/{inviteId}/accept",
+                ClientHttpAuthentication.Bearer,
+                ClientHttpBodyPolicy.Json,
+                4096,
+                HttpStatusCode.OK,
+                true,
+                5000,
+                16 * 1024);
+            AssertDescriptor(
                 ClientHttpOperationCatalog.IssueWorldAdmission,
                 "issueWorldAdmission",
                 HttpMethod.Post,
@@ -194,10 +206,10 @@ namespace IHomeland.Client.Tests.EditMode
 
             Assert.That(
                 ClientHttpOperationCatalog.All.Select(item => item.OperationID).Distinct().Count(),
-                Is.EqualTo(9));
+                Is.EqualTo(10));
             Assert.That(
-                ClientHttpOperationCatalog.All.All(item => item.RelativePath.IndexOf('{') < 0),
-                Is.True);
+                ClientHttpOperationCatalog.All.Count(item => item.RelativePath.IndexOf('{') >= 0),
+                Is.EqualTo(1));
         }
 
         /// <summary>
@@ -281,6 +293,42 @@ namespace IHomeland.Client.Tests.EditMode
                 ClientWorldAdmissionTarget.VisitWorld("visit/invalid")));
             Assert.Throws<ClientHttpContractException>(() => codec.DecodeWorldAdmission(Utf8(
                 "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"JOIN\",\"role\":\"OWNER\"}")));
+        }
+
+        /// <summary>
+        /// 验证 invite accept 只绑定两个 path identity 与 expected revision，并拒绝错配 reservation。
+        /// </summary>
+        [Test]
+        public void CodecFreezesVisitInviteAcceptContract()
+        {
+            var codec = new ClientHttpCodec();
+            var request = new ClientVisitInviteAcceptRequest("visit:fixture", "invite_fixture", 7);
+
+            Assert.That(
+                codec.BuildVisitInviteAcceptPath(request),
+                Is.EqualTo("/v1/visits/visit%3Afixture/invites/invite_fixture/accept"));
+            using (var body = JsonDocument.Parse(codec.EncodeVisitInviteAccept(request)))
+            {
+                Assert.That(body.RootElement.EnumerateObject().Count(), Is.EqualTo(1));
+                Assert.That(body.RootElement.GetProperty("expectedRevision").GetInt64(), Is.EqualTo(7));
+            }
+
+            var reservation = codec.DecodeVisitInviteAccept(
+                Utf8("{\"reservation\":{\"visitSessionId\":\"visit:fixture\",\"revision\":8,\"reservationExpiresAtMs\":9000}}"),
+                request);
+            Assert.That(reservation.VisitSessionID, Is.EqualTo("visit:fixture"));
+            Assert.That(reservation.Revision, Is.EqualTo(8));
+
+            Assert.Throws<ArgumentException>(() => codec.EncodeVisitInviteAccept(
+                new ClientVisitInviteAcceptRequest("visit/invalid", "invite", 7)));
+            Assert.Throws<ArgumentException>(() => codec.BuildVisitInviteAcceptPath(
+                new ClientVisitInviteAcceptRequest("visit", "invite", 0)));
+            Assert.Throws<ClientHttpContractException>(() => codec.DecodeVisitInviteAccept(
+                Utf8("{\"reservation\":{\"visitSessionId\":\"visit-other\",\"revision\":8,\"reservationExpiresAtMs\":9000}}"),
+                request));
+            Assert.Throws<ClientHttpContractException>(() => codec.DecodeVisitInviteAccept(
+                Utf8("{\"reservation\":{\"visitSessionId\":\"visit:fixture\",\"revision\":7,\"reservationExpiresAtMs\":9000}}"),
+                request));
         }
 
         /// <summary>
@@ -383,6 +431,24 @@ namespace IHomeland.Client.Tests.EditMode
                     .GetProperty("response").GetProperty("body").GetRawText()));
                 Assert.That(world.World.PersonalWorldID, Is.EqualTo("pworld_fixture_owner"));
                 Assert.That(world.Assignment.WorldInstanceID, Is.EqualTo("winst_fixture_current"));
+
+                var acceptCase = cases["visit-accept-success"];
+                var acceptFixture = acceptCase.GetProperty("request");
+                var acceptRequest = new ClientVisitInviteAcceptRequest(
+                    "visit_fixture_one",
+                    "invite_fixture_one",
+                    acceptFixture.GetProperty("body").GetProperty("expectedRevision").GetInt64());
+                using (var encodedAccept = JsonDocument.Parse(codec.EncodeVisitInviteAccept(acceptRequest)))
+                {
+                    Assert.That(
+                        encodedAccept.RootElement.GetProperty("expectedRevision").GetInt64(),
+                        Is.EqualTo(acceptRequest.ExpectedRevision));
+                }
+
+                var reservation = codec.DecodeVisitInviteAccept(
+                    Utf8(acceptCase.GetProperty("response").GetProperty("body").GetRawText()),
+                    acceptRequest);
+                Assert.That(reservation.VisitSessionID, Is.EqualTo(acceptRequest.VisitSessionID));
 
                 var admissionCase = cases["own-world-admission-success"];
                 using (var encodedAdmission = JsonDocument.Parse(codec.EncodeWorldAdmission(

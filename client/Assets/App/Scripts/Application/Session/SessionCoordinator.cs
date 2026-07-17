@@ -308,6 +308,51 @@ namespace IHomeland.Client.Application.Session
         }
 
         /// <summary>
+        /// 使用 current session generation 接受定向 invite，并拒绝迟到或已过期 reservation。
+        /// </summary>
+        /// <param name="request">VisitSession、invite 与 expected revision 的封闭输入。</param>
+        /// <param name="idempotencyKey">同一 accept intent 稳定复用的 key。</param>
+        /// <param name="cancellationToken">取消等待；不会自动重试或声称服务端未提交。</param>
+        /// <returns>Current generation 的有效 reservation、服务端错误或本地失败。</returns>
+        internal async Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+            ClientVisitInviteAcceptRequest request,
+            string idempotencyKey,
+            CancellationToken cancellationToken)
+        {
+            if (!TryCaptureAuthenticated(out var source))
+            {
+                return LocalPolicy<ClientVisitReservation>(
+                    ClientHttpOperationCatalog.AcceptVisitInvite.OperationID);
+            }
+
+            var result = await _httpApi.AcceptVisitInviteAsync(
+                source.Tokens.AccessToken,
+                request,
+                idempotencyKey,
+                cancellationToken);
+            if (!result.IsSuccess)
+            {
+                HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
+                return result;
+            }
+
+            if (result.Value.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds)
+            {
+                return ClientHttpResult<ClientVisitReservation>.Failed(new ClientHttpFailure(
+                    ClientHttpFailureKind.MalformedResponse,
+                    ClientHttpOperationCatalog.AcceptVisitInvite.OperationID));
+            }
+
+            lock (_sync)
+            {
+                return IsCurrent(source.Generation)
+                    ? result
+                    : LocalPolicy<ClientVisitReservation>(
+                        ClientHttpOperationCatalog.AcceptVisitInvite.OperationID);
+            }
+        }
+
+        /// <summary>
         /// 为当前 session generation 签发单次 world admission lease。
         /// </summary>
         /// <param name="target">Own-world 或 visit-world target。</param>

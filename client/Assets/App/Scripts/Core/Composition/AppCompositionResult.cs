@@ -5,6 +5,7 @@ using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
+using IHomeland.Client.Application.World;
 using IHomeland.Client.Core.Lifetime;
 
 namespace IHomeland.Client.Core.Composition
@@ -44,6 +45,21 @@ namespace IHomeland.Client.Core.Composition
         private readonly ClientGameplayChannel _gameplayChannel;
 
         /// <summary>
+        /// 保存 PersonalWorld/assignment 的唯一不可变投影 owner；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly PersonalWorldService _personalWorldService;
+
+        /// <summary>
+        /// 保存 VisitSession/invite 的唯一不可变投影 owner；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly VisitSessionService _visitSessionService;
+
+        /// <summary>
+        /// 保存 current world target 转换的唯一 coordinator；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly WorldAdmissionCoordinator _worldAdmissionCoordinator;
+
+        /// <summary>
         /// 创建只包含宿主运行边界的对象图结果，供不接入 HTTP capability 的 isolated fixture 使用。
         /// </summary>
         /// <param name="lifetime">统一拥有 App Scope 初始化和逆序停止的生命周期。</param>
@@ -65,7 +81,10 @@ namespace IHomeland.Client.Core.Composition
                 bootstrapService: null,
                 sessionCoordinator: null,
                 controlChannel: null,
-                gameplayChannel: null)
+                gameplayChannel: null,
+                personalWorldService: null,
+                visitSessionService: null,
+                worldAdmissionCoordinator: null)
         {
         }
 
@@ -80,6 +99,9 @@ namespace IHomeland.Client.Core.Composition
         /// <param name="sessionCoordinator">App Scope 唯一 Session owner。</param>
         /// <param name="controlChannel">App Scope 唯一 WSS control owner。</param>
         /// <param name="gameplayChannel">App Scope 唯一 TLS/TCP gameplay owner。</param>
+        /// <param name="personalWorldService">PersonalWorld/assignment 投影 owner。</param>
+        /// <param name="visitSessionService">VisitSession/invite 投影 owner。</param>
+        /// <param name="worldAdmissionCoordinator">World target flow owner。</param>
         /// <exception cref="ArgumentException">单帧 callback 上限非正数时抛出。</exception>
         /// <exception cref="ArgumentNullException">任一必需对象、集合引用或 tickable 元素为 null 时抛出。</exception>
         internal AppCompositionResult(
@@ -90,7 +112,10 @@ namespace IHomeland.Client.Core.Composition
             ClientBootstrapService bootstrapService,
             SessionCoordinator sessionCoordinator,
             ClientControlChannel controlChannel,
-            ClientGameplayChannel gameplayChannel)
+            ClientGameplayChannel gameplayChannel,
+            PersonalWorldService personalWorldService,
+            VisitSessionService visitSessionService,
+            WorldAdmissionCoordinator worldAdmissionCoordinator)
         {
             Lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
             Dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -117,6 +142,9 @@ namespace IHomeland.Client.Core.Composition
             _sessionCoordinator = sessionCoordinator;
             _controlChannel = controlChannel;
             _gameplayChannel = gameplayChannel;
+            _personalWorldService = personalWorldService;
+            _visitSessionService = visitSessionService;
+            _worldAdmissionCoordinator = worldAdmissionCoordinator;
         }
 
         /// <summary>
@@ -166,5 +194,20 @@ namespace IHomeland.Client.Core.Composition
         /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 gameplay graph 时抛出。</exception>
         internal ClientGameplayChannel GameplayChannel => _gameplayChannel ??
             throw new InvalidOperationException("当前 isolated host composition 不包含 TLS/TCP gameplay owner。");
+
+        /// <summary>获取完整 Composition 显式连接的 PersonalWorld projection owner。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 world graph 时抛出。</exception>
+        internal PersonalWorldService PersonalWorldService => _personalWorldService ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 PersonalWorld Service。");
+
+        /// <summary>获取完整 Composition 显式连接的 VisitSession projection owner。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 world graph 时抛出。</exception>
+        internal VisitSessionService VisitSessionService => _visitSessionService ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 VisitSession Service。");
+
+        /// <summary>获取完整 Composition 显式连接的 world target flow owner。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 world graph 时抛出。</exception>
+        internal WorldAdmissionCoordinator WorldAdmissionCoordinator => _worldAdmissionCoordinator ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 WorldAdmissionCoordinator。");
     }
 }

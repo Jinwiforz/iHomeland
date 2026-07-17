@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Configuration;
@@ -112,6 +113,82 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(path, Is.EqualTo("/v1/world/admissions"));
             Assert.That(idempotencyKey, Is.EqualTo(key));
             Assert.That(body, Is.EqualTo("{\"kind\":\"OWN_WORLD\"}"));
+            await transport.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 验证 invite accept 精确绑定 path、Bearer、Idempotency-Key 与唯一 body 字段。
+        /// </summary>
+        /// <returns>等待强类型请求与 reservation 解码完成的任务。</returns>
+        [Test]
+        public async Task VisitInviteAcceptUsesFrozenPathHeaderAndSchema()
+        {
+            const string key = "fixture-accept-key-0001";
+            string authorization = null;
+            string idempotencyKey = null;
+            string body = null;
+            Uri requestUri = null;
+            var handler = new DelegateHandler(async (request, cancellationToken) =>
+            {
+                requestUri = request.RequestUri;
+                authorization = request.Headers.Authorization?.ToString();
+                idempotencyKey = request.Headers.GetValues("Idempotency-Key").Single();
+                body = await request.Content.ReadAsStringAsync();
+                return JsonResponse(
+                    HttpStatusCode.OK,
+                    "{\"reservation\":{\"visitSessionId\":\"visit:fixture\",\"revision\":5,\"reservationExpiresAtMs\":9000}}");
+            });
+            var transport = CreateTransport(handler);
+            await transport.InitializeAsync(CancellationToken.None);
+            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+
+            var result = await api.AcceptVisitInviteAsync(
+                "access-token",
+                new ClientVisitInviteAcceptRequest("visit:fixture", "invite_fixture", 4),
+                key,
+                CancellationToken.None);
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(
+                requestUri.AbsolutePath,
+                Is.EqualTo("/v1/visits/visit%3Afixture/invites/invite_fixture/accept"));
+            Assert.That(authorization, Is.EqualTo("Bearer access-token"));
+            Assert.That(idempotencyKey, Is.EqualTo(key));
+            using (var document = JsonDocument.Parse(body))
+            {
+                Assert.That(document.RootElement.EnumerateObject().Count(), Is.EqualTo(1));
+                Assert.That(document.RootElement.GetProperty("expectedRevision").GetInt64(), Is.EqualTo(4));
+            }
+
+            await transport.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 验证非法 accept identity 在创建 HTTP request 前收敛为稳定本地策略失败。
+        /// </summary>
+        /// <returns>等待本地拒绝与 transport 停止完成的任务。</returns>
+        [Test]
+        public async Task InvalidVisitInviteAcceptIsRejectedBeforeRequestCreation()
+        {
+            var calls = 0;
+            var handler = new DelegateHandler((_, __) =>
+            {
+                calls++;
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK, "{}"));
+            });
+            var transport = CreateTransport(handler);
+            await transport.InitializeAsync(CancellationToken.None);
+            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+
+            var result = await api.AcceptVisitInviteAsync(
+                "access-token",
+                new ClientVisitInviteAcceptRequest("visit/escape", "invite_fixture", 4),
+                "fixture-accept-key-0002",
+                CancellationToken.None);
+
+            Assert.That(result.IsSuccess, Is.False);
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(calls, Is.Zero);
             await transport.StopAsync(CancellationToken.None);
         }
 

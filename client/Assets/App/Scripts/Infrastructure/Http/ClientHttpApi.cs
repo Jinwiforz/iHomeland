@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 namespace IHomeland.Client.Infrastructure.Http
 {
     /// <summary>
-    /// 把九个强类型 application 调用映射到 operation catalog、显式 codec 与有界 transport。
+    /// 把冻结的强类型 application 调用映射到 operation catalog、显式 codec 与有界 transport。
     /// </summary>
     internal sealed class ClientHttpApi : IClientHttpApi
     {
@@ -138,6 +138,38 @@ namespace IHomeland.Client.Infrastructure.Http
         }
 
         /// <inheritdoc />
+        public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+            string accessToken,
+            ClientVisitInviteAcceptRequest request,
+            string idempotencyKey,
+            CancellationToken cancellationToken)
+        {
+            string requestPath;
+            byte[] requestBody;
+            try
+            {
+                requestPath = _codec.BuildVisitInviteAcceptPath(request);
+                requestBody = _codec.EncodeVisitInviteAccept(request);
+            }
+            catch (ArgumentException)
+            {
+                return Task.FromResult(ClientHttpResult<ClientVisitReservation>.Failed(
+                    new ClientHttpFailure(
+                        ClientHttpFailureKind.LocalPolicy,
+                        ClientHttpOperationCatalog.AcceptVisitInvite.OperationID)));
+            }
+
+            return ExecuteAsync(
+                ClientHttpOperationCatalog.AcceptVisitInvite,
+                requestBody,
+                accessToken,
+                body => _codec.DecodeVisitInviteAccept(body, request),
+                cancellationToken,
+                idempotencyKey,
+                requestPath);
+        }
+
+        /// <inheritdoc />
         public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
             string accessToken,
             ClientWorldAdmissionTarget target,
@@ -163,6 +195,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="decodeSuccess">显式成功投影函数。</param>
         /// <param name="cancellationToken">调用方取消等待的信号。</param>
         /// <param name="idempotencyKey">仅需要幂等 header 的 operation 提供；其他 operation 必须为空。</param>
+        /// <param name="requestPath">仅带 path parameter 的冻结 operation 提供；其他 operation 必须为空。</param>
         /// <returns>成功、服务端错误或本地失败三选一结果。</returns>
         private async Task<ClientHttpResult<T>> ExecuteAsync<T>(
             ClientHttpOperation operation,
@@ -170,14 +203,16 @@ namespace IHomeland.Client.Infrastructure.Http
             string bearerToken,
             Func<ReadOnlyMemory<byte>, T> decodeSuccess,
             CancellationToken cancellationToken,
-            string idempotencyKey = null)
+            string idempotencyKey = null,
+            string requestPath = null)
         {
             var raw = await _transport.SendAsync(
                 operation,
                 requestBody,
                 bearerToken,
                 cancellationToken,
-                idempotencyKey);
+                idempotencyKey,
+                requestPath);
             if (!raw.HasResponse)
             {
                 return ClientHttpResult<T>.Failed(raw.Failure);

@@ -308,13 +308,15 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 实现 TLS/TCP framing、single reader/serialized writer、pending correlation/typed PUSH dispatch、gameplay admission、backpressure 和 close reasons。
 
-**当前实现边界：**HTTP world admission、TLS 1.3/loopback transport、`IHTP` preface、冻结 gameplay route、双向 sequence、有界 pending/writer、typed PUSH、safe-return gate、session invalidation 与 App Scope 逆序停止已经落地；PersonalWorld/VisitSession 最终状态、UI、Scene、业务流程与自动恢复不在本 change 内。
+**当前实现边界：**HTTP world admission、TLS 1.3/loopback transport、`IHTP` preface、冻结 gameplay route、双向 sequence、有界 pending/writer、typed PUSH、safe-return gate、session invalidation 与 App Scope 逆序停止已经落地；PersonalWorld/VisitSession 最终状态和业务流程由 C2 Services change 接续，UI、Scene 与自动恢复仍不在本 change 内。
 
 ## C2：个人世界客户端竖切
 
 ### `establish-client-personal-world-services`
 
 实现纯 C# PersonalWorld、WorldInstance、VisitSession、WorldAdmission Services，以及 OwnWorld/JoiningVisit/Visiting/ReturningOwnWorld 状态机。
+
+**当前实现边界：**十个强类型 HTTP operation、不可变 world/visit/invite 投影、revision/generation gate、有界 control hint、Owner/Visitor command policy、credential 内聚的 JOIN/RECONNECT 窄入口、target 状态机与 App Scope 逆序停止已落地。默认初始化保持零网络副作用；UI、SceneContext、Prefab、资源加载、跨进程 token 恢复与独立通道自动恢复留给后续 change。
 
 ### `integrate-dual-ui-routing`
 

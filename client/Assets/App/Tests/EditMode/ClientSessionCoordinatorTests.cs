@@ -305,6 +305,69 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
+        /// 确认 invite accept 只提交 current generation 的未过期 reservation，且未知结果不自动重试。
+        /// </summary>
+        [Test]
+        public async Task VisitInviteAcceptIsGenerationBoundExpiringAndNotRetried()
+        {
+            var clock = new FakeClock(1000);
+            var acceptCompletion = new TaskCompletionSource<ClientHttpResult<ClientVisitReservation>>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var authenticationQueue = new Queue<ClientAuthentication>();
+            authenticationQueue.Enqueue(CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"));
+            authenticationQueue.Enqueue(CreateAuthentication("account-b", "session-b", "access-b", "refresh-b"));
+            var acceptCalls = 0;
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, _, _) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
+                AcceptHandler = (_, _, _, _) =>
+                {
+                    acceptCalls++;
+                    return acceptCompletion.Task;
+                },
+            };
+            var coordinator = await CreateCoordinatorAsync(api, clock);
+            await coordinator.LoginAsync("user-a", "password", CancellationToken.None);
+            var request = new ClientVisitInviteAcceptRequest("visit-a", "invite-a", 4);
+
+            var pending = coordinator.AcceptVisitInviteAsync(
+                request,
+                "fixture-accept-key-0001",
+                CancellationToken.None);
+            await coordinator.LoginAsync("user-b", "password", CancellationToken.None);
+            acceptCompletion.SetResult(ClientHttpResult<ClientVisitReservation>.Success(
+                new ClientVisitReservation("visit-a", 5, 2000)));
+
+            var late = await pending;
+            Assert.That(late.IsSuccess, Is.False);
+            Assert.That(late.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(acceptCalls, Is.EqualTo(1));
+
+            api.AcceptHandler = (_, _, _, _) => Task.FromResult(
+                ClientHttpResult<ClientVisitReservation>.Success(
+                    new ClientVisitReservation("visit-a", 5, 1000)));
+            var expired = await coordinator.AcceptVisitInviteAsync(
+                request,
+                "fixture-accept-key-0002",
+                CancellationToken.None);
+            Assert.That(expired.IsSuccess, Is.False);
+            Assert.That(expired.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.MalformedResponse));
+
+            api.AcceptHandler = (_, _, _, _) => Task.FromResult(
+                ClientHttpResult<ClientVisitReservation>.Failed(
+                    new ClientHttpFailure(ClientHttpFailureKind.Transport, "acceptVisitInvite")));
+            var unknown = await coordinator.AcceptVisitInviteAsync(
+                request,
+                "fixture-accept-key-0003",
+                CancellationToken.None);
+            Assert.That(unknown.IsSuccess, Is.False);
+            Assert.That(unknown.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Transport));
+            Assert.That(acceptCalls, Is.EqualTo(1));
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Authenticated));
+        }
+
+        /// <summary>
         /// 验证 world admission 绑定 session generation、expiry、role/purpose 且最多交付一次。
         /// </summary>
         /// <returns>等待认证、签发与单次交付完成的任务。</returns>
@@ -531,7 +594,7 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
-        /// 为 application tests 提供九个强类型 operation 的确定性替换边界。
+        /// 为 application tests 提供十个强类型 operation 的确定性替换边界。
         /// </summary>
         private sealed class FakeHttpApi : IClientHttpApi
         {
@@ -574,6 +637,11 @@ namespace IHomeland.Client.Tests.EditMode
             /// 获取或设置 ticket 响应函数。
             /// </summary>
             internal Func<string, ClientEndpointChannel, CancellationToken, Task<ClientHttpResult<ClientConnectionTicket>>> TicketHandler { get; set; }
+
+            /// <summary>
+            /// 获取或设置 invite accept 响应函数。
+            /// </summary>
+            internal Func<string, ClientVisitInviteAcceptRequest, string, CancellationToken, Task<ClientHttpResult<ClientVisitReservation>>> AcceptHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 world admission 响应函数。
@@ -648,6 +716,19 @@ namespace IHomeland.Client.Tests.EditMode
             {
                 return Task.FromResult(ClientHttpResult<ClientWorldBootstrap>.Failed(
                     new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "getWorldBootstrap")));
+            }
+
+            /// <inheritdoc />
+            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+                string accessToken,
+                ClientVisitInviteAcceptRequest request,
+                string idempotencyKey,
+                CancellationToken cancellationToken)
+            {
+                return AcceptHandler != null
+                    ? AcceptHandler(accessToken, request, idempotencyKey, cancellationToken)
+                    : Task.FromResult(ClientHttpResult<ClientVisitReservation>.Failed(
+                        new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "acceptVisitInvite")));
             }
 
             /// <inheritdoc />

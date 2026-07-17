@@ -758,6 +758,16 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
+            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+                string accessToken,
+                ClientVisitInviteAcceptRequest request,
+                string idempotencyKey,
+                CancellationToken cancellationToken)
+            {
+                throw new NotSupportedException();
+            }
+
+            /// <inheritdoc />
             public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
                 string accessToken,
                 ClientWorldAdmissionTarget target,

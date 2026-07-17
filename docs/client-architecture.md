@@ -148,7 +148,7 @@ ClientHttpTransport + ClientHttpCodec + ClientHttpOperationCatalog
 - Infrastructure 只承担冻结 HTTP operation 的传输与 codec；Application 的 `ClientBootstrapService` 和 `SessionCoordinator` 分别拥有启动配置流程与唯一 session/credential lineage。
 - 初始化不自动访问网络，own-world bootstrap 也只返回一次查询投影；具体 operation、安全和失败语义由[客户端接入规范](client-integration.md)统一说明。
 
-HTTP 边界本身不实现 UI、自动网络 bootstrap、token 持久化、invite accept 或 socket。Own-world bootstrap 只作为一次强类型查询返回；world admission 只形成 generation-bound、expiring、single-use lease，不在本层保存 PersonalWorld 最终事实。WSS/TCP 由各自独立 owner 消费这里交付的凭据。
+HTTP 边界本身不实现 UI、自动网络 bootstrap、token 持久化或 socket。第十个 `acceptVisitInvite` operation 只返回 generation-bound reservation；own-world bootstrap 只返回一次强类型查询投影，world admission 只形成 expiring、single-use lease。最终事实与流程分别由下述 Services/coordinator 持有，WSS/TCP 仍由独立 owner 消费凭据。
 
 ### 当前 WSS control 边界
 
@@ -184,7 +184,24 @@ SessionCoordinator + ClientConfigurationStore
 - Caller cancel 只结束本地等待，仍保留有界 correlation 以安全消费迟到 response；JOIN/RECONNECT 只允许携带当前 admission 的首个匹配 command。
 - 三类登记 PUSH 才能进入主线程；safe-return 在投递前先关闭旧 target mutation gate，session epoch 失效会同步撤销匹配 gameplay generation。
 
-该边界不保存 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现页面、Scene、业务状态机、自动重试或跨通道恢复编排；这些职责留给后续 Services 与 vertical slice change。
+该边界不保存 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现页面、Scene 或自动重试；它只向下述 Services/coordinator 交付 typed response/PUSH。
+
+### 当前 PersonalWorld/VisitSession Services 边界
+
+```text
+HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
+  -> PersonalWorldService          (world/assignment 完整投影)
+  -> VisitSessionService           (visit/invite/role/command 投影)
+  -> WorldAdmissionCoordinator     (current target 与转换状态机)
+```
+
+- Generated message 只作为边界输入；提交前校验 identity、enum、assignment binding、revision、deadline 与集合上限，并复制为不可变 application model。
+- 完整 world/visit snapshot 使用最高 revision gate：低 revision 丢弃、同 revision 等价幂等、同 revision 冲突 fail closed；target 清除后仍保留不可见的 VisitSession revision gate。缺失 assignment 会清除旧投影并留下 generation tombstone，只有更高 generation 才能建立新实例。
+- WSS assignment/availability/closed 只形成 refresh hint，不能冒充 gameplay snapshot 或 safe-return；定向 invite inbox 按 identity 去重、按 expiry 清理并限制为 128 项。
+- Coordinator 只允许 `Inactive -> ResolvingOwnWorld -> OwnWorld -> JoiningVisit -> Visiting -> ReturningOwnWorld -> OwnWorld` 的登记转换，并同时校验 session generation 与 target generation。
+- JOIN/RECONNECT admission credential 只由 gameplay channel 内部写入首个 command；Services、coordinator、snapshot、subscriber 与日志均不能读取。
+- Owner/Visitor command 使用 current role 与 revision 在写入前 fail closed。Caller cancel、commit-unknown 或 revision conflict 不触发隐式 mutation 重试。
+- App Scope 初始化只登记 subscriber；只有显式 flow/command 才联网。UI、SceneContext、Prefab、资源加载、页面路由和跨进程恢复仍属于后续 change。
 
 ## 状态所有权
 
@@ -195,7 +212,8 @@ SessionCoordinator + ClientConfigurationStore
 | account/player | Account Service |
 | PersonalWorld identity、owner 与最高 world revision | PersonalWorld Service |
 | VisitSession、Owner/Visitor role、membership 与 expiry | VisitSession Service |
-| current WorldInstance assignment/admission | World Admission Coordinator |
+| current WorldInstance assignment | PersonalWorld Service |
+| current target、admission flow 与 target generation | World Admission Coordinator |
 | active screen/modal | UI Service |
 | camera/map/scene actors | SceneContext |
 | transient animation/focus | View/Host |
