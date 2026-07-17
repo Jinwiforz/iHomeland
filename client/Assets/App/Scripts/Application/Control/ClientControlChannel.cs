@@ -151,6 +151,11 @@ namespace IHomeland.Client.Application.Control
         private readonly TimeSpan[] _retryDelays;
 
         /// <summary>
+        /// 在统一 Session owner 接受更高 epoch 后同步撤销匹配 gameplay generation。
+        /// </summary>
+        private readonly Action<long> _gameplaySessionInvalidation;
+
+        /// <summary>
         /// AppLifetime 初始化时创建、停止时取消的根信号。
         /// </summary>
         private CancellationTokenSource _lifetimeCancellation;
@@ -194,6 +199,7 @@ namespace IHomeland.Client.Application.Control
         /// <param name="dispatcher">有界 Unity 主线程 dispatcher。</param>
         /// <param name="delay">可测试 backoff owner。</param>
         /// <param name="retryDelays">每次瞬时失败后的正数固定延迟。</param>
+        /// <param name="gameplaySessionInvalidation">Session authority 接受更高 epoch 后同步撤销匹配 gameplay generation 的可选回调。</param>
         /// <exception cref="ArgumentException">Retry policy 包含非正数 delay 时抛出。</exception>
         /// <exception cref="ArgumentNullException">任一依赖或 policy 为空时抛出。</exception>
         internal ClientControlChannel(
@@ -204,7 +210,8 @@ namespace IHomeland.Client.Application.Control
             ClientControlCodec codec,
             MainThreadDispatcher dispatcher,
             IClientControlDelay delay,
-            IReadOnlyList<TimeSpan> retryDelays)
+            IReadOnlyList<TimeSpan> retryDelays,
+            Action<long> gameplaySessionInvalidation = null)
         {
             _environment = environment ?? throw new ArgumentNullException(nameof(environment));
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
@@ -213,6 +220,7 @@ namespace IHomeland.Client.Application.Control
             _codec = codec ?? throw new ArgumentNullException(nameof(codec));
             _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
             _delay = delay ?? throw new ArgumentNullException(nameof(delay));
+            _gameplaySessionInvalidation = gameplaySessionInvalidation;
             if (retryDelays == null)
             {
                 throw new ArgumentNullException(nameof(retryDelays));
@@ -614,6 +622,10 @@ namespace IHomeland.Client.Application.Control
                     var invalidated = _sessionCoordinator.TryInvalidateFromControl(
                         sourceSessionGeneration,
                         invalidatedEpoch);
+                    if (invalidated)
+                    {
+                        _gameplaySessionInvalidation?.Invoke(sourceSessionGeneration);
+                    }
                     // Session authority transition 已经决定终态；通知投递失败不能把结果降级为背压。
                     _ = TryPostPush(runGeneration, push);
                     return invalidated

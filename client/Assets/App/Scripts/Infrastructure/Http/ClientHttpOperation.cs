@@ -164,7 +164,7 @@ namespace IHomeland.Client.Infrastructure.Http
     }
 
     /// <summary>
-    /// 集中拥有 C1 首段允许调用的八个 HTTP operation descriptor。
+    /// 集中拥有当前客户端网络阶段允许调用的九个 HTTP operation descriptor。
     /// </summary>
     internal static class ClientHttpOperationCatalog
     {
@@ -196,6 +196,7 @@ namespace IHomeland.Client.Infrastructure.Http
             LogoutSession = Create("logoutSession", HttpMethod.Post, "/v1/auth/logout", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.None, 0, HttpStatusCode.NoContent, false, 5000, SmallResponseLimitBytes);
             IssueConnectionTicket = Create("issueConnectionTicket", HttpMethod.Post, "/v1/session/tickets", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.Json, 2048, HttpStatusCode.Created, true, 5000, SmallResponseLimitBytes);
             GetWorldBootstrap = Create("getWorldBootstrap", HttpMethod.Get, "/v1/world/bootstrap", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.None, 0, HttpStatusCode.OK, true, 5000, CompositeResponseLimitBytes);
+            IssueWorldAdmission = Create("issueWorldAdmission", HttpMethod.Post, "/v1/world/admissions", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.Json, 4096, HttpStatusCode.Created, true, 5000, SmallResponseLimitBytes);
             Operations = new ReadOnlyCollection<ClientHttpOperation>(new[]
             {
                 GetVersion,
@@ -206,6 +207,7 @@ namespace IHomeland.Client.Infrastructure.Http
                 LogoutSession,
                 IssueConnectionTicket,
                 GetWorldBootstrap,
+                IssueWorldAdmission,
             });
         }
 
@@ -248,6 +250,11 @@ namespace IHomeland.Client.Infrastructure.Http
         /// 获取查询 own-world 安全启动投影的 descriptor。
         /// </summary>
         internal static ClientHttpOperation GetWorldBootstrap { get; }
+
+        /// <summary>
+        /// 获取签发一次性 gameplay world admission 的 descriptor。
+        /// </summary>
+        internal static ClientHttpOperation IssueWorldAdmission { get; }
 
         /// <summary>
         /// 获取只包含当前 HTTP bootstrap capability 允许 operation 的稳定只读快照。

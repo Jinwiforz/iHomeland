@@ -305,6 +305,59 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
+        /// 验证 world admission 绑定 session generation、expiry、role/purpose 且最多交付一次。
+        /// </summary>
+        /// <returns>等待认证、签发与单次交付完成的任务。</returns>
+        [Test]
+        public async Task WorldAdmissionLeaseIsGenerationBoundExpiringAndSingleUse()
+        {
+            var clock = new FakeClock(1000);
+            var admission = new ClientWorldAdmission(
+                "wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                new ClientEndpoint(ClientEndpointChannel.TlsTcp, "game.example.invalid", 4433),
+                ClientWorldRole.Owner,
+                ClientWorldAdmissionPurpose.OwnWorld,
+                2000);
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                    CreateAuthentication("account", "session", "access", "refresh"))),
+                AdmissionHandler = (_, __, ___, ____) => Task.FromResult(
+                    ClientHttpResult<ClientWorldAdmission>.Success(admission)),
+            };
+            var coordinator = await CreateCoordinatorAsync(api, clock);
+            var login = await coordinator.LoginAsync("fixture-user", "password", CancellationToken.None);
+
+            var issue = await coordinator.IssueWorldAdmissionAsync(
+                ClientWorldAdmissionTarget.OwnWorld(),
+                "fixture-admission-key-01",
+                CancellationToken.None);
+            Assert.That(issue.IsSuccess, Is.True);
+            Assert.That(coordinator.TryTakeWorldAdmission(issue.Value, out var use), Is.True);
+            Assert.That(use.Purpose, Is.EqualTo(ClientWorldAdmissionPurpose.OwnWorld));
+            Assert.That(use.ToString(), Does.Not.Contain(use.Credential));
+            Assert.That(coordinator.TryTakeWorldAdmission(issue.Value, out _), Is.False);
+
+            var expiring = await coordinator.IssueWorldAdmissionAsync(
+                ClientWorldAdmissionTarget.OwnWorld(),
+                "fixture-admission-key-02",
+                CancellationToken.None);
+            clock.UtcNowMilliseconds = 2000;
+            Assert.That(coordinator.TryTakeWorldAdmission(expiring.Value, out _), Is.False);
+
+            clock.UtcNowMilliseconds = 1000;
+            var invalidBinding = new ClientWorldAdmissionLease(
+                new ClientWorldAdmission(
+                    "wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    new ClientEndpoint(ClientEndpointChannel.TlsTcp, "game.example.invalid", 4433),
+                    ClientWorldRole.Owner,
+                    ClientWorldAdmissionPurpose.Join,
+                    2000),
+                login.Value.Generation);
+            Assert.That(coordinator.TryTakeWorldAdmission(invalidBinding, out _), Is.False);
+        }
+
+        /// <summary>
         /// 确认 current control connection 的更高 epoch 会清除对应 session lineage。
         /// </summary>
         [Test]
@@ -478,7 +531,7 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
-        /// 为 application tests 提供八个强类型 operation 的确定性替换边界。
+        /// 为 application tests 提供九个强类型 operation 的确定性替换边界。
         /// </summary>
         private sealed class FakeHttpApi : IClientHttpApi
         {
@@ -521,6 +574,11 @@ namespace IHomeland.Client.Tests.EditMode
             /// 获取或设置 ticket 响应函数。
             /// </summary>
             internal Func<string, ClientEndpointChannel, CancellationToken, Task<ClientHttpResult<ClientConnectionTicket>>> TicketHandler { get; set; }
+
+            /// <summary>
+            /// 获取或设置 world admission 响应函数。
+            /// </summary>
+            internal Func<string, ClientWorldAdmissionTarget, string, CancellationToken, Task<ClientHttpResult<ClientWorldAdmission>>> AdmissionHandler { get; set; }
 
             /// <inheritdoc />
             public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken)
@@ -590,6 +648,19 @@ namespace IHomeland.Client.Tests.EditMode
             {
                 return Task.FromResult(ClientHttpResult<ClientWorldBootstrap>.Failed(
                     new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "getWorldBootstrap")));
+            }
+
+            /// <inheritdoc />
+            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
+                string accessToken,
+                ClientWorldAdmissionTarget target,
+                string idempotencyKey,
+                CancellationToken cancellationToken)
+            {
+                return AdmissionHandler != null
+                    ? AdmissionHandler(accessToken, target, idempotencyKey, cancellationToken)
+                    : Task.FromResult(ClientHttpResult<ClientWorldAdmission>.Failed(
+                        new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "issueWorldAdmission")));
             }
         }
     }

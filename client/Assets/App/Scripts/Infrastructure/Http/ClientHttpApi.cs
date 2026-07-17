@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 namespace IHomeland.Client.Infrastructure.Http
 {
     /// <summary>
-    /// 把八个强类型 application 调用映射到 operation catalog、显式 codec 与有界 transport。
+    /// 把九个强类型 application 调用映射到 operation catalog、显式 codec 与有界 transport。
     /// </summary>
     internal sealed class ClientHttpApi : IClientHttpApi
     {
@@ -137,6 +137,22 @@ namespace IHomeland.Client.Infrastructure.Http
                 cancellationToken);
         }
 
+        /// <inheritdoc />
+        public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
+            string accessToken,
+            ClientWorldAdmissionTarget target,
+            string idempotencyKey,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteAsync(
+                ClientHttpOperationCatalog.IssueWorldAdmission,
+                _codec.EncodeWorldAdmission(target),
+                accessToken,
+                _codec.DecodeWorldAdmission,
+                cancellationToken,
+                idempotencyKey);
+        }
+
         /// <summary>
         /// 执行必须返回 JSON payload 的 operation，并统一解码成功与 ErrorResponse。
         /// </summary>
@@ -146,19 +162,22 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="bearerToken">认证 operation 的 access token。</param>
         /// <param name="decodeSuccess">显式成功投影函数。</param>
         /// <param name="cancellationToken">调用方取消等待的信号。</param>
+        /// <param name="idempotencyKey">仅需要幂等 header 的 operation 提供；其他 operation 必须为空。</param>
         /// <returns>成功、服务端错误或本地失败三选一结果。</returns>
         private async Task<ClientHttpResult<T>> ExecuteAsync<T>(
             ClientHttpOperation operation,
             byte[] requestBody,
             string bearerToken,
             Func<ReadOnlyMemory<byte>, T> decodeSuccess,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string idempotencyKey = null)
         {
             var raw = await _transport.SendAsync(
                 operation,
                 requestBody,
                 bearerToken,
-                cancellationToken);
+                cancellationToken,
+                idempotencyKey);
             if (!raw.HasResponse)
             {
                 return ClientHttpResult<T>.Failed(raw.Failure);

@@ -108,6 +108,38 @@ namespace IHomeland.Client.Infrastructure.Http
         }
 
         /// <summary>
+        /// 编码封闭 world admission target，不允许客户端自报 actor 或 assignment。
+        /// </summary>
+        /// <param name="target">Own-world 或 visit-world target。</param>
+        /// <returns>只包含 schema 声明字段的 UTF-8 JSON。</returns>
+        /// <exception cref="ArgumentNullException">Target 为空时抛出。</exception>
+        /// <exception cref="ArgumentException">VisitSessionID 不符合公开 identity grammar 时抛出。</exception>
+        internal byte[] EncodeWorldAdmission(ClientWorldAdmissionTarget target)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            return WriteObject(writer =>
+            {
+                switch (target.Kind)
+                {
+                    case ClientWorldAdmissionTargetKind.OwnWorld:
+                        writer.WriteString("kind", "OWN_WORLD");
+                        break;
+                    case ClientWorldAdmissionTargetKind.VisitWorld:
+                        ValidateIdentity(target.VisitSessionID, nameof(target.VisitSessionID));
+                        writer.WriteString("kind", "VISIT_WORLD");
+                        writer.WriteString("visitSessionId", target.VisitSessionID);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(target), "World admission target kind 无效。");
+                }
+            });
+        }
+
+        /// <summary>
         /// 解码 version response 并验证全部 required field。
         /// </summary>
         /// <param name="body">已通过字节上限检查的 UTF-8 JSON body。</param>
@@ -262,6 +294,49 @@ namespace IHomeland.Client.Infrastructure.Http
                 }
 
                 return new ClientWorldBootstrap(world, assignment);
+            });
+        }
+
+        /// <summary>
+        /// 解码 world admission 并验证 opaque grammar、TLS/TCP endpoint 与封闭 role/purpose。
+        /// </summary>
+        /// <param name="body">已通过字节上限检查的 UTF-8 JSON body。</param>
+        /// <returns>包含 opaque credential 的短期 admission 投影。</returns>
+        /// <exception cref="ClientHttpContractException">响应不符合冻结 schema 时抛出。</exception>
+        internal ClientWorldAdmission DecodeWorldAdmission(ReadOnlyMemory<byte> body)
+        {
+            return ReadObject(body, root =>
+            {
+                var credential = ReadString(root, "credential", 32, 4096);
+                if (!Regex.IsMatch(credential, "^[A-Za-z0-9._~-]+$", RegexOptions.CultureInvariant))
+                {
+                    throw Contract("credential 不符合 opaque ASCII grammar。");
+                }
+
+                var role = ReadString(root, "role", 1, 16) switch
+                {
+                    "OWNER" => ClientWorldRole.Owner,
+                    "VISITOR" => ClientWorldRole.Visitor,
+                    _ => throw Contract("role 包含未知 enum。"),
+                };
+                var purpose = ReadString(root, "purpose", 1, 16) switch
+                {
+                    "OWN_WORLD" => ClientWorldAdmissionPurpose.OwnWorld,
+                    "JOIN" => ClientWorldAdmissionPurpose.Join,
+                    "RECONNECT" => ClientWorldAdmissionPurpose.Reconnect,
+                    _ => throw Contract("purpose 包含未知 enum。"),
+                };
+                if ((role == ClientWorldRole.Owner) != (purpose == ClientWorldAdmissionPurpose.OwnWorld))
+                {
+                    throw Contract("World admission role 与 purpose 不一致。");
+                }
+
+                return new ClientWorldAdmission(
+                    credential,
+                    ReadEndpoint(ReadObjectProperty(root, "endpoint"), gameplayOnly: true),
+                    role,
+                    purpose,
+                    ReadInt64(root, "expiresAtMs", 1, long.MaxValue));
             });
         }
 
@@ -730,6 +805,20 @@ namespace IHomeland.Client.Infrastructure.Http
             if (username == null || username.Length < 3 || username.Length > 64 || !UsernamePattern.IsMatch(username))
             {
                 throw new ArgumentException("Username 不符合公开 contract。", nameof(username));
+            }
+        }
+
+        /// <summary>
+        /// 验证待发送公开 identity 的长度与安全 ASCII grammar。
+        /// </summary>
+        /// <param name="value">待验证 identity。</param>
+        /// <param name="parameterName">ArgumentException 使用的参数名。</param>
+        /// <exception cref="ArgumentException">Identity 无效时抛出。</exception>
+        private static void ValidateIdentity(string value, string parameterName)
+        {
+            if (value == null || value.Length < 1 || value.Length > 128 || !IdentityPattern.IsMatch(value))
+            {
+                throw new ArgumentException("Identity 不符合公开 contract。", parameterName);
             }
         }
 

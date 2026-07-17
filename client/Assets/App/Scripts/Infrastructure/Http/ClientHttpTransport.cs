@@ -165,12 +165,31 @@ namespace IHomeland.Client.Infrastructure.Http
             string bearerToken,
             CancellationToken cancellationToken)
         {
+            return await SendAsync(operation, requestBody, bearerToken, cancellationToken, null);
+        }
+
+        /// <summary>
+        /// 发送可选带冻结 Idempotency-Key 的单个 operation。
+        /// </summary>
+        /// <param name="operation">Catalog 提供的不可变 descriptor。</param>
+        /// <param name="requestBody">JSON operation 的 UTF-8 body。</param>
+        /// <param name="bearerToken">Bearer operation 的当前 access token。</param>
+        /// <param name="cancellationToken">调用方取消等待的信号。</param>
+        /// <param name="idempotencyKey">仅 issueWorldAdmission 使用的安全 ASCII key。</param>
+        /// <returns>完整 raw response 或稳定本地失败。</returns>
+        internal async Task<ClientHttpRawResult> SendAsync(
+            ClientHttpOperation operation,
+            byte[] requestBody,
+            string bearerToken,
+            CancellationToken cancellationToken,
+            string idempotencyKey)
+        {
             if (operation == null)
             {
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            var localFailure = ValidateRequest(operation, requestBody, bearerToken);
+            var localFailure = ValidateRequest(operation, requestBody, bearerToken, idempotencyKey);
             if (localFailure != null)
             {
                 return ClientHttpRawResult.Failed(localFailure);
@@ -188,7 +207,7 @@ namespace IHomeland.Client.Infrastructure.Http
                        cancellationToken,
                        deadlineCancellation.Token,
                        _lifetimeCancellation.Token))
-            using (var request = CreateRequest(operation, requestBody, bearerToken))
+            using (var request = CreateRequest(operation, requestBody, bearerToken, idempotencyKey))
             {
                 try
                 {
@@ -350,11 +369,13 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="operation">冻结 descriptor。</param>
         /// <param name="requestBody">待发送 body。</param>
         /// <param name="bearerToken">待发送 credential。</param>
+        /// <param name="idempotencyKey">可选幂等 header。</param>
         /// <returns>违反本地策略时返回失败，否则为空。</returns>
         private static ClientHttpFailure ValidateRequest(
             ClientHttpOperation operation,
             byte[] requestBody,
-            string bearerToken)
+            string bearerToken,
+            string idempotencyKey)
         {
             var hasBody = requestBody != null && requestBody.Length > 0;
             if (operation.RequestBodyPolicy == ClientHttpBodyPolicy.None && hasBody)
@@ -378,6 +399,15 @@ namespace IHomeland.Client.Infrastructure.Http
                 return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
             }
 
+            var requiresIdempotencyKey = ReferenceEquals(
+                operation,
+                ClientHttpOperationCatalog.IssueWorldAdmission);
+            if (requiresIdempotencyKey != !string.IsNullOrEmpty(idempotencyKey) ||
+                (requiresIdempotencyKey && !IsValidIdempotencyKey(idempotencyKey)))
+            {
+                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+            }
+
             return null;
         }
 
@@ -387,17 +417,24 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="operation">冻结 descriptor。</param>
         /// <param name="requestBody">已通过上限验证的 JSON body。</param>
         /// <param name="bearerToken">当前 session access token。</param>
+        /// <param name="idempotencyKey">可选幂等 header。</param>
         /// <returns>由调用方 using 释放的请求。</returns>
         private static HttpRequestMessage CreateRequest(
             ClientHttpOperation operation,
             byte[] requestBody,
-            string bearerToken)
+            string bearerToken,
+            string idempotencyKey)
         {
             var request = new HttpRequestMessage(operation.Method, operation.RelativePath);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             if (operation.Authentication == ClientHttpAuthentication.Bearer)
             {
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+            }
+
+            if (!string.IsNullOrEmpty(idempotencyKey))
+            {
+                request.Headers.Add("Idempotency-Key", idempotencyKey);
             }
 
             if (operation.RequestBodyPolicy == ClientHttpBodyPolicy.Json)
@@ -410,6 +447,32 @@ namespace IHomeland.Client.Infrastructure.Http
             }
 
             return request;
+        }
+
+        /// <summary>
+        /// 验证 OpenAPI Idempotency-Key 的长度与安全 ASCII grammar。
+        /// </summary>
+        /// <param name="value">待发送 header value。</param>
+        /// <returns>长度 16-128 且只含允许字符时返回 true。</returns>
+        private static bool IsValidIdempotencyKey(string value)
+        {
+            if (value == null || value.Length < 16 || value.Length > 128)
+            {
+                return false;
+            }
+
+            foreach (var character in value)
+            {
+                if (!(character >= 'A' && character <= 'Z') &&
+                    !(character >= 'a' && character <= 'z') &&
+                    !(character >= '0' && character <= '9') &&
+                    character != '.' && character != '_' && character != ':' && character != '-')
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

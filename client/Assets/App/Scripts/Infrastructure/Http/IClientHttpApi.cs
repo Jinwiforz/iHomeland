@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 namespace IHomeland.Client.Infrastructure.Http
 {
     /// <summary>
-    /// 定义 C1 首段唯一允许上层调用的八个强类型 HTTP operation。
+    /// 定义当前客户端网络阶段唯一允许上层调用的九个强类型 HTTP operation。
     /// </summary>
     /// <remarks>
     /// 接口由 application 消费侧拥有测试替换边界，不暴露任意 method/path/body。Bearer token 只由
@@ -93,6 +93,20 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <returns>一次性 world bootstrap 投影、服务端错误或稳定本地失败。</returns>
         Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
             string accessToken,
+            CancellationToken cancellationToken);
+
+        /// <summary>
+        /// 为 own-world 或已有 Visitor membership 签发一次性 world admission。
+        /// </summary>
+        /// <param name="accessToken">Session owner 当前 snapshot 的 access token。</param>
+        /// <param name="target">封闭的 own-world 或 visit-world target。</param>
+        /// <param name="idempotencyKey">同一 actor scope 内稳定标识本次签发意图的安全 ASCII key。</param>
+        /// <param name="cancellationToken">调用方取消等待的信号。</param>
+        /// <returns>一次性 opaque admission、服务端错误或稳定本地失败。</returns>
+        Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
+            string accessToken,
+            ClientWorldAdmissionTarget target,
+            string idempotencyKey,
             CancellationToken cancellationToken);
     }
 }

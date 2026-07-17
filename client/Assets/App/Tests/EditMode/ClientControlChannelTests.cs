@@ -756,6 +756,16 @@ namespace IHomeland.Client.Tests.EditMode
             {
                 throw new NotSupportedException();
             }
+
+            /// <inheritdoc />
+            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
+                string accessToken,
+                ClientWorldAdmissionTarget target,
+                string idempotencyKey,
+                CancellationToken cancellationToken)
+            {
+                throw new NotSupportedException();
+            }
         }
     }
 }

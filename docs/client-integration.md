@@ -58,7 +58,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - WSS/TCP connection ticket
 - timeout、cancel、retryable error
 
-当前首段实现固定只接入 version、config、register、login、refresh、logout、connection ticket 与 own-world bootstrap 八个 operation。客户端以手写不可变 projection 和显式 `System.Text.Json` codec 消费 OpenAPI/共享 fixtures，不生成或提交 HTTP C# 代码，也不提供任意 path/body escape hatch。
+当前 HTTP 边界固定接入 version、config、register、login、refresh、logout、connection ticket、own-world bootstrap 与 world admission 九个 operation。客户端以手写不可变 projection 和显式 `System.Text.Json` codec 消费 OpenAPI/共享 fixtures，不生成或提交 HTTP C# 代码，也不提供任意 path/body escape hatch。
 
 - Production base URI 必须为 HTTPS；Local/Test 的明文例外必须同时满足显式环境和 loopback host。
 - App Scope 初始化不自动联网；后续 application flow 只能在 AppRoot Running 后显式调用 `ClientBootstrapService`。
@@ -68,7 +68,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - Transport 不自动重试。Caller cancel、deadline、transport、oversized、malformed 与结构有效的 server error 保持不同结果；`Retry-After` 只作为事实返回。
 - 当前不恢复进程退出前的 refresh token；重启回到未认证状态。安全持久化需独立 capability。
 
-`acceptVisitInvite` 与 `issueWorldAdmission` 仍属于后续个人世界 Services change；HTTP 对象图只向独立 WSS control owner 交付一次性 ticket，TLS/TCP 尚未接入。
+`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease，不能成为 PersonalWorld 或 VisitSession 最终事实。`acceptVisitInvite` 及其业务编排仍属于后续个人世界 Services change；HTTP 对象图只向独立 WSS/TCP owner 交付凭据，不拥有 socket。
 
 ### 3. WSS Control
 
@@ -79,7 +79,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - 独立执行 heartbeat、close reason、sequence 缺口检测和有界重连，并把 generated payload 投递主线程
 - session invalidation/forced logout 后关闭 WSS 与后续 TLS/TCP、清理本地 session 并回到登录流程
 
-当前客户端已接入只接收 WSS control owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-wss-control-边界)。本接入层继续约束初始化不自动连接、Runtime 不公开 WSS application send API，且 TLS/TCP 与 PersonalWorld/VisitSession 状态消费仍由后续 change 交付。
+当前客户端已接入只接收 WSS control owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-wss-control-边界)。本接入层继续约束初始化不自动连接、Runtime 不公开 WSS application send API，PersonalWorld/VisitSession 状态消费仍由后续 change 交付。
 
 ### 4. TLS/TCP Business
 
@@ -90,6 +90,8 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - `OWN_WORLD` 可直接请求 snapshot；`JOIN`/`RECONNECT` 必须把同一 admission 放入首个匹配 command，并在 response 前保持 pending
 - 只接收登记的 response/error 与 2002、2121、2122 push；`VISIT_SAFE_RETURN_PUSH` 到达后立即停止旧 target mutation，等待有界关闭并进入受控返回流程
 - ticket、admission、完整 payload 和 assignment 私有字段不得进入客户端日志；session epoch 失效时同时关闭 WSS/TCP
+
+当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH，不保存 PersonalWorld/VisitSession 最终 snapshot，不提供 UI、Scene、自动重连或业务流程编排。
 
 ### 5. Account/PersonalWorld/VisitSession Services
 
@@ -136,9 +138,9 @@ App Start
   -> open target screen
 ```
 
-WSS 与 TCP 独立重连，但共享 session epoch。epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
+目标恢复策略要求 WSS 与 TCP 独立重连但共享 session epoch；epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
 
-上述完整恢复序列是目标状态；当前 HTTP bootstrap 只交付前两步的强类型边界与 ticket 来源，尚未建立 WSS/TCP channel。
+上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS control 与显式 TLS/TCP gameplay channel，但尚未建立 token 跨进程恢复、PersonalWorld/VisitSession Services、目标状态机或独立通道重连编排。
 
 ## 世界与访问快照
 

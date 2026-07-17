@@ -237,4 +237,165 @@ namespace IHomeland.Client.Application.Session
             return $"ClientConnectionTicketUse[REDACTED] channel={Endpoint.Channel} expiresAtMs={ExpiresAtMilliseconds}";
         }
     }
+
+    /// <summary>
+    /// 保存来源 session generation 与单次交付状态的 world admission lease。
+    /// </summary>
+    internal sealed class ClientWorldAdmissionLease
+    {
+        /// <summary>保存不得输出的完整 HTTP admission 响应。</summary>
+        private readonly ClientWorldAdmission _admission;
+
+        /// <summary>保存签发时 Session owner 的 generation。</summary>
+        private readonly long _sourceGeneration;
+
+        /// <summary>使用原子位保证 credential 最多成功交付一次。</summary>
+        private int _taken;
+
+        /// <summary>创建绑定当前 session generation 的短期 lease。</summary>
+        /// <param name="admission">服务端签发的完整 admission 响应。</param>
+        /// <param name="sourceGeneration">签发调用捕获的 current generation。</param>
+        internal ClientWorldAdmissionLease(ClientWorldAdmission admission, long sourceGeneration)
+        {
+            _admission = admission ?? throw new ArgumentNullException(nameof(admission));
+            _sourceGeneration = sourceGeneration;
+        }
+
+        /// <summary>获取 credential 绑定 endpoint。</summary>
+        internal ClientEndpoint Endpoint => _admission.Endpoint;
+
+        /// <summary>获取服务端权威 role。</summary>
+        internal ClientWorldRole Role => _admission.Role;
+
+        /// <summary>获取服务端权威 purpose。</summary>
+        internal ClientWorldAdmissionPurpose Purpose => _admission.Purpose;
+
+        /// <summary>获取绝对 Unix expiry，单位为毫秒。</summary>
+        internal long ExpiresAtMilliseconds => _admission.ExpiresAtMilliseconds;
+
+        /// <summary>在 generation、expiry 与 admission contract 有效时原子取得 credential。</summary>
+        /// <param name="currentGeneration">Session owner 当前 generation。</param>
+        /// <param name="utcNowMilliseconds">当前 Unix 时间，单位为毫秒。</param>
+        /// <param name="admissionUse">成功时返回唯一 credential 使用权。</param>
+        /// <returns>Generation、expiry、binding 与单次交付均有效时返回 true。</returns>
+        internal bool TryTake(
+            long currentGeneration,
+            long utcNowMilliseconds,
+            out ClientWorldAdmissionUse admissionUse)
+        {
+            admissionUse = null;
+            if (currentGeneration != _sourceGeneration ||
+                utcNowMilliseconds >= _admission.ExpiresAtMilliseconds ||
+                !IsDeliverable(_admission))
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _taken, 1, 0) != 0)
+            {
+                return false;
+            }
+
+            admissionUse = new ClientWorldAdmissionUse(
+                _admission.Credential,
+                _admission.Endpoint,
+                _admission.Role,
+                _admission.Purpose,
+                _admission.ExpiresAtMilliseconds,
+                _sourceGeneration);
+            return true;
+        }
+
+        /// <summary>在 credential 离开 Session owner 前防御性复核 opaque grammar 与 role/purpose binding。</summary>
+        /// <param name="admission">HTTP codec 已解析的不可变 admission。</param>
+        /// <returns>Credential、endpoint 与封闭角色用途均仍有效时返回 true。</returns>
+        private static bool IsDeliverable(ClientWorldAdmission admission)
+        {
+            if (admission.Endpoint.Channel != ClientEndpointChannel.TlsTcp ||
+                admission.Credential.Length < 32 || admission.Credential.Length > 4096)
+            {
+                return false;
+            }
+
+            foreach (var character in admission.Credential)
+            {
+                var isAsciiLetterOrDigit =
+                    (character >= 'A' && character <= 'Z') ||
+                    (character >= 'a' && character <= 'z') ||
+                    (character >= '0' && character <= '9');
+                if (!isAsciiLetterOrDigit &&
+                    character != '.' && character != '_' && character != '~' && character != '-')
+                {
+                    return false;
+                }
+            }
+
+            return admission.Purpose == ClientWorldAdmissionPurpose.OwnWorld
+                ? admission.Role == ClientWorldRole.Owner
+                : admission.Role == ClientWorldRole.Visitor &&
+                  (admission.Purpose == ClientWorldAdmissionPurpose.Join ||
+                   admission.Purpose == ClientWorldAdmissionPurpose.Reconnect);
+        }
+
+        /// <summary>返回固定脱敏摘要。</summary>
+        /// <returns>不包含 admission credential 的 purpose 与 expiry。</returns>
+        public override string ToString()
+        {
+            return $"ClientWorldAdmissionLease[REDACTED] purpose={Purpose} expiresAtMs={ExpiresAtMilliseconds}";
+        }
+    }
+
+    /// <summary>
+    /// 表示已经从 lease 单次取得、等待交给 gameplay channel 的 admission。
+    /// </summary>
+    internal sealed class ClientWorldAdmissionUse
+    {
+        /// <summary>创建唯一 admission 使用权。</summary>
+        /// <param name="credential">不得输出或复用的 opaque credential。</param>
+        /// <param name="endpoint">Credential 绑定 endpoint。</param>
+        /// <param name="role">Credential 绑定角色。</param>
+        /// <param name="purpose">Credential 绑定用途。</param>
+        /// <param name="expiresAtMilliseconds">绝对 Unix expiry，单位为毫秒。</param>
+        /// <param name="sourceGeneration">来源 session generation。</param>
+        internal ClientWorldAdmissionUse(
+            string credential,
+            ClientEndpoint endpoint,
+            ClientWorldRole role,
+            ClientWorldAdmissionPurpose purpose,
+            long expiresAtMilliseconds,
+            long sourceGeneration)
+        {
+            Credential = credential ?? throw new ArgumentNullException(nameof(credential));
+            Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
+            Role = role;
+            Purpose = purpose;
+            ExpiresAtMilliseconds = expiresAtMilliseconds;
+            SourceGeneration = sourceGeneration;
+        }
+
+        /// <summary>获取只能交给 gameplay authentication 的 opaque credential。</summary>
+        internal string Credential { get; }
+
+        /// <summary>获取 credential 绑定 endpoint。</summary>
+        internal ClientEndpoint Endpoint { get; }
+
+        /// <summary>获取 credential 绑定角色。</summary>
+        internal ClientWorldRole Role { get; }
+
+        /// <summary>获取 credential 绑定用途。</summary>
+        internal ClientWorldAdmissionPurpose Purpose { get; }
+
+        /// <summary>获取绝对 Unix expiry，单位为毫秒。</summary>
+        internal long ExpiresAtMilliseconds { get; }
+
+        /// <summary>获取来源 session generation。</summary>
+        internal long SourceGeneration { get; }
+
+        /// <summary>返回固定脱敏摘要。</summary>
+        /// <returns>不包含 credential 的 purpose 与 expiry。</returns>
+        public override string ToString()
+        {
+            return $"ClientWorldAdmissionUse[REDACTED] purpose={Purpose} expiresAtMs={ExpiresAtMilliseconds}";
+        }
+    }
 }

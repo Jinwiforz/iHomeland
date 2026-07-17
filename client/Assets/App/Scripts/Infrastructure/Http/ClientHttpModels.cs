@@ -543,4 +543,132 @@ namespace IHomeland.Client.Infrastructure.Http
         /// </summary>
         internal ClientWorldAssignment Assignment { get; }
     }
+
+    /// <summary>
+    /// 标识 world admission 请求的封闭目标类别。
+    /// </summary>
+    internal enum ClientWorldAdmissionTargetKind
+    {
+        /// <summary>请求进入认证玩家自己的 PersonalWorld。</summary>
+        OwnWorld = 0,
+
+        /// <summary>请求进入已持有 membership 的 VisitSession。</summary>
+        VisitWorld = 1,
+    }
+
+    /// <summary>
+    /// 保存 world admission 请求中唯一允许的目标字段。
+    /// </summary>
+    internal sealed class ClientWorldAdmissionTarget
+    {
+        /// <summary>创建 own-world target。</summary>
+        /// <returns>不包含客户端自报 actor 的 target。</returns>
+        internal static ClientWorldAdmissionTarget OwnWorld()
+        {
+            return new ClientWorldAdmissionTarget(ClientWorldAdmissionTargetKind.OwnWorld, null);
+        }
+
+        /// <summary>创建 visit-world target。</summary>
+        /// <param name="visitSessionID">已有 Visitor membership 所属 VisitSessionID。</param>
+        /// <returns>只携带 VisitSessionID 的 target。</returns>
+        internal static ClientWorldAdmissionTarget VisitWorld(string visitSessionID)
+        {
+            if (string.IsNullOrEmpty(visitSessionID))
+            {
+                throw new ArgumentException("VisitSessionID 不能为空。", nameof(visitSessionID));
+            }
+
+            return new ClientWorldAdmissionTarget(ClientWorldAdmissionTargetKind.VisitWorld, visitSessionID);
+        }
+
+        /// <summary>创建已验证类别的 target。</summary>
+        /// <param name="kind">封闭 target 类别。</param>
+        /// <param name="visitSessionID">仅 visit-world 设置。</param>
+        private ClientWorldAdmissionTarget(ClientWorldAdmissionTargetKind kind, string visitSessionID)
+        {
+            Kind = kind;
+            VisitSessionID = visitSessionID;
+        }
+
+        /// <summary>获取请求类别。</summary>
+        internal ClientWorldAdmissionTargetKind Kind { get; }
+
+        /// <summary>获取 visit-world 的 VisitSessionID；own-world 时为空。</summary>
+        internal string VisitSessionID { get; }
+    }
+
+    /// <summary>
+    /// 标识 world admission 绑定的 gameplay 角色。
+    /// </summary>
+    internal enum ClientWorldRole
+    {
+        /// <summary>当前玩家是 immutable PersonalWorld Owner。</summary>
+        Owner = 0,
+
+        /// <summary>当前玩家是受控 Visitor。</summary>
+        Visitor = 1,
+    }
+
+    /// <summary>
+    /// 标识 world admission 绑定的连接用途。
+    /// </summary>
+    internal enum ClientWorldAdmissionPurpose
+    {
+        /// <summary>进入自己的 PersonalWorld。</summary>
+        OwnWorld = 0,
+
+        /// <summary>首次加入已有 Visitor reservation。</summary>
+        Join = 1,
+
+        /// <summary>恢复已进入 reconnect window 的 Visitor membership。</summary>
+        Reconnect = 2,
+    }
+
+    /// <summary>
+    /// 保存服务端签发且只能交付一次的 opaque world admission。
+    /// </summary>
+    internal sealed class ClientWorldAdmission
+    {
+        /// <summary>创建完整 admission 投影。</summary>
+        /// <param name="credential">只由 gameplay verifier 解释的 opaque credential。</param>
+        /// <param name="endpoint">Credential 绑定的 TLS/TCP endpoint。</param>
+        /// <param name="role">服务端权威角色。</param>
+        /// <param name="purpose">服务端权威连接用途。</param>
+        /// <param name="expiresAtMilliseconds">绝对 Unix expiry，单位为毫秒。</param>
+        internal ClientWorldAdmission(
+            string credential,
+            ClientEndpoint endpoint,
+            ClientWorldRole role,
+            ClientWorldAdmissionPurpose purpose,
+            long expiresAtMilliseconds)
+        {
+            Credential = credential ?? throw new ArgumentNullException(nameof(credential));
+            Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
+            Role = role;
+            Purpose = purpose;
+            ExpiresAtMilliseconds = expiresAtMilliseconds;
+        }
+
+        /// <summary>获取不得输出、解析或复用的 opaque credential。</summary>
+        internal string Credential { get; }
+
+        /// <summary>获取服务端受信 TLS/TCP endpoint。</summary>
+        internal ClientEndpoint Endpoint { get; }
+
+        /// <summary>获取 credential 绑定角色。</summary>
+        internal ClientWorldRole Role { get; }
+
+        /// <summary>获取 credential 绑定用途。</summary>
+        internal ClientWorldAdmissionPurpose Purpose { get; }
+
+        /// <summary>获取 admission 绝对 Unix expiry，单位为毫秒。</summary>
+        internal long ExpiresAtMilliseconds { get; }
+
+        /// <summary>返回不包含 credential 的安全绑定摘要。</summary>
+        /// <returns>Role、purpose、channel 与 expiry。</returns>
+        public override string ToString()
+        {
+            return $"ClientWorldAdmission[REDACTED] role={Role} purpose={Purpose} channel={Endpoint.Channel} expiresAtMs={ExpiresAtMilliseconds}";
+        }
+    }
 }

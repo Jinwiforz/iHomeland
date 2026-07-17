@@ -293,9 +293,9 @@ client/
 
 ### `Application`
 
-纯 C# session/account/personal-world/visit-session 状态与命令，不依赖具体 UI 或 transport component。
+纯 C# session/account/personal-world/visit-session 状态与命令，不依赖具体 UI、Unity Host 或平台 socket/WebSocket 对象。Channel owner 可以依赖窄 transport interface 与冻结 codec，但不得直接持有平台网络实现或第二份业务事实。
 
-当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session owner，以及 `Application/Control` 的只接收 WSS control 状态机；具体行为由[客户端接入规范](client-integration.md)统一说明。
+当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session/credential owner、`Application/Control` 的只接收 WSS control 状态机，以及 `Application/Gameplay` 的独立 TLS/TCP channel owner；具体行为由[客户端接入规范](client-integration.md)统一说明。
 
 尚未出现独立业务需求的 `Account`、`PersonalWorld`、`VisitSession` 与 `WorldAdmission` 目录不得为了目标树完整而创建空壳。
 
@@ -303,7 +303,7 @@ client/
 
 HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第二份业务事实。
 
-当前 `Infrastructure/Http` 放置冻结 operation catalog、JSON codec、共享 transport、result/error projection 与强类型 API；`Infrastructure/WebSocket` 只提供单次连接 adapter、封闭 control route catalog 与 generated Protobuf codec。两者都不保存业务状态，`Tcp` 在对应 capability 落地前不得创建空目录。
+当前 `Infrastructure/Http` 放置冻结 operation catalog、JSON codec、共享 transport、result/error projection 与强类型 API；`Infrastructure/WebSocket` 只提供单次连接 adapter、封闭 control route catalog 与 generated Protobuf codec；`Infrastructure/Tcp` 提供 exact stream transport、`IHTP` preface、framing、封闭 gameplay route catalog 与 generated Protobuf codec。三者都不保存业务状态。
 
 ### `Presentation`
 

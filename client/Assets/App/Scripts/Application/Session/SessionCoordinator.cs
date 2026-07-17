@@ -308,6 +308,48 @@ namespace IHomeland.Client.Application.Session
         }
 
         /// <summary>
+        /// 为当前 session generation 签发单次 world admission lease。
+        /// </summary>
+        /// <param name="target">Own-world 或 visit-world target。</param>
+        /// <param name="idempotencyKey">稳定签发意图 key；transport 不自动重试。</param>
+        /// <param name="cancellationToken">取消等待的信号。</param>
+        /// <returns>绑定 source generation 的单次 lease、服务端错误或本地失败。</returns>
+        internal async Task<ClientHttpResult<ClientWorldAdmissionLease>> IssueWorldAdmissionAsync(
+            ClientWorldAdmissionTarget target,
+            string idempotencyKey,
+            CancellationToken cancellationToken)
+        {
+            if (!TryCaptureAuthenticated(out var source))
+            {
+                return LocalPolicy<ClientWorldAdmissionLease>(
+                    ClientHttpOperationCatalog.IssueWorldAdmission.OperationID);
+            }
+
+            var result = await _httpApi.IssueWorldAdmissionAsync(
+                source.Tokens.AccessToken,
+                target,
+                idempotencyKey,
+                cancellationToken);
+            if (!result.IsSuccess)
+            {
+                HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
+                return ConvertFailure<ClientWorldAdmission, ClientWorldAdmissionLease>(result);
+            }
+
+            lock (_sync)
+            {
+                if (!IsCurrent(source.Generation))
+                {
+                    return LocalPolicy<ClientWorldAdmissionLease>(
+                        ClientHttpOperationCatalog.IssueWorldAdmission.OperationID);
+                }
+
+                return ClientHttpResult<ClientWorldAdmissionLease>.Success(
+                    new ClientWorldAdmissionLease(result.Value, source.Generation));
+            }
+        }
+
+        /// <summary>
         /// 在 Session owner 锁内验证 generation/expiry，并从 lease 原子取得 ticket 一次。
         /// </summary>
         /// <param name="lease">由当前或旧 generation 签发的 lease。</param>
@@ -335,6 +377,37 @@ namespace IHomeland.Client.Application.Session
                     _snapshot.Generation,
                     _clock.UtcNowMilliseconds,
                     out ticketUse);
+            }
+        }
+
+        /// <summary>
+        /// 在 Session owner 锁内验证 generation、expiry 与 binding，并从 lease 原子取得 admission 一次。
+        /// </summary>
+        /// <param name="lease">由当前或旧 generation 签发的 lease。</param>
+        /// <param name="admissionUse">成功时返回交给 gameplay channel 的 credential 所有权。</param>
+        /// <returns>当前 session、generation、expiry、binding 与单次交付均有效时返回 true。</returns>
+        /// <exception cref="ArgumentNullException">Lease 为空时抛出。</exception>
+        internal bool TryTakeWorldAdmission(
+            ClientWorldAdmissionLease lease,
+            out ClientWorldAdmissionUse admissionUse)
+        {
+            if (lease == null)
+            {
+                throw new ArgumentNullException(nameof(lease));
+            }
+
+            lock (_sync)
+            {
+                if (_state != ClientSessionOwnerState.Authenticated || _snapshot == null)
+                {
+                    admissionUse = null;
+                    return false;
+                }
+
+                return lease.TryTake(
+                    _snapshot.Generation,
+                    _clock.UtcNowMilliseconds,
+                    out admissionUse);
             }
         }
 

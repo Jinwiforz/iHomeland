@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -71,6 +72,46 @@ namespace IHomeland.Client.Tests.EditMode
 
             Assert.That(result.IsSuccess, Is.True);
             Assert.That(authorization, Is.EqualTo($"Bearer {accessToken}"));
+            await transport.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 验证 world admission 精确使用 POST、Bearer、Idempotency-Key 与封闭 JSON body。
+        /// </summary>
+        /// <returns>等待强类型请求与响应解码完成的任务。</returns>
+        [Test]
+        public async Task WorldAdmissionUsesFrozenHeaderAndSchema()
+        {
+            const string key = "fixture-admission-key-01";
+            string method = null;
+            string path = null;
+            string idempotencyKey = null;
+            string body = null;
+            var handler = new DelegateHandler(async (request, cancellationToken) =>
+            {
+                method = request.Method.Method;
+                path = request.RequestUri.AbsolutePath;
+                idempotencyKey = request.Headers.GetValues("Idempotency-Key").Single();
+                body = await request.Content.ReadAsStringAsync();
+                return JsonResponse(
+                    HttpStatusCode.Created,
+                    "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"127.0.0.1\",\"port\":4433},\"expiresAtMs\":2000,\"purpose\":\"OWN_WORLD\",\"role\":\"OWNER\"}");
+            });
+            var transport = CreateTransport(handler);
+            await transport.InitializeAsync(CancellationToken.None);
+            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+
+            var result = await api.IssueWorldAdmissionAsync(
+                "access-token",
+                ClientWorldAdmissionTarget.OwnWorld(),
+                key,
+                CancellationToken.None);
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(method, Is.EqualTo("POST"));
+            Assert.That(path, Is.EqualTo("/v1/world/admissions"));
+            Assert.That(idempotencyKey, Is.EqualTo(key));
+            Assert.That(body, Is.EqualTo("{\"kind\":\"OWN_WORLD\"}"));
             await transport.StopAsync(CancellationToken.None);
         }
 

@@ -126,15 +126,7 @@ Host 不实现业务状态机，不持有第二份业务事实。
 
 ## 网络核心
 
-网络核心包括：
-
-- `SessionCoordinator`
-- `MessageRouter`
-- channel-specific receive pumps
-- `PendingRequestRegistry`
-- `PushDispatcher`
-- `MainThreadDispatcher`
-- `ChannelHealthMonitor`
+网络核心必须覆盖 session ownership、channel-specific receive pump、typed route、pending correlation、有界主线程投递和低敏连接状态。当前实现由 `SessionCoordinator`、各 channel owner 与 `MainThreadDispatcher` 直接承担这些职责；在两个以上通道出现可证明的稳定共性前，不预先创建通用 `MessageRouter`、`PendingRequestRegistry`、`PushDispatcher` 或 `ChannelHealthMonitor`。
 
 每个 channel 一个 reader；writer 必须序列化并有界。网络线程不能直接写 Unity view。
 
@@ -156,7 +148,7 @@ ClientHttpTransport + ClientHttpCodec + ClientHttpOperationCatalog
 - Infrastructure 只承担冻结 HTTP operation 的传输与 codec；Application 的 `ClientBootstrapService` 和 `SessionCoordinator` 分别拥有启动配置流程与唯一 session/credential lineage。
 - 初始化不自动访问网络，own-world bootstrap 也只返回一次查询投影；具体 operation、安全和失败语义由[客户端接入规范](client-integration.md)统一说明。
 
-HTTP 边界本身不实现 UI、自动网络 bootstrap、token 持久化、invite accept、world admission 或 TLS/TCP。Own-world bootstrap 只作为一次强类型查询返回，不在本层保存 PersonalWorld 最终事实；WSS control 由下述独立 owner 消费这里交付的一次性 ticket。
+HTTP 边界本身不实现 UI、自动网络 bootstrap、token 持久化、invite accept 或 socket。Own-world bootstrap 只作为一次强类型查询返回；world admission 只形成 generation-bound、expiring、single-use lease，不在本层保存 PersonalWorld 最终事实。WSS/TCP 由各自独立 owner 消费这里交付的凭据。
 
 ### 当前 WSS control 边界
 
@@ -174,7 +166,25 @@ SessionCoordinator + ClientConfigurationStore
 - 普通 PUSH 经既有有界 `MainThreadDispatcher` 进入 Unity 主线程；forced logout/session invalidation 先以来源 generation 与更高 epoch 清除唯一 Session owner，再终止自动恢复。
 - 只有瞬时 transport/普通 peer close 消耗固定有限 backoff；协议、授权、失效、背压与停止均 fail closed，普通 WSS 中断不擅自清除 HTTP session。
 
-该边界不拥有 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现 TLS/TCP、world admission、业务 request/response 或客户端 control command。
+该边界不拥有 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现 TLS/TCP、业务 request/response 或客户端 control command。
+
+### 当前 TLS/TCP gameplay 边界
+
+```text
+SessionCoordinator + ClientConfigurationStore
+  -> ClientGameplayChannel
+      -> IClientGameplayConnection (single reader / serialized writer)
+      -> ClientGameplayFramer + ClientGameplayCodec + frozen route catalog
+      -> bounded pending + MainThreadDispatcher
+```
+
+- `ClientGameplayChannel` 初始化保持零网络副作用；显式 connect 原子消费同一 session generation 的 world admission lease，再签发并消费匹配 `TLS_TCP`/`GAMEPLAY` ticket。
+- Wire、TLS、明文例外与 credential 规则由[客户端接入规范](client-integration.md#4-tlstcp-business)统一拥有；channel 对任何不匹配的 preface、frame、sequence、route 或 correlation fail closed。
+- 每个 connection generation 只有一个 reader 与一个 serialized writer；pending、writer item、writer encoded bytes 和主线程投递均有硬上限，断线或背压会恰好完成等待方并撤销 generation。
+- Caller cancel 只结束本地等待，仍保留有界 correlation 以安全消费迟到 response；JOIN/RECONNECT 只允许携带当前 admission 的首个匹配 command。
+- 三类登记 PUSH 才能进入主线程；safe-return 在投递前先关闭旧 target mutation gate，session epoch 失效会同步撤销匹配 gameplay generation。
+
+该边界不保存 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现页面、Scene、业务状态机、自动重试或跨通道恢复编排；这些职责留给后续 Services 与 vertical slice change。
 
 ## 状态所有权
 

@@ -1,10 +1,12 @@
 using System;
 using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Control;
+using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Client.Scenes.Contexts;
 
@@ -88,6 +90,12 @@ namespace IHomeland.Client.Core.Composition
                 new SystemClientClock());
             var controlCatalog = new ClientControlCatalog();
             var controlCodec = new ClientControlCodec(controlCatalog);
+            var gameplayChannel = new ClientGameplayChannel(
+                configurationStore,
+                sessionCoordinator,
+                new SystemClientGameplayConnectionFactory(environment),
+                new ClientGameplayCodec(),
+                dispatcher);
             var controlChannel = new ClientControlChannel(
                 environment,
                 configurationStore,
@@ -96,16 +104,18 @@ namespace IHomeland.Client.Core.Composition
                 controlCodec,
                 dispatcher,
                 new SystemClientControlDelay(),
-                ControlRetryDelays);
+                ControlRetryDelays,
+                gameplayChannel.InvalidateSession);
             var sceneLifetimeOwner = new SceneLifetimeOwner();
 
-            // 逆序停止依次撤销 Scene、WSS、Session、HTTP、Configuration，最后拒绝主线程回写。
+            // 逆序停止依次撤销 Scene、WSS、TCP、Session、HTTP、Configuration，最后拒绝主线程回写。
             IAppLifetimeParticipant[] participants =
             {
                 dispatcher,
                 configurationStore,
                 transport,
                 sessionCoordinator,
+                gameplayChannel,
                 controlChannel,
                 sceneLifetimeOwner,
             };
@@ -118,7 +128,8 @@ namespace IHomeland.Client.Core.Composition
                 MaximumDispatchesPerFrame,
                 bootstrapService,
                 sessionCoordinator,
-                controlChannel);
+                controlChannel,
+                gameplayChannel);
         }
     }
 }

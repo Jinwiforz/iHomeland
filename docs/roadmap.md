@@ -302,9 +302,13 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 实现 WSS receive pump、控制通知、visit invite、epoch invalidation、主线程投递、重连与关闭。
 
+**当前状态：**已完成只接收 WSS control owner、9-route typed PUSH、有限自动恢复、session invalidation 与逆序关闭，并已归档；`add-client-tcp-gameplay` 的进入条件已满足。
+
 ### `add-client-tcp-gameplay`
 
-实现 TLS/TCP framing、single reader/serialized writer、pending requests/push dispatcher、gameplay admission、backpressure 和 close reasons。
+实现 TLS/TCP framing、single reader/serialized writer、pending correlation/typed PUSH dispatch、gameplay admission、backpressure 和 close reasons。
+
+**当前实现边界：**HTTP world admission、TLS 1.3/loopback transport、`IHTP` preface、冻结 gameplay route、双向 sequence、有界 pending/writer、typed PUSH、safe-return gate、session invalidation 与 App Scope 逆序停止已经落地；PersonalWorld/VisitSession 最终状态、UI、Scene、业务流程与自动恢复不在本 change 内。
 
 ## C2：个人世界客户端竖切
 

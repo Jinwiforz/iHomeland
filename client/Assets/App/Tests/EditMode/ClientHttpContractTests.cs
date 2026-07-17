@@ -77,12 +77,12 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
-        /// 验证 catalog 只暴露 HTTP bootstrap capability 的八个 operation，并冻结核心 metadata。
+        /// 验证 catalog 只暴露当前 capability 的九个 operation，并冻结核心 metadata。
         /// </summary>
         [Test]
-        public void CatalogFreezesEightOperations()
+        public void CatalogFreezesNineOperations()
         {
-            Assert.That(ClientHttpOperationCatalog.All, Has.Count.EqualTo(8));
+            Assert.That(ClientHttpOperationCatalog.All, Has.Count.EqualTo(9));
             AssertDescriptor(
                 ClientHttpOperationCatalog.GetVersion,
                 "getVersion",
@@ -179,10 +179,22 @@ namespace IHomeland.Client.Tests.EditMode
                 true,
                 5000,
                 64 * 1024);
+            AssertDescriptor(
+                ClientHttpOperationCatalog.IssueWorldAdmission,
+                "issueWorldAdmission",
+                HttpMethod.Post,
+                "/v1/world/admissions",
+                ClientHttpAuthentication.Bearer,
+                ClientHttpBodyPolicy.Json,
+                4096,
+                HttpStatusCode.Created,
+                true,
+                5000,
+                16 * 1024);
 
             Assert.That(
                 ClientHttpOperationCatalog.All.Select(item => item.OperationID).Distinct().Count(),
-                Is.EqualTo(8));
+                Is.EqualTo(9));
             Assert.That(
                 ClientHttpOperationCatalog.All.All(item => item.RelativePath.IndexOf('{') < 0),
                 Is.True);
@@ -237,6 +249,38 @@ namespace IHomeland.Client.Tests.EditMode
                 "{\"endpoint\":{\"channel\":\"UDP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"scopes\":[\"GAMEPLAY\"],\"ticket\":\"opaque-ticket-value-with-safe-length\"}")));
             Assert.Throws<ClientHttpContractException>(() => codec.DecodeWorldBootstrap(Utf8(
                 "{\"world\":{\"personalWorldId\":\"pworld-owner\",\"ownerPlayerId\":\"player-owner\",\"lifecycle\":\"ACTIVE\",\"revision\":1,\"createdAtMs\":1},\"assignment\":{\"personalWorldId\":\"pworld-other\",\"worldInstanceId\":\"winst-current\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":1,\"leaseExpiresAtMs\":2}}")));
+        }
+
+        /// <summary>
+        /// 验证 admission request 不允许 actor 注入，response 保持 role/purpose 与 credential 脱敏。
+        /// </summary>
+        [Test]
+        public void CodecFreezesWorldAdmissionContract()
+        {
+            var codec = new ClientHttpCodec();
+            using (var own = JsonDocument.Parse(codec.EncodeWorldAdmission(
+                       ClientWorldAdmissionTarget.OwnWorld())))
+            {
+                Assert.That(own.RootElement.EnumerateObject().Count(), Is.EqualTo(1));
+                Assert.That(own.RootElement.GetProperty("kind").GetString(), Is.EqualTo("OWN_WORLD"));
+            }
+
+            using (var visit = JsonDocument.Parse(codec.EncodeWorldAdmission(
+                       ClientWorldAdmissionTarget.VisitWorld("visit_fixture_one"))))
+            {
+                Assert.That(visit.RootElement.EnumerateObject().Count(), Is.EqualTo(2));
+                Assert.That(visit.RootElement.GetProperty("visitSessionId").GetString(), Is.EqualTo("visit_fixture_one"));
+            }
+
+            var admission = codec.DecodeWorldAdmission(Utf8(
+                "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"OWN_WORLD\",\"role\":\"OWNER\"}"));
+            Assert.That(admission.Purpose, Is.EqualTo(ClientWorldAdmissionPurpose.OwnWorld));
+            Assert.That(admission.ToString(), Does.Not.Contain(admission.Credential));
+
+            Assert.Throws<ArgumentException>(() => codec.EncodeWorldAdmission(
+                ClientWorldAdmissionTarget.VisitWorld("visit/invalid")));
+            Assert.Throws<ClientHttpContractException>(() => codec.DecodeWorldAdmission(Utf8(
+                "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"JOIN\",\"role\":\"OWNER\"}")));
         }
 
         /// <summary>
@@ -339,6 +383,21 @@ namespace IHomeland.Client.Tests.EditMode
                     .GetProperty("response").GetProperty("body").GetRawText()));
                 Assert.That(world.World.PersonalWorldID, Is.EqualTo("pworld_fixture_owner"));
                 Assert.That(world.Assignment.WorldInstanceID, Is.EqualTo("winst_fixture_current"));
+
+                var admissionCase = cases["own-world-admission-success"];
+                using (var encodedAdmission = JsonDocument.Parse(codec.EncodeWorldAdmission(
+                           ClientWorldAdmissionTarget.OwnWorld())))
+                {
+                    var fixtureAdmission = admissionCase.GetProperty("request").GetProperty("body");
+                    Assert.That(encodedAdmission.RootElement.EnumerateObject().Count(), Is.EqualTo(1));
+                    Assert.That(
+                        encodedAdmission.RootElement.GetProperty("kind").GetString(),
+                        Is.EqualTo(fixtureAdmission.GetProperty("kind").GetString()));
+                }
+
+                var admission = codec.DecodeWorldAdmission(Utf8(admissionCase
+                    .GetProperty("response").GetProperty("body").GetRawText()));
+                Assert.That(admission.Role, Is.EqualTo(ClientWorldRole.Owner));
             }
         }
 
