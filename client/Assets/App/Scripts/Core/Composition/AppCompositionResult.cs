@@ -7,6 +7,7 @@ using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
 using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Presentation.Navigation;
 
 namespace IHomeland.Client.Core.Composition
 {
@@ -60,6 +61,11 @@ namespace IHomeland.Client.Core.Composition
         private readonly WorldAdmissionCoordinator _worldAdmissionCoordinator;
 
         /// <summary>
+        /// 保存当前 App Scope 唯一 UI route owner；isolated host fixture 可以不提供。
+        /// </summary>
+        private readonly ClientUiRouter _uiRouter;
+
+        /// <summary>
         /// 创建只包含宿主运行边界的对象图结果，供不接入 HTTP capability 的 isolated fixture 使用。
         /// </summary>
         /// <param name="lifetime">统一拥有 App Scope 初始化和逆序停止的生命周期。</param>
@@ -84,7 +90,8 @@ namespace IHomeland.Client.Core.Composition
                 gameplayChannel: null,
                 personalWorldService: null,
                 visitSessionService: null,
-                worldAdmissionCoordinator: null)
+                worldAdmissionCoordinator: null,
+                uiRouter: null)
         {
         }
 
@@ -102,6 +109,7 @@ namespace IHomeland.Client.Core.Composition
         /// <param name="personalWorldService">PersonalWorld/assignment 投影 owner。</param>
         /// <param name="visitSessionService">VisitSession/invite 投影 owner。</param>
         /// <param name="worldAdmissionCoordinator">World target flow owner。</param>
+        /// <param name="uiRouter">App Scope 唯一 UI route owner。</param>
         /// <exception cref="ArgumentException">单帧 callback 上限非正数时抛出。</exception>
         /// <exception cref="ArgumentNullException">任一必需对象、集合引用或 tickable 元素为 null 时抛出。</exception>
         internal AppCompositionResult(
@@ -115,7 +123,8 @@ namespace IHomeland.Client.Core.Composition
             ClientGameplayChannel gameplayChannel,
             PersonalWorldService personalWorldService,
             VisitSessionService visitSessionService,
-            WorldAdmissionCoordinator worldAdmissionCoordinator)
+            WorldAdmissionCoordinator worldAdmissionCoordinator,
+            ClientUiRouter uiRouter)
         {
             Lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
             Dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -145,6 +154,7 @@ namespace IHomeland.Client.Core.Composition
             _personalWorldService = personalWorldService;
             _visitSessionService = visitSessionService;
             _worldAdmissionCoordinator = worldAdmissionCoordinator;
+            _uiRouter = uiRouter;
         }
 
         /// <summary>
@@ -209,5 +219,10 @@ namespace IHomeland.Client.Core.Composition
         /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 world graph 时抛出。</exception>
         internal WorldAdmissionCoordinator WorldAdmissionCoordinator => _worldAdmissionCoordinator ??
             throw new InvalidOperationException("当前 isolated host composition 不包含 WorldAdmissionCoordinator。");
+
+        /// <summary>获取完整 Composition 显式连接的唯一 UI route owner。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 UI graph 时抛出。</exception>
+        internal ClientUiRouter UiRouter => _uiRouter ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含 ClientUiRouter。");
     }
 }

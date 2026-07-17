@@ -3,7 +3,8 @@
   "rootNamespace": "IHomeland.Client.Tests.EditMode",
   "references": [
     "IHomeland.Client.Runtime",
-    "IHomeland.Client.Protocol.Generated"
+    "IHomeland.Client.Protocol.Generated",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [
     "Editor"

@@ -2,7 +2,8 @@
   "name": "IHomeland.Client.Runtime",
   "rootNamespace": "IHomeland.Client",
   "references": [
-    "IHomeland.Client.Protocol.Generated"
+    "IHomeland.Client.Protocol.Generated",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

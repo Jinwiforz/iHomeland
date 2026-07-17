@@ -322,6 +322,10 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 按页面适配度选择 UI Toolkit/uGUI，统一 screen owner、layer、input、focus 和 lifecycle；邀请/访问列表优先评估 UI Toolkit，世界空间 UI 使用 uGUI。
 
+**当前状态：**已完成统一 route owner、双 Host、Input/focus、生命周期、Unity 全量测试与 Windows Development build 验收，并于 2026-07-17 归档；`add-client-personal-world-vertical-slice` 的进入条件已满足。
+
+**当前实现边界：**已落地纯 C# 有界事务 route、空 production registry、稳定跨 framework layer、generation/cancellation、唯一 Input System clone owner，以及直接引用的 UI Toolkit/uGUI Host adapters；没有产品 UXML/USS/Prefab、Presenter、SceneContext、资源系统或业务网络动作。BootstrapScene 直接引用、Unity 全量测试与 Windows Development build 均已完成。
+
 ### `add-client-personal-world-vertical-slice`
 
 交付登录、进入自己的世界、邀请/接受、Visitor 模式、Owner grace、离开/踢出、安全返回、SceneContext generation/cancellation 和 PC 输入/分辨率验收。

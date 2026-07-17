@@ -9,6 +9,8 @@ using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Client.Infrastructure.WebSocket;
+using IHomeland.Client.Presentation.Hosts;
+using IHomeland.Client.Presentation.Navigation;
 using IHomeland.Client.Scenes.Contexts;
 
 namespace IHomeland.Client.Core.Composition
@@ -31,6 +33,11 @@ namespace IHomeland.Client.Core.Composition
         /// 限制单帧 callback 数量，避免一次积压独占 Unity 主线程。
         /// </summary>
         private const int MaximumDispatchesPerFrame = 128;
+
+        /// <summary>
+        /// 限制等待 UI transition 的请求数，过载时由 router 立即返回稳定拒绝。
+        /// </summary>
+        private const int UiTransitionQueueCapacity = 16;
 
         /// <summary>
         /// 限制初始化失败后的逆序回滚总等待时间。
@@ -61,15 +68,25 @@ namespace IHomeland.Client.Core.Composition
         /// 在当前 Unity 主线程创建 App Scope 对象图和冻结的执行顺序。
         /// </summary>
         /// <param name="environment">已在任何网络副作用前验证的环境与构建身份。</param>
+        /// <param name="uiHostRoot">已在 bootstrap 前验证的唯一 UI/Input Host root。</param>
         /// <returns>只供唯一 AppRoot 持有和驱动的不可变 composition 结果。</returns>
-        /// <exception cref="ArgumentNullException">环境快照为空时抛出。</exception>
+        /// <exception cref="ArgumentNullException">环境快照或 UI Host root 为空时抛出。</exception>
         /// <exception cref="InvalidOperationException">同一 AppComposition 实例重复 Build 时抛出。</exception>
-        internal AppCompositionResult Build(ClientEnvironment environment)
+        internal AppCompositionResult Build(
+            ClientEnvironment environment,
+            ClientUiHostRoot uiHostRoot)
         {
             if (environment == null)
             {
                 throw new ArgumentNullException(nameof(environment));
             }
+
+            if (uiHostRoot == null)
+            {
+                throw new ArgumentNullException(nameof(uiHostRoot));
+            }
+
+            uiHostRoot.ValidateConfiguration();
 
             if (_built)
             {
@@ -116,11 +133,20 @@ namespace IHomeland.Client.Core.Composition
                 personalWorldService,
                 visitSessionService);
             var sceneLifetimeOwner = new SceneLifetimeOwner();
+            var uiRegistry = new ClientUiRegistry(
+                Array.Empty<ClientUiRouteDefinition>(),
+                uiHostRoot.GetHosts());
+            var uiRouter = new ClientUiRouter(
+                uiRegistry,
+                uiHostRoot,
+                maximumQueuedTransitions: UiTransitionQueueCapacity,
+                cleanupTimeout: RollbackTimeout);
 
-            // 逆序停止依次撤销 Scene、world flow/subscriber、WSS、TCP、Session、HTTP、Configuration，最后拒绝主线程回写。
+            // 逆序停止先关闭 UI route，再撤销 Scene、world flow/subscriber、WSS、TCP、Session、HTTP、Configuration，最后释放 Input 并拒绝主线程回写。
             IAppLifetimeParticipant[] participants =
             {
                 dispatcher,
+                uiHostRoot,
                 configurationStore,
                 transport,
                 sessionCoordinator,
@@ -130,6 +156,7 @@ namespace IHomeland.Client.Core.Composition
                 visitSessionService,
                 worldAdmissionCoordinator,
                 sceneLifetimeOwner,
+                uiRouter,
             };
 
             var lifetime = new AppLifetime(participants, RollbackTimeout, ShutdownTimeout);
@@ -144,7 +171,8 @@ namespace IHomeland.Client.Core.Composition
                 gameplayChannel,
                 personalWorldService,
                 visitSessionService,
-                worldAdmissionCoordinator);
+                worldAdmissionCoordinator,
+                uiRouter);
         }
     }
 }

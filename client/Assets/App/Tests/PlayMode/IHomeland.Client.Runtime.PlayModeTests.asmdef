@@ -2,7 +2,8 @@
   "name": "IHomeland.Client.Runtime.PlayModeTests",
   "rootNamespace": "IHomeland.Client.Tests.PlayMode",
   "references": [
-    "IHomeland.Client.Runtime"
+    "IHomeland.Client.Runtime",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

@@ -91,7 +91,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - 只接收登记的 response/error 与 2002、2121、2122 push；`VISIT_SAFE_RETURN_PUSH` 到达后立即停止旧 target mutation，等待有界关闭并进入受控返回流程
 - ticket、admission、完整 payload 和 assignment 私有字段不得进入客户端日志；session epoch 失效时同时关闭 WSS/TCP
 
-当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，UI、Scene 与自动恢复仍未接入。
+当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，UI routing/Host/Input 基础设施已独立接入，但产品页面、Scene 与自动恢复仍未接入。
 
 ### 5. Account/PersonalWorld/VisitSession Services
 
@@ -101,6 +101,8 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - Services 只公开不可变、无 credential snapshot；后续 UI 不接触 transport type、generated message 或第二份最终事实。
 
 ### 6. UI Vertical Slice
+
+当前先行能力是空 production registry 的统一 routing/Host/Input 边界：它不读取 Service、不发网络请求、不加载页面资源，也不改变下列竖切范围。下列产品页面只能在后续 `add-client-personal-world-vertical-slice` 中按 route 逐项接线：
 
 - login
 - home/shell
@@ -140,7 +142,7 @@ App Start
 
 目标恢复策略要求 WSS 与 TCP 独立重连但共享 session epoch；epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
 
-上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS/TLS-TCP channel、PersonalWorld/VisitSession Services 与目标状态机；token 跨进程恢复、独立通道自动恢复策略、UI 与 SceneContext 仍未建立。
+上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS/TLS-TCP channel、PersonalWorld/VisitSession Services、目标状态机以及空 registry 的 UI routing/Host/Input 基础设施；token 跨进程恢复、独立通道自动恢复策略、产品 UI 与 SceneContext 仍未建立。
 
 ## 世界与访问快照
 
@@ -175,7 +177,7 @@ PersonalWorld projection
   -> WorldInstance reliable channel
   -> OwnWorld/Visiting state machine
   -> SceneContext world adapter
-  -> UI and interaction presentation
+  -> product UI routes and interaction presentation
 ```
 
 进入自己的世界：

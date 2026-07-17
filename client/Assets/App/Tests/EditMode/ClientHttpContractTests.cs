@@ -9,7 +9,12 @@ using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Presentation.Hosts;
+using IHomeland.Client.Presentation.Hosts.UGUI;
+using IHomeland.Client.Presentation.Hosts.UIToolkit;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace IHomeland.Client.Tests.EditMode
 {
@@ -369,13 +374,32 @@ namespace IHomeland.Client.Tests.EditMode
                 "0.1.0",
                 1);
             var composition = new AppComposition();
+            var hostObject = new GameObject("CompositionUiHostRoot");
+            hostObject.SetActive(false);
+            var inputAsset = ScriptableObject.CreateInstance<InputActionAsset>();
+            inputAsset.AddActionMap("Player").AddAction("Move");
+            inputAsset.AddActionMap("UI").AddAction("Navigate");
+            var uiHostRoot = hostObject.AddComponent<ClientUiHostRoot>();
+            uiHostRoot.ConfigureBeforeActivation(
+                inputAsset,
+                Array.Empty<ClientUiToolkitHost>(),
+                Array.Empty<ClientUguiHost>());
 
-            var result = composition.Build(environment);
+            try
+            {
+                var result = composition.Build(environment, uiHostRoot);
 
-            Assert.That(result.BootstrapService, Is.Not.Null);
-            Assert.That(result.SessionCoordinator, Is.Not.Null);
-            Assert.That(result.Lifetime.State, Is.EqualTo(AppLifetimeState.Created));
-            Assert.Throws<InvalidOperationException>(() => composition.Build(environment));
+                Assert.That(result.BootstrapService, Is.Not.Null);
+                Assert.That(result.SessionCoordinator, Is.Not.Null);
+                Assert.That(result.UiRouter.CurrentSnapshot.Items, Is.Empty);
+                Assert.That(result.Lifetime.State, Is.EqualTo(AppLifetimeState.Created));
+                Assert.Throws<InvalidOperationException>(() => composition.Build(environment, uiHostRoot));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(hostObject);
+                UnityEngine.Object.DestroyImmediate(inputAsset);
+            }
         }
 
         /// <summary>

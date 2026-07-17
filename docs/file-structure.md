@@ -305,9 +305,11 @@ HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第
 
 ### `Presentation`
 
-- Navigation：screen id、layer、input 和 lifecycle。
-- Models：复杂共享展示投影，按需创建。
-- Hosts：UIDocument、Canvas、EventSystem 和 Unity lifecycle adapters。
+- Navigation：当前放置纯 C# `ClientUiRegistry`、`ClientUiRouter`、封闭 route id、稳定 layer/input/lifecycle、generation 与不可变 snapshot；不得引用资源路径或 transport。
+- Models：复杂共享展示投影，按真实页面需求创建；当前不建立空目录或占位 Presenter。
+- Hosts：当前放置持久 `ClientUiHostRoot`、UI Toolkit `UIDocument` adapter 与 uGUI `Canvas/CanvasGroup/EventSystem` adapter；只接受直接引用，不扫描场景、不加载资源、不保存业务事实。
+
+当前 production route registry 与双 framework Host 列表保持为空，`Presentation` 没有产品 UXML/USS/Prefab。后续个人世界竖切按一个逻辑 route 一个 active owner 接线，不得把页面、资源 key、credential 或 generated message 塞回 router。
 
 ### `Scenes/Contexts`
 

@@ -2,7 +2,7 @@
 
 ## 文档职责
 
-本文档定义 UI Toolkit 与 uGUI 的页面选型、统一入口、状态、输入、生命周期和验收规则。UI 实现必须等待服务端 v1 与客户端网络/业务 Services 稳定。
+本文档定义 UI Toolkit 与 uGUI 的页面选型、统一入口、状态、输入、生命周期和验收规则。服务端 v1 与客户端网络/业务 Services 已满足 UI 基础设施进入条件；当前只落地路由、Host 与输入边界，产品页面仍由个人世界竖切 change 交付。
 
 ## 选型原则
 
@@ -28,26 +28,34 @@
 
 ## 统一 UI 入口
 
-业务按逻辑 screen id 导航，不直接选择框架：
+业务按封闭逻辑 route id 导航，不直接选择框架：
 
 ```text
-Open(ScreenID.WorldVisit)
-Close(ScreenID.Settings)
-ShowModal(ModalID.ConnectionLost)
+Open(ClientUiRouteId.WorldVisit)
+Close(ClientUiRouteId.Settings)
+Open(ClientUiRouteId.ConnectionLost)
 ```
 
-Screen definition 至少包含：
+Route definition 至少包含：
 
 | 字段 | 说明 |
 |---|---|
-| `screen_id` | 稳定逻辑标识 |
+| `route_id` | 稳定逻辑标识 |
 | `framework_owner` | UI Toolkit 或 uGUI |
 | `layer` | screen、overlay、modal、system |
 | `input_mode` | game、ui、text、modal |
 | `lifecycle` | cached、recreate、scene-bound |
-| `resource_key` | UXML/USS、prefab 或资源地址 |
 
-同一会话中的一个 screen 只有一个 active owner，禁止两份可交互实现和 command 双发。
+Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具体 Host 或后续独立资源系统，不能泄漏到导航接口。同一会话中的一个 route 只有一个 active owner，禁止两份可交互实现和 command 双发。
+
+### 当前实现边界
+
+- `ClientUiRouter` 是 App Scope 唯一 route owner，使用有界串行 transition、单调 navigation generation 与不可变 snapshot。
+- `ClientUiRegistry` 在任何 Host 副作用前冻结 definition/Host 一对一关系；production registry 当前为空，因此启动不会创建占位页面。
+- Screen 与 System 各自只有一个 owner；Overlay 可叠加；Modal 严格按栈顶关闭；最高层且最后提交的 route 才能交互。
+- `Cached` 只保留已初始化 Host，关闭时仍会 hide/unbind；`Recreate` 完整 dispose；`SceneBound` 必须绑定正 Scene generation。
+- 未登记 route、错误 scene generation、队列过载、调用取消、停止、策略拒绝和 Host failure 都返回稳定结果；结果区分未提交拒绝、幂等未变化、已提交成功和 post-commit failure，不把内部异常文本暴露给页面。
+- 当前没有产品 UXML、USS、Prefab、Presenter 或业务 route definition；`Login` 等 enum identity 只冻结后续接线名称，不代表页面已经实现。
 
 ## 状态边界
 
@@ -62,24 +70,23 @@ Screen definition 至少包含：
 
 ### UI Toolkit Host
 
-- 创建 UIDocument 与 panel
-- 加载 UXML/USS/controller
+- 适配直接序列化的 UIDocument 与 panel
 - 适配 show/hide/dispose
-- 注册与解除 callback
+- 只在页面 change 明确需要时注册与解除 callback
 - 与统一输入和层级表协调
 
 ### uGUI Host
 
-- 创建 Canvas、prefab 和 scene/world overlay
+- 适配直接序列化的 Canvas、CanvasGroup、EventSystem 和可选默认 focus
 - 适配 show/hide/dispose
-- 管理 camera、sorting layer 和 scene binding
+- 管理固定 sorting slot、raycast 和 scene binding
 - 与 SceneContext 生命周期协调
 
-Host 只获得所需的状态、command、logger 和 main-thread 接口，不获得完整全局容器。
+Host 只获得当前 route binding、页面 cancellation、focus 与必要 Unity 对象，不获得 transport、generated message、credential 或完整全局容器。Router 将 Host 失败映射为稳定、低敏且区分提交边界的 transition result。
 
 ## 输入与层级
 
-客户端统一使用 Input System。UI Service/Host 协调：
+客户端统一使用 Input System。持久 `ClientUiHostRoot` clone 项目 Input System 资产并成为 `Player`/`UI` action map 与 cursor 的唯一 owner；原资产保持只读。Router/Host 共同协调：
 
 - modal 独占
 - text input 与 keyboard focus
@@ -87,6 +94,8 @@ Host 只获得所需的状态、command、logger 和 main-thread 接口，不获
 - cursor visible/lock state
 - gamepad navigation 与 previous focus 恢复
 - UI Toolkit panel 与 uGUI Canvas 排序
+
+Gameplay input state 不绑定 UI route owner；只有 UI、Text 与 Modal mode 才绑定当前交互 route，避免 HUD 打开时把 gameplay 误判为 UI 输入。
 
 统一层级：
 
@@ -112,7 +121,7 @@ System Notice
 - `Unbind`：解除订阅
 - `Dispose`：释放资源
 
-页面隐藏或销毁后，延迟响应可以更新业务 Service，但不得重新写入或隐式显示旧 view。页面级 cancellation 必须与 lifecycle 绑定。
+页面隐藏或销毁后，延迟响应可以更新业务 Service，但不得重新写入或隐式显示旧 view。页面级 cancellation 必须与 lifecycle 绑定，迟到回写还必须同时匹配 route、navigation generation、Host generation 与 Scene generation。
 
 ## 主线程
 

@@ -33,8 +33,8 @@ BootstrapScene
 - 读取环境配置与 endpoint manifest model
 - 创建 logger、clock、main-thread dispatcher
 - 创建 HTTP、WSS、TCP adapters
-- 创建 Session、Account、PersonalWorld、VisitSession、WorldAdmission 和 UI Services
-- 创建必要 Unity Hosts
+- 创建 Session、Account、PersonalWorld、VisitSession、WorldAdmission 与唯一 `ClientUiRouter`
+- 接入 BootstrapScene 直接引用的必要 Unity Hosts
 - 显式连接依赖
 - 生成初始化顺序、tickable 列表和关闭顺序
 - 失败时逆序清理已成功项
@@ -74,7 +74,7 @@ Created -> Initializing -> Running -> Stopping -> Stopped
 - Message router、pending requests、push dispatcher
 - Account Service
 - PersonalWorld Service、VisitSession Service 与 World Admission Coordinator
-- UI navigation/service
+- `ClientUiRouter`、`ClientUiHostRoot` 与空 production route registry
 - persistent audio/settings
 
 这些对象不得引用已卸载场景中的 GameObject、Component、Camera 或 view。
@@ -201,7 +201,22 @@ HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
 - Coordinator 只允许 `Inactive -> ResolvingOwnWorld -> OwnWorld -> JoiningVisit -> Visiting -> ReturningOwnWorld -> OwnWorld` 的登记转换，并同时校验 session generation 与 target generation。
 - JOIN/RECONNECT admission credential 只由 gameplay channel 内部写入首个 command；Services、coordinator、snapshot、subscriber 与日志均不能读取。
 - Owner/Visitor command 使用 current role 与 revision 在写入前 fail closed。Caller cancel、commit-unknown 或 revision conflict 不触发隐式 mutation 重试。
-- App Scope 初始化只登记 subscriber；只有显式 flow/command 才联网。UI、SceneContext、Prefab、资源加载、页面路由和跨进程恢复仍属于后续 change。
+- App Scope 初始化只登记 subscriber；只有显式 flow/command 才联网。UI route/Host/Input 基础设施由下述边界接续；产品页面、SceneContext、Prefab、资源加载和跨进程恢复仍属于后续 change。
+
+### 当前 UI routing/Host 边界
+
+```text
+AppBootstrap
+  -> ClientUiHostRoot (Input System clone / explicit Hosts)
+  -> AppComposition
+      -> ClientUiRegistry (production definitions = empty)
+      -> ClientUiRouter
+          -> UI Toolkit Host | uGUI Host
+```
+
+- `AppBootstrap` 只验证 BootstrapScene 的直接引用；`AppComposition` 创建唯一纯 C# `ClientUiRouter`，并把 router 与 Host/Input boundary 纳入既有 AppLifetime。
+- production registry 当前为空，启动后保持空 snapshot，不显示页面、不自动联网；UI Toolkit/uGUI Host 不取得 transport、generated message、credential 或完整容器。
+- route、layer、事务、输入、焦点、生命周期、失败和验收的唯一详细规则见 `docs/client-ui-architecture.md`，本文不重复维护。
 
 ## 状态所有权
 
@@ -214,7 +229,7 @@ HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
 | VisitSession、Owner/Visitor role、membership 与 expiry | VisitSession Service |
 | current WorldInstance assignment | PersonalWorld Service |
 | current target、admission flow 与 target generation | World Admission Coordinator |
-| active screen/modal | UI Service |
+| active route、layer、input 与 focus generation | ClientUiRouter / ClientUiHostRoot |
 | camera/map/scene actors | SceneContext |
 | transient animation/focus | View/Host |
 
@@ -272,3 +287,4 @@ ScriptableObject 不保存在线 session、连接状态或 world/visit snapshot�
 - 网络 push 只在主线程更新业务状态和 active view。
 - 应用退出有 deadline，不同步阻塞 Unity shutdown。
 - 个人世界阶段 Owner/Visitor 模式切换不会残留旧 SceneContext、旧 admission 或可写 world callback。
+- 空 production route registry 启动不创建页面；双 Host fixture 的 modal、focus、raycast、action map 与 teardown 保持单 owner。

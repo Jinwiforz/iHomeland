@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -7,10 +8,14 @@ using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Scenes.Contexts;
+using IHomeland.Client.Presentation.Hosts;
+using IHomeland.Client.Presentation.Hosts.UGUI;
+using IHomeland.Client.Presentation.Hosts.UIToolkit;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using UnityEngine.InputSystem;
 
 namespace IHomeland.Client.Tests.PlayMode
 {
@@ -19,6 +24,9 @@ namespace IHomeland.Client.Tests.PlayMode
     /// </summary>
     public sealed class AppRootPlayModeTests
     {
+        /// <summary>保存测试创建且必须显式销毁的 InputActionAsset 模板。</summary>
+        private readonly List<InputActionAsset> _inputAssets = new List<InputActionAsset>();
+
         /// <summary>
         /// 每个测试后销毁所有 AppRoot，验证 OnDestroy 清理并隔离静态唯一性状态。
         /// </summary>
@@ -34,6 +42,16 @@ namespace IHomeland.Client.Tests.PlayMode
                     Object.Destroy(root.gameObject);
                 }
             }
+
+            foreach (var inputAsset in _inputAssets)
+            {
+                if (inputAsset != null)
+                {
+                    Object.Destroy(inputAsset);
+                }
+            }
+
+            _inputAssets.Clear();
 
             yield return null;
         }
@@ -177,9 +195,11 @@ namespace IHomeland.Client.Tests.PlayMode
             var gameObject = new GameObject("InvalidEnvironmentRoot");
             gameObject.SetActive(false);
             var root = gameObject.AddComponent<AppRoot>();
+            var uiHostRoot = AddUiHostRoot(gameObject);
             var bootstrap = gameObject.AddComponent<AppBootstrap>();
             SetPrivateField(bootstrap, "_appRoot", root);
             SetPrivateField(bootstrap, "_environmentProfile", profile);
+            SetPrivateField(bootstrap, "_uiHostRoot", uiHostRoot);
             LogAssert.Expect(
                 LogType.Exception,
                 new Regex("Production HTTP base URI 必须使用 HTTPS", RegexOptions.CultureInvariant));
@@ -200,15 +220,35 @@ namespace IHomeland.Client.Tests.PlayMode
         /// </summary>
         /// <param name="name">用于诊断场景层级的 GameObject 名称。</param>
         /// <returns>已经激活并开始启动的 AppRoot。</returns>
-        private static AppRoot CreateBootstrapRoot(string name)
+        private AppRoot CreateBootstrapRoot(string name)
         {
             var gameObject = new GameObject(name);
             gameObject.SetActive(false);
             var root = gameObject.AddComponent<AppRoot>();
+            var uiHostRoot = AddUiHostRoot(gameObject);
             var bootstrap = gameObject.AddComponent<AppBootstrap>();
-            bootstrap.ConfigureBeforeActivation(root, CreateTestEnvironment());
+            bootstrap.ConfigureBeforeActivation(root, uiHostRoot, CreateTestEnvironment());
             gameObject.SetActive(true);
             return root;
+        }
+
+        /// <summary>
+        /// 在测试 GameObject 上创建带最小 Player/UI action map 的唯一 UI/Input Host root。
+        /// </summary>
+        /// <param name="gameObject">尚未激活的测试 App Scope GameObject。</param>
+        /// <returns>已完成激活前配置的 Host root。</returns>
+        private ClientUiHostRoot AddUiHostRoot(GameObject gameObject)
+        {
+            var uiHostRoot = gameObject.AddComponent<ClientUiHostRoot>();
+            var inputActions = ScriptableObject.CreateInstance<InputActionAsset>();
+            inputActions.AddActionMap("Player").AddAction("Move");
+            inputActions.AddActionMap("UI").AddAction("Navigate");
+            _inputAssets.Add(inputActions);
+            uiHostRoot.ConfigureBeforeActivation(
+                inputActions,
+                System.Array.Empty<ClientUiToolkitHost>(),
+                System.Array.Empty<ClientUguiHost>());
+            return uiHostRoot;
         }
 
         /// <summary>

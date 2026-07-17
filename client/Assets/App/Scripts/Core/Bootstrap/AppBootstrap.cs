@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Presentation.Hosts;
 using UnityEngine;
 
 namespace IHomeland.Client.Core.Bootstrap
@@ -32,6 +33,13 @@ namespace IHomeland.Client.Core.Bootstrap
         private ClientEnvironmentProfile _environmentProfile = null;
 
         /// <summary>
+        /// 保存 BootstrapScene 直接序列化引用的同一持久 GameObject UI/Input Host root。
+        /// </summary>
+        [SerializeField]
+        [Tooltip("同一 Bootstrap GameObject 上唯一拥有 Input System clone 与 UI Host 列表的 root。")]
+        private ClientUiHostRoot _uiHostRoot;
+
+        /// <summary>
         /// 保存程序化 PlayMode fixture 在激活前注入的不可变环境；正式场景保持为空。
         /// </summary>
         private ClientEnvironment _configuredEnvironment;
@@ -59,6 +67,31 @@ namespace IHomeland.Client.Core.Bootstrap
                 return;
             }
 
+            if (_uiHostRoot == null)
+            {
+                Debug.LogError("AppBootstrap 缺少 ClientUiHostRoot 直接序列化引用。", this);
+                enabled = false;
+                return;
+            }
+
+            if (!ReferenceEquals(_uiHostRoot.gameObject, gameObject))
+            {
+                Debug.LogError("ClientUiHostRoot 必须与 AppBootstrap 位于同一持久 GameObject。", this);
+                enabled = false;
+                return;
+            }
+
+            try
+            {
+                _uiHostRoot.ValidateConfiguration();
+            }
+            catch (Exception configurationError)
+            {
+                Debug.LogException(configurationError, this);
+                enabled = false;
+                return;
+            }
+
             if (!_appRoot.TryClaim())
             {
                 Destroy(gameObject);
@@ -70,7 +103,7 @@ namespace IHomeland.Client.Core.Bootstrap
                 var environment = _configuredEnvironment ?? _environmentProfile.Build(
                     UnityEngine.Application.version,
                     ClientContractBaseline.ProtocolVersion);
-                var composition = new AppComposition().Build(environment);
+                var composition = new AppComposition().Build(environment, _uiHostRoot);
                 _appRoot.Attach(composition);
                 await _appRoot.StartAsync();
             }
@@ -89,17 +122,22 @@ namespace IHomeland.Client.Core.Bootstrap
         private void Reset()
         {
             _appRoot = GetComponent<AppRoot>();
+            _uiHostRoot = GetComponent<ClientUiHostRoot>();
         }
 
         /// <summary>
         /// 为程序化 PlayMode fixture 在激活前提供与 Inspector 等价的直接引用。
         /// </summary>
         /// <param name="appRoot">位于同一 GameObject 且尚未启动的 AppRoot。</param>
+        /// <param name="uiHostRoot">位于同一 GameObject 且尚未初始化的 UI/Input Host root。</param>
         /// <param name="environment">已验证且不访问 Unity 资产的测试环境快照。</param>
-        /// <exception cref="ArgumentException">AppRoot 不属于同一 GameObject 时抛出。</exception>
-        /// <exception cref="ArgumentNullException">AppRoot 为空时抛出。</exception>
+        /// <exception cref="ArgumentException">AppRoot 或 UI Host root 不属于同一 GameObject 时抛出。</exception>
+        /// <exception cref="ArgumentNullException">任一必需引用为空时抛出。</exception>
         /// <exception cref="InvalidOperationException">组件已经激活时抛出。</exception>
-        internal void ConfigureBeforeActivation(AppRoot appRoot, ClientEnvironment environment)
+        internal void ConfigureBeforeActivation(
+            AppRoot appRoot,
+            ClientUiHostRoot uiHostRoot,
+            ClientEnvironment environment)
         {
             if (appRoot == null)
             {
@@ -116,12 +154,27 @@ namespace IHomeland.Client.Core.Bootstrap
                 throw new ArgumentNullException(nameof(environment));
             }
 
+            if (uiHostRoot == null)
+            {
+                throw new ArgumentNullException(nameof(uiHostRoot));
+            }
+
             if (!ReferenceEquals(appRoot.gameObject, gameObject))
             {
                 throw new ArgumentException("AppRoot 必须与 AppBootstrap 位于同一 GameObject。", nameof(appRoot));
             }
 
+            if (!ReferenceEquals(uiHostRoot.gameObject, gameObject))
+            {
+                throw new ArgumentException(
+                    "ClientUiHostRoot 必须与 AppBootstrap 位于同一 GameObject。",
+                    nameof(uiHostRoot));
+            }
+
+            uiHostRoot.ValidateConfiguration();
+
             _appRoot = appRoot;
+            _uiHostRoot = uiHostRoot;
             _configuredEnvironment = environment;
         }
 
