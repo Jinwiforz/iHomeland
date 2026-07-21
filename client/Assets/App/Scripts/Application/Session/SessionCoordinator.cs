@@ -203,10 +203,15 @@ namespace IHomeland.Client.Application.Session
         internal async Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
             CancellationToken cancellationToken)
         {
-            if (!TryCaptureAuthenticated(out var source))
+            var access = await CaptureFreshAuthenticatedAsync(
+                ClientHttpOperationCatalog.LogoutSession.OperationID,
+                cancellationToken);
+            if (!access.IsSuccess)
             {
-                return LocalPolicy<ClientHttpEmpty>(ClientHttpOperationCatalog.LogoutSession.OperationID);
+                return ConvertFailure<ClientSessionSnapshot, ClientHttpEmpty>(access);
             }
+
+            var source = access.Value;
 
             var result = await _httpApi.LogoutAsync(source.Tokens.AccessToken, cancellationToken);
             lock (_sync)
@@ -239,11 +244,15 @@ namespace IHomeland.Client.Application.Session
             ClientEndpointChannel channel,
             CancellationToken cancellationToken)
         {
-            if (!TryCaptureAuthenticated(out var source))
+            var access = await CaptureFreshAuthenticatedAsync(
+                ClientHttpOperationCatalog.IssueConnectionTicket.OperationID,
+                cancellationToken);
+            if (!access.IsSuccess)
             {
-                return LocalPolicy<ClientConnectionTicketLease>(
-                    ClientHttpOperationCatalog.IssueConnectionTicket.OperationID);
+                return ConvertFailure<ClientSessionSnapshot, ClientConnectionTicketLease>(access);
             }
+
+            var source = access.Value;
 
             var result = await _httpApi.IssueConnectionTicketAsync(
                 source.Tokens.AccessToken,
@@ -283,11 +292,15 @@ namespace IHomeland.Client.Application.Session
         internal async Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
             CancellationToken cancellationToken)
         {
-            if (!TryCaptureAuthenticated(out var source))
+            var access = await CaptureFreshAuthenticatedAsync(
+                ClientHttpOperationCatalog.GetWorldBootstrap.OperationID,
+                cancellationToken);
+            if (!access.IsSuccess)
             {
-                return LocalPolicy<ClientWorldBootstrap>(
-                    ClientHttpOperationCatalog.GetWorldBootstrap.OperationID);
+                return ConvertFailure<ClientSessionSnapshot, ClientWorldBootstrap>(access);
             }
+
+            var source = access.Value;
 
             var result = await _httpApi.GetWorldBootstrapAsync(
                 source.Tokens.AccessToken,
@@ -319,11 +332,15 @@ namespace IHomeland.Client.Application.Session
             string idempotencyKey,
             CancellationToken cancellationToken)
         {
-            if (!TryCaptureAuthenticated(out var source))
+            var access = await CaptureFreshAuthenticatedAsync(
+                ClientHttpOperationCatalog.AcceptVisitInvite.OperationID,
+                cancellationToken);
+            if (!access.IsSuccess)
             {
-                return LocalPolicy<ClientVisitReservation>(
-                    ClientHttpOperationCatalog.AcceptVisitInvite.OperationID);
+                return ConvertFailure<ClientSessionSnapshot, ClientVisitReservation>(access);
             }
+
+            var source = access.Value;
 
             var result = await _httpApi.AcceptVisitInviteAsync(
                 source.Tokens.AccessToken,
@@ -364,11 +381,15 @@ namespace IHomeland.Client.Application.Session
             string idempotencyKey,
             CancellationToken cancellationToken)
         {
-            if (!TryCaptureAuthenticated(out var source))
+            var access = await CaptureFreshAuthenticatedAsync(
+                ClientHttpOperationCatalog.IssueWorldAdmission.OperationID,
+                cancellationToken);
+            if (!access.IsSuccess)
             {
-                return LocalPolicy<ClientWorldAdmissionLease>(
-                    ClientHttpOperationCatalog.IssueWorldAdmission.OperationID);
+                return ConvertFailure<ClientSessionSnapshot, ClientWorldAdmissionLease>(access);
             }
+
+            var source = access.Value;
 
             var result = await _httpApi.IssueWorldAdmissionAsync(
                 source.Tokens.AccessToken,
@@ -637,6 +658,33 @@ namespace IHomeland.Client.Application.Session
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 为 Bearer operation 捕获 current access；绝对到期时共享一次既有 refresh flight。
+        /// </summary>
+        /// <param name="operationID">原始强类型 HTTP operation，用于无 Session 时的本地拒绝。</param>
+        /// <param name="cancellationToken">首个 refresh owner 或当前等待方的取消信号。</param>
+        /// <returns>仍有效或已成功刷新的 current Session snapshot；失败时不执行原始 operation。</returns>
+        /// <remarks>
+        /// 本方法只比较服务端签发的绝对 expiry，不启动 timer、tick 或延时任务。Refresh 的
+        /// commit-unknown 继续由 <see cref="RefreshAsync"/> 撤销旧 lineage，调用方不得使用旧 access。
+        /// </remarks>
+        private async Task<ClientHttpResult<ClientSessionSnapshot>> CaptureFreshAuthenticatedAsync(
+            string operationID,
+            CancellationToken cancellationToken)
+        {
+            if (!TryCaptureAuthenticated(out var source))
+            {
+                return LocalPolicy<ClientSessionSnapshot>(operationID);
+            }
+
+            if (_clock.UtcNowMilliseconds < source.Tokens.AccessExpiresAtMilliseconds)
+            {
+                return ClientHttpResult<ClientSessionSnapshot>.Success(source);
+            }
+
+            return await RefreshAsync(cancellationToken);
         }
 
         /// <summary>

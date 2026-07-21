@@ -8,6 +8,7 @@ using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Scenes.Contexts;
+using IHomeland.Client.Scenes.PersonalWorld;
 using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Presentation.Hosts.UGUI;
 using IHomeland.Client.Presentation.Hosts.UIToolkit;
@@ -196,10 +197,12 @@ namespace IHomeland.Client.Tests.PlayMode
             gameObject.SetActive(false);
             var root = gameObject.AddComponent<AppRoot>();
             var uiHostRoot = AddUiHostRoot(gameObject);
+            var sceneTransitionHost = gameObject.AddComponent<ClientWorldSceneTransitionHost>();
             var bootstrap = gameObject.AddComponent<AppBootstrap>();
             SetPrivateField(bootstrap, "_appRoot", root);
             SetPrivateField(bootstrap, "_environmentProfile", profile);
             SetPrivateField(bootstrap, "_uiHostRoot", uiHostRoot);
+            SetPrivateField(bootstrap, "_sceneTransitionHost", sceneTransitionHost);
             LogAssert.Expect(
                 LogType.Exception,
                 new Regex("Production HTTP base URI 必须使用 HTTPS", RegexOptions.CultureInvariant));
@@ -241,8 +244,12 @@ namespace IHomeland.Client.Tests.PlayMode
         {
             var uiHostRoot = gameObject.AddComponent<ClientUiHostRoot>();
             var inputActions = ScriptableObject.CreateInstance<InputActionAsset>();
-            inputActions.AddActionMap("Player").AddAction("Move");
-            inputActions.AddActionMap("UI").AddAction("Navigate");
+            var player = inputActions.AddActionMap("Player");
+            player.AddAction("Move");
+            player.AddAction("Menu", InputActionType.Button);
+            var ui = inputActions.AddActionMap("UI");
+            ui.AddAction("Navigate");
+            ui.AddAction("Cancel", InputActionType.Button);
             _inputAssets.Add(inputActions);
             uiHostRoot.ConfigureBeforeActivation(
                 inputActions,

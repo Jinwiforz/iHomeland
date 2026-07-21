@@ -37,6 +37,7 @@ type gameplayAssignmentReader interface {
 // 回调发生在领域 owner 返回成功之后，因此实现不得把投递失败反向伪装成 command 失败；
 // deadline、通知和 safe-return 必须依赖 result 中的权威 snapshot 幂等收敛。
 type visitResultCoordinator interface {
+	staleOpenReconciler
 	// OpenCommitted 消费首次创建或幂等解析的 active snapshot。
 	OpenCommitted(context.Context, visitsession.OpenResult)
 	// OwnerOpened 防止新连接抢占仍存活的 Owner binding，并恢复已失联旧 binding。
@@ -45,6 +46,12 @@ type visitResultCoordinator interface {
 	MutationCommitted(context.Context, visitsession.MutationResult)
 	// SnapshotResolved 对只读边界执行 lazy deadline reconciliation。
 	SnapshotResolved(context.Context, visitsession.Snapshot)
+}
+
+// staleOpenReconciler 是显式Open恢复旧assignment时唯一允许的终态端口。
+type staleOpenReconciler interface {
+	// ReconcileStaleOpen 提交或解析阻塞current assignment的旧session终态。
+	ReconcileStaleOpen(context.Context, personalworld.PersonalWorldID) error
 }
 
 // tcpGameplayApplication 把transport逐operation端口适配到既有领域owner。
@@ -111,11 +118,17 @@ func (application *tcpGameplayApplication) VisitOpen(ctx context.Context, operat
 	if operation.Qualification.Binding().Purpose() != worldadmission.PurposeOwnWorld {
 		return nil, forbiddenPublicError()
 	}
+	binding, err := application.binding(operation)
+	if err != nil {
+		return nil, err
+	}
 	bindingID, commandID, err := gameplayMutationIDs(operation.ConnectionID, hex.EncodeToString(rawCommandID))
 	if err != nil {
 		return nil, dependencyPublicError()
 	}
-	result, err := application.visits.Open(ctx, operation.Auth, bindingID, commandID)
+	result, err := reconcileVisitOpen(ctx, binding.WorldID(), func() (visitsession.OpenResult, error) {
+		return application.visits.Open(ctx, operation.Auth, bindingID, commandID)
+	}, application.results)
 	if err != nil {
 		return nil, mapVisitError(err)
 	}
@@ -128,6 +141,21 @@ func (application *tcpGameplayApplication) VisitOpen(ctx context.Context, operat
 		return nil, err
 	}
 	return visitv1.VisitOpenResponse_builder{Snapshot: projected}.Build(), nil
+}
+
+// reconcileVisitOpen 只在首次Open明确返回stale后执行一次终态恢复和一次重新解析。
+//
+// open闭包固定同一AuthContext、binding和CommandID；本函数不按时间或次数循环，也不在
+// reconciliation结果不确定时继续创建，因此两个调用是由权威终态分隔的application步骤。
+func reconcileVisitOpen(ctx context.Context, worldID personalworld.PersonalWorldID, open func() (visitsession.OpenResult, error), reconciler staleOpenReconciler) (visitsession.OpenResult, error) {
+	result, err := open()
+	if !visitsession.IsErrorCode(err, visitsession.ErrorCodeStale) {
+		return result, err
+	}
+	if err := reconciler.ReconcileStaleOpen(ctx, worldID); err != nil {
+		return visitsession.OpenResult{}, err
+	}
+	return open()
 }
 
 // VisitCreateInvite 委托Owner mutation并投影完整replay结果和invite。

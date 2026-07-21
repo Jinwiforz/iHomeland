@@ -194,6 +194,8 @@ func (codec *Codec) encodeEnvelope(messageID uint32, kind commonv1.MessageKind, 
 // clientPayload 为每个允许C2S route创建精确generated message实例。
 func clientPayload(messageID uint32) (proto.Message, error) {
 	switch messageID {
+	case 1:
+		return new(commonv1.GameplayHeartbeatRequest), nil
 	case 2000:
 		return new(worldv1.WorldSnapshotRequest), nil
 	case 2103:

@@ -13,7 +13,7 @@ type personalWorldSliceObserver interface {
 	ObserveWorldLease(string)
 	// ObserveSemanticDeadline 记录固定 kind 与 executed|retry|stale|failed。
 	ObserveSemanticDeadline(string, string)
-	// ObserveVisitLifecycle 记录 connect|disconnect|assignment_invalidate 的封闭结果。
+	// ObserveVisitLifecycle 记录 connect|disconnect|assignment_invalidate|stale_open_reconcile 的封闭结果。
 	ObserveVisitLifecycle(string, string)
 	// ObserveVisitDelivery 记录固定 delivery kind 与稳定结果。
 	ObserveVisitDelivery(string, string)

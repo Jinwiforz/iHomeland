@@ -176,15 +176,29 @@ namespace IHomeland.Client.Presentation.Navigation
             long sceneGeneration,
             CancellationToken cancellationToken)
         {
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiRouter),
+                "open_requested",
+                $"route={routeId} scene_generation={sceneGeneration} current_generation={CurrentSnapshot.Generation}");
             var admission = await EnterTransitionAsync(cancellationToken);
             if (!admission.Entered)
             {
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiRouter),
+                    "open_rejected",
+                    $"route={routeId} code={admission.Result.Code}");
                 return admission.Result;
             }
 
             try
             {
-                return await OpenCoreAsync(routeId, sceneGeneration, cancellationToken);
+                var result = await OpenCoreAsync(routeId, sceneGeneration, cancellationToken);
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiRouter),
+                    "open_completed",
+                    $"route={routeId} code={result.Code} committed={result.Committed} " +
+                    $"current_generation={CurrentSnapshot.Generation}");
+                return result;
             }
             finally
             {
@@ -202,15 +216,29 @@ namespace IHomeland.Client.Presentation.Navigation
             ClientUiRouteId routeId,
             CancellationToken cancellationToken)
         {
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiRouter),
+                "close_requested",
+                $"route={routeId} current_generation={CurrentSnapshot.Generation}");
             var admission = await EnterTransitionAsync(cancellationToken);
             if (!admission.Entered)
             {
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiRouter),
+                    "close_rejected",
+                    $"route={routeId} code={admission.Result.Code}");
                 return admission.Result;
             }
 
             try
             {
-                return await CloseCoreAsync(routeId, cancellationToken, publishSnapshot: true);
+                var result = await CloseCoreAsync(routeId, cancellationToken, publishSnapshot: true);
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiRouter),
+                    "close_completed",
+                    $"route={routeId} code={result.Code} committed={result.Committed} " +
+                    $"current_generation={CurrentSnapshot.Generation}");
+                return result;
             }
             finally
             {
@@ -855,8 +883,25 @@ namespace IHomeland.Client.Presentation.Navigation
                 _activeRoutes.Clear();
                 _activeRoutes.AddRange(routeCopy);
                 _currentSnapshot = snapshot;
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiRouter),
+                    "snapshot_committed",
+                    $"navigation_generation={generation} routes={FormatSnapshot(snapshot)}");
                 return true;
             }
+        }
+
+        /// <summary>把 route snapshot 投影为不含业务 identity 的紧凑诊断字段。</summary>
+        /// <param name="snapshot">已经提交的不可变 route snapshot。</param>
+        /// <returns>按 layer 排序的 route 与交互 owner 标记。</returns>
+        private static string FormatSnapshot(ClientUiRouteSnapshot snapshot)
+        {
+            return string.Join(
+                ",",
+                snapshot.Items.Select(item =>
+                    item.Interactive
+                        ? $"{item.Definition.RouteId}:interactive"
+                        : item.Definition.RouteId.ToString()));
         }
 
         /// <summary>

@@ -13,7 +13,10 @@ func TestDefaultPublicAPIValidates(t *testing.T) {
 	if err := settings.Validate(); err != nil {
 		t.Fatalf("Default().Validate() error = %v", err)
 	}
-	if settings.PublicAPI.TLS.Enabled || settings.PublicAPI.Address != "127.0.0.1:8080" {
+	if settings.PublicAPI.TLS.Enabled ||
+		settings.PublicAPI.Address != "127.0.0.1:8080" ||
+		settings.PublicAPI.Endpoints.WSS.Host != "127.0.0.1" ||
+		settings.PublicAPI.Endpoints.TLSTCP.Host != "127.0.0.1" {
 		t.Fatalf("unexpected local public API defaults: %+v", settings.PublicAPI)
 	}
 }
@@ -79,6 +82,11 @@ func TestPublicAPIValidationRejectsUnsafeCrossFieldValues(t *testing.T) {
 		{name: "gameplay 本地明文暴露公网", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.Address = "0.0.0.0:8444" }, want: "loopback"},
 		{name: "gameplay 握手超过 frame", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.HandshakeBytes = 128 * 1024 }, want: "handshake budget"},
 		{name: "gameplay queue 不足一个 frame", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.QueueBytes = 65536 }, want: "queue budget"},
+		{name: "gameplay idle 超出长连接上限", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.IdleTimeout = 30*time.Minute + time.Millisecond }, want: "idleTimeout"},
+		{name: "gameplay read 超出普通 timeout 上限", mutate: func(value *Config) {
+			value.PublicAPI.GameplayTCP.ReadTimeout = 2 * time.Minute
+			value.PublicAPI.GameplayTCP.IdleTimeout = 30 * time.Minute
+		}, want: "readTimeout"},
 		{name: "gameplay deadline 逆序", mutate: func(value *Config) { value.PublicAPI.GameplayTCP.KeepAlive = value.PublicAPI.GameplayTCP.IdleTimeout }, want: "deadlines"},
 	}
 	for _, test := range tests {
@@ -91,6 +99,16 @@ func TestPublicAPIValidationRejectsUnsafeCrossFieldValues(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want fragment %q", err, test.want)
 			}
 		})
+	}
+}
+
+// TestGameplayTCPIdleTimeoutAllowsBoundedLongConnection 验证低频gameplay连接可使用长于通用I/O timeout的有界空闲窗口。
+func TestGameplayTCPIdleTimeoutAllowsBoundedLongConnection(t *testing.T) {
+	t.Parallel()
+	settings := Default()
+	settings.PublicAPI.GameplayTCP.IdleTimeout = maximumGameplayTCPIdleTimeout
+	if err := settings.Validate(); err != nil {
+		t.Fatalf("maximum bounded gameplay idle timeout rejected: %v", err)
 	}
 }
 

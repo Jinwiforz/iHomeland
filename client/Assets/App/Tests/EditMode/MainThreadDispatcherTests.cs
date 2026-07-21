@@ -53,6 +53,35 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
+        /// 保护 terminal callback 拥有独立槽位，并且在普通队列已满时仍先于普通工作收敛状态。
+        /// </summary>
+        /// <returns>等待 Dispatcher 初始化、drain 与清理完成的任务。</returns>
+        [Test]
+        public async Task CriticalCallbackBypassesFullQueueAndExecutesFirst()
+        {
+            var dispatcher = new MainThreadDispatcher(Environment.CurrentManagedThreadId, capacity: 1);
+            await dispatcher.InitializeAsync(CancellationToken.None);
+            var order = new List<string>();
+
+            Assert.That(
+                dispatcher.TryPost(() => order.Add("normal")),
+                Is.EqualTo(DispatchPostResult.Accepted));
+            Assert.That(
+                dispatcher.TryPostCritical(() => order.Add("critical")),
+                Is.EqualTo(DispatchPostResult.Accepted));
+            Assert.That(
+                dispatcher.TryPostCritical(() => order.Add("duplicate-critical")),
+                Is.EqualTo(DispatchPostResult.QueueFull));
+            Assert.That(dispatcher.PendingCount, Is.EqualTo(2));
+
+            var drain = dispatcher.Drain(maximumCallbacks: 2);
+
+            Assert.That(drain.ExecutedCount, Is.EqualTo(2));
+            Assert.That(order, Is.EqualTo(new[] { "critical", "normal" }));
+            await dispatcher.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
         /// 保护单个 callback 异常被收集且不会阻止同批后续工作。
         /// </summary>
         /// <returns>等待 Dispatcher 初始化和清理完成的任务。</returns>
@@ -101,11 +130,15 @@ namespace IHomeland.Client.Tests.EditMode
             var dispatcher = new MainThreadDispatcher(Environment.CurrentManagedThreadId, capacity: 2);
             await dispatcher.InitializeAsync(CancellationToken.None);
             dispatcher.TryPost(() => { });
+            dispatcher.TryPostCritical(() => { });
 
             await dispatcher.StopAsync(CancellationToken.None);
 
             Assert.That(dispatcher.PendingCount, Is.EqualTo(0));
             Assert.That(dispatcher.TryPost(() => { }), Is.EqualTo(DispatchPostResult.Stopped));
+            Assert.That(
+                dispatcher.TryPostCritical(() => { }),
+                Is.EqualTo(DispatchPostResult.Stopped));
             Assert.Throws<InvalidOperationException>(
                 () => dispatcher.InitializeAsync(CancellationToken.None));
         }

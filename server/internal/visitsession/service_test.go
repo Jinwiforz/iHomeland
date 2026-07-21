@@ -28,6 +28,128 @@ func TestServiceOpenAndCreateInvite(t *testing.T) {
 	}
 }
 
+// TestServiceCreateInviteRequiresAuthoritativeTarget 验证self、unavailable与依赖故障均保持零mutation。
+func TestServiceCreateInviteRequiresAuthoritativeTarget(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		target      func(serviceFixture) account.PlayerID
+		outcome     account.InvitablePlayerOutcome
+		readerErr   error
+		wantCode    ErrorCode
+		wantLookups int
+	}{
+		{name: "self", target: func(fixture serviceFixture) account.PlayerID { return fixture.ownerID }, outcome: account.InvitablePlayerOutcomeAvailable, wantCode: ErrorCodeInvalidArgument},
+		{name: "unavailable", target: func(fixture serviceFixture) account.PlayerID { return fixture.visitorID }, outcome: account.InvitablePlayerOutcomeUnavailable, wantCode: ErrorCodeInvalidArgument, wantLookups: 1},
+		{name: "dependency", target: func(fixture serviceFixture) account.PlayerID { return fixture.visitorID }, outcome: account.InvitablePlayerOutcomeUnspecified, readerErr: errors.New("account unavailable"), wantCode: ErrorCodeDependency, wantLookups: 1},
+		{name: "contradictory", target: func(fixture serviceFixture) account.PlayerID { return fixture.visitorID }, outcome: account.InvitablePlayerOutcomeUnspecified, wantCode: ErrorCodeDependencyDefect, wantLookups: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newServiceFixture(t)
+			open, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_targetOpen"+test.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.players.outcome = test.outcome
+			fixture.players.err = test.readerErr
+			result, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, test.target(fixture), fixture.createdAt.Add(time.Minute), open.Snapshot().Revision(), mustCommandID(t, "vcmd_targetInvite"+test.name))
+			if !mutationResultEmpty(result) || !IsErrorCode(err, test.wantCode) || fixture.players.calls != test.wantLookups {
+				t.Fatalf("CreateInvite() = result=%#v err=%v lookups=%d", result, err, fixture.players.calls)
+			}
+			current, found, resolveErr := fixture.service.ResolveActive(context.Background(), fixture.worldID)
+			if resolveErr != nil || !found || current.Revision() != open.Snapshot().Revision() || len(current.Invites()) != 0 {
+				t.Fatalf("rejected target changed state: snapshot=%#v found=%v err=%v", current, found, resolveErr)
+			}
+		})
+	}
+}
+
+// TestServiceCreateInviteReplayPrecedesTargetRecheck 验证已提交command不受目标后续inactive影响。
+func TestServiceCreateInviteReplayPrecedesTargetRecheck(t *testing.T) {
+	fixture := newServiceFixture(t)
+	open, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_targetReplayOpen"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := mustCommandID(t, "vcmd_targetReplayInvite")
+	expiresAt := fixture.createdAt.Add(time.Minute)
+	created, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, fixture.visitorID, expiresAt, open.Snapshot().Revision(), commandID)
+	if err != nil || fixture.players.calls != 1 {
+		t.Fatalf("first CreateInvite() = result=%#v err=%v lookups=%d", created, err, fixture.players.calls)
+	}
+	fixture.players.outcome = account.InvitablePlayerOutcomeUnavailable
+	replayed, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, fixture.visitorID, expiresAt, open.Snapshot().Revision(), commandID)
+	if err != nil || fixture.players.calls != 1 || !replayed.Snapshot().Equal(created.Snapshot()) || replayed.Invite().ID() != created.Invite().ID() {
+		t.Fatalf("replayed CreateInvite() = result=%#v err=%v lookups=%d", replayed, err, fixture.players.calls)
+	}
+}
+
+// TestServicePersistsPendingInviteRetirements 验证撤销、过期与终态会原子保存并重放精确退役集合。
+func TestServicePersistsPendingInviteRetirements(t *testing.T) {
+	t.Run("revoke and replay", func(t *testing.T) {
+		fixture := newServiceFixture(t)
+		open, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_retireRevokeOpen"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.clock.Set(fixture.createdAt.Add(time.Second))
+		invited, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, fixture.visitorID, fixture.createdAt.Add(time.Minute), open.Snapshot().Revision(), mustCommandID(t, "vcmd_retireRevokeCreate"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		commandID := mustCommandID(t, "vcmd_retireRevoke")
+		fixture.store.loseNextMutationResponse()
+		if unknown, unknownErr := fixture.service.RevokeInvite(context.Background(), fixture.ownerAuth, invited.Snapshot().ID(), invited.Invite().ID(), invited.Snapshot().Revision(), commandID); !mutationResultEmpty(unknown) || !IsErrorCode(unknownErr, ErrorCodeCommitUnknown) {
+			t.Fatalf("revoke response loss did not preserve commit-unknown: result=%#v err=%v", unknown, unknownErr)
+		}
+		replayed, err := fixture.service.RevokeInvite(context.Background(), fixture.ownerAuth, invited.Snapshot().ID(), invited.Invite().ID(), invited.Snapshot().Revision(), commandID)
+		if err != nil || len(replayed.RetiredInvites()) != 1 || replayed.RetiredInvites()[0].ID() != invited.Invite().ID() || replayed.Snapshot().Revision() != invited.Snapshot().Revision()+1 {
+			t.Fatalf("revoke replay retirement: result=%#v err=%v", replayed, err)
+		}
+	})
+
+	t.Run("expire", func(t *testing.T) {
+		fixture := newServiceFixture(t)
+		open, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_retireExpireOpen"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.clock.Set(fixture.createdAt.Add(time.Second))
+		deadline := fixture.createdAt.Add(time.Minute)
+		invited, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, fixture.visitorID, deadline, open.Snapshot().Revision(), mustCommandID(t, "vcmd_retireExpireCreate"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.clock.Set(deadline)
+		retired, err := fixture.service.ExpireInvite(context.Background(), invited.Snapshot().ID(), invited.Invite().ID(), deadline, invited.Snapshot().Revision(), mustCommandID(t, "vcmd_retireExpire"))
+		if err != nil || len(retired.RetiredInvites()) != 1 || retired.RetiredInvites()[0].ID() != invited.Invite().ID() {
+			t.Fatalf("expire retirement: result=%#v err=%v", retired, err)
+		}
+	})
+
+	t.Run("terminal retires all pending", func(t *testing.T) {
+		fixture := newServiceFixture(t)
+		open, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_retireCloseOpen"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.clock.Set(fixture.createdAt.Add(time.Second))
+		first, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, fixture.visitorID, fixture.createdAt.Add(time.Minute), open.Snapshot().Revision(), mustCommandID(t, "vcmd_retireCloseFirst"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondTarget, _ := account.NewPlayerID("ply_retiredSecond")
+		second, err := fixture.service.CreateInvite(context.Background(), fixture.ownerAuth, secondTarget, fixture.createdAt.Add(time.Minute), first.Snapshot().Revision(), mustCommandID(t, "vcmd_retireCloseSecond"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		closed, err := fixture.service.Close(context.Background(), fixture.ownerAuth, second.Snapshot().ID(), second.Snapshot().Revision(), mustCommandID(t, "vcmd_retireClose"))
+		retirements := closed.RetiredInvites()
+		if err != nil || len(retirements) != 2 || retirements[0].ID().Value() >= retirements[1].ID().Value() {
+			t.Fatalf("terminal retirements: result=%#v err=%v", closed, err)
+		}
+	})
+}
+
 // TestHTTPAcceptComputesDeadlineAndAdmissionEligibility 验证公开桥接由领域事实决定reservation与JOIN用途。
 func TestHTTPAcceptComputesDeadlineAndAdmissionEligibility(t *testing.T) {
 	fixture := newServiceFixture(t)
@@ -44,6 +166,9 @@ func TestHTTPAcceptComputesDeadlineAndAdmissionEligibility(t *testing.T) {
 	accepted, err := fixture.service.AcceptInviteFromHTTP(context.Background(), authenticated, invited.Snapshot().ID(), invited.Invite().ID(), invited.Snapshot().Revision(), mustCommandID(t, "vcmd_httpAccept"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(accepted.RetiredInvites()) != 1 || accepted.RetiredInvites()[0].ID() != invited.Invite().ID() {
+		t.Fatalf("accepted invite retirement missing: %#v", accepted.RetiredInvites())
 	}
 	wantDeadline := fixture.clock.Now().Add(fixture.policy.ReservationLifetime())
 	if !accepted.AdmissionIntent().ExpiresAt().Equal(wantDeadline) {
@@ -156,7 +281,7 @@ func TestServicePlacementMissingAndMalformedStoreResult(t *testing.T) {
 
 	fixture = newServiceFixture(t)
 	malformed := &malformedVisitStore{delegate: fixture.store, createOutcome: CreateOutcomeCreated}
-	service, err := NewService(malformed, fixture.worlds, fixture.assignments, fixture.clock, fixture.ids, fixture.policy)
+	service, err := NewService(malformed, fixture.worlds, fixture.players, fixture.assignments, fixture.clock, fixture.ids, fixture.policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +315,63 @@ func TestServiceInvalidateAssignmentRequiresPlacementEvidence(t *testing.T) {
 	}
 	if active, found, err := fixture.service.ResolveActive(context.Background(), fixture.worldID); err != nil || found || !active.empty() {
 		t.Fatalf("closed session retained active index: snapshot=%#v found=%v err=%v", active, found, err)
+	}
+}
+
+// TestServiceOpenAfterStaleAssignmentInvalidation 验证旧访问终态后同一Open命令只绑定current assignment。
+func TestServiceOpenAfterStaleAssignmentInvalidation(t *testing.T) {
+	t.Parallel()
+	fixture := newServiceFixture(t)
+	oldOpen, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_staleOriginal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStamp := oldOpen.Snapshot().Assignment()
+	replacementInstance, err := placement.NewWorldInstanceID("winst_staleReplacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementNode, err := placement.NewRuntimeNodeID("rnode_staleReplacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementGeneration, err := placement.NewAssignmentGeneration(oldStamp.Generation().Uint64() + 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementFence, err := placement.NewFencingToken(oldStamp.FencingToken().Uint64() + 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementStamp, err := placement.NewAssignmentStamp(
+		oldStamp.WorldID(),
+		replacementInstance,
+		replacementNode,
+		replacementGeneration,
+		replacementFence,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.assignments.snapshot, err = placement.NewAssignmentSnapshot(replacementStamp, placement.PhaseActive, fixture.createdAt, fixture.createdAt.Add(time.Hour), fixture.createdAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openCommand := mustCommandID(t, "vcmd_staleReplacementOpen")
+	if result, openErr := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, openCommand); result.Valid() || !IsErrorCode(openErr, ErrorCodeStale) {
+		t.Fatalf("stale active session was not rejected: result=%#v err=%v", result, openErr)
+	}
+	closed, err := fixture.service.InvalidateAssignment(context.Background(), oldOpen.Snapshot().ID(), oldOpen.Snapshot().Revision(), mustCommandID(t, "vcmd_staleInvalidate"))
+	if err != nil || closed.Snapshot().Lifecycle() != LifecycleClosed {
+		t.Fatalf("stale session invalidation: result=%#v err=%v", closed, err)
+	}
+	current, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, openCommand)
+	if err != nil || !current.Created() || !current.Snapshot().Assignment().Equal(replacementStamp) || current.Snapshot().ID() == oldOpen.Snapshot().ID() {
+		t.Fatalf("replacement open: result=%#v err=%v", current, err)
+	}
+	existing, err := fixture.service.Open(context.Background(), fixture.ownerAuth, fixture.ownerBinding, mustCommandID(t, "vcmd_staleExisting"))
+	if err != nil || existing.Created() || existing.Snapshot().ID() != current.Snapshot().ID() || !existing.Snapshot().Assignment().Equal(replacementStamp) {
+		t.Fatalf("replacement existing: result=%#v err=%v", existing, err)
 	}
 }
 
@@ -234,6 +416,8 @@ type serviceFixture struct {
 	worldID personalworld.PersonalWorldID
 	// visitorID 是 Owner 创建定向邀请时使用的目标。
 	visitorID account.PlayerID
+	// ownerID 是 self-invite 测试使用的受信 Owner PlayerID。
+	ownerID account.PlayerID
 	// ownerAuth 通过 session public API 创建，不能由本 package 伪造。
 	ownerAuth session.AuthContext
 	// ownerBinding 是 Open 使用的受信 connection registry identity。
@@ -242,6 +426,8 @@ type serviceFixture struct {
 	store *referenceStore
 	// worlds 提供可故障注入的 owned world 查询。
 	worlds *fakeWorldReader
+	// players 提供目标 Player active 可邀请性决议。
+	players *fakeInvitablePlayerReader
 	// assignments 提供可故障注入的 current placement 查询。
 	assignments *fakeAssignmentReader
 	// clock 可在 response-loss 重试前显式推进。
@@ -262,14 +448,15 @@ func newServiceFixture(t *testing.T) serviceFixture {
 	worldSnapshot := mustWorldSnapshot(t, aggregate.worldID, aggregate.owner.playerID, aggregate.createdAt)
 	store := newReferenceStore()
 	worlds := &fakeWorldReader{snapshot: worldSnapshot, outcome: OwnedWorldOutcomeFound}
+	players := &fakeInvitablePlayerReader{outcome: account.InvitablePlayerOutcomeAvailable}
 	assignments := &fakeAssignmentReader{snapshot: aggregate.assignment, outcome: AssignmentOutcomeFound}
 	clock := &fakeClock{now: aggregate.createdAt}
 	ids := &sequenceIDs{}
-	service, err := NewService(store, worlds, assignments, clock, ids, aggregate.policy)
+	service, err := NewService(store, worlds, players, assignments, clock, ids, aggregate.policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return serviceFixture{createdAt: aggregate.createdAt, worldID: aggregate.worldID, visitorID: aggregate.visitorA.playerID, ownerAuth: ownerAuth, ownerBinding: aggregate.ownerBinding.connectionID, store: store, worlds: worlds, assignments: assignments, clock: clock, ids: ids, policy: aggregate.policy, service: service}
+	return serviceFixture{createdAt: aggregate.createdAt, worldID: aggregate.worldID, visitorID: aggregate.visitorA.playerID, ownerID: aggregate.owner.playerID, ownerAuth: ownerAuth, ownerBinding: aggregate.ownerBinding.connectionID, store: store, worlds: worlds, players: players, assignments: assignments, clock: clock, ids: ids, policy: aggregate.policy, service: service}
 }
 
 // fakeWorldReader 返回测试选择的持久 world outcome，并允许注入依赖失败。
@@ -285,6 +472,22 @@ type fakeWorldReader struct {
 // ResolveOwnedWorld 返回预设结果；测试通过 snapshot owner mismatch 验证 Service 严格校验。
 func (reader *fakeWorldReader) ResolveOwnedWorld(_ context.Context, _ account.PlayerID) (personalworld.Snapshot, OwnedWorldOutcome, error) {
 	return reader.snapshot, reader.outcome, reader.err
+}
+
+// fakeInvitablePlayerReader 返回测试选择的目标 Player 可用性并记录查询次数。
+type fakeInvitablePlayerReader struct {
+	// outcome 是 available、统一 unavailable 或故意 unspecified。
+	outcome account.InvitablePlayerOutcome
+	// err 用于模拟 Account owner 依赖故障。
+	err error
+	// calls 证明 self 与 replay 路径不会重复读取目标。
+	calls int
+}
+
+// ResolveInvitablePlayer 返回预设决议且不暴露账号其他事实。
+func (reader *fakeInvitablePlayerReader) ResolveInvitablePlayer(context.Context, account.PlayerID) (account.InvitablePlayerOutcome, error) {
+	reader.calls++
+	return reader.outcome, reader.err
 }
 
 // fakeAssignmentReader 返回测试选择的 current placement outcome。

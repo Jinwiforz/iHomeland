@@ -249,12 +249,14 @@ func WSSPushCatalog() Catalog {
 	return catalog
 }
 
-// TLSGameplayCatalog 返回编译进服务端的world/visit可靠业务路由投影。
+// TLSGameplayCatalog 返回编译进服务端的heartbeat与world/visit可靠业务路由投影。
 //
 // 该投影必须由contract测试与registry逐字段比较。它同时携带dispatcher可能公开的最小错误集合，
-// 但不包含WSS消息、握手preface、未登记heartbeat或generic world action，因此adapter无法在运行时扩张协议面。
+// 但不包含WSS消息、握手preface或generic world action，因此adapter无法在运行时扩张协议面。
 func TLSGameplayCatalog() Catalog {
 	profiles := []ProjectedRoute{
+		tlsGameplayProfile(1, "GAMEPLAY_HEARTBEAT_REQUEST", "common", "ihomeland.common.v1.GameplayHeartbeatRequest", "REQUEST", "CLIENT_TO_SERVER", 256, "gameplay_heartbeat", "REQUEST_ID", 10000),
+		tlsGameplayProfile(2, "GAMEPLAY_HEARTBEAT_RESPONSE", "common", "ihomeland.common.v1.GameplayHeartbeatResponse", "RESPONSE", "SERVER_TO_CLIENT", 256, "gameplay_heartbeat", "CORRELATION_ID", 10000),
 		tlsGameplayProfile(2000, "WORLD_SNAPSHOT_REQUEST", "world", "ihomeland.world.v1.WorldSnapshotRequest", "REQUEST", "CLIENT_TO_SERVER", 4096, "world_read", "REQUEST_ID", 10000),
 		tlsGameplayProfile(2001, "WORLD_SNAPSHOT_RESPONSE", "world", "ihomeland.world.v1.WorldSnapshotResponse", "RESPONSE", "SERVER_TO_CLIENT", 65536, "world_read", "CORRELATION_ID", 10000),
 		tlsGameplayProfile(2002, "WORLD_SNAPSHOT_PUSH", "world", "ihomeland.world.v1.WorldSnapshotPush", "PUSH", "SERVER_TO_CLIENT", 65536, "server_world", "NONE", 0),

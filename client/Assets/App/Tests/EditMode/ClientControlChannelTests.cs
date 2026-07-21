@@ -136,6 +136,45 @@ namespace IHomeland.Client.Tests.EditMode
             await harness.Channel.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>确认初始连接屏障只在 WebSocket 已协商 control subprotocol 后报告就绪。</summary>
+        [Test]
+        public async Task WaitUntilConnected_HandshakeAccepted_ReturnsTrue()
+        {
+            var socket = new FakeSocket(
+                false,
+                ClientWebSocketConnectRequest.ControlSubprotocol,
+                ReceiveStep.Close(WebSocketCloseStatus.PolicyViolation));
+            var harness = await CreateHarnessAsync(
+                new FakeSocketFactory(socket),
+                Array.Empty<TimeSpan>());
+
+            var run = harness.Channel.RunAsync(CancellationToken.None);
+            var connected = await harness.Channel.WaitUntilConnectedAsync(CancellationToken.None);
+            await run;
+
+            Assert.That(connected, Is.True);
+            await harness.Channel.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>确认首次连接在 Connected 前耗尽预算时解除等待并报告不可接收 push。</summary>
+        [Test]
+        public async Task WaitUntilConnected_InitialConnectFails_ReturnsFalse()
+        {
+            var socket = new FakeSocket(
+                true,
+                ClientWebSocketConnectRequest.ControlSubprotocol);
+            var harness = await CreateHarnessAsync(
+                new FakeSocketFactory(socket),
+                Array.Empty<TimeSpan>());
+
+            var run = harness.Channel.RunAsync(CancellationToken.None);
+            var connected = await harness.Channel.WaitUntilConnectedAsync(CancellationToken.None);
+            await run;
+
+            Assert.That(connected, Is.False);
+            await harness.Channel.StopAsync(CancellationToken.None);
+        }
+
         /// <summary>
         /// 确认 upgrade 未协商冻结 subprotocol 时立即终止且不消耗重试预算。
         /// </summary>

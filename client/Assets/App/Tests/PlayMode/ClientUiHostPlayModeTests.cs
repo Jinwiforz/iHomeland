@@ -9,6 +9,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
@@ -58,8 +59,8 @@ namespace IHomeland.Client.Tests.PlayMode
 
             _gameObjects.Clear();
             _assets.Clear();
-            UnityCursor.visible = true;
             UnityCursor.lockState = CursorLockMode.None;
+            UnityCursor.visible = true;
             yield return null;
         }
 
@@ -87,6 +88,8 @@ namespace IHomeland.Client.Tests.PlayMode
                 new ClientUiInputState(ClientUiInputMode.Ui, ClientUiRouteId.Login),
                 CancellationToken.None);
             Assert.That(apply.IsCompletedSuccessfully, Is.True);
+            UnityCursor.visible = false;
+            yield return null;
             Assert.That(hostRoot.IsPlayerActionMapEnabled, Is.False);
             Assert.That(hostRoot.IsUiActionMapEnabled, Is.True);
             Assert.That(UnityCursor.visible, Is.True);
@@ -102,9 +105,157 @@ namespace IHomeland.Client.Tests.PlayMode
         }
 
         /// <summary>
+        /// 保护 Player/Menu 只在 Gameplay mode 发布一次产品意图，UI mode 与停止状态均不透传。
+        /// </summary>
+        /// <returns>等待 Input System 消费虚拟键盘事件的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator GameplayMenuAndUiCancelOnlyPublishForTheirOwningModes()
+        {
+            var keyboard = InputSystem.AddDevice<Keyboard>();
+            try
+            {
+                var inputAsset = CreateInputAsset();
+                var hostRoot = CreateHostRoot(inputAsset);
+                var requests = 0;
+                var cancellations = 0;
+                var cancelledRoute = ClientUiRouteId.None;
+                var input = (IClientUiInputCoordinator)hostRoot;
+                hostRoot.GameplayMenuRequested += () =>
+                {
+                    requests++;
+                    Assert.That(
+                        input.ApplyAsync(
+                            new ClientUiInputState(ClientUiInputMode.Ui, ClientUiRouteId.WorldVisit),
+                            CancellationToken.None).IsCompletedSuccessfully,
+                        Is.True);
+                };
+                hostRoot.UiCancelRequested += routeId =>
+                {
+                    cancellations++;
+                    cancelledRoute = routeId;
+                    Assert.That(
+                        input.ApplyAsync(ClientUiInputState.Gameplay, CancellationToken.None).IsCompletedSuccessfully,
+                        Is.True);
+                };
+                hostRoot.gameObject.SetActive(true);
+
+                Assert.That(hostRoot.InitializeAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
+                PressAndReleaseTab(keyboard);
+                PressAndReleaseEscape(keyboard);
+                Assert.That(requests, Is.Zero, "Input callback 内不得同步提交并切换 action map。");
+                yield return null;
+                Assert.That(requests, Is.EqualTo(1));
+                Assert.That(cancellations, Is.Zero);
+                Assert.That(input.CurrentState.Mode, Is.EqualTo(ClientUiInputMode.Ui));
+                Assert.That(input.CurrentState.InteractiveRouteId, Is.EqualTo(ClientUiRouteId.WorldVisit));
+
+                // Owner 切换后的首帧只用于确认相关物理按键已释放。
+                yield return null;
+                PressAndReleaseTab(keyboard);
+                PressAndReleaseEscape(keyboard);
+                Assert.That(requests, Is.EqualTo(1));
+                Assert.That(cancellations, Is.Zero, "Input callback 内不得同步关闭当前 route。");
+                yield return null;
+                Assert.That(cancellations, Is.EqualTo(1));
+                Assert.That(cancelledRoute, Is.EqualTo(ClientUiRouteId.WorldVisit));
+                Assert.That(input.CurrentState, Is.EqualTo(ClientUiInputState.Gameplay));
+
+                Assert.That(hostRoot.StopAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
+                PressAndReleaseTab(keyboard);
+                PressAndReleaseEscape(keyboard);
+                yield return null;
+                Assert.That(requests, Is.EqualTo(1));
+                Assert.That(cancellations, Is.EqualTo(1));
+            }
+            finally
+            {
+                InputSystem.RemoveDevice(keyboard);
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
+        /// 保护 owner 切换必须等待共享物理按键释放，阻止 Menu/Cancel 反复开关同一 overlay。
+        /// </summary>
+        /// <returns>等待 Input System 初始状态检查与帧末产品意图分发的枚举器。</returns>
+        [UnityTest]
+        public IEnumerator SharedMenuAndCancelBindingCannotCreateRouteFeedbackLoop()
+        {
+            var keyboard = InputSystem.AddDevice<Keyboard>();
+            try
+            {
+                var inputAsset = CreateInputAsset(sharedMenuAndCancelBinding: true);
+                var hostRoot = CreateHostRoot(inputAsset);
+                var requests = 0;
+                var cancellations = 0;
+                var input = (IClientUiInputCoordinator)hostRoot;
+                hostRoot.GameplayMenuRequested += () =>
+                {
+                    requests++;
+                    Assert.That(
+                        input.ApplyAsync(
+                            new ClientUiInputState(ClientUiInputMode.Ui, ClientUiRouteId.WorldVisit),
+                            CancellationToken.None).IsCompletedSuccessfully,
+                        Is.True);
+                };
+                hostRoot.UiCancelRequested += _ =>
+                {
+                    cancellations++;
+                    Assert.That(
+                        input.ApplyAsync(ClientUiInputState.Gameplay, CancellationToken.None).IsCompletedSuccessfully,
+                        Is.True);
+                };
+                hostRoot.gameObject.SetActive(true);
+
+                Assert.That(hostRoot.InitializeAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
+                PressTab(keyboard);
+                yield return null;
+                Assert.That(requests, Is.EqualTo(1));
+                Assert.That(cancellations, Is.Zero);
+                Assert.That(input.CurrentState.Mode, Is.EqualTo(ClientUiInputMode.Ui));
+
+                // UI map 的同一 Tab 仍处于按下状态，不能被初始状态检查提升为 Cancel。
+                yield return null;
+                yield return null;
+                Assert.That(requests, Is.EqualTo(1));
+                Assert.That(cancellations, Is.Zero);
+
+                ReleaseKeyboard(keyboard);
+                yield return null;
+                PressTab(keyboard);
+                yield return null;
+                Assert.That(cancellations, Is.EqualTo(1));
+                Assert.That(input.CurrentState.Mode, Is.EqualTo(ClientUiInputMode.Gameplay));
+
+                // 返回 Player map 后仍按下的同一 Tab 也不能立即重新打开 overlay。
+                yield return null;
+                yield return null;
+                Assert.That(requests, Is.EqualTo(1));
+                Assert.That(cancellations, Is.EqualTo(1));
+
+                ReleaseKeyboard(keyboard);
+                yield return null;
+                PressTab(keyboard);
+                yield return null;
+                Assert.That(requests, Is.EqualTo(2));
+                Assert.That(cancellations, Is.EqualTo(1));
+
+                ReleaseKeyboard(keyboard);
+                Assert.That(hostRoot.StopAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
+            }
+            finally
+            {
+                InputSystem.RemoveDevice(keyboard);
+            }
+
+            yield return null;
+        }
+
+        /// <summary>
         /// 保护 UI Toolkit screen 与 uGUI modal 共享 route、input、layer、raycast 和 focus 恢复语义。
         /// </summary>
-        /// <returns>等待 UIDocument panel 建立并执行完整 route transaction 的枚举器。</returns>
+        /// <returns>等待 PanelRenderer panel 建立并执行完整 route transaction 的枚举器。</returns>
         [UnityTest]
         public IEnumerator ToolkitScreenUguiOverlayAndToolkitModalShareOneRouterOwner()
         {
@@ -118,19 +269,29 @@ namespace IHomeland.Client.Tests.PlayMode
             panelSettings.themeStyleSheet = themeStyleSheet;
             var toolkitObject = Track(new GameObject("ToolkitScreen"));
             toolkitObject.SetActive(false);
-            var document = toolkitObject.AddComponent<UIDocument>();
-            document.panelSettings = panelSettings;
+            var visualTreeAsset = ScriptableObject.CreateInstance<VisualTreeAsset>();
+            _assets.Add(visualTreeAsset);
+            var panelRenderer = toolkitObject.AddComponent<PanelRenderer>();
+            panelRenderer.panelSettings = panelSettings;
+            panelRenderer.visualTreeAsset = visualTreeAsset;
+            VisualElement toolkitRoot = null;
+            panelRenderer.RegisterUIReloadCallback((_, root, __) => toolkitRoot = root);
             var toolkitHost = toolkitObject.AddComponent<ClientUiToolkitHost>();
-            toolkitHost.ConfigureBeforeActivation(ClientUiRouteId.Login, document, "DefaultAction");
+            toolkitHost.ConfigureBeforeActivation(ClientUiRouteId.Login, panelRenderer, "DefaultAction");
 
             var modalToolkitObject = Track(new GameObject("ToolkitModal"));
             modalToolkitObject.SetActive(false);
-            var modalDocument = modalToolkitObject.AddComponent<UIDocument>();
-            modalDocument.panelSettings = panelSettings;
+            var modalVisualTreeAsset = ScriptableObject.CreateInstance<VisualTreeAsset>();
+            _assets.Add(modalVisualTreeAsset);
+            var modalPanelRenderer = modalToolkitObject.AddComponent<PanelRenderer>();
+            modalPanelRenderer.panelSettings = panelSettings;
+            modalPanelRenderer.visualTreeAsset = modalVisualTreeAsset;
+            VisualElement modalToolkitRoot = null;
+            modalPanelRenderer.RegisterUIReloadCallback((_, root, __) => modalToolkitRoot = root);
             var modalToolkitHost = modalToolkitObject.AddComponent<ClientUiToolkitHost>();
             modalToolkitHost.ConfigureBeforeActivation(
                 ClientUiRouteId.ConnectionLost,
-                modalDocument,
+                modalPanelRenderer,
                 "ModalAction");
 
             var canvasObject = Track(new GameObject("UguiModal"));
@@ -162,18 +323,27 @@ namespace IHomeland.Client.Tests.PlayMode
             hostRoot.gameObject.SetActive(true);
             yield return null;
 
+            Assert.That(toolkitRoot, Is.Not.Null);
+            Assert.That(modalToolkitRoot, Is.Not.Null);
+            Assert.That(toolkitRoot.style.display.value, Is.EqualTo(DisplayStyle.None));
+            Assert.That(toolkitRoot.pickingMode, Is.EqualTo(PickingMode.Ignore));
+            Assert.That(toolkitRoot.enabledSelf, Is.False);
+            Assert.That(modalToolkitRoot.style.display.value, Is.EqualTo(DisplayStyle.None));
+            Assert.That(modalToolkitRoot.pickingMode, Is.EqualTo(PickingMode.Ignore));
+            Assert.That(modalToolkitRoot.enabledSelf, Is.False);
+
             var toolkitDefault = new UnityEngine.UIElements.Button
             {
                 name = "DefaultAction",
                 focusable = true,
             };
-            document.rootVisualElement.Add(toolkitDefault);
+            toolkitRoot.Add(toolkitDefault);
             var modalToolkitDefault = new UnityEngine.UIElements.Button
             {
                 name = "ModalAction",
                 focusable = true,
             };
-            modalDocument.rootVisualElement.Add(modalToolkitDefault);
+            modalToolkitRoot.Add(modalToolkitDefault);
 
             Assert.That(hostRoot.InitializeAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
             var definitions = new[]
@@ -207,10 +377,10 @@ namespace IHomeland.Client.Tests.PlayMode
             var openScreen = router.OpenAsync(ClientUiRouteId.Login, 0, CancellationToken.None);
             Assert.That(openScreen.IsCompletedSuccessfully, Is.True);
             Assert.That(openScreen.Result.IsSuccess, Is.True);
-            Assert.That(document.sortingOrder, Is.EqualTo((int)ClientUiLayer.Screen));
-            Assert.That(document.rootVisualElement.enabledSelf, Is.True);
+            Assert.That(panelRenderer.sortingOrder, Is.EqualTo((int)ClientUiLayer.Screen));
+            Assert.That(toolkitRoot.enabledSelf, Is.True);
             Assert.That(
-                document.rootVisualElement.panel.focusController.focusedElement,
+                toolkitRoot.panel.focusController.focusedElement,
                 Is.SameAs(toolkitDefault));
 
             var openOverlay = router.OpenAsync(ClientUiRouteId.Settings, 0, CancellationToken.None);
@@ -219,7 +389,7 @@ namespace IHomeland.Client.Tests.PlayMode
             Assert.That(canvas.sortingOrder, Is.EqualTo((int)ClientUiLayer.Overlay));
             Assert.That(canvasGroup.blocksRaycasts, Is.True);
             Assert.That(eventSystem.currentSelectedGameObject, Is.SameAs(buttonObject));
-            Assert.That(document.rootVisualElement.enabledSelf, Is.False);
+            Assert.That(toolkitRoot.enabledSelf, Is.False);
 
             // EventSystem 允许选择任意 GameObject；Host 必须拒绝恢复不含 Selectable 的旧 token。
             eventSystem.SetSelectedGameObject(invalidFocusObject);
@@ -227,10 +397,10 @@ namespace IHomeland.Client.Tests.PlayMode
             var openModal = router.OpenAsync(ClientUiRouteId.ConnectionLost, 0, CancellationToken.None);
             Assert.That(openModal.IsCompletedSuccessfully, Is.True);
             Assert.That(openModal.Result.IsSuccess, Is.True);
-            Assert.That(modalDocument.sortingOrder, Is.EqualTo((int)ClientUiLayer.Modal));
-            Assert.That(modalDocument.rootVisualElement.enabledSelf, Is.True);
+            Assert.That(modalPanelRenderer.sortingOrder, Is.EqualTo((int)ClientUiLayer.Modal));
+            Assert.That(modalToolkitRoot.enabledSelf, Is.True);
             Assert.That(
-                modalDocument.rootVisualElement.panel.focusController.focusedElement,
+                modalToolkitRoot.panel.focusController.focusedElement,
                 Is.SameAs(modalToolkitDefault));
             Assert.That(canvasGroup.blocksRaycasts, Is.False);
 
@@ -246,24 +416,65 @@ namespace IHomeland.Client.Tests.PlayMode
             Assert.That(closeOverlay.Result.IsSuccess, Is.True);
             Assert.That(canvas.enabled, Is.False);
             Assert.That(canvasGroup.blocksRaycasts, Is.False);
-            Assert.That(document.rootVisualElement.enabledSelf, Is.True);
+            Assert.That(toolkitRoot.enabledSelf, Is.True);
             Assert.That(
-                document.rootVisualElement.panel.focusController.focusedElement,
+                toolkitRoot.panel.focusController.focusedElement,
                 Is.SameAs(toolkitDefault));
 
             Assert.That(router.StopAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
             Assert.That(hostRoot.StopAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
         }
 
-        /// <summary>创建不含 binding 的最小 Player/UI InputActionAsset 模板。</summary>
+        /// <summary>创建只含产品输入契约所需 action 的最小 Player/UI InputActionAsset 模板。</summary>
         /// <returns>由 teardown 显式销毁的测试资产。</returns>
-        private InputActionAsset CreateInputAsset()
+        private InputActionAsset CreateInputAsset(bool sharedMenuAndCancelBinding = false)
         {
             var inputAsset = ScriptableObject.CreateInstance<InputActionAsset>();
-            inputAsset.AddActionMap("Player").AddAction("Move");
-            inputAsset.AddActionMap("UI").AddAction("Navigate");
+            var player = inputAsset.AddActionMap("Player");
+            player.AddAction("Move");
+            player.AddAction("Menu", InputActionType.Button).AddBinding("<Keyboard>/tab");
+            var ui = inputAsset.AddActionMap("UI");
+            ui.AddAction("Navigate");
+            ui.AddAction("Cancel", InputActionType.Button).AddBinding(
+                sharedMenuAndCancelBinding ? "<Keyboard>/tab" : "<Keyboard>/escape");
             _assets.Add(inputAsset);
             return inputAsset;
+        }
+
+        /// <summary>向指定虚拟键盘提交 Tab 按下但保持未释放。</summary>
+        /// <param name="keyboard">由当前测试独占并在 finally 中移除的虚拟键盘。</param>
+        private static void PressTab(Keyboard keyboard)
+        {
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.Tab));
+            InputSystem.Update();
+        }
+
+        /// <summary>向指定虚拟键盘提交全部按键释放。</summary>
+        /// <param name="keyboard">由当前测试独占并在 finally 中移除的虚拟键盘。</param>
+        private static void ReleaseKeyboard(Keyboard keyboard)
+        {
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+            InputSystem.Update();
+        }
+
+        /// <summary>向指定虚拟键盘提交一次完整 Tab 按下与释放。</summary>
+        /// <param name="keyboard">由当前测试独占并在 finally 中移除的虚拟键盘。</param>
+        private static void PressAndReleaseTab(Keyboard keyboard)
+        {
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.Tab));
+            InputSystem.Update();
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+            InputSystem.Update();
+        }
+
+        /// <summary>向指定虚拟键盘提交一次完整 Escape 按下与释放。</summary>
+        /// <param name="keyboard">由当前测试独占并在 finally 中移除的虚拟键盘。</param>
+        private static void PressAndReleaseEscape(Keyboard keyboard)
+        {
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.Escape));
+            InputSystem.Update();
+            InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+            InputSystem.Update();
         }
 
         /// <summary>创建 inactive 且完成直接引用配置的 Host root。</summary>

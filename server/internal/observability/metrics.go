@@ -216,14 +216,14 @@ func (metrics *Metrics) RecordStorageOperation(adapter string, operation string,
 		"transaction", "command", "script", "ensure_primary", "find_by_id", "archive", "allocation",
 		"resolve", "acquire", "activate", "renew", "revoke", "replace", "qualify_write", "create",
 		"find_for_authentication", "resolve_access", "rotate_refresh", "issue_ticket", "consume_ticket",
-		"invalidate_session", "invalidate_principal", "resolve_active", "commit", "issue", "consume")
+		"invalidate_session", "invalidate_principal", "resolve_active", "resolve_invitable_player", "commit", "issue", "consume")
 	requireMetricLabel(outcome,
 		"ok", "failed", "invalid", "defect", "dependency_defect", "codec_failed", "key_failed", "read_failed",
 		"current_read_failed", "replay_read_failed", "allocation_read_failed", "not_committed", "pre_commit_transient",
 		"commit_unknown", "allocation_not_committed", "allocation_commit_unknown", "not_applied", "created", "existing",
 		"applied", "replay", "in_progress", "not_found", "conflict", "expired", "revision_conflict",
 		"idempotency_conflict", "invalid_state", "found", "burned", "username_conflict", "replayed",
-		"invalidated", "epoch_mismatch", "consumed", "binding_mismatch", "corrupt", "stale")
+		"invalidated", "epoch_mismatch", "consumed", "binding_mismatch", "available", "unavailable", "corrupt", "stale")
 	metrics.storageOperationTotal.WithLabelValues(adapter, operation, outcome).Inc()
 }
 
@@ -325,7 +325,7 @@ func (metrics *Metrics) ObserveTCPFrame(direction string, outcome string, bytes 
 // ObserveTCPDispatch 记录已登记C2S message、固定处理结果与端到端耗时。
 func (metrics *Metrics) ObserveTCPDispatch(messageID uint32, outcome string, duration time.Duration) {
 	message := fmt.Sprintf("%d", messageID)
-	requireMetricLabel(message, "2000", "2103", "2105", "2107", "2109", "2111", "2113", "2115", "2117", "2119")
+	requireMetricLabel(message, "1", "2000", "2103", "2105", "2107", "2109", "2111", "2113", "2115", "2117", "2119")
 	requireMetricLabel(outcome, "ok", "state_rejected", "rate_limited", "in_flight_rejected", "application_error", "queue_rejected", "panic")
 	if duration < 0 {
 		panic("invalid tcp gameplay dispatch duration")
@@ -404,7 +404,7 @@ func (metrics *Metrics) ObserveSemanticDeadline(kind string, outcome string) {
 
 // ObserveVisitLifecycle 记录受信 TCP lifecycle callback 的低基数结果。
 func (metrics *Metrics) ObserveVisitLifecycle(operation string, outcome string) {
-	requireMetricLabel(operation, "connect", "disconnect", "assignment_invalidate")
+	requireMetricLabel(operation, "connect", "disconnect", "assignment_invalidate", "stale_open_reconcile")
 	requireMetricLabel(outcome, "applied", "ignored", "stale", "failed")
 	metrics.visitLifecycles.WithLabelValues(operation, outcome).Inc()
 }

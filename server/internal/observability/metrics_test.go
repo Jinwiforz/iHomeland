@@ -33,6 +33,9 @@ func TestStorageMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveStorageProbe("redis", "ok", 0.01)
 	metrics.ObserveMigration("applied", 1)
 	metrics.RecordStorageOperation("mysql", "transaction", "commit_unknown")
+	metrics.RecordStorageOperation("account", "resolve_invitable_player", "available")
+	metrics.RecordStorageOperation("account", "resolve_invitable_player", "unavailable")
+	metrics.RecordStorageOperation("account", "resolve_invitable_player", "corrupt")
 }
 
 // TestWebSocketMetricLabelsAcceptFixedVocabulary 保护握手、心跳和关闭路径实际使用的稳定枚举。
@@ -57,6 +60,7 @@ func TestTCPGameplayMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveTCPHandshake("preface", "accepted")
 	metrics.SetTCPConnections("pending", 1)
 	metrics.ObserveTCPFrame("c2s", "accepted", 128)
+	metrics.ObserveTCPDispatch(1, "ok", time.Millisecond)
 	metrics.ObserveTCPDispatch(2000, "ok", time.Millisecond)
 	metrics.AddTCPInFlight(1)
 	metrics.AddTCPInFlight(-1)
@@ -77,6 +81,7 @@ func TestPersonalWorldSliceMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveWorldLease("renewed")
 	metrics.ObserveSemanticDeadline("owner_grace", "executed")
 	metrics.ObserveVisitLifecycle("disconnect", "stale")
+	metrics.ObserveVisitLifecycle("stale_open_reconcile", "applied")
 	metrics.ObserveVisitDelivery("safe_return", "offline")
 }
 

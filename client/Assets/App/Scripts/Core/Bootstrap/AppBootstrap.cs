@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Presentation.Hosts;
+using IHomeland.Client.Scenes.PersonalWorld;
 using UnityEngine;
 
 namespace IHomeland.Client.Core.Bootstrap
@@ -40,6 +41,13 @@ namespace IHomeland.Client.Core.Bootstrap
         private ClientUiHostRoot _uiHostRoot;
 
         /// <summary>
+        /// 保存 BootstrapScene 直接序列化引用的唯一内容 Scene 转换 Host。
+        /// </summary>
+        [SerializeField]
+        [Tooltip("只加载登记的 PersonalWorldScene，并显式注入唯一 SceneContext。")]
+        private ClientWorldSceneTransitionHost _sceneTransitionHost;
+
+        /// <summary>
         /// 保存程序化 PlayMode fixture 在激活前注入的不可变环境；正式场景保持为空。
         /// </summary>
         private ClientEnvironment _configuredEnvironment;
@@ -74,6 +82,13 @@ namespace IHomeland.Client.Core.Bootstrap
                 return;
             }
 
+            if (_configuredEnvironment == null && _sceneTransitionHost == null)
+            {
+                Debug.LogError("AppBootstrap 缺少 ClientWorldSceneTransitionHost 直接序列化引用。", this);
+                enabled = false;
+                return;
+            }
+
             if (!ReferenceEquals(_uiHostRoot.gameObject, gameObject))
             {
                 Debug.LogError("ClientUiHostRoot 必须与 AppBootstrap 位于同一持久 GameObject。", this);
@@ -103,7 +118,9 @@ namespace IHomeland.Client.Core.Bootstrap
                 var environment = _configuredEnvironment ?? _environmentProfile.Build(
                     UnityEngine.Application.version,
                     ClientContractBaseline.ProtocolVersion);
-                var composition = new AppComposition().Build(environment, _uiHostRoot);
+                var composition = _sceneTransitionHost == null
+                    ? new AppComposition().Build(environment, _uiHostRoot)
+                    : new AppComposition().Build(environment, _uiHostRoot, _sceneTransitionHost);
                 _appRoot.Attach(composition);
                 await _appRoot.StartAsync();
             }
@@ -123,6 +140,7 @@ namespace IHomeland.Client.Core.Bootstrap
         {
             _appRoot = GetComponent<AppRoot>();
             _uiHostRoot = GetComponent<ClientUiHostRoot>();
+            _sceneTransitionHost = GetComponent<ClientWorldSceneTransitionHost>();
         }
 
         /// <summary>

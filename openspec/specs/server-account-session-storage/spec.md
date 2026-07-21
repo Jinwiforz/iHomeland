@@ -17,8 +17,8 @@
 - **WHEN** repository 读取非法 ID、非 canonical username、unknown status、无效 credential encoding 或零/越界时间
 - **THEN** adapter 返回脱敏 dependency/corruption error且不构造部分 Account、默认状态或可认证记录
 
-### Requirement: AccountRepository 必须忠实实现原子 outcome 与提交不确定性
-AccountRepository `Create` MUST 在一个 MySQL 原子写入中提交 account、player 与 credential hash，并只把已知 username 唯一约束映射为 `CreateOutcomeUsernameConflict`。Server-generated AccountID/PlayerID 碰撞 MUST 作为 identity/data defect fail closed，不能伪装成 username conflict。连接错误、context deadline 或 commit acknowledgement 丢失 MUST 复用 transaction policy 区分明确未提交与 commit unknown，不得猜测回滚、重试生成新身份或补偿删除。`FindForAuthentication` MUST 按 exact canonical username 返回同一一致性认证快照，not found 与 dependency failure MUST 严格分离。
+### Requirement: AccountRepository 必须忠实实现原子 outcome、提交不确定性与最小 Player 可用性读取
+AccountRepository `Create` MUST 在一个 MySQL 原子写入中提交 account、player 与 credential hash，并只把已知 username 唯一约束映射为 `CreateOutcomeUsernameConflict`。Server-generated AccountID/PlayerID 碰撞 MUST 作为 identity/data defect fail closed，不能伪装成 username conflict。连接错误、context deadline 或 commit acknowledgement 丢失 MUST 复用 transaction policy 区分明确未提交与 commit unknown，不得猜测回滚、重试生成新身份或补偿删除。`FindForAuthentication` MUST 按 exact canonical username 返回同一一致性认证快照，not found 与 dependency failure MUST 严格分离。Account owner 还 MUST 提供按 exact PlayerID 判断目标当前是否 active 且可邀请的最小只读合同，只返回 available、统一 unavailable 或 dependency failure；missing 与 inactive MUST 合并，且不得向调用领域暴露 AccountID、username、credential 或具体停用原因。
 
 #### Scenario: 并发注册相同 canonical username
 - **WHEN** 多个 goroutine 使用大小写等价 username 并发调用 Create
@@ -31,6 +31,10 @@ AccountRepository `Create` MUST 在一个 MySQL 原子写入中提交 account、
 #### Scenario: 认证读取依赖失败
 - **WHEN** canonical username 合法但 MySQL 无法证明记录存在或不存在
 - **THEN** repository 返回 dependency failure而不是 not found，account application不得把它降级为 invalid credentials
+
+#### Scenario: 按 PlayerID 读取邀请可用性
+- **WHEN** 其他领域以格式有效的 exact PlayerID 查询 active 可邀请性
+- **THEN** active account 返回 available，missing 与 inactive 统一返回 unavailable，unknown status 或数据库故障返回 dependency failure且不泄漏其他账号字段
 
 ### Requirement: Production password hashing 必须有界、memory-hard 且默认脱敏
 CredentialHasher MUST 使用 Argon2id v19 self-describing PHC encoding、每次独立 CSPRNG salt、受治理 current profile 和 constant-time tag comparison。Current profile MUST 固定 64 MiB memory、3 iterations、4 lanes、16-byte salt 与32-byte tag；parser MUST只接受canonical encoding和显式登记且不超过安全上限的profile，禁止由持久字符串请求任意资源。Hash/Verify MUST受并发内存门控制，unknown username dummy hash MUST使用相同算法与成本。Plaintext、完整 PHC hash、salt、tag、dummy material 与内部解析错误 MUST NOT进入日志、错误、metrics或公开响应。

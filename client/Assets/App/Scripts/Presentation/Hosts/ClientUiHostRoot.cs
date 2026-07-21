@@ -7,6 +7,7 @@ using IHomeland.Client.Presentation.Hosts.UIToolkit;
 using IHomeland.Client.Presentation.Navigation;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 namespace IHomeland.Client.Presentation.Hosts
 {
@@ -15,7 +16,7 @@ namespace IHomeland.Client.Presentation.Hosts
     /// </summary>
     /// <remarks>
     /// 该组件只拥有 action map、cursor 和 Host 引用，不查找场景对象，也不保存账号、连接或世界事实。
-    /// production Host 列表可以为空；后续页面必须通过直接序列化引用显式加入。
+    /// Isolated fixture 的 Host 列表可以为空；production 必须通过直接序列化引用登记完整产品 Host。
     /// </remarks>
     [DisallowMultipleComponent]
     public sealed class ClientUiHostRoot : MonoBehaviour, IClientUiInputCoordinator
@@ -27,12 +28,12 @@ namespace IHomeland.Client.Presentation.Hosts
 
         /// <summary>保存直接序列化的 UI Toolkit route Host。</summary>
         [SerializeField]
-        [Tooltip("显式登记的 UI Toolkit route Host；当前没有产品页面时保持为空。")]
+        [Tooltip("显式登记的 UI Toolkit route Host；production 必须包含全部已交付页面。")]
         private ClientUiToolkitHost[] _uiToolkitHosts = Array.Empty<ClientUiToolkitHost>();
 
         /// <summary>保存直接序列化的 uGUI route Host。</summary>
         [SerializeField]
-        [Tooltip("显式登记的 uGUI route Host；当前没有产品页面时保持为空。")]
+        [Tooltip("显式登记的 uGUI route Host；production 必须包含 WorldHud。")]
         private ClientUguiHost[] _uguiHosts = Array.Empty<ClientUguiHost>();
 
         /// <summary>保存运行时私有 action asset clone。</summary>
@@ -44,6 +45,12 @@ namespace IHomeland.Client.Presentation.Hosts
         /// <summary>保存私有 clone 中唯一 UI action map。</summary>
         private InputActionMap _uiActionMap;
 
+        /// <summary>保存 Player map 中打开产品菜单的独立语义 action。</summary>
+        private InputAction _gameplayMenuAction;
+
+        /// <summary>保存 UI map 中返回当前产品页面的标准取消 action。</summary>
+        private InputAction _uiCancelAction;
+
         /// <summary>保存初始化所在 Unity 主线程，阻止后台线程操作 Unity API。</summary>
         private int _mainThreadId;
 
@@ -52,6 +59,24 @@ namespace IHomeland.Client.Presentation.Hosts
 
         /// <summary>表示当前 Input owner 已永久停止。</summary>
         private bool _stopped;
+
+        /// <summary>表示输入模式或窗口焦点变化后仍需在当前帧末确认一次 cursor 状态。</summary>
+        private bool _cursorCommitPending;
+
+        /// <summary>表示 Player/Menu 已在 Input System 回调中产生，等待帧末提交产品意图。</summary>
+        private bool _gameplayMenuRequestPending;
+
+        /// <summary>表示 UI/Cancel 已在 Input System 回调中产生，等待帧末提交产品意图。</summary>
+        private bool _uiCancelRequestPending;
+
+        /// <summary>保存 UI/Cancel 发生时的交互 route，拒绝把迟到输入提交给后继页面。</summary>
+        private ClientUiRouteId _pendingUiCancelRouteId = ClientUiRouteId.None;
+
+        /// <summary>表示输入 owner 切换后仍在等待 Menu/Cancel 相关物理按键全部释放。</summary>
+        private bool _inputReleaseGateActive;
+
+        /// <summary>保存 release gate 建立的帧，保证新 action map 至少经过一次 Input System update。</summary>
+        private int _inputReleaseGateFrame = -1;
 
         /// <summary>获取最近一次原子提交的输入状态。</summary>
         ClientUiInputState IClientUiInputCoordinator.CurrentState => CurrentState;
@@ -64,6 +89,19 @@ namespace IHomeland.Client.Presentation.Hosts
 
         /// <summary>获取 runtime clone 的 UI action map 是否启用，供生命周期测试观察。</summary>
         internal bool IsUiActionMapEnabled => _uiActionMap != null && _uiActionMap.enabled;
+
+        /// <summary>
+        /// 在 Gameplay mode 收到一次菜单动作时通知显式连接的产品入口。
+        /// </summary>
+        /// <remarks>
+        /// 该事件只把 Input System action 转换为无参数语义意图，不广播键位、设备或业务状态。
+        /// </remarks>
+        internal event Action GameplayMenuRequested;
+
+        /// <summary>
+        /// 在非 Gameplay mode 收到 UI/Cancel 时通知显式连接的当前 route 处理者。
+        /// </summary>
+        internal event Action<ClientUiRouteId> UiCancelRequested;
 
         /// <summary>
         /// 在构造对象图前验证 Input 资产和所有显式 Host 引用，不产生 Unity 运行副作用。
@@ -107,6 +145,30 @@ namespace IHomeland.Client.Presentation.Hosts
             }
 
             return hosts;
+        }
+
+        /// <summary>
+        /// 在 Host 初始化前把唯一产品上下文显式注入全部直接引用的页面 binding。
+        /// </summary>
+        /// <param name="context">Composition 创建的窄产品上下文。</param>
+        /// <exception cref="ArgumentNullException">上下文为空时抛出。</exception>
+        internal void ConfigureProductBindings(IClientUiProductContext context)
+        {
+            if (context == null)
+            {
+                throw new ArgumentNullException(nameof(context));
+            }
+
+            ValidateConfiguration();
+            foreach (var host in _uiToolkitHosts)
+            {
+                host.ConfigureProductContext(context);
+            }
+
+            foreach (var host in _uguiHosts)
+            {
+                host.ConfigureProductContext(context);
+            }
         }
 
         /// <summary>
@@ -159,6 +221,10 @@ namespace IHomeland.Client.Presentation.Hosts
             {
                 _playerActionMap = _runtimeInputActions.FindActionMap("Player", throwIfNotFound: true);
                 _uiActionMap = _runtimeInputActions.FindActionMap("UI", throwIfNotFound: true);
+                _gameplayMenuAction = _playerActionMap.FindAction("Menu", throwIfNotFound: true);
+                _uiCancelAction = _uiActionMap.FindAction("Cancel", throwIfNotFound: true);
+                _gameplayMenuAction.performed += OnGameplayMenuPerformed;
+                _uiCancelAction.performed += OnUiCancelPerformed;
                 _runtimeInputActions.Disable();
                 ApplyState(ClientUiInputState.Gameplay);
                 _initialized = true;
@@ -167,8 +233,9 @@ namespace IHomeland.Client.Presentation.Hosts
             catch
             {
                 CurrentState = ClientUiInputState.Gameplay;
-                Cursor.visible = true;
                 Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+                _cursorCommitPending = false;
                 _initialized = false;
                 DestroyRuntimeInputClone();
                 throw;
@@ -215,13 +282,238 @@ namespace IHomeland.Client.Presentation.Hosts
                 _runtimeInputActions.Disable();
             }
 
-            Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
             CurrentState = ClientUiInputState.Gameplay;
+            _cursorCommitPending = false;
+            _inputReleaseGateActive = false;
+            _inputReleaseGateFrame = -1;
+            ClearPendingInputIntent();
             DestroyRuntimeInputClone();
+            GameplayMenuRequested = null;
+            UiCancelRequested = null;
             _initialized = false;
             _stopped = true;
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 在输入模式或窗口焦点变化后的首个帧末确认一次 cursor 状态。
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (TryReleaseInputTransitionGate())
+            {
+                DispatchPendingInputIntent();
+            }
+
+            if (!_cursorCommitPending || !_initialized || _stopped || !UnityEngine.Application.isFocused)
+            {
+                return;
+            }
+
+            CommitCursorState(CurrentState.Mode == ClientUiInputMode.Gameplay);
+            _cursorCommitPending = false;
+        }
+
+        /// <summary>窗口重新获得焦点时重新提交当前输入模式的 cursor policy。</summary>
+        /// <param name="hasFocus">当前 Player 是否获得输入焦点。</param>
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus || !_initialized || _stopped)
+            {
+                return;
+            }
+
+            CommitCursorState(CurrentState.Mode == ClientUiInputMode.Gameplay);
+            _cursorCommitPending = true;
+        }
+
+        /// <summary>
+        /// 仅在 Gameplay mode 把 Player/Menu 的 performed 回调提升为产品菜单意图。
+        /// </summary>
+        /// <param name="context">Input System 提交的 action callback 上下文。</param>
+        private void OnGameplayMenuPerformed(InputAction.CallbackContext context)
+        {
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiHostRoot),
+                "gameplay_menu_performed",
+                $"mode={CurrentState.Mode} route={CurrentState.InteractiveRouteId} release_gate={_inputReleaseGateActive}");
+            if (!_initialized || _stopped || _inputReleaseGateActive ||
+                CurrentState.Mode != ClientUiInputMode.Gameplay)
+            {
+                return;
+            }
+
+            // Input System 正在遍历 callback 时切换 action map，可能让新 map 立即消费同一设备状态。
+            // 这里只记录语义输入，帧末离开 Input System 调用栈后再允许 Router 改变 map 与页面。
+            _gameplayMenuRequestPending = true;
+        }
+
+        /// <summary>
+        /// 把 UI/Cancel 提升为带当前 route identity 的返回意图，不在输入 owner 内决定业务导航。
+        /// </summary>
+        /// <param name="context">Input System 提交的 action callback 上下文。</param>
+        private void OnUiCancelPerformed(InputAction.CallbackContext context)
+        {
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiHostRoot),
+                "ui_cancel_performed",
+                $"mode={CurrentState.Mode} route={CurrentState.InteractiveRouteId} release_gate={_inputReleaseGateActive}");
+            if (!_initialized || _stopped || _inputReleaseGateActive ||
+                CurrentState.Mode == ClientUiInputMode.Gameplay)
+            {
+                return;
+            }
+
+            // 捕获发生时的 route；帧末若 owner 已变化则丢弃，避免迟到 Cancel 关闭新页面。
+            _uiCancelRequestPending = true;
+            _pendingUiCancelRouteId = CurrentState.InteractiveRouteId;
+        }
+
+        /// <summary>在帧末离开 Input System callback 栈后提交至多一个仍属于当前输入 owner 的语义意图。</summary>
+        /// <remarks>
+        /// Router 会在订阅回调内切换 Player/UI action map。若直接从 InputAction.performed 调用 Router，
+        /// 新启用的 map 可能消费尚未释放的同一帧设备状态，形成 Menu/Cancel 反复开关页面的反馈环。
+        /// </remarks>
+        private void DispatchPendingInputIntent()
+        {
+            if (!_initialized || _stopped)
+            {
+                ClearPendingInputIntent();
+                return;
+            }
+
+            var menuPending = _gameplayMenuRequestPending;
+            var cancelPending = _uiCancelRequestPending;
+            var cancelledRoute = _pendingUiCancelRouteId;
+            ClearPendingInputIntent();
+
+            if (menuPending && CurrentState.Mode == ClientUiInputMode.Gameplay)
+            {
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiHostRoot),
+                    "gameplay_menu_dispatched",
+                    $"mode={CurrentState.Mode} route={CurrentState.InteractiveRouteId}");
+                NotifyGameplayMenuRequested();
+                return;
+            }
+
+            if (cancelPending &&
+                CurrentState.Mode != ClientUiInputMode.Gameplay &&
+                CurrentState.InteractiveRouteId == cancelledRoute)
+            {
+                ClientUiDiagnostics.Trace(
+                    nameof(ClientUiHostRoot),
+                    "ui_cancel_dispatched",
+                    $"mode={CurrentState.Mode} route={cancelledRoute}");
+                NotifyUiCancelRequested(cancelledRoute);
+            }
+        }
+
+        /// <summary>通知 Gameplay 菜单订阅者，并隔离单个订阅者异常。</summary>
+        private void NotifyGameplayMenuRequested()
+        {
+            var subscribers = GameplayMenuRequested;
+            if (subscribers == null)
+            {
+                return;
+            }
+
+            foreach (Action subscriber in subscribers.GetInvocationList())
+            {
+                try
+                {
+                    subscriber();
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogException(exception, this);
+                }
+            }
+        }
+
+        /// <summary>通知 UI Cancel 订阅者，并隔离单个订阅者异常。</summary>
+        /// <param name="routeId">产生 Cancel 时且当前仍持有交互权的 route。</param>
+        private void NotifyUiCancelRequested(ClientUiRouteId routeId)
+        {
+            var subscribers = UiCancelRequested;
+            if (subscribers == null)
+            {
+                return;
+            }
+
+            foreach (Action<ClientUiRouteId> subscriber in subscribers.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(routeId);
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogException(exception, this);
+                }
+            }
+        }
+
+        /// <summary>清除尚未提交的帧级语义输入，避免停止或 owner 变化后回写。</summary>
+        private void ClearPendingInputIntent()
+        {
+            _gameplayMenuRequestPending = false;
+            _uiCancelRequestPending = false;
+            _pendingUiCancelRouteId = ClientUiRouteId.None;
+        }
+
+        /// <summary>
+        /// 仅在 owner 切换后的下一帧且 Menu/Cancel 全部释放后解除输入边沿门。
+        /// </summary>
+        /// <remarks>
+        /// Input System 启用 action map 时会检查当前设备状态。若切换发生在按键仍按下期间，
+        /// 新 map 可能立即产生 performed；必须等待一次完整 release，不能用时间窗口猜测用户意图。
+        /// </remarks>
+        /// <returns>当前帧是否允许分发新的 Menu/Cancel 产品意图。</returns>
+        private bool TryReleaseInputTransitionGate()
+        {
+            if (!_inputReleaseGateActive)
+            {
+                return true;
+            }
+
+            ClearPendingInputIntent();
+            if (Time.frameCount <= _inputReleaseGateFrame || HasPressedControl(_gameplayMenuAction) ||
+                HasPressedControl(_uiCancelAction))
+            {
+                return false;
+            }
+
+            _inputReleaseGateActive = false;
+            _inputReleaseGateFrame = -1;
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiHostRoot),
+                "input_release_gate_opened",
+                $"mode={CurrentState.Mode} route={CurrentState.InteractiveRouteId}");
+            return true;
+        }
+
+        /// <summary>检查 action 的任一 ButtonControl 是否仍处于按下状态。</summary>
+        /// <param name="action">Menu 或 Cancel action；允许在停止清理期间为 null。</param>
+        /// <returns>至少一个绑定按钮尚未释放时返回 true。</returns>
+        private static bool HasPressedControl(InputAction action)
+        {
+            if (action == null)
+            {
+                return false;
+            }
+
+            foreach (var control in action.controls)
+            {
+                if (control is ButtonControl button && button.isPressed)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -270,23 +562,74 @@ namespace IHomeland.Client.Presentation.Hosts
         /// <param name="state">目标输入状态。</param>
         private void ApplyState(ClientUiInputState state)
         {
+            var ownerChanged = CurrentState.Mode != state.Mode ||
+                               CurrentState.InteractiveRouteId != state.InteractiveRouteId;
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiHostRoot),
+                "input_state_applying",
+                $"previous_mode={CurrentState.Mode} previous_route={CurrentState.InteractiveRouteId} " +
+                $"target_mode={state.Mode} target_route={state.InteractiveRouteId} owner_changed={ownerChanged}");
             var gameplay = state.Mode == ClientUiInputMode.Gameplay;
             _playerActionMap.Disable();
             _uiActionMap.Disable();
             if (gameplay)
             {
                 _playerActionMap.Enable();
-                Cursor.visible = false;
-                Cursor.lockState = CursorLockMode.Locked;
             }
             else
             {
                 _uiActionMap.Enable();
-                Cursor.visible = true;
-                Cursor.lockState = CursorLockMode.None;
             }
 
             CurrentState = state;
+            if (ownerChanged)
+            {
+                // 切换 map 前产生但尚未分发的输入不属于新的 owner。
+                ClearPendingInputIntent();
+                _inputReleaseGateActive = true;
+                _inputReleaseGateFrame = Time.frameCount;
+            }
+
+            ClientUiDiagnostics.Trace(
+                nameof(ClientUiHostRoot),
+                "input_state_applied",
+                $"mode={CurrentState.Mode} route={CurrentState.InteractiveRouteId} release_gate={_inputReleaseGateActive}");
+
+            CommitCursorState(gameplay);
+            _cursorCommitPending = true;
+        }
+
+        /// <summary>
+        /// 按唯一输入 owner 的目标模式提交 cursor；UI 必须先解锁再显示，Gameplay 则锁定并隐藏。
+        /// </summary>
+        /// <param name="gameplay">是否提交 Gameplay cursor policy。</param>
+        private static void CommitCursorState(bool gameplay)
+        {
+            if (gameplay)
+            {
+                if (Cursor.lockState != CursorLockMode.Locked)
+                {
+                    Cursor.lockState = CursorLockMode.Locked;
+                }
+
+                if (Cursor.visible)
+                {
+                    Cursor.visible = false;
+                }
+
+                return;
+            }
+
+            // Locked 状态强制隐藏 cursor；必须先解锁，再提交可见性。
+            if (Cursor.lockState != CursorLockMode.None)
+            {
+                Cursor.lockState = CursorLockMode.None;
+            }
+
+            if (!Cursor.visible)
+            {
+                Cursor.visible = true;
+            }
         }
 
         /// <summary>验证 owner 已初始化、未停止且调用位于初始化主线程。</summary>
@@ -312,6 +655,16 @@ namespace IHomeland.Client.Presentation.Hosts
         /// <summary>销毁 runtime clone 并清空全部派生 action map 引用。</summary>
         private void DestroyRuntimeInputClone()
         {
+            if (_gameplayMenuAction != null)
+            {
+                _gameplayMenuAction.performed -= OnGameplayMenuPerformed;
+            }
+
+            if (_uiCancelAction != null)
+            {
+                _uiCancelAction.performed -= OnUiCancelPerformed;
+            }
+
             if (_runtimeInputActions != null)
             {
                 Destroy(_runtimeInputActions);
@@ -320,6 +673,8 @@ namespace IHomeland.Client.Presentation.Hosts
             _runtimeInputActions = null;
             _playerActionMap = null;
             _uiActionMap = null;
+            _gameplayMenuAction = null;
+            _uiCancelAction = null;
         }
     }
 }

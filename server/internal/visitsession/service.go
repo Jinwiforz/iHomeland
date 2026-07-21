@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"strconv"
 	"time"
 
@@ -25,6 +26,8 @@ type Service struct {
 	store VisitSessionStore
 	// worlds 解析认证 Owner 的 active PersonalWorld 持久事实。
 	worlds OwnedWorldReader
+	// players 只解析目标 Player 当前是否 active 且可邀请，不暴露账号其他事实。
+	players account.InvitablePlayerReader
 	// assignments 解析 placement owner 的 current active assignment 与 lease。
 	assignments CurrentAssignmentReader
 	// clock 为每个 application 调用提供一次 UTC 微秒 observedAt。
@@ -38,11 +41,11 @@ type Service struct {
 // NewService 校验并保留 VisitSession application 的全部必需依赖与 policy。
 //
 // 构造不会执行 I/O、启动 timer/goroutine 或把 service 注入正式 Composition Root。
-func NewService(store VisitSessionStore, worlds OwnedWorldReader, assignments CurrentAssignmentReader, clock Clock, ids IDGenerator, policy Policy) (*Service, error) {
-	if store == nil || worlds == nil || assignments == nil || clock == nil || ids == nil || !policy.Valid() {
+func NewService(store VisitSessionStore, worlds OwnedWorldReader, players account.InvitablePlayerReader, assignments CurrentAssignmentReader, clock Clock, ids IDGenerator, policy Policy) (*Service, error) {
+	if store == nil || worlds == nil || players == nil || assignments == nil || clock == nil || ids == nil || !policy.Valid() {
 		return nil, &Error{operation: OperationOpen, code: ErrorCodeInvalidArgument, cause: errors.New("visit session service dependencies are incomplete")}
 	}
-	return &Service{store: store, worlds: worlds, assignments: assignments, clock: clock, ids: ids, policy: policy}, nil
+	return &Service{store: store, worlds: worlds, players: players, assignments: assignments, clock: clock, ids: ids, policy: policy}, nil
 }
 
 // OpenResult 是 world active index create/resolve 的安全 application 结果。
@@ -148,6 +151,9 @@ func (service *Service) CreateInvite(ctx context.Context, auth session.AuthConte
 	if err != nil {
 		return MutationResult{}, err
 	}
+	if !targetID.Valid() {
+		return MutationResult{}, domainError(OperationCreateInvite, ErrorCodeInvalidArgument)
+	}
 	world, err := service.ownedWorld(ctx, actor, OperationCreateInvite)
 	if err != nil {
 		return MutationResult{}, err
@@ -160,6 +166,15 @@ func (service *Service) CreateInvite(ctx context.Context, auth session.AuthConte
 		return MutationResult{}, domainError(OperationCreateInvite, ErrorCodeNotFound)
 	}
 	fingerprint := commandFingerprint(OperationCreateInvite, snapshot.ID(), expected, actorFields(actor), targetID.String(), timeField(expiresAt))
+	if replay, resolved, replayErr := service.resolveCommandBeforeApply(ctx, snapshot, expected, commandID, fingerprint, OperationCreateInvite); resolved {
+		return replay, replayErr
+	}
+	if targetID == actor.playerID {
+		return MutationResult{}, domainError(OperationCreateInvite, ErrorCodeInvalidArgument)
+	}
+	if err := service.requireInvitablePlayer(ctx, targetID); err != nil {
+		return MutationResult{}, err
+	}
 	return service.commit(ctx, snapshot, expected, commandID, fingerprint, OperationCreateInvite, func(visit VisitSession) (mutationProposal, error) {
 		if policyErr := validatePolicyDeadline(OperationCreateInvite, observedAt, expiresAt, minimumInviteLifetime, service.policy.inviteLifetime); policyErr != nil {
 			return mutationProposal{}, policyErr
@@ -171,6 +186,22 @@ func (service *Service) CreateInvite(ctx context.Context, auth session.AuthConte
 		target, invite, applyErr := visit.CreateInvite(actor, inviteID, targetID, expiresAt, observedAt)
 		return mutationProposal{visit: target, invite: invite}, applyErr
 	})
+}
+
+// requireInvitablePlayer 将 Account owner 的最小读取决议映射为 VisitSession 失败语义。
+func (service *Service) requireInvitablePlayer(ctx context.Context, targetID account.PlayerID) error {
+	outcome, err := service.players.ResolveInvitablePlayer(ctx, targetID)
+	if err != nil {
+		return &Error{operation: OperationCreateInvite, code: ErrorCodeDependency, cause: err}
+	}
+	switch outcome {
+	case account.InvitablePlayerOutcomeAvailable:
+		return nil
+	case account.InvitablePlayerOutcomeUnavailable:
+		return domainError(OperationCreateInvite, ErrorCodeInvalidArgument)
+	default:
+		return &Error{operation: OperationCreateInvite, code: ErrorCodeDependencyDefect}
+	}
 }
 
 // RevokeInvite 由 Owner 撤销 matching pending invite。
@@ -627,7 +658,18 @@ func (service *Service) commit(ctx context.Context, snapshot Snapshot, expected 
 		if applyErr != nil {
 			return MutationResult{}, applyErr
 		}
-		proposalResult, err = NewMutationResult(operation, proposal.visit.Snapshot(), commandID, fingerprint, proposal.invite, proposal.admission, proposal.membership, proposal.directives)
+		target := proposal.visit.Snapshot()
+		proposalResult, err = NewMutationResultWithRetiredInvites(
+			operation,
+			target,
+			commandID,
+			fingerprint,
+			proposal.invite,
+			proposal.admission,
+			proposal.membership,
+			retiredPendingInvites(snapshot, target),
+			proposal.directives,
+		)
 		if err != nil {
 			return MutationResult{}, &Error{operation: operation, code: ErrorCodeDependencyDefect, cause: err}
 		}
@@ -903,8 +945,13 @@ func extendFingerprint(base CommandFingerprint, fields ...string) CommandFingerp
 
 // mutationPayloadEqual 比较 store applied result 与 application proposal 的完整 replay payload。
 func mutationPayloadEqual(left, right MutationResult) bool {
-	if left.invite != right.invite || left.admission != right.admission || left.membership != right.membership || len(left.directives) != len(right.directives) {
+	if left.invite != right.invite || left.admission != right.admission || left.membership != right.membership || len(left.retiredInvites) != len(right.retiredInvites) || len(left.directives) != len(right.directives) {
 		return false
+	}
+	for index := range left.retiredInvites {
+		if left.retiredInvites[index] != right.retiredInvites[index] {
+			return false
+		}
 	}
 	for index := range left.directives {
 		if left.directives[index] != right.directives[index] {
@@ -916,7 +963,21 @@ func mutationPayloadEqual(left, right MutationResult) bool {
 
 // mutationResultEmpty 报告非成功 outcome 是否错误携带部分 result。
 func mutationResultEmpty(result MutationResult) bool {
-	return result.operation == OperationUnspecified && !result.snapshot.Valid() && !result.commandID.Valid() && !result.fingerprint.Valid() && !result.invite.Valid() && !result.admission.Valid() && !result.membership.Valid() && len(result.directives) == 0
+	return result.operation == OperationUnspecified && !result.snapshot.Valid() && !result.commandID.Valid() && !result.fingerprint.Valid() && !result.invite.Valid() && !result.admission.Valid() && !result.membership.Valid() && len(result.retiredInvites) == 0 && len(result.directives) == 0
+}
+
+// retiredPendingInvites 返回 source 中已不再由 target 保持 pending 的稳定排序邀请。
+func retiredPendingInvites(source, target Snapshot) []InviteSnapshot {
+	retired := make([]InviteSnapshot, 0)
+	for _, invite := range source.Invites() {
+		if invite.State() == InviteStatePending && !snapshotContainsPendingInvite(target, invite.ID()) {
+			retired = append(retired, invite)
+		}
+	}
+	sort.Slice(retired, func(left, right int) bool {
+		return retired[left].ID().Value() < retired[right].ID().Value()
+	})
+	return retired
 }
 
 // empty 报告 snapshot 是否严格没有任何部分填充字段。

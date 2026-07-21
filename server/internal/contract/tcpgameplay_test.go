@@ -10,7 +10,7 @@ func TestTLSGameplayCatalogMatchesRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := TLSGameplayCatalog()
-	if len(runtime.Messages.Messages) != 23 || len(runtime.Routes.Routes) != 23 {
+	if len(runtime.Messages.Messages) != 25 || len(runtime.Routes.Routes) != 25 {
 		t.Fatalf("runtime TLS/TCP catalog count drifted: messages=%d routes=%d", len(runtime.Messages.Messages), len(runtime.Routes.Routes))
 	}
 	if len(runtime.Errors.Errors) != 23 {

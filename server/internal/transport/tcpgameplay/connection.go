@@ -239,7 +239,7 @@ func stableCloseReason(err error) string {
 	}
 }
 
-// configureTCPKeepAlive 对TLS和明文连接的底层TCP socket启用OS探测，不创建application heartbeat。
+// configureTCPKeepAlive 对TLS和明文连接的底层TCP socket启用OS探测，不替代application heartbeat。
 func configureTCPKeepAlive(connection net.Conn, period time.Duration) {
 	for {
 		switch typed := connection.(type) {

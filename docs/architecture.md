@@ -236,6 +236,10 @@ Owner 断线后进入有绝对 deadline 的 reconnect grace。Owner 在 deadline
 
 `internal/storage/visitsession` 已以共享 standalone Redis 实现 production `VisitSessionStore`：active/session/command 三类 versioned Hash 在 owner Lua 线性化点内维护唯一索引、revision CAS 和完整重放结果。Adapter 不拥有 Redis client、后台 cleanup、admission credential 或 listener；正式 Composition Root 由 application coordinator 把 HTTP accept/admission、TLS/TCP realtime lifecycle command、semantic deadline、WSS notice、TCP snapshot 和精确 safe-return 组合为同一结果路径。Redis 进程重启只能恢复其自身仍保留的合法运行态；flush 或 key 丢失后不从 MySQL 补回旧访问资格。完整 key/field/TTL 字典由 `docs/redis-keys.md` 唯一管理。
 
+Owner 显式 Open 遇到绑定旧 AssignmentStamp 的 active VisitSession 时，只能依据 current placement 事实执行一次确定性恢复：先提交并发布 `assignment-changed` 终态，再以原 Open CommandID 解析或创建 current session。dependency、dependency defect 与 commit-unknown 均 fail closed，不清理 Redis、不换 CommandID 循环重试，也不依赖后台 timer/tick 猜测状态。
+
+CreateInvite 在 Owner/active-session 授权和 command replay 决议后，通过 Account owner 的最小只读合同确认目标是非 Owner 的 active Player；self、missing、inactive 与矛盾目标统一映射为低敏 validation 且零 mutation。撤销、到期、接受与 terminal close 产生的 pending invite retirement 与 mutation result 原子保存并可重放，再通过既有 WSS message 2100 向精确 TargetVisitorID 发布 `RETIRED` tombstone，不建立第二条邀请事实通道。
+
 World admission runtime 使用注入的至少 256-bit derivation key、稳定 issuance identity 与完整 binding fingerprint，以 HMAC-SHA-256 可重复推导短期 credential；Redis 只保存 credential digest、binding 和 consume tombstone。Issue/consume 由 `internal/storage/worldadmission` owner Lua 原子线性化，同一 consume identity 可解析响应丢失，其他重放拒绝；TCP 握手消费后 application 仍重新读取 current full assignment，VisitSession 仍二次验证 membership 与 deadline。Own-world/visit-world producer、cleanup 与 safe-return 已接线；`server/internal/testclient` 只经公开 HTTPS/WSS/TLS-TCP 验证独立 `cmd/server`，分层门禁、冻结摘要和故障 ownership 由 `docs/server-v1-qualification.md` 管理。
 
 Party 只在需要跨场景持续队伍、队长、队伍聊天或连续活动时建立。直接访问好友个人世界只需要 VisitSession，不要求预先创建 Party 或 Room。

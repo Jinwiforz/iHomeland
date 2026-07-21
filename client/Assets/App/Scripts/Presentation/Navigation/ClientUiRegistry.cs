@@ -19,7 +19,7 @@ namespace IHomeland.Client.Presentation.Navigation
         private readonly ReadOnlyCollection<ClientUiRouteDefinition> _definitionSnapshot;
 
         /// <summary>
-        /// 创建完整冻结 registry；空 definitions/hosts 是合法 production 基线。
+        /// 创建完整冻结 registry；空 definitions/hosts 只用于 isolated fixture。
         /// </summary>
         /// <param name="definitions">完整 route definitions。</param>
         /// <param name="hosts">BootstrapScene 显式登记的完整 Host 集合。</param>

@@ -2,7 +2,7 @@
 
 ## 文档职责
 
-本文档定义 UI Toolkit 与 uGUI 的页面选型、统一入口、状态、输入、生命周期和验收规则。服务端 v1 与客户端网络/业务 Services 已满足 UI 基础设施进入条件；当前只落地路由、Host 与输入边界，产品页面仍由个人世界竖切 change 交付。
+本文档定义 UI Toolkit 与 uGUI 的页面选型、统一入口、状态、输入、生命周期和验收规则。服务端 v1、客户端网络/业务 Services、统一路由与个人世界首期产品页面均已落地；后续页面继续复用本文定义的单 owner、Host、输入和状态边界，不得建立第二套路由或业务事实。
 
 ## 选型原则
 
@@ -51,16 +51,19 @@ Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具
 ### 当前实现边界
 
 - `ClientUiRouter` 是 App Scope 唯一 route owner，使用有界串行 transition、单调 navigation generation 与不可变 snapshot。
-- `ClientUiRegistry` 在任何 Host 副作用前冻结 definition/Host 一对一关系；production registry 当前为空，因此启动不会创建占位页面。
+- `ClientUiRegistry` 在任何 Host 副作用前冻结 definition/Host 一对一关系；首期 production 只登记 Login、Shell、WorldVisit、WorldHud 与 ConnectionLost，Settings 保持未登记。
 - Screen 与 System 各自只有一个 owner；Overlay 可叠加；Modal 严格按栈顶关闭；最高层且最后提交的 route 才能交互。
 - `Cached` 只保留已初始化 Host，关闭时仍会 hide/unbind；`Recreate` 完整 dispose；`SceneBound` 必须绑定正 Scene generation。
 - 未登记 route、错误 scene generation、队列过载、调用取消、停止、策略拒绝和 Host failure 都返回稳定结果；结果区分未提交拒绝、幂等未变化、已提交成功和 post-commit failure，不把内部异常文本暴露给页面。
-- 当前没有产品 UXML、USS、Prefab、Presenter 或业务 route definition；`Login` 等 enum identity 只冻结后续接线名称，不代表页面已经实现。
+- `ClientPersonalWorldExperience` 从既有 Session/World/Visit owner 派生不可变低敏 View State，并向页面提供窄语义 action；它不复制权威事实，不持有 credential 或 Unity object。
+- Login、Shell、WorldVisit 与 ConnectionLost 使用 UI Toolkit，WorldHud 使用 scene-bound uGUI。产品 UXML/USS、Prefab 与 Scene 必须由 Unity Editor 创建并以直接引用接线，不得把资源路径加入 route definition。
+- 首期只使用一个项目 USS 表达 color、typography、spacing、focus、disabled、loading 与 error 语义；当前不引入 Theme manager、Resources 或 Addressables。
 
 ## 状态边界
 
 - Account/PersonalWorld/VisitSession Services 保存业务事实。
-- 简单 view 直接读取只读状态并提交语义化 command。
+- 简单 view 直接读取只读状态并提交语义化 command。WorldVisit 不允许玩家手填 VisitSessionID、InviteID 或 member identity：列表项保存页面局部 selection，每次不可变 View State replacement 都重新核对完整 identity；旧项消失立即取消选择，多项时不按顺序静默选择。
+- 每个按钮只读取 Experience 投影的精确 capability 和 current collection；空集合、角色不匹配、连接终止或 action single-flight 时保持 disabled。失败绑定产生它的 authority scope，新 world/visit snapshot 到达后确定性清除过期错误，不使用延时、Update/tick 修正或自动 mutation 重试。
 - 多个 view 共享复杂派生数据时才引入纯 C# Presenter/View State。
 - View State 必须可从业务事实派生。
 - UI Toolkit view 与 uGUI view 不互相持有控件引用。
@@ -70,7 +73,7 @@ Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具
 
 ### UI Toolkit Host
 
-- 适配直接序列化的 UIDocument 与 panel
+- 适配直接序列化的 `PanelRenderer` 与 panel
 - 适配 show/hide/dispose
 - 只在页面 change 明确需要时注册与解除 callback
 - 与统一输入和层级表协调
@@ -81,6 +84,7 @@ Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具
 - 适配 show/hide/dispose
 - 管理固定 sorting slot、raycast 和 scene binding
 - 与 SceneContext 生命周期协调
+- uGUI 运行时文本使用 TextMeshPro；交互按钮使用锁定 uGUI 包的 `Button`，可见标签使用 `TextMeshProUGUI`，不新增 Legacy Text
 
 Host 只获得当前 route binding、页面 cancellation、focus 与必要 Unity 对象，不获得 transport、generated message、credential 或完整全局容器。Router 将 Host 失败映射为稳定、低敏且区分提交边界的 transition result。
 
@@ -96,6 +100,8 @@ Host 只获得当前 route binding、页面 cancellation、focus 与必要 Unity
 - UI Toolkit panel 与 uGUI Canvas 排序
 
 Gameplay input state 不绑定 UI route owner；只有 UI、Text 与 Modal mode 才绑定当前交互 route，避免 HUD 打开时把 gameplay 误判为 UI 输入。
+
+Gameplay 中打开产品菜单必须使用项目 Input System 资产内的独立语义 action，不轮询具体键位，也不复用世界交互。首期 `Player/Menu` 绑定 Keyboard Tab 与 Gamepad Start，由 `ClientUiHostRoot` 在 Gameplay mode 提升为一次“打开访问管理”意图；Experience 只调用既有 Router。WorldVisit 提交后切换到 UI action map 并解锁显示 cursor；`UI/Cancel` 只提交 current route identity，Experience 仅关闭允许返回的 overlay，再原子恢复 Player action map 与锁定隐藏 cursor。
 
 统一层级：
 

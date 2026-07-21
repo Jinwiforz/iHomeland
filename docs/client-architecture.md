@@ -74,7 +74,8 @@ Created -> Initializing -> Running -> Stopping -> Stopped
 - Message router、pending requests、push dispatcher
 - Account Service
 - PersonalWorld Service、VisitSession Service 与 World Admission Coordinator
-- `ClientUiRouter`、`ClientUiHostRoot` 与空 production route registry
+- `ClientUiRouter`、`ClientUiHostRoot`、个人世界 production routes 与唯一 `ClientPersonalWorldExperience`
+- `ClientWorldSceneTransitionHost` 与 current `PersonalWorldSceneContext`
 - persistent audio/settings
 
 这些对象不得引用已卸载场景中的 GameObject、Component、Camera 或 view。
@@ -119,7 +120,7 @@ Created -> Initializing -> Running -> Stopping -> Stopped
 - main-thread dispatch
 - GameObject/Component 生命周期
 - AudioSource
-- UIDocument/Canvas/EventSystem
+- PanelRenderer/Canvas/EventSystem
 - SceneManager 与 SceneContext adapter
 
 Host 不实现业务状态机，不持有第二份业务事实。
@@ -181,10 +182,13 @@ SessionCoordinator + ClientConfigurationStore
 - `ClientGameplayChannel` 初始化保持零网络副作用；显式 connect 原子消费同一 session generation 的 world admission lease，再签发并消费匹配 `TLS_TCP`/`GAMEPLAY` ticket。
 - Wire、TLS、明文例外与 credential 规则由[客户端接入规范](client-integration.md#4-tlstcp-business)统一拥有；channel 对任何不匹配的 preface、frame、sequence、route 或 correlation fail closed。
 - 每个 connection generation 只有一个 reader 与一个 serialized writer；pending、writer item、writer encoded bytes 和主线程投递均有硬上限，断线或背压会恰好完成等待方并撤销 generation。
+- Active generation 由 channel 内唯一 heartbeat owner 每 15 秒提交 `GAMEPLAY_HEARTBEAT_REQUEST(1)`，并通过同一 correlation/pending、writer、codec 和 terminal close 路径等待 `GAMEPLAY_HEARTBEAT_RESPONSE(2)`；close、safe-return、session invalidation 或新 generation 建立后，旧 heartbeat 不得继续写入。
 - Caller cancel 只结束本地等待，仍保留有界 correlation 以安全消费迟到 response；JOIN/RECONNECT 只允许携带当前 admission 的首个匹配 command。
-- 三类登记 PUSH 才能进入主线程；safe-return 在投递前先关闭旧 target mutation gate，session epoch 失效会同步撤销匹配 gameplay generation。
+- 三类登记 PUSH 才能进入主线程；safe-return 在投递前先关闭旧 target mutation gate，session epoch 失效会同步撤销匹配 gameplay generation。Remote、protocol、timeout、backpressure 或 transport 终止会在 reader/writer 都确认退出后，通过主线程保留槽发布一次 terminal disconnect；显式 close、safe-return、session invalidation 与 shutdown 不发布该事件。
 
 该边界不保存 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现页面、Scene 或自动重试；它只向下述 Services/coordinator 交付 typed response/PUSH。
+
+产品层的“重试连接”是玩家显式触发的 single-flight 事务，不是 tick 或后台无限修正。整笔 control 恢复、own-world admission、gameplay 建连和 Scene 同步共享 45 秒总 deadline；超时后保留 `ConnectionLost` 与可重试按钮，并对称释放 active intent。control 已经 Connected 时复用 current run，不能重复创建第二条连接；旧 generation 的完成或诊断回调不能覆盖新一代状态。
 
 ### 当前 PersonalWorld/VisitSession Services 边界
 
@@ -196,12 +200,13 @@ HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
 ```
 
 - Generated message 只作为边界输入；提交前校验 identity、enum、assignment binding、revision、deadline 与集合上限，并复制为不可变 application model。
-- 完整 world/visit snapshot 使用最高 revision gate：低 revision 丢弃、同 revision 等价幂等、同 revision 冲突 fail closed；target 清除后仍保留不可见的 VisitSession revision gate。缺失 assignment 会清除旧投影并留下 generation tombstone，只有更高 generation 才能建立新实例。
-- WSS assignment/availability/closed 只形成 refresh hint，不能冒充 gameplay snapshot 或 safe-return；定向 invite inbox 按 identity 去重、按 expiry 清理并限制为 128 项。
-- Coordinator 只允许 `Inactive -> ResolvingOwnWorld -> OwnWorld -> JoiningVisit -> Visiting -> ReturningOwnWorld -> OwnWorld` 的登记转换，并同时校验 session generation 与 target generation。
+- PersonalWorld aggregate revision 与 runtime assignment generation 是两个独立的单调 authority gate：world revision 只比较 identity、owner、lifecycle 与创建事实；同一 world revision 可以接纳更高 assignment generation 的新 WorldInstance，例如服务端重启恢复。相同 assignment generation 只允许 identity 不变且 lease deadline 单调续期。低 generation、同 generation identity 漂移或 lease 回退必须 fail closed。
+- 完整 VisitSession snapshot 使用最高 revision gate：低 revision 丢弃、同 revision 等价幂等、同 revision 冲突 fail closed；target 清除后仍保留不可见的 VisitSession revision gate。缺失 assignment 会清除旧投影并留下 generation tombstone，只有更高 generation 才能建立新实例。
+- WSS assignment/availability/closed 只形成 refresh hint，不能冒充 gameplay snapshot 或 safe-return；定向 invite inbox 按 identity 去重、按 expiry 清理并限制为 128 项。message 2100 的 `RETIRED` projection 是 exact VisitSessionID、InviteID、Owner、Target 与 created revision tombstone，匹配项立即从 inbox/selection 删除，重复或不存在 identity 幂等忽略。Accept 成功也会退役 Visitor inbox 中被消费的 identity；Owner 完整 member snapshot 出现对应 Visitor 时会退役该 target 的 outgoing identity，避免继续暴露必然失败的撤销按钮。同 VisitSession、Owner、Target 的更高 created revision 会替换旧 pending identity，commit-unknown 不猜测消费结果。
+- Coordinator 只允许 `Inactive -> ResolvingOwnWorld -> OwnWorld -> JoiningVisit -> Visiting -> ReturningOwnWorld -> OwnWorld` 的正常转换，并同时校验 session generation 与 target generation；active gameplay 非预期终止会进入 `ConnectionLost`、清除 current target 投影，只有显式进入 own-world 才建立新 generation。
 - JOIN/RECONNECT admission credential 只由 gameplay channel 内部写入首个 command；Services、coordinator、snapshot、subscriber 与日志均不能读取。
 - Owner/Visitor command 使用 current role 与 revision 在写入前 fail closed。Caller cancel、commit-unknown 或 revision conflict 不触发隐式 mutation 重试。
-- App Scope 初始化只登记 subscriber；只有显式 flow/command 才联网。UI route/Host/Input 基础设施由下述边界接续；产品页面、SceneContext、Prefab、资源加载和跨进程恢复仍属于后续 change。
+- App Scope 初始化只登记 subscriber 并打开本地 Login route；只有玩家显式 register/login 或重试才开始 bootstrap 与业务联网。跨进程 token 恢复、独立通道自动恢复和内容资源系统仍属于后续 change。
 
 ### 当前 UI routing/Host 边界
 
@@ -209,13 +214,17 @@ HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
 AppBootstrap
   -> ClientUiHostRoot (Input System clone / explicit Hosts)
   -> AppComposition
-      -> ClientUiRegistry (production definitions = empty)
+      -> ClientPersonalWorldExperience (derived View State / semantic actions)
+      -> ClientUiRegistry (Login / Shell / WorldVisit / WorldHud / ConnectionLost)
       -> ClientUiRouter
           -> UI Toolkit Host | uGUI Host
+      -> ClientWorldSceneTransitionHost
+          -> PersonalWorldSceneContext
 ```
 
-- `AppBootstrap` 只验证 BootstrapScene 的直接引用；`AppComposition` 创建唯一纯 C# `ClientUiRouter`，并把 router 与 Host/Input boundary 纳入既有 AppLifetime。
-- production registry 当前为空，启动后保持空 snapshot，不显示页面、不自动联网；UI Toolkit/uGUI Host 不取得 transport、generated message、credential 或完整容器。
+- `AppBootstrap` 验证 BootstrapScene 的直接引用；`AppComposition` 创建唯一纯 C# `ClientUiRouter` 与 `ClientPersonalWorldExperience`，并把 router、Scene、Host/Input boundary 纳入既有 AppLifetime。
+- Production registry 只登记 Login、Shell、WorldVisit、WorldHud 与 ConnectionLost；Settings 未交付。UI Toolkit/uGUI Host 只取得不可变 View State 和窄语义 action，不取得 transport、generated message、credential 或完整容器。
+- `PersonalWorldScene` 同时承载 Owner/Visitor 表现，只允许一个轻量 Context；load 候选通过 target/scene/request generation 后才提交，旧候选必须回滚。
 - route、layer、事务、输入、焦点、生命周期、失败和验收的唯一详细规则见 `docs/client-ui-architecture.md`，本文不重复维护。
 
 ## 状态所有权
@@ -287,4 +296,4 @@ ScriptableObject 不保存在线 session、连接状态或 world/visit snapshot�
 - 网络 push 只在主线程更新业务状态和 active view。
 - 应用退出有 deadline，不同步阻塞 Unity shutdown。
 - 个人世界阶段 Owner/Visitor 模式切换不会残留旧 SceneContext、旧 admission 或可写 world callback。
-- 空 production route registry 启动不创建页面；双 Host fixture 的 modal、focus、raycast、action map 与 teardown 保持单 owner。
+- 未认证启动只创建 Login 页面且零业务网络副作用；双 Host 的 modal、focus、raycast、action map 与 teardown 保持单 owner。

@@ -47,6 +47,48 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(conflicts, Is.EqualTo(1));
         }
 
+        /// <summary>验证同一 assignment 的 lease 续期不会被误判为 world identity 漂移。</summary>
+        [Test]
+        public void WorldSnapshotAcceptsMonotonicAssignmentLeaseRenewal()
+        {
+            var service = new PersonalWorldService();
+            Assert.That(
+                service.ApplyWorldSnapshot(World(8, Assignment(3, 20_000))),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                service.ApplyWorldSnapshot(World(8, Assignment(3, 30_000))),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(service.Snapshot.CurrentWorld.Assignment.LeaseExpiresAtMilliseconds, Is.EqualTo(30_000));
+
+            Assert.That(
+                service.ApplyWorldSnapshot(World(8, Assignment(3, 25_000))),
+                Is.EqualTo(ClientProjectionApplyResult.Stale));
+            Assert.That(
+                service.ApplyWorldSnapshot(World(8, Assignment(3, 40_000, "instance_other"))),
+                Is.EqualTo(ClientProjectionApplyResult.Conflict));
+        }
+
+        /// <summary>验证服务端恢复可在 world revision 不变时以更高 assignment generation 替换实例。</summary>
+        [Test]
+        public void WorldBootstrapAcceptsHigherAssignmentGenerationAtSameWorldRevision()
+        {
+            var service = new PersonalWorldService();
+            Assert.That(
+                service.ApplyBootstrap(Bootstrap(1, 2)),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            service.ClearCurrentTarget();
+
+            var recovered = Bootstrap(1, 3, "instance_recovered");
+            Assert.That(
+                service.ApplyBootstrap(recovered),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(service.Snapshot.PrimaryWorld.Revision, Is.EqualTo(1));
+            Assert.That(service.Snapshot.PrimaryWorld.Assignment.Generation, Is.EqualTo(3));
+            Assert.That(
+                service.Snapshot.PrimaryWorld.Assignment.WorldInstanceID,
+                Is.EqualTo("instance_recovered"));
+        }
+
         /// <summary>验证 assignment control hint 独立比较 generation 且不替代完整 snapshot。</summary>
         [Test]
         public void AssignmentHintUsesGenerationWithoutReplacingWorld()
@@ -116,6 +158,36 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(service.Snapshot.NeedsRefresh, Is.True);
         }
 
+        /// <summary>验证 VisitSession revision 与 current assignment lease 使用各自的单调门。</summary>
+        [Test]
+        public void VisitSnapshotAcceptsCurrentAssignmentLeaseRenewal()
+        {
+            var service = new VisitSessionService(new FakeClock(1_000));
+            Assert.That(service.SetTargetRole(ClientVisitRole.Owner, null), Is.True);
+
+            var initial = Visit(4);
+            initial.Assignment.LeaseExpiresAtMs = 20_000;
+            Assert.That(service.ApplySnapshot(initial, ClientVisitRole.Owner), Is.EqualTo(ClientProjectionApplyResult.Applied));
+
+            var sameRevisionRenewal = Visit(4);
+            sameRevisionRenewal.Assignment.LeaseExpiresAtMs = 25_000;
+            Assert.That(service.ApplySnapshot(sameRevisionRenewal, ClientVisitRole.Owner), Is.EqualTo(ClientProjectionApplyResult.Applied));
+
+            var mutationResponse = Visit(5);
+            mutationResponse.Assignment.LeaseExpiresAtMs = 30_000;
+            Assert.That(service.ApplySnapshot(mutationResponse, ClientVisitRole.Owner), Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(service.Snapshot.Current.Revision, Is.EqualTo(5));
+            Assert.That(service.Snapshot.Current.Assignment.LeaseExpiresAtMilliseconds, Is.EqualTo(30_000));
+
+            var regressedLease = Visit(5);
+            regressedLease.Assignment.LeaseExpiresAtMs = 25_000;
+            Assert.That(service.ApplySnapshot(regressedLease, ClientVisitRole.Owner), Is.EqualTo(ClientProjectionApplyResult.Stale));
+
+            var changedIdentity = Visit(6);
+            changedIdentity.Assignment.WorldInstanceId = "instance_other";
+            Assert.That(service.ApplySnapshot(changedIdentity, ClientVisitRole.Owner), Is.EqualTo(ClientProjectionApplyResult.Conflict));
+        }
+
         /// <summary>验证 Visitor 集合必须稳定排序、唯一且不包含 Owner。</summary>
         [Test]
         public void VisitVisitorsMustBeCanonical()
@@ -154,6 +226,55 @@ namespace IHomeland.Client.Tests.EditMode
             clock.UtcNowMilliseconds = 11_000;
             Assert.That(service.Snapshot.Invites, Is.Empty);
             Assert.That(service.ApplyInvite(invite), Is.EqualTo(ClientProjectionApplyResult.Rejected));
+        }
+
+        /// <summary>验证 accept 成功证明与更高 revision PUSH 都会退役旧 pending identity。</summary>
+        [Test]
+        public void InviteInboxRetiresAcceptedAndSupersededIdentity()
+        {
+            var service = new VisitSessionService(new FakeClock(1_000));
+            Assert.That(
+                service.ApplyInvite(Invite("invite_old", 3, 20_000)),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                service.RetireAcceptedInvite("visit_one", "invite_old"),
+                Is.True);
+            Assert.That(service.Snapshot.Invites, Is.Empty);
+
+            Assert.That(
+                service.ApplyInvite(Invite("invite_replaced", 5, 20_000)),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                service.ApplyInvite(Invite("invite_current", 7, 20_000)),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+
+            Assert.That(service.Snapshot.Invites, Has.Count.EqualTo(1));
+            Assert.That(service.Snapshot.Invites[0].InviteID, Is.EqualTo("invite_current"));
+            Assert.That(
+                service.RetireAcceptedInvite("visit_one", "invite_replaced"),
+                Is.False);
+        }
+
+        /// <summary>验证 RETIRED PUSH 即使携带已过期时间也只删除完整匹配的 invite identity。</summary>
+        [Test]
+        public void InviteInboxAppliesAuthoritativeRetirementByExactIdentity()
+        {
+            var service = new VisitSessionService(new FakeClock(1_000));
+            Assert.That(
+                service.ApplyInvite(Invite("invite_retired", 3, 20_000)),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                service.ApplyInvite(Invite("invite_current", 4, 20_000, "player_other")),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+
+            var retired = Invite("invite_retired", 3, 500);
+            retired.Invite.State = VisitInviteState.Retired;
+            Assert.That(
+                service.ApplyInvite(retired),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+
+            Assert.That(service.Snapshot.Invites, Has.Count.EqualTo(1));
+            Assert.That(service.Snapshot.Invites[0].InviteID, Is.EqualTo("invite_current"));
         }
 
         /// <summary>验证解除 Visitor target 会同步清除旧完整投影、hint 与刷新标记。</summary>
@@ -206,12 +327,16 @@ namespace IHomeland.Client.Tests.EditMode
             for (var index = 0; index < VisitSessionService.InviteCapacity; index++)
             {
                 Assert.That(
-                    service.ApplyInvite(Invite("invite_" + index, (ulong)(index + 1), 20_000)),
+                    service.ApplyInvite(Invite(
+                        "invite_" + index,
+                        (ulong)(index + 1),
+                        20_000,
+                        "player_visitor_" + index)),
                     Is.EqualTo(ClientProjectionApplyResult.Applied));
             }
 
             Assert.That(
-                service.ApplyInvite(Invite("invite_overflow", 999, 20_000)),
+                service.ApplyInvite(Invite("invite_overflow", 999, 20_000, "player_overflow")),
                 Is.EqualTo(ClientProjectionApplyResult.Overflow));
             Assert.That(service.Snapshot.Invites.Count, Is.EqualTo(VisitSessionService.InviteCapacity));
         }
@@ -268,8 +393,12 @@ namespace IHomeland.Client.Tests.EditMode
         /// <summary>创建 HTTP own-world bootstrap fixture。</summary>
         /// <param name="revision">World revision。</param>
         /// <param name="generation">Assignment generation。</param>
+        /// <param name="worldInstanceID">WorldInstance identity。</param>
         /// <returns>完整 HTTP fixture。</returns>
-        private static ClientWorldBootstrap Bootstrap(long revision, long generation)
+        private static ClientWorldBootstrap Bootstrap(
+            long revision,
+            long generation,
+            string worldInstanceID = "instance_one")
         {
             return new ClientWorldBootstrap(
                 new ClientPersonalWorldSummary(
@@ -280,7 +409,7 @@ namespace IHomeland.Client.Tests.EditMode
                     1_000),
                 new ClientWorldAssignment(
                     "world_one",
-                    "instance_one",
+                    worldInstanceID,
                     new ClientEndpoint(ClientEndpointChannel.TlsTcp, "world.example.test", 9443),
                     generation,
                     20_000));
@@ -308,13 +437,18 @@ namespace IHomeland.Client.Tests.EditMode
 
         /// <summary>创建 generated TLS/TCP assignment fixture。</summary>
         /// <param name="generation">Assignment generation。</param>
+        /// <param name="leaseExpiresAtMilliseconds">Lease Unix expiry，单位为毫秒。</param>
+        /// <param name="worldInstanceID">WorldInstance identity。</param>
         /// <returns>完整 assignment。</returns>
-        private static WorldAssignment Assignment(ulong generation)
+        private static WorldAssignment Assignment(
+            ulong generation,
+            long leaseExpiresAtMilliseconds = 20_000,
+            string worldInstanceID = "instance_one")
         {
             return new WorldAssignment
             {
                 PersonalWorldId = "world_one",
-                WorldInstanceId = "instance_one",
+                WorldInstanceId = worldInstanceID,
                 Endpoint = new Endpoint
                 {
                     Channel = TransportChannel.TlsTcp,
@@ -322,7 +456,7 @@ namespace IHomeland.Client.Tests.EditMode
                     Port = 9443,
                 },
                 Generation = generation,
-                LeaseExpiresAtMs = 20_000,
+                LeaseExpiresAtMs = leaseExpiresAtMilliseconds,
             };
         }
 
@@ -348,8 +482,13 @@ namespace IHomeland.Client.Tests.EditMode
         /// <param name="inviteID">Invite identity。</param>
         /// <param name="revision">Created revision。</param>
         /// <param name="expiry">Unix expiry，单位为毫秒。</param>
+        /// <param name="targetVisitorID">目标 Visitor；默认使用稳定 fixture identity。</param>
         /// <returns>完整 invite PUSH。</returns>
-        private static VisitInvitePush Invite(string inviteID, ulong revision, long expiry)
+        private static VisitInvitePush Invite(
+            string inviteID,
+            ulong revision,
+            long expiry,
+            string targetVisitorID = "player_visitor")
         {
             return new VisitInvitePush
             {
@@ -358,7 +497,7 @@ namespace IHomeland.Client.Tests.EditMode
                 {
                     InviteId = inviteID,
                     VisitSessionId = "visit_one",
-                    TargetVisitorId = "player_visitor",
+                    TargetVisitorId = targetVisitorID,
                     State = VisitInviteState.Pending,
                     CreatedRevision = revision,
                     ExpiresAtMs = expiry,

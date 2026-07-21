@@ -267,6 +267,7 @@ deadline 但仍在 physical retention 窗口内的 active index 会 fail closed�
 | `payload.invite` | object/omitted | 邀请结果 | 仅create-invite存在 |
 | `payload.admission` | object/omitted | 非凭据准入意图 | 仅accept存在；含VisitSession/Visitor/session/epoch/assignment与`expires_us` |
 | `payload.membership` | object/omitted | 访客成员结果 | 仅join/reconnect存在，字段与snapshot membership相同 |
+| `payload.retired_invites[]` | array/omitted | 本次退役邀请集合 | 按完整邀请identity稳定排序且唯一；每项字段与snapshot invite相同，只允许source为pending且target已不存在或非pending的项；历史结果可缺失 |
 | `payload.directives[]` | array | 安全返回指令集合 | 按VisitorID稳定排序；每项含`visit_session_id`、`visitor_id`与封闭`reason` |
 
 `worldadmission_issue`：

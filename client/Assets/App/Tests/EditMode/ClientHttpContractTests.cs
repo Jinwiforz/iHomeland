@@ -377,8 +377,12 @@ namespace IHomeland.Client.Tests.EditMode
             var hostObject = new GameObject("CompositionUiHostRoot");
             hostObject.SetActive(false);
             var inputAsset = ScriptableObject.CreateInstance<InputActionAsset>();
-            inputAsset.AddActionMap("Player").AddAction("Move");
-            inputAsset.AddActionMap("UI").AddAction("Navigate");
+            var player = inputAsset.AddActionMap("Player");
+            player.AddAction("Move");
+            player.AddAction("Menu", InputActionType.Button);
+            var ui = inputAsset.AddActionMap("UI");
+            ui.AddAction("Navigate");
+            ui.AddAction("Cancel", InputActionType.Button);
             var uiHostRoot = hostObject.AddComponent<ClientUiHostRoot>();
             uiHostRoot.ConfigureBeforeActivation(
                 inputAsset,

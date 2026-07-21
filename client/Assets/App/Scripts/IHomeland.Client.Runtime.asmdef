@@ -3,7 +3,8 @@
   "rootNamespace": "IHomeland.Client",
   "references": [
     "IHomeland.Client.Protocol.Generated",
-    "Unity.InputSystem"
+    "Unity.InputSystem",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

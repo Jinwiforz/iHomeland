@@ -23,7 +23,8 @@
 ## 路由规则
 
 - 每个 `messageId` 在三个 registry 中引用一致，并且只有一条 route。
-- `control` 与 world/visit control notice 只允许 `WSS`；world/visit authoritative request、command、response 与 safe-return 只允许 `TLS_TCP`。
+- `control` 与 world/visit control notice 只允许 `WSS`；common gameplay heartbeat 与 world/visit authoritative request、command、response、safe-return 只允许 `TLS_TCP`。
+- gameplay heartbeat 使用独立 `gameplay_heartbeat` rate policy，只证明已认证 active connection 存活，不读取或修改任何业务状态。
 - request 使用 `REQUEST_ID`，command 使用 `COMMAND_ID`，response 使用 `CORRELATION_ID` 并在 envelope 中恰好携带来源 request id 或 command id，push 使用 `NONE`。
 - route `maxSize` 限制完整编码 envelope，不得超过全局 1 MiB frame 上限。
 - command schema 禁止声明 actor/account/player/user、session/epoch、world/instance、role、endpoint、fencing 或 assignment stamp 等可覆盖受信上下文的字段；Owner 控制面的 `target_visitor_id` 是明确允许的业务目标。

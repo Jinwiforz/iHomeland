@@ -185,6 +185,8 @@ type mutationResultDTO struct {
 	Admission *admissionDTO `json:"admission,omitempty"`
 	// Membership仅join/reconnect存在。
 	Membership *membershipDTO `json:"membership,omitempty"`
+	// RetiredInvites 保存本次 transition 从 pending 退役的稳定排序邀请。
+	RetiredInvites []inviteDTO `json:"retired_invites,omitempty"`
 	// Directives按VisitorID稳定排序。
 	Directives []directiveDTO `json:"directives"`
 }
@@ -288,6 +290,9 @@ func encodeMutationResult(result domain.MutationResult) (string, error) {
 		item := membershipToDTO(value)
 		dto.Membership = &item
 	}
+	for _, retired := range result.RetiredInvites() {
+		dto.RetiredInvites = append(dto.RetiredInvites, inviteToDTO(retired))
+	}
 	for _, directive := range result.Directives() {
 		dto.Directives = append(dto.Directives, directiveDTO{VisitSessionID: directive.VisitSessionID().Value(), VisitorID: directive.VisitorID().String(), Reason: directive.Reason().String()})
 	}
@@ -328,6 +333,15 @@ func decodeMutationResult(payload string) (domain.MutationResult, error) {
 	if err == nil && dto.Membership != nil {
 		membership, err = membershipFromDTO(*dto.Membership)
 	}
+	retiredInvites := make([]domain.InviteSnapshot, 0, len(dto.RetiredInvites))
+	for _, value := range dto.RetiredInvites {
+		if err != nil {
+			break
+		}
+		var retired domain.InviteSnapshot
+		retired, err = inviteFromDTO(value)
+		retiredInvites = append(retiredInvites, retired)
+	}
 	directives := make([]domain.SafeReturnDirective, 0, len(dto.Directives))
 	for _, value := range dto.Directives {
 		if err != nil {
@@ -340,7 +354,7 @@ func decodeMutationResult(payload string) (domain.MutationResult, error) {
 	if err != nil {
 		return domain.MutationResult{}, err
 	}
-	return domain.NewMutationResult(operation, snapshot, commandID, fingerprint, invite, admission, membership, directives)
+	return domain.NewMutationResultWithRetiredInvites(operation, snapshot, commandID, fingerprint, invite, admission, membership, retiredInvites, directives)
 }
 
 // snapshotToDTO 从已经过领域验证的snapshot生成稳定字段副本。

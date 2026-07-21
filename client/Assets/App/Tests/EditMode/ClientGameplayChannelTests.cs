@@ -90,6 +90,79 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
+        /// 验证 active generation 的 heartbeat 使用独立 typed route、精确 correlation，并能在 close 后建立新 generation。
+        /// </summary>
+        /// <returns>等待两个 generation 的 heartbeat 与 owner 关闭。</returns>
+        [Test]
+        public async Task HeartbeatUsesTypedCorrelationAndDoesNotSurviveGenerationClose()
+        {
+            var fixture = await GameplayFixture.CreateAsync(blockGameplayWrites: false);
+            Assert.That(await fixture.ConnectOwnWorldAsync(), Is.True);
+            await WaitUntilAsync(() => fixture.HeartbeatDelay.PendingCount == 1);
+            fixture.HeartbeatDelay.ReleaseNext();
+            await fixture.Connection.WaitForWritesAsync(2);
+            var heartbeat = ParseFramedEnvelope(fixture.Connection.GetWrite(1));
+            Assert.That(heartbeat.MessageId, Is.EqualTo(1));
+            Assert.That(heartbeat.Kind, Is.EqualTo(MessageKind.Request));
+            Assert.That(heartbeat.RequestId.Length, Is.EqualTo(16));
+            fixture.Connection.Enqueue(ClientGameplayFramer.Frame(new ReliableEnvelope
+            {
+                ProtocolVersion = 1,
+                MessageId = 2,
+                Kind = MessageKind.Response,
+                RequestId = heartbeat.RequestId,
+                Sequence = 1,
+                TimestampMs = 1,
+                Payload = new GameplayHeartbeatResponse().ToByteString(),
+            }.ToByteArray()));
+            await WaitUntilAsync(() => fixture.HeartbeatDelay.PendingCount == 1);
+
+            await fixture.Channel.CloseAsync(CancellationToken.None);
+            Assert.That(fixture.Channel.Snapshot.State, Is.EqualTo(ClientGameplayChannelState.Ready));
+            Assert.That(fixture.Connection.IsDisposed, Is.True);
+            Assert.That(await fixture.ConnectOwnWorldAsync(), Is.True);
+            Assert.That(fixture.Channel.Snapshot.Generation, Is.EqualTo(2));
+            await fixture.StopAsync();
+        }
+
+        /// <summary>
+        /// 验证 heartbeat 拒绝会终止 current generation，并只发布一次可重连断线结果。
+        /// </summary>
+        /// <returns>等待 heartbeat failure、owner 退出与主线程 terminal callback。</returns>
+        [Test]
+        public async Task HeartbeatFailureClosesGenerationAndPublishesTerminalDisconnect()
+        {
+            var fixture = await GameplayFixture.CreateAsync(blockGameplayWrites: false);
+            Assert.That(await fixture.ConnectOwnWorldAsync(), Is.True);
+            var disconnects = 0;
+            fixture.Channel.UnexpectedDisconnect += _ => disconnects++;
+            await WaitUntilAsync(() => fixture.HeartbeatDelay.PendingCount == 1);
+            fixture.HeartbeatDelay.ReleaseNext();
+            await fixture.Connection.WaitForWritesAsync(2);
+            var heartbeat = ParseFramedEnvelope(fixture.Connection.GetWrite(1));
+            fixture.Connection.Enqueue(ClientGameplayFramer.Frame(new ReliableEnvelope
+            {
+                ProtocolVersion = 1,
+                MessageId = 2,
+                Kind = MessageKind.Error,
+                RequestId = heartbeat.RequestId,
+                Sequence = 1,
+                TimestampMs = 1,
+                Payload = new ErrorPayload
+                {
+                    Code = 101,
+                    MessageKey = "error.auth.forbidden",
+                }.ToByteString(),
+            }.ToByteArray()));
+
+            await DrainUntilAsync(fixture.Dispatcher, () => disconnects == 1);
+            Assert.That(fixture.Channel.Snapshot.State, Is.EqualTo(ClientGameplayChannelState.Ready));
+            Assert.That(fixture.Channel.Snapshot.CloseReason, Is.EqualTo(ClientGameplayCloseReason.Protocol));
+            Assert.That(disconnects, Is.EqualTo(1));
+            await fixture.StopAsync();
+        }
+
+        /// <summary>
         /// 验证 writer encoded-byte budget 先于无界积压拒绝并完成全部 pending。
         /// </summary>
         /// <returns>等待 blocked writer、背压关闭与 pending 清理。</returns>
@@ -285,6 +358,13 @@ namespace IHomeland.Client.Tests.EditMode
         public async Task ResponseCorrelationKindMustMatchPendingOperation()
         {
             var fixture = await GameplayFixture.CreateAsync(blockGameplayWrites: false);
+            var disconnectCount = 0;
+            ClientGameplayChannelSnapshot disconnected = null;
+            fixture.Channel.UnexpectedDisconnect += snapshot =>
+            {
+                disconnectCount++;
+                disconnected = snapshot;
+            };
             Assert.That(await fixture.ConnectOwnWorldAsync(), Is.True);
             var send = fixture.Channel.SendAsync(
                 ClientGameplayCatalog.WorldSnapshot,
@@ -306,6 +386,14 @@ namespace IHomeland.Client.Tests.EditMode
 
             Assert.That((await send).Failure, Is.EqualTo(ClientGameplayFailureKind.Disconnected));
             Assert.That(fixture.Channel.Snapshot.CloseReason, Is.EqualTo(ClientGameplayCloseReason.Protocol));
+            await WaitUntilAsync(() => fixture.Dispatcher.PendingCount > 0);
+            Assert.That(disconnectCount, Is.Zero);
+
+            await DrainUntilAsync(fixture.Dispatcher, () => disconnectCount == 1);
+
+            Assert.That(disconnectCount, Is.EqualTo(1));
+            Assert.That(disconnected, Is.Not.Null);
+            Assert.That(disconnected.CloseReason, Is.EqualTo(ClientGameplayCloseReason.Protocol));
             await fixture.StopAsync();
         }
 
@@ -373,6 +461,32 @@ namespace IHomeland.Client.Tests.EditMode
             }
         }
 
+        /// <summary>持续执行有限主线程批次，直到指定权威 callback 提交状态。</summary>
+        /// <param name="dispatcher">被测有界主线程 dispatcher。</param>
+        /// <param name="condition">由 callback 提交的无副作用完成条件。</param>
+        /// <returns>条件成立时完成。</returns>
+        private static async Task DrainUntilAsync(
+            MainThreadDispatcher dispatcher,
+            Func<bool> condition)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (!condition())
+            {
+                dispatcher.Drain(maximumCallbacks: 8);
+                if (condition())
+                {
+                    return;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    Assert.Fail("Gameplay terminal callback 未在测试 deadline 内提交。");
+                }
+
+                await Task.Delay(5);
+            }
+        }
+
         /// <summary>
         /// 组合不依赖 Unity Scene 或真实网络的完整 gameplay App Scope 测试图。
         /// </summary>
@@ -384,6 +498,7 @@ namespace IHomeland.Client.Tests.EditMode
                 SessionCoordinator session,
                 MainThreadDispatcher dispatcher,
                 FakeConnectionFactory factory,
+                FakeGameplayDelay heartbeatDelay,
                 ClientGameplayChannel channel,
                 long sessionGeneration)
             {
@@ -391,6 +506,7 @@ namespace IHomeland.Client.Tests.EditMode
                 Session = session;
                 Dispatcher = dispatcher;
                 Factory = factory;
+                HeartbeatDelay = heartbeatDelay;
                 Channel = channel;
                 SessionGeneration = sessionGeneration;
             }
@@ -406,6 +522,9 @@ namespace IHomeland.Client.Tests.EditMode
 
             /// <summary>获取可控 connection factory。</summary>
             internal FakeConnectionFactory Factory { get; }
+
+            /// <summary>获取可控 heartbeat scheduler。</summary>
+            internal FakeGameplayDelay HeartbeatDelay { get; }
 
             /// <summary>获取待测试 gameplay owner。</summary>
             internal ClientGameplayChannel Channel { get; }
@@ -436,18 +555,21 @@ namespace IHomeland.Client.Tests.EditMode
                 var dispatcher = new MainThreadDispatcher(Environment.CurrentManagedThreadId, 32);
                 await dispatcher.InitializeAsync(CancellationToken.None);
                 var factory = new FakeConnectionFactory(blockGameplayWrites);
+                var heartbeatDelay = new FakeGameplayDelay();
                 var channel = new ClientGameplayChannel(
                     configurationStore,
                     session,
                     factory,
                     new ClientGameplayCodec(),
-                    dispatcher);
+                    dispatcher,
+                    heartbeatDelay);
                 await channel.InitializeAsync(CancellationToken.None);
                 return new GameplayFixture(
                     configurationStore,
                     session,
                     dispatcher,
                     factory,
+                    heartbeatDelay,
                     channel,
                     login.Value.Generation);
             }
@@ -558,6 +680,62 @@ namespace IHomeland.Client.Tests.EditMode
                         visit ? ClientWorldRole.Visitor : ClientWorldRole.Owner,
                         visit ? ClientWorldAdmissionPurpose.Join : ClientWorldAdmissionPurpose.OwnWorld,
                         9000)));
+            }
+        }
+
+        /// <summary>由测试显式释放每个 heartbeat interval，不依赖真实时间。</summary>
+        private sealed class FakeGameplayDelay : IClientGameplayDelay
+        {
+            /// <summary>保护等待队列。</summary>
+            private readonly object _sync = new object();
+
+            /// <summary>保存尚未释放的 interval。</summary>
+            private readonly Queue<TaskCompletionSource<bool>> _pending =
+                new Queue<TaskCompletionSource<bool>>();
+
+            /// <summary>获取当前等待 interval 数量。</summary>
+            internal int PendingCount
+            {
+                get
+                {
+                    lock (_sync)
+                    {
+                        return _pending.Count;
+                    }
+                }
+            }
+
+            /// <inheritdoc />
+            public async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+            {
+                if (delay <= TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(delay));
+                }
+
+                var completion = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_sync)
+                {
+                    _pending.Enqueue(completion);
+                }
+
+                using (cancellationToken.Register(() => completion.TrySetCanceled()))
+                {
+                    await completion.Task;
+                }
+            }
+
+            /// <summary>释放最早的 heartbeat interval。</summary>
+            internal void ReleaseNext()
+            {
+                TaskCompletionSource<bool> completion;
+                lock (_sync)
+                {
+                    completion = _pending.Dequeue();
+                }
+
+                completion.TrySetResult(true);
             }
         }
 

@@ -199,7 +199,22 @@ namespace IHomeland.Client.Application.World
                 throw Invalid("Visit invite PUSH 缺少 invite。");
             }
 
-            var invite = push.Invite;
+            return FromInviteSummary(push.Invite, push.OwnerPlayerId);
+        }
+
+        /// <summary>转换 mutation response 或 PUSH 共享的定向邀请摘要。</summary>
+        /// <param name="invite">Generated 公开邀请摘要。</param>
+        /// <param name="ownerPlayerID">由 response snapshot 或 PUSH envelope 证明的 Owner Player 标识。</param>
+        /// <returns>不可变 invite 投影。</returns>
+        internal static ClientVisitInviteProjection FromInviteSummary(
+            VisitInviteSummary invite,
+            string ownerPlayerID)
+        {
+            if (invite == null)
+            {
+                throw Invalid("Visit invite summary 不能为空。");
+            }
+
             if (invite.CreatedRevision == 0)
             {
                 throw Invalid("Invite created revision 必须为正数。");
@@ -209,7 +224,7 @@ namespace IHomeland.Client.Application.World
             return new ClientVisitInviteProjection(
                 RequireIdentity(invite.InviteId, "InviteID"),
                 RequireIdentity(invite.VisitSessionId, "VisitSessionID"),
-                RequireIdentity(push.OwnerPlayerId, "OwnerPlayerID"),
+                RequireIdentity(ownerPlayerID, "OwnerPlayerID"),
                 RequireIdentity(invite.TargetVisitorId, "TargetVisitorID"),
                 MapInviteState(invite.State),
                 invite.CreatedRevision,
@@ -472,6 +487,7 @@ namespace IHomeland.Client.Application.World
             {
                 case VisitInviteState.Pending: return ClientVisitInviteState.Pending;
                 case VisitInviteState.Accepted: return ClientVisitInviteState.Accepted;
+                case VisitInviteState.Retired: return ClientVisitInviteState.Retired;
                 default: throw Invalid("Visit invite state 未登记。");
             }
         }

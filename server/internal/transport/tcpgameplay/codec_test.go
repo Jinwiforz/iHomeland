@@ -23,12 +23,12 @@ func (clock fixedClock) Now() time.Time { return clock.value }
 func TestCodecDecodesEveryClientRoute(t *testing.T) {
 	t.Parallel()
 	codec := newTestCodec(t)
-	for index, messageID := range []uint32{2000, 2103, 2105, 2107, 2109, 2111, 2113, 2115, 2117, 2119} {
+	for index, messageID := range []uint32{1, 2000, 2103, 2105, 2107, 2109, 2111, 2113, 2115, 2117, 2119} {
 		payload, _ := clientPayload(messageID)
 		payloadBytes, _ := proto.Marshal(payload)
 		kind := commonv1.MessageKind_MESSAGE_KIND_COMMAND
 		builder := commonv1.ReliableEnvelope_builder{ProtocolVersion: proto.Uint32(1), MessageId: proto.Uint32(messageID), Kind: &kind, CommandId: bytes.Repeat([]byte{2}, 16), Sequence: proto.Uint64(uint64(index + 1)), TimestampMs: proto.Int64(1), Payload: payloadBytes}
-		if messageID == 2000 || messageID == 2119 {
+		if messageID == 1 || messageID == 2000 || messageID == 2119 {
 			kind = commonv1.MessageKind_MESSAGE_KIND_REQUEST
 			builder.Kind, builder.CommandId, builder.RequestId = &kind, nil, bytes.Repeat([]byte{1}, 16)
 		}
@@ -48,12 +48,15 @@ func TestCodecEncodesResponsePushAndError(t *testing.T) {
 	t.Parallel()
 	codec := newTestCodec(t)
 	request := Correlation{RequestID: bytes.Repeat([]byte{1}, 16)}
+	if _, err := codec.Encode(2, commonv1.GameplayHeartbeatResponse_builder{}.Build(), request, 1); err != nil {
+		t.Fatal(err)
+	}
 	response := worldv1.WorldSnapshotResponse_builder{}.Build()
-	first, err := codec.Encode(2001, response, request, 1)
+	first, err := codec.Encode(2001, response, request, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _ := codec.Encode(2001, response, request, 1)
+	second, _ := codec.Encode(2001, response, request, 2)
 	if !bytes.Equal(first.Frame(), second.Frame()) {
 		t.Fatal("deterministic response encoding drifted")
 	}

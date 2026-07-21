@@ -27,6 +27,8 @@ enum VisitInviteState {
   VISIT_INVITE_STATE_PENDING = 1;
   // VISIT_INVITE_STATE_ACCEPTED 表示 invite 已转换为 reservation，不能再次 accept。
   VISIT_INVITE_STATE_ACCEPTED = 2;
+  // VISIT_INVITE_STATE_RETIRED 表示该 invite identity 已被权威退役，不能再次 accept。
+  VISIT_INVITE_STATE_RETIRED = 3;
 }
 
 // VisitMembershipState 表达客户端可见的 Visitor presence 阶段。

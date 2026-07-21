@@ -274,7 +274,7 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct visit session policy: %w", err)
 	}
-	visitService, err := visitsession.NewService(visitStore, visitWorldReader{worlds: worldAdapter}, visitAssignmentReader{placements: placementStore}, component.clock, component.ids, visitPolicy)
+	visitService, err := visitsession.NewService(visitStore, visitWorldReader{worlds: worldAdapter}, accountRepository, visitAssignmentReader{placements: placementStore}, component.clock, component.ids, visitPolicy)
 	if err != nil {
 		return fmt.Errorf("construct visit session service: %w", err)
 	}

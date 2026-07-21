@@ -364,13 +364,20 @@ type MutationResult struct {
 	admission AdmissionIntent
 	// membership 只由 join/reconnect 等 membership projection 结果返回。
 	membership MembershipSnapshot
+	// retiredInvites 保存本次 transition 从 pending 退役的稳定排序邀请集合。
+	retiredInvites []InviteSnapshot
 	// directives 保存单成员或批量 safe-return 的稳定排序副本。
 	directives []SafeReturnDirective
 }
 
 // NewMutationResult 构造 application 提交与 store replay 共用的完整结果。
 func NewMutationResult(operation Operation, snapshot Snapshot, commandID CommandID, fingerprint CommandFingerprint, invite InviteSnapshot, admission AdmissionIntent, membership MembershipSnapshot, directives []SafeReturnDirective) (MutationResult, error) {
-	result := MutationResult{operation: operation, snapshot: snapshot, commandID: commandID, fingerprint: fingerprint, invite: invite, admission: admission, membership: membership, directives: append([]SafeReturnDirective(nil), directives...)}
+	return NewMutationResultWithRetiredInvites(operation, snapshot, commandID, fingerprint, invite, admission, membership, nil, directives)
+}
+
+// NewMutationResultWithRetiredInvites 构造同时保存邀请退役事实的完整 mutation result。
+func NewMutationResultWithRetiredInvites(operation Operation, snapshot Snapshot, commandID CommandID, fingerprint CommandFingerprint, invite InviteSnapshot, admission AdmissionIntent, membership MembershipSnapshot, retiredInvites []InviteSnapshot, directives []SafeReturnDirective) (MutationResult, error) {
+	result := MutationResult{operation: operation, snapshot: snapshot, commandID: commandID, fingerprint: fingerprint, invite: invite, admission: admission, membership: membership, retiredInvites: append([]InviteSnapshot(nil), retiredInvites...), directives: append([]SafeReturnDirective(nil), directives...)}
 	if err := result.validate(); err != nil {
 		return MutationResult{}, err
 	}
@@ -398,6 +405,11 @@ func (result MutationResult) AdmissionIntent() AdmissionIntent { return result.a
 // Membership 返回 join/reconnect projection；其他 operation 返回零值。
 func (result MutationResult) Membership() MembershipSnapshot { return result.membership }
 
+// RetiredInvites 返回本次 transition 从 pending 退役的稳定排序邀请副本。
+func (result MutationResult) RetiredInvites() []InviteSnapshot {
+	return append([]InviteSnapshot(nil), result.retiredInvites...)
+}
+
 // Directives 返回稳定副本，调用方修改结果不会改变 replay record。
 func (result MutationResult) Directives() []SafeReturnDirective {
 	return append([]SafeReturnDirective(nil), result.directives...)
@@ -422,6 +434,17 @@ func (result MutationResult) validate() error {
 	for _, directive := range result.directives {
 		if !directive.Valid() || directive.visitSessionID != result.snapshot.ID() {
 			return errors.New("visit mutation result contains invalid directive")
+		}
+	}
+	if len(result.retiredInvites) > maximumPendingInvites {
+		return errors.New("visit mutation result contains too many retired invites")
+	}
+	for index, retired := range result.retiredInvites {
+		if !retired.Valid() || retired.State() != InviteStatePending || snapshotContainsPendingInvite(result.snapshot, retired.ID()) {
+			return errors.New("visit mutation result contains invalid retired invite")
+		}
+		if index > 0 && result.retiredInvites[index-1].ID().Value() >= retired.ID().Value() {
+			return errors.New("visit mutation retired invites are not unique and sorted")
 		}
 	}
 	for index := range result.directives {
@@ -460,6 +483,16 @@ func (result MutationResult) validate() error {
 		}
 	}
 	return nil
+}
+
+// snapshotContainsPendingInvite 判断 target snapshot 是否仍保留指定 pending identity。
+func snapshotContainsPendingInvite(snapshot Snapshot, inviteID InviteID) bool {
+	for _, invite := range snapshot.invites {
+		if invite.ID() == inviteID && invite.State() == InviteStatePending {
+			return true
+		}
+	}
+	return false
 }
 
 // snapshotContainsInvite 验证 result projection 精确存在于 target snapshot。

@@ -142,3 +142,56 @@ Services MUST 在初始化时只验证依赖、登记既有 channel 的强类型
 
 - **WHEN** Windows Development build 只初始化 App Scope 后正常关闭
 - **THEN** Player.log 不包含 credential、未观察异常或自动 world/visit 连接，且 runtime/protocol 依赖完整
+
+### Requirement: 显式连接恢复必须在统一 deadline 内提交 terminal snapshot
+
+PersonalWorld presentation owner MUST 把 control ready、own-world bootstrap/admission、gameplay connect、world snapshot、scene synchronization 与 route commit 作为同一 generation 的显式恢复事务，并设置冻结的总 deadline。事务 MUST 恰好提交成功或稳定失败 snapshot；超时、caller cancellation、dependency failure、session invalidation 与 shutdown MUST 撤销未提交 target 和 transport，UI MUST NOT 无限停留在 `EnteringOwnWorld`、`ResolvingOwnWorld` 或 busy 状态。恢复事务新建的 control run MUST 在首次进入 `Connected` 前可由该事务撤销，进入 `Connected` 后 MUST 转交 App Scope owner，关闭 `ConnectionLost` route MUST NOT 取消已提交的 control run。系统 MUST NOT 使用延时重试、frame tick 或本地猜测修正权威 flow。
+
+#### Scenario: 重连中 gameplay response 永不返回
+
+- **WHEN** 用户在 ConnectionLost 页面点击重试，control 已连接但 gameplay connect 或 world snapshot 在总 deadline 前未完成
+- **THEN** 当次 intent 被撤销，可能建立的 gameplay generation 被关闭，flow 与 UI 提交稳定可重试失败，重试按钮重新可操作
+
+#### Scenario: 用户连续点击重试
+
+- **WHEN** 第一笔恢复 intent 仍在执行时再次提交重试
+- **THEN** presentation intent gate 稳定拒绝第二笔请求，不签发第二组 ticket/admission、不创建并行 socket，也不覆盖第一笔 terminal snapshot
+
+#### Scenario: 恢复成功后旧失败回调迟到
+
+- **WHEN** 新 generation 已完成 own-world snapshot 与 scene/route commit，旧 generation 的 timeout、disconnect 或 UI cancellation 随后到达
+- **THEN** generation gate 丢弃旧结果，UI 继续显示已提交 OwnWorld，不回退到 ConnectionLost 或 EnteringOwnWorld
+
+#### Scenario: 重连成功后关闭 ConnectionLost 页面
+
+- **WHEN** control run 已进入 `Connected`，own-world Scene/HUD 已提交，presentation 关闭 `ConnectionLost` route 并由 route lifecycle 取消页面 token
+- **THEN** 已提交的 control run 保持存活，Router 只保留当前 WorldHUD，旧 modal 不得在下一帧因页面取消而重新打开
+
+### Requirement: Invite inbox 必须消费权威退役并明确拒绝残留邀请
+
+`VisitSessionService` MUST 将 state 为 `RETIRED` 的 `VisitInvitePush` 作为 exact VisitSessionID + InviteID tombstone：匹配 Pending identity 必须立即从 inbox immutable snapshot 删除并使页面 selection/capability 同步失效；不存在或重复 identity MUST 幂等忽略。Pending invite MUST 继续经过 absolute expiry、identity 与容量校验，但 Retired tombstone 即使在原 expiry 之后到达也必须允许删除。客户端 MUST NOT 依据时间、页面开关或 Owner 本地按钮猜测远端撤销。
+
+#### Scenario: Visitor 在线收到撤销通知
+
+- **WHEN** Owner 撤销邀请且 Visitor 的 control channel 收到 matching Retired push
+- **THEN** inbox replacement 删除 exact identity、接受按钮立即禁用，其他 VisitSession 或 InviteID 的条目保持不变
+
+#### Scenario: VisitSession 关闭时清理多个邀请
+
+- **WHEN** Visitor 收到同一或不同 session 的多个 Retired push
+- **THEN** Service 对每个 exact identity 幂等收敛，页面不保留已关闭会话的可接受项，也不按 Owner 或列表位置误删其他邀请
+
+#### Scenario: 点击残留邀请收到明确拒绝
+
+- **WHEN** 客户端因断线窗口或旧版本状态仍显示某项邀请，玩家点击接受且服务端明确返回 visit/invite not-found、invite expired、state/revision conflict 或当前 actor 不可接受
+- **THEN** Coordinator 退役该 exact inbox identity、保持现有 OwnWorld target/Scene且不签发 visit admission，并显示“邀请已撤销或失效，请选择最新邀请”的稳定低敏说明，不表现为接受成功进入自己的世界
+
+#### Scenario: 接受结果无法确认
+
+- **WHEN** accept 返回 timeout、transport、caller cancellation 或 commit-unknown
+- **THEN** 客户端保持既有 commit-unknown fail-closed 语义，不删除 invite、不自动重试、不进入 OwnWorld fallback，也不声称邀请仍有效或已经失效
+
+#### Scenario: 暂时性拒绝不删除邀请
+
+- **WHEN** accept 因 capacity、Owner unavailable、rate limit 或 dependency unavailable 被拒绝
+- **THEN** 客户端显示对应可恢复失败并保留 inbox identity，等待新的权威 push 或玩家显式重试

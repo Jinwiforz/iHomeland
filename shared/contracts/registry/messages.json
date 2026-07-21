@@ -10,6 +10,8 @@
   ],
   "reserved": [],
   "messages": [
+    { "id": 1, "name": "GAMEPLAY_HEARTBEAT_REQUEST", "owner": "common", "protobuf": "ihomeland.common.v1.GameplayHeartbeatRequest", "kind": "REQUEST", "direction": "CLIENT_TO_SERVER" },
+    { "id": 2, "name": "GAMEPLAY_HEARTBEAT_RESPONSE", "owner": "common", "protobuf": "ihomeland.common.v1.GameplayHeartbeatResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
     { "id": 500, "name": "CONTROL_MAINTENANCE_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.MaintenancePush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
     { "id": 501, "name": "CONTROL_FORCED_LOGOUT_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.ForcedLogoutPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
     { "id": 502, "name": "CONTROL_QUEUE_STATUS_PUSH", "owner": "control", "protobuf": "ihomeland.control.v1.QueueStatusPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },

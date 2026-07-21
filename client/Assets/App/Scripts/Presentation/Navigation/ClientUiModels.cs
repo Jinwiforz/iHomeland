@@ -13,20 +13,23 @@ namespace IHomeland.Client.Presentation.Navigation
         /// <summary>表示未登记 route，不能用于 definition。</summary>
         None = 0,
 
-        /// <summary>预留登录 screen identity。</summary>
+        /// <summary>产品登录 screen identity。</summary>
         Login = 1,
 
-        /// <summary>预留持久 shell screen identity。</summary>
+        /// <summary>产品持久 shell screen identity。</summary>
         Shell = 2,
 
-        /// <summary>预留个人世界访问 screen identity。</summary>
+        /// <summary>产品个人世界访问 overlay identity。</summary>
         WorldVisit = 3,
 
         /// <summary>预留设置 overlay identity。</summary>
         Settings = 4,
 
-        /// <summary>预留连接丢失 modal identity。</summary>
+        /// <summary>产品连接丢失 modal identity。</summary>
         ConnectionLost = 5,
+
+        /// <summary>个人世界内容场景中的 uGUI HUD identity。</summary>
+        WorldHud = 6,
     }
 
     /// <summary>

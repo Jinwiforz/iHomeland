@@ -25,6 +25,9 @@
 *.yaml text
 *.yml text
 
+# TextMesh Pro Essential Resources 保留 Unity 上游 shader 原始空白，避免为供应商资产制造格式化差异。
+"client/Assets/TextMesh Pro/**" -whitespace
+
 # 二进制资源不得参与换行转换。
 *.7z -text
 *.a -text

@@ -35,6 +35,14 @@ namespace IHomeland.Client.Presentation.Hosts.UGUI
         [SerializeField]
         private Selectable _defaultFocus;
 
+        /// <summary>保存可选产品页面 binding 的直接序列化组件引用。</summary>
+        [SerializeField]
+        [Tooltip("同一 route 的产品页面 binding；通用 fixture 可以为空。")]
+        private ClientUiProductBindingBehaviour _productBindingComponent;
+
+        /// <summary>缓存已经验证的产品页面 binding。</summary>
+        private IClientUiProductBinding _productBinding;
+
         /// <summary>保存当前 route binding。</summary>
         private ClientUiRouteBinding _binding;
 
@@ -86,6 +94,41 @@ namespace IHomeland.Client.Presentation.Hosts.UGUI
             _defaultFocus = defaultFocus;
         }
 
+        /// <summary>为程序化 fixture 在激活前配置与 Inspector 等价的产品 binding 引用。</summary>
+        /// <param name="productBindingComponent">实现产品 binding 接口的同 route 组件。</param>
+        /// <exception cref="ArgumentNullException">组件为空时抛出。</exception>
+        /// <exception cref="InvalidOperationException">Host 已初始化或 GameObject 已激活时抛出。</exception>
+        internal void ConfigureProductBindingBeforeActivation(
+            ClientUiProductBindingBehaviour productBindingComponent)
+        {
+            if (_initialized || isActiveAndEnabled)
+            {
+                throw new InvalidOperationException("ClientUguiHost 只能在激活和初始化前配置产品 binding。");
+            }
+
+            _productBindingComponent = productBindingComponent ??
+                throw new ArgumentNullException(nameof(productBindingComponent));
+            ResolveProductBinding();
+        }
+
+        /// <summary>在 AppLifetime 启动前向可选产品页面显式注入上下文。</summary>
+        /// <param name="context">Composition 创建的窄产品上下文。</param>
+        internal void ConfigureProductContext(IClientUiProductContext context)
+        {
+            if (_initialized)
+            {
+                throw new InvalidOperationException("uGUI 产品 binding 只能在 Host 初始化前配置。");
+            }
+
+            ResolveProductBinding();
+            if (_productBinding == null)
+            {
+                throw new InvalidOperationException("Production uGUI Host 缺少产品 binding 直接引用。");
+            }
+
+            _productBinding.Configure(context ?? throw new ArgumentNullException(nameof(context)));
+        }
+
         /// <summary>验证直接引用并建立新 Host generation，默认保持隐藏和不可交互。</summary>
         /// <param name="cancellationToken">candidate 或 App 停止取消。</param>
         /// <returns>Host 可 bind 时完成的任务。</returns>
@@ -101,6 +144,8 @@ namespace IHomeland.Client.Presentation.Hosts.UGUI
             {
                 throw new InvalidOperationException("ClientUguiHost route、Canvas、CanvasGroup 或 EventSystem 配置非法。");
             }
+
+            ResolveProductBinding();
 
             if (!_canvasGroup.transform.IsChildOf(_canvas.transform))
             {
@@ -118,7 +163,7 @@ namespace IHomeland.Client.Presentation.Hosts.UGUI
         /// <param name="binding">当前 route binding。</param>
         /// <param name="cancellationToken">bind 等待取消。</param>
         /// <returns>binding 已保存时完成的任务。</returns>
-        Task IClientUiViewHost.BindAsync(
+        async Task IClientUiViewHost.BindAsync(
             ClientUiRouteBinding binding,
             CancellationToken cancellationToken)
         {
@@ -130,7 +175,18 @@ namespace IHomeland.Client.Presentation.Hosts.UGUI
             }
 
             _binding = binding;
-            return Task.CompletedTask;
+            try
+            {
+                if (_productBinding != null)
+                {
+                    await _productBinding.BindAsync(binding, cancellationToken);
+                }
+            }
+            catch
+            {
+                _binding = null;
+                throw;
+            }
         }
 
         /// <summary>按 registry layer slot 显示 Canvas。</summary>
@@ -236,30 +292,66 @@ namespace IHomeland.Client.Presentation.Hosts.UGUI
         /// <summary>解除 route binding，不保留页面订阅或数据。</summary>
         /// <param name="cancellationToken">unbind 等待取消。</param>
         /// <returns>binding 已清除时完成的任务。</returns>
-        Task IClientUiViewHost.UnbindAsync(CancellationToken cancellationToken)
+        async Task IClientUiViewHost.UnbindAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             EnsureUsable();
-            _binding = null;
-            return Task.CompletedTask;
+            try
+            {
+                if (_productBinding != null && _binding != null)
+                {
+                    await _productBinding.UnbindAsync(cancellationToken);
+                }
+            }
+            finally
+            {
+                _binding = null;
+            }
         }
 
         /// <summary>幂等隐藏并释放当前 Host generation。</summary>
         /// <param name="cancellationToken">共享清理 deadline。</param>
         /// <returns>当前 generation 已释放时完成的任务。</returns>
-        Task IClientUiViewHost.DisposeAsync(CancellationToken cancellationToken)
+        async Task IClientUiViewHost.DisposeAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!_initialized)
             {
-                return Task.CompletedTask;
+                return;
             }
 
             EnsureMainThread();
+            if (_productBinding != null && _binding != null)
+            {
+                try
+                {
+                    await _productBinding.UnbindAsync(cancellationToken);
+                }
+                finally
+                {
+                    _binding = null;
+                }
+            }
+
             SetVisibleAndInteractive(visible: false, interactive: false);
             _binding = null;
             _initialized = false;
-            return Task.CompletedTask;
+        }
+
+        /// <summary>验证并缓存经过 Inspector 类型边界约束的可选产品 binding。</summary>
+        private void ResolveProductBinding()
+        {
+            if (_productBindingComponent == null)
+            {
+                _productBinding = null;
+                return;
+            }
+
+            _productBinding = _productBindingComponent as IClientUiProductBinding;
+            if (_productBinding == null)
+            {
+                throw new InvalidOperationException("uGUI 产品 binding 组件未实现 IClientUiProductBinding。");
+            }
         }
 
         /// <summary>同时提交 Canvas 可见性、alpha、raycast 与 interactable 状态。</summary>

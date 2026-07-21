@@ -111,7 +111,11 @@ func (dispatcher *Dispatcher) Dispatch(parent context.Context, entry *connection
 	}()
 	if err := dispatcher.authorizeState(entry, message.route.MessageID); err != nil {
 		observe("state_rejected")
-		return dispatcher.enqueueError(entry, message, PublicError{Code: 101, MessageKey: "error.auth.forbidden"})
+		return dispatcher.enqueueError(entry, message, PublicError{
+			Code:            101,
+			MessageKey:      "error.auth.forbidden",
+			CloseConnection: message.route.MessageID == 1,
+		})
 	}
 	allowed, closeConnection := allowRoute(entry, message.route.RatePolicy, dispatcher.registry.clock.Now().UTC())
 	if !allowed {
@@ -232,6 +236,8 @@ func (entry *connection) enqueuePush(messageID uint32, payload proto.Message, cl
 func (dispatcher *Dispatcher) call(ctx context.Context, entry *connection, operation OperationContext, message DecodedMessage) (uint32, proto.Message, error) {
 	commandID := append([]byte(nil), message.correlation.CommandID...)
 	switch payload := message.payload.(type) {
+	case *commonv1.GameplayHeartbeatRequest:
+		return 2, commonv1.GameplayHeartbeatResponse_builder{}.Build(), nil
 	case *worldv1.WorldSnapshotRequest:
 		response, err := dispatcher.application.WorldSnapshot(ctx, operation, payload)
 		return 2001, response, err
@@ -328,6 +334,8 @@ const maximumConsecutiveRateRejections = 3
 func allowRoute(entry *connection, policy string, now time.Time) (bool, bool) {
 	requests, window, burst := 0, time.Minute, 0
 	switch policy {
+	case "gameplay_heartbeat":
+		requests, burst = 8, 2
 	case "world_read":
 		requests, burst = 120, 20
 	case "visit_command":

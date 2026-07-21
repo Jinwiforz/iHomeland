@@ -17,6 +17,9 @@ namespace IHomeland.Client.Application.World
     /// </summary>
     internal sealed class WorldAdmissionCoordinator : IAppLifetimeParticipant
     {
+        /// <summary>限制失败 target 已线性化关闭后的 I/O owner 观察窗口。</summary>
+        private static readonly TimeSpan FailedConnectionCleanupTimeout = TimeSpan.FromSeconds(5);
+
         /// <summary>保护状态、单一 intent 与 generation。</summary>
         private readonly object _sync = new object();
 
@@ -100,6 +103,7 @@ namespace IHomeland.Client.Application.World
                 _visitSessionService.ProjectionConflict += OnProjectionConflict;
                 _visitSessionService.Changed += OnVisitSessionChanged;
                 _visitSessionService.SafeReturnReceived += OnSafeReturn;
+                _gameplayChannel.UnexpectedDisconnect += OnGameplayUnexpectedDisconnect;
                 _subscribed = true;
             }
 
@@ -111,8 +115,15 @@ namespace IHomeland.Client.Application.World
         /// <returns>完整 target 已提交为 OwnWorld 时返回 true。</returns>
         internal async Task<bool> EnterOwnWorldAsync(CancellationToken cancellationToken)
         {
+            var source = Snapshot.State;
+            if (source != ClientWorldFlowState.Inactive &&
+                source != ClientWorldFlowState.ConnectionLost)
+            {
+                return false;
+            }
+
             if (!TryBegin(
-                    ClientWorldFlowState.Inactive,
+                    source,
                     ClientWorldFlowState.ResolvingOwnWorld,
                     null,
                     null,
@@ -137,7 +148,7 @@ namespace IHomeland.Client.Application.World
             var invite = FindInvite(visitSessionID, inviteID);
             if (invite == null || invite.State != ClientVisitInviteState.Pending)
             {
-                return false;
+                return RejectUnavailableInvite();
             }
 
             if (!TryBegin(
@@ -161,9 +172,25 @@ namespace IHomeland.Client.Application.World
                         checked((long)invite.CreatedRevision)),
                     acceptKey,
                     linked.Token);
-                if (!IsCurrent(intent) || !accept.IsSuccess)
+                if (!IsCurrent(intent))
                 {
-                    FinishJoinFailure(intent, MapAcceptFailure(accept));
+                    return false;
+                }
+
+                if (!accept.IsSuccess)
+                {
+                    if (IsAuthoritativeInviteUnavailable(accept))
+                    {
+                        _visitSessionService.RetireRejectedInvite(
+                            invite.VisitSessionID,
+                            invite.InviteID);
+                        FinishJoinFailure(intent, ClientWorldFlowFailure.InviteUnavailable);
+                    }
+                    else
+                    {
+                        FinishJoinFailure(intent, MapAcceptFailure(accept));
+                    }
+
                     return false;
                 }
 
@@ -174,6 +201,10 @@ namespace IHomeland.Client.Application.World
                     FinishJoinFailure(intent, ClientWorldFlowFailure.Protocol);
                     return false;
                 }
+
+                // 成功 accept 已权威证明 pending invite 被消费；后续 admission/JOIN 即使失败也不能
+                // 让旧 identity 重新出现在可接受 inbox。Commit-unknown 路径不会到达这里。
+                _visitSessionService.RetireAcceptedInvite(invite.VisitSessionID, invite.InviteID);
 
                 var admission = await _sessionCoordinator.IssueWorldAdmissionAsync(
                     ClientWorldAdmissionTarget.VisitWorld(reservation.VisitSessionID),
@@ -233,7 +264,7 @@ namespace IHomeland.Client.Application.World
                 var currentVisit = _visitSessionService.Snapshot.Current;
                 if (!IsCurrent(intent) || !worldApplied ||
                     currentWorld?.Assignment == null || currentVisit == null ||
-                    !currentWorld.Assignment.IsEquivalent(currentVisit.Assignment))
+                    !currentWorld.Assignment.HasSameIdentity(currentVisit.Assignment))
                 {
                     BeginReturningAfterJoinFailure(intent, MapGameplayFailure(world));
                     return false;
@@ -336,6 +367,7 @@ namespace IHomeland.Client.Application.World
                     _visitSessionService.ProjectionConflict -= OnProjectionConflict;
                     _visitSessionService.Changed -= OnVisitSessionChanged;
                     _visitSessionService.SafeReturnReceived -= OnSafeReturn;
+                    _gameplayChannel.UnexpectedDisconnect -= OnGameplayUnexpectedDisconnect;
                     _subscribed = false;
                 }
 
@@ -422,11 +454,35 @@ namespace IHomeland.Client.Application.World
                 if (!IsCurrent(intent) || !worldApplied ||
                     _personalWorldService.Snapshot.CurrentWorld?.Assignment == null)
                 {
+                    await CloseFailedConnectionAsync();
                     FinishOwnFailure(intent, MapGameplayFailure(world));
                     return false;
                 }
 
-                return FinishSuccess(intent, ClientWorldFlowState.OwnWorld, null, null);
+                var committed = FinishSuccess(intent, ClientWorldFlowState.OwnWorld, null, null);
+                if (!committed)
+                {
+                    await CloseFailedConnectionAsync();
+                }
+
+                return committed;
+            }
+        }
+
+        /// <summary>关闭已建立但未提交 target 的 gameplay generation，并有界观察全部 owner 退出。</summary>
+        /// <returns>Connection 已进入不可发送状态，或观察 deadline 到期时完成。</returns>
+        private async Task CloseFailedConnectionAsync()
+        {
+            using (var timeout = new CancellationTokenSource(FailedConnectionCleanupTimeout))
+            {
+                try
+                {
+                    await _gameplayChannel.CloseAsync(timeout.Token);
+                }
+                catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+                {
+                    // CloseAsync 已在线性化临界区撤销 connection；这里只放弃继续等待异常 transport owner。
+                }
             }
         }
 
@@ -512,6 +568,33 @@ namespace IHomeland.Client.Application.World
             FinishFailure(intent, ClientWorldFlowState.OwnWorld, failure, null);
         }
 
+        /// <summary>
+        /// 将已过期、已撤销或不再存在的 inbox invite 提交为稳定拒绝，避免接受按钮静默无响应。
+        /// </summary>
+        /// <returns>固定返回 false，供 join action 直接结束。</returns>
+        private bool RejectUnavailableInvite()
+        {
+            ClientWorldFlowSnapshot committed;
+            lock (_sync)
+            {
+                if (_snapshot.State != ClientWorldFlowState.OwnWorld || _intentActive)
+                {
+                    return false;
+                }
+
+                SetSnapshotLocked(
+                    ClientWorldFlowState.OwnWorld,
+                    _snapshot.TargetGeneration,
+                    ClientWorldFlowFailure.InviteUnavailable,
+                    null,
+                    _snapshot.SafeReturn);
+                committed = _snapshot;
+            }
+
+            Notify(committed);
+            return false;
+        }
+
         /// <summary>在旧 target 已关闭后保持 ReturningOwnWorld，绝不复活 Visiting。</summary>
         /// <param name="intent">Join intent。</param>
         /// <param name="failure">低敏失败。</param>
@@ -593,6 +676,36 @@ namespace IHomeland.Client.Application.World
             }
 
             _visitSessionService.ClearTargetRole();
+            Notify(committed);
+        }
+
+        /// <summary>让 terminal world target 在 gameplay 非预期断开时立即进入不可交互失败态。</summary>
+        /// <param name="channel">Gameplay owner 发布的 final Ready snapshot 与低敏关闭原因。</param>
+        private void OnGameplayUnexpectedDisconnect(ClientGameplayChannelSnapshot channel)
+        {
+            ClientWorldFlowSnapshot committed;
+            lock (_sync)
+            {
+                if (_intentActive ||
+                    (_snapshot.State != ClientWorldFlowState.OwnWorld &&
+                     _snapshot.State != ClientWorldFlowState.Visiting))
+                {
+                    return;
+                }
+
+                SetSnapshotLocked(
+                    ClientWorldFlowState.ConnectionLost,
+                    _snapshot.TargetGeneration + 1,
+                    channel.CloseReason == ClientGameplayCloseReason.Protocol
+                        ? ClientWorldFlowFailure.Protocol
+                        : ClientWorldFlowFailure.Transport,
+                    null,
+                    _snapshot.SafeReturn);
+                committed = _snapshot;
+            }
+
+            _visitSessionService.ClearTargetRole();
+            _personalWorldService.ClearCurrentTarget();
             Notify(committed);
         }
 
@@ -768,6 +881,22 @@ namespace IHomeland.Client.Application.World
             }
 
             return MapHttpFailure(result);
+        }
+
+        /// <summary>识别足以证明指定 invite 已不可接受的服务端确定性拒绝。</summary>
+        /// <param name="result">Accept invite HTTP result。</param>
+        /// <returns>仅在错误码属于冻结退役白名单时返回 true。</returns>
+        private static bool IsAuthoritativeInviteUnavailable(
+            ClientHttpResult<ClientVisitReservation> result)
+        {
+            var code = result?.ServerError?.Code;
+            return code == 101 ||
+                   code == 200 ||
+                   code == 2100 ||
+                   code == 2101 ||
+                   code == 2102 ||
+                   code == 2104 ||
+                   code == 2105;
         }
 
         /// <summary>映射任意 HTTP result 为低敏 flow failure。</summary>

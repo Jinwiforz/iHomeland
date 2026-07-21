@@ -151,6 +151,10 @@ ticket 固定为 32 字节小写十六进制，admission 固定为 `wad1_` 开�
 
 preface 和后续业务 frame 都使用 4-byte unsigned big-endian 长度前缀，但分别执行 handshake 与 realtime frame 预算。单次 `Read` 不代表完整 frame；reader 必须先验证声明长度再分配，并处理半包、粘包与有限批量 frame。每连接只有一个 reader 与 serialized writer，response、error、push 共享单调 S2C sequence 和双重有界发送队列。
 
+Active gameplay connection 使用 registry 登记的 common heartbeat `1/2` 保持应用层活性。客户端每 15 秒通过同一 writer/pending owner 发送一次 typed request；服务端返回精确 correlation 的空 response，合法 heartbeat 与其他合法 C2S frame 一样刷新 read idle deadline。单次 heartbeat 使用 10 秒 operation deadline；超时、错误 response、协议错误或 transport failure 都终结当前 connection generation，由产品层显示一次可重连终态。heartbeat 只证明已认证连接存活，不读取或修改 PersonalWorld、VisitSession 等业务事实。
+
+服务端仍保留 30 分钟 idle safety 上限，用于回收未实现 heartbeat、进程挂起或异常客户端，不把 OS TCP keepalive 当成应用层活性证明。上线顺序固定为服务端先识别并响应 `1/2`，客户端后启用发送；未完成服务端兼容部署前不得发布启用 heartbeat 的客户端。
+
 ### 裸 UDP 不可靠时序面
 
 只承载：

@@ -107,6 +107,36 @@ func TestSnapshotAndResultCodecRoundTrip(t *testing.T) {
 	if err != nil || len(restoredDirective.Directives()) != 1 || restoredDirective.Directives()[0].Reason() != domain.SafeReturnReasonOwnerClosed {
 		t.Fatalf("directive round trip failed: %v", err)
 	}
+	pendingResult := testProjectionResults(t, fixture)[0]
+	retiredCommand, _ := domain.NewCommandID("vcmd_retiredCodec")
+	retiredResult, err := domain.NewMutationResultWithRetiredInvites(
+		domain.OperationRevokeInvite,
+		fixture.snapshot,
+		retiredCommand,
+		testFingerprint(t, "retired"),
+		domain.InviteSnapshot{},
+		domain.AdmissionIntent{},
+		domain.MembershipSnapshot{},
+		pendingResult.Snapshot().Invites(),
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredPayload, err := encodeMutationResult(retiredResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredRetired, err := decodeMutationResult(retiredPayload)
+	if err != nil || len(restoredRetired.RetiredInvites()) != 1 || restoredRetired.RetiredInvites()[0].ID() != pendingResult.Snapshot().Invites()[0].ID() {
+		t.Fatalf("retired invite round trip failed: result=%#v err=%v", restoredRetired, err)
+	}
+	if strings.Contains(mutationPayload, `"retired_invites"`) {
+		t.Fatal("legacy-compatible empty mutation unexpectedly encoded retired_invites")
+	}
+	if legacy, legacyErr := decodeMutationResult(mutationPayload); legacyErr != nil || len(legacy.RetiredInvites()) != 0 {
+		t.Fatalf("payload without retired_invites did not decode: result=%#v err=%v", legacy, legacyErr)
+	}
 }
 
 // TestCodecRejectsNonCanonicalAndContradictoryPayload 固定unknown、额外field和metadata矛盾拒绝。

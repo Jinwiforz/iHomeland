@@ -1,0 +1,15 @@
+<ui:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" noNamespaceSchemaLocation="../../../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
+    <Style src="project://database/Assets/App/UI/PersonalWorld/PersonalWorldTheme.uss?fileID=7433441132597879392&amp;guid=5efe5e5871a35284d9276d04c6cdec1c&amp;type=3#PersonalWorldTheme"/>
+    <ui:VisualElement name="connection-lost-root" class="ih-modal-backdrop" style="flex-grow: 1;">
+        <ui:VisualElement name="connection-lost-panel" class="ih-panel ih-modal-panel" style="flex-grow: 0;">
+            <ui:Label text="!" name="connection-lost-symbol" class="ih-modal-symbol"/>
+            <ui:Label text="连接已中断" name="connection-lost-title" class="ih-title"/>
+            <ui:Label text="与服务器的连接已经断开，可以重试或退出登录" name="connection-lost-description" class="ih-subtitle"/>
+            <ui:Label text="" name="error-label" class="ih-error"/>
+            <ui:VisualElement name="connection-lost-actions" class="ih-actions" style="flex-grow: 0;">
+                <ui:Button text="重新连接" name="retry-button" class="ih-primary-button"/>
+                <ui:Button text="退出登录" name="logout-button" class="ih-secondary-button"/>
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
@@ -11,7 +12,9 @@ using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Presentation.Navigation;
+using IHomeland.Client.Presentation.PersonalWorld;
 using IHomeland.Client.Scenes.Contexts;
+using IHomeland.Client.Scenes.PersonalWorld;
 
 namespace IHomeland.Client.Core.Composition
 {
@@ -76,6 +79,43 @@ namespace IHomeland.Client.Core.Composition
             ClientEnvironment environment,
             ClientUiHostRoot uiHostRoot)
         {
+            return BuildCore(environment, uiHostRoot, sceneTransitionHost: null, productExperience: false);
+        }
+
+        /// <summary>
+        /// 在当前 Unity 主线程创建包含个人世界产品竖切的完整 App Scope 对象图。
+        /// </summary>
+        /// <param name="environment">已在任何网络副作用前验证的环境与构建身份。</param>
+        /// <param name="uiHostRoot">已接线全部 production routes 的唯一 UI/Input Host root。</param>
+        /// <param name="sceneTransitionHost">BootstrapScene 直接引用的唯一内容 Scene 转换 Host。</param>
+        /// <returns>只供唯一 AppRoot 持有和驱动的不可变 composition 结果。</returns>
+        /// <exception cref="ArgumentNullException">任一必需引用为空时抛出。</exception>
+        /// <exception cref="InvalidOperationException">同一 AppComposition 实例重复 Build 时抛出。</exception>
+        internal AppCompositionResult Build(
+            ClientEnvironment environment,
+            ClientUiHostRoot uiHostRoot,
+            ClientWorldSceneTransitionHost sceneTransitionHost)
+        {
+            if (sceneTransitionHost == null)
+            {
+                throw new ArgumentNullException(nameof(sceneTransitionHost));
+            }
+
+            return BuildCore(environment, uiHostRoot, sceneTransitionHost, productExperience: true);
+        }
+
+        /// <summary>构造 isolated fixture 或 production 产品对象图的共享实现。</summary>
+        /// <param name="environment">已验证环境与构建身份。</param>
+        /// <param name="uiHostRoot">唯一 UI/Input Host root。</param>
+        /// <param name="sceneTransitionHost">Production 内容 Scene Host；isolated fixture 为空。</param>
+        /// <param name="productExperience">是否连接 production routes 与 Experience。</param>
+        /// <returns>冻结后的 App Scope 对象图。</returns>
+        private AppCompositionResult BuildCore(
+            ClientEnvironment environment,
+            ClientUiHostRoot uiHostRoot,
+            ClientWorldSceneTransitionHost sceneTransitionHost,
+            bool productExperience)
+        {
             if (environment == null)
             {
                 throw new ArgumentNullException(nameof(environment));
@@ -114,7 +154,11 @@ namespace IHomeland.Client.Core.Composition
                 sessionCoordinator,
                 new SystemClientGameplayConnectionFactory(environment),
                 new ClientGameplayCodec(),
-                dispatcher);
+                dispatcher,
+                new SystemClientGameplayDelay());
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            gameplayChannel.DiagnosticRecorded += RecordGameplayDiagnostic;
+#endif
             var controlChannel = new ClientControlChannel(
                 environment,
                 configurationStore,
@@ -133,17 +177,42 @@ namespace IHomeland.Client.Core.Composition
                 personalWorldService,
                 visitSessionService);
             var sceneLifetimeOwner = new SceneLifetimeOwner();
+            if (productExperience)
+            {
+                sceneTransitionHost.Configure(sceneLifetimeOwner);
+            }
+
+            var routeDefinitions = productExperience
+                ? ClientPersonalWorldUiRoutes.Definitions
+                : Array.Empty<ClientUiRouteDefinition>();
             var uiRegistry = new ClientUiRegistry(
-                Array.Empty<ClientUiRouteDefinition>(),
+                routeDefinitions,
                 uiHostRoot.GetHosts());
             var uiRouter = new ClientUiRouter(
                 uiRegistry,
                 uiHostRoot,
                 maximumQueuedTransitions: UiTransitionQueueCapacity,
                 cleanupTimeout: RollbackTimeout);
+            ClientPersonalWorldExperience experience = null;
+            if (productExperience)
+            {
+                experience = new ClientPersonalWorldExperience(
+                    bootstrapService,
+                    sessionCoordinator,
+                    controlChannel,
+                    personalWorldService,
+                    visitSessionService,
+                    worldAdmissionCoordinator,
+                    uiRouter,
+                    sceneTransitionHost,
+                    ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
+                uiHostRoot.GameplayMenuRequested += experience.RequestWorldVisitFromGameplayMenu;
+                uiHostRoot.UiCancelRequested += experience.RequestUiCancel;
+                uiHostRoot.ConfigureProductBindings(experience);
+            }
 
-            // 逆序停止先关闭 UI route，再撤销 Scene、world flow/subscriber、WSS、TCP、Session、HTTP、Configuration，最后释放 Input 并拒绝主线程回写。
-            IAppLifetimeParticipant[] participants =
+            // 逆序停止先拒绝产品 intent，再关闭 UI route、Scene、world flow/subscriber、WSS、TCP、Session、HTTP、Configuration，最后释放 Input 并拒绝主线程回写。
+            var participants = new List<IAppLifetimeParticipant>
             {
                 dispatcher,
                 uiHostRoot,
@@ -156,8 +225,17 @@ namespace IHomeland.Client.Core.Composition
                 visitSessionService,
                 worldAdmissionCoordinator,
                 sceneLifetimeOwner,
-                uiRouter,
             };
+            if (productExperience)
+            {
+                participants.Add(sceneTransitionHost);
+            }
+
+            participants.Add(uiRouter);
+            if (experience != null)
+            {
+                participants.Add(experience);
+            }
 
             var lifetime = new AppLifetime(participants, RollbackTimeout, ShutdownTimeout);
             return new AppCompositionResult(
@@ -172,7 +250,21 @@ namespace IHomeland.Client.Core.Composition
                 personalWorldService,
                 visitSessionService,
                 worldAdmissionCoordinator,
-                uiRouter);
+                uiRouter,
+                experience,
+                sceneTransitionHost);
         }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>把 gameplay channel 的低敏结构化诊断写入 Development Player.log。</summary>
+        /// <param name="diagnostic">不含 endpoint、credential、payload、异常文本或业务 identity 的事件。</param>
+        private static void RecordGameplayDiagnostic(ClientGameplayDiagnostic diagnostic)
+        {
+            UnityEngine.Debug.LogWarning(
+                $"[IHOMELAND_NETWORK] component=ClientGameplayChannel generation={diagnostic.Generation} " +
+                $"stage={diagnostic.Stage} close_reason={diagnostic.CloseReason} " +
+                $"exception_type={diagnostic.ExceptionType}");
+        }
+#endif
     }
 }

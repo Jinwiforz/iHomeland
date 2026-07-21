@@ -7,7 +7,7 @@
 ## Requirements
 
 ### Requirement: VisitSession identity 与 owner binding 必须稳定且不可转移
-服务端 MUST 使用独立、受校验且由服务端生成的 VisitSessionID 标识一次临时访问 aggregate，并 MUST 不可变绑定 `account.PlayerID` Owner、Owner 的 active PersonalWorldID 与创建时完整 current AssignmentStamp。VisitSession MUST NOT 把 Owner client 视为网络主机，不得把 VisitSessionID、PlayerID、PersonalWorldID、WorldInstanceID、connection binding、PartyID、RoomID 或 ActivityInstanceID 相互转换。Owner MUST NOT 因 disconnect、join order、latency、capacity 或 Visitor 状态而转移。
+服务端 MUST 使用独立、受校验且由服务端生成的 VisitSessionID 标识一次临时访问 aggregate，并 MUST 不可变绑定 `account.PlayerID` Owner、Owner 的 active PersonalWorldID 与创建时完整 current AssignmentStamp。VisitSession MUST NOT 把 Owner client 视为网络主机，不得把 VisitSessionID、PlayerID、PersonalWorldID、WorldInstanceID、connection binding、PartyID、RoomID 或 ActivityInstanceID 相互转换。Owner MUST NOT 因 disconnect、join order、latency、capacity 或 Visitor 状态而转移。Owner 对 own-world gameplay connection 显式 Open 时，若 world active index 指向绑定旧 AssignmentStamp 的 VisitSession，application MUST 先通过已有 system invalidation 取得并提交权威终态结果、发布完整 safe-return，再以同一 Open CommandID 重新解析 current active session；不得就地改写旧 assignment、迁移旧资格或依赖客户端重复点击。
 
 #### Scenario: Owner 为 current world 开启访问
 - **WHEN** 受信 Owner AuthContext 对自己的 active PersonalWorld 请求开启 VisitSession，且 placement 返回 current active、lease 有效的完整 assignment
@@ -16,6 +16,22 @@
 #### Scenario: Assignment 已经改变
 - **WHEN** 旧 VisitSession 绑定的完整 AssignmentStamp 与 PersonalWorld 当前 assignment 不同
 - **THEN** 旧 VisitSession 不得迁移或复活到 successor，任何新 accept/join/reconnect 均被拒绝；独立 system invalidation 只有重新取得 missing、expired、非 active 或不同完整 stamp 的权威证据后才能关闭并产生安全返回结果
+
+#### Scenario: 重启后 Owner 显式重新开放访问
+- **WHEN** 进程退出前未执行 assignment loss callback，重启后的 world active index 仍指向旧 VisitSession，且 placement 已提供更高 generation/fence 的 current assignment
+- **THEN** 首次 Owner Open 先以稳定 system CommandID 原子关闭旧 VisitSession并发布其完整 terminal result，再以原始 Open CommandID 创建或解析只绑定 current assignment 的唯一 active VisitSession；旧 Owner gameplay connection 已不存在时不得向 successor Owner 投递 predecessor assignment changed，客户端无需清理 Redis 或重复点击
+
+#### Scenario: 恢复流程保持可观测且不会中断业务响应
+- **WHEN** stale Open 恢复提交或解析旧 VisitSession 终态
+- **THEN** 服务端以固定 `stale_open_reconcile` operation 记录 applied、ignored、stale 或 failed，metrics 封闭标签必须接受该 operation，且观测不得 panic、改变提交结论或阻止随后一次 Open
+
+#### Scenario: 恢复提交结果不确定
+- **WHEN** 旧 VisitSession invalidation 返回 dependency、dependency defect 或 commit-unknown
+- **THEN** application 返回低敏依赖失败且不得继续创建新 VisitSession、替换 CommandID或猜测终态已提交；相同 system command 的后续权威 replay仍能返回首次完整结果
+
+#### Scenario: 并发 Open 恢复同一旧 session
+- **WHEN** 多个 Owner gameplay command 同时发现同一旧 AssignmentStamp VisitSession
+- **THEN** revision CAS、稳定 invalidation identity与active-world唯一索引保证旧终态最多提交一次、safe-return副作用按首次结果去重且最多存在一个绑定current assignment的active VisitSession
 
 #### Scenario: Visitor 被当作新 Owner
 - **WHEN** Owner 断线而某个 Visitor 最早加入、延迟最低或是唯一在线成员
@@ -40,12 +56,28 @@ VisitSession MUST 使用封闭的 `open`、`owner_grace`、`closed` lifecycle、
 - **WHEN** 首次 mutation 提供的 invite、reservation、Owner grace 或 Visitor reconnect deadline 超过对应 policy 配置值
 - **THEN** application 拒绝该 target 且 revision 不变；已经提交的相同 command replay 不得用推进后的 observedAt 重新解释首次 deadline
 
-### Requirement: Invite 必须有界、定向且永远不是 gameplay credential
-只有 VisitSession Owner MAY 为非 Owner 的有效目标 PlayerID 创建或撤销 pending invite。Invite MUST 绑定 VisitSessionID、目标 Visitor、创建 revision 与绝对 expiry，使用独立 InviteID，并受 session lifecycle/expiry、pending invite 上限和稳定 command identity 约束。Invite MUST NOT 包含 endpoint、socket、通用 gameplay ticket、admission bearer secret 或 Owner/Visitor 可转移权限；持有 InviteID 只允许目标 Visitor 请求 accept，不能直接 join 或执行 world command。
+### Requirement: Invite 必须有界、定向、绑定有效目标且永远不是 gameplay credential
+只有 VisitSession Owner MAY 为非 Owner、由 Account owner 在首次提交前证明当前 active 且可邀请的目标 PlayerID 创建或撤销 pending invite。Application MUST 在确认受信 actor 拥有 active PersonalWorld 与 active VisitSession 后才解析目标可用性，并 MUST 将 self、missing 与 inactive 统一拒绝为低敏 validation failure，不能推进 revision、创建 InviteID、保存 invite 或发布副作用。Account 读取依赖失败 MUST fail closed，不能伪装为目标不存在。相同 CommandID/fingerprint 已经提交时，store MUST 在重新读取目标可用性之前重放首次完整结果。Invite MUST 绑定 VisitSessionID、目标 Visitor、创建 revision 与绝对 expiry，使用独立 InviteID，并受 session lifecycle/expiry、pending invite 上限和稳定 command identity 约束。Invite MUST NOT 包含 endpoint、socket、通用 gameplay ticket、admission bearer secret 或 Owner/Visitor 可转移权限；持有 InviteID 只允许目标 Visitor 请求 accept，不能直接 join 或执行 world command。
 
 #### Scenario: Owner 创建目标邀请
-- **WHEN** session open、未过期且 Owner 使用受信 AuthContext 邀请另一个有效 Player
+- **WHEN** session open、未过期且 Owner 使用受信 AuthContext 邀请另一个由 Account owner 证明 active 的 Player
 - **THEN** application 原子保存有界 pending invite，返回不具备 gameplay scope 或 admission 权限的 invite projection
+
+#### Scenario: Owner 邀请自身
+- **WHEN** target PlayerID 与受信 Owner actor 相同
+- **THEN** application 返回统一 validation failure，revision、invite、membership 和网络副作用全部不变，且不需要查询 Account 目录
+
+#### Scenario: 目标 Player 不存在或 inactive
+- **WHEN** Account owner 对格式有效 target PlayerID 返回统一 unavailable
+- **THEN** application 返回与 self 相同的低敏 validation failure，不创建伪邀请且不泄漏目标是否存在或停用
+
+#### Scenario: 目标 Player 读取依赖失败
+- **WHEN** MySQL 或 Account reader 无法权威证明 target available 或 unavailable
+- **THEN** application 返回 dependency unavailable，VisitSession revision 与集合不变且不发布邀请
+
+#### Scenario: 已提交邀请在目标状态改变后 replay
+- **WHEN** 首次 CreateInvite 已提交，目标随后变为 inactive，并以相同 CommandID/fingerprint 重试
+- **THEN** store 在重新读取目标可用性前重放首次 invite、snapshot 与 revision，不生成新 InviteID或第二次 mutation
 
 #### Scenario: Visitor 邀请第三方
 - **WHEN** Visitor 或非 Owner actor 尝试创建 invite、改变 capacity 或把 invite 转发给其他 Player accept
@@ -198,3 +230,23 @@ VisitSession domain/application MUST 只依赖消费侧定义的 store、OwnedWo
 #### Scenario: Redis 未来被清空
 - **WHEN** 后续adapter的VisitSession/invite/membership运行态因Redis flush丢失
 - **THEN** core契约要求访问安全结束并重新admission，PersonalWorld、PlayerState、资产与奖励持久事实不被伪造、删除或回滚
+
+### Requirement: VisitSession mutation 必须原子保存邀请退役事实
+
+VisitSession application service MUST 在首次成功 mutation 的 source 与 target snapshot 之间计算 pending invite retirement：source 中为 Pending、target 中不存在或不再 Pending 的 identity MUST 作为稳定排序、唯一且有界的 `retired_invites` 与 target snapshot、CommandID、fingerprint、operation payload 和 safe-return directives 原子保存。Store replay MUST 返回首次完整 retirement 集合；not-committed 与 commit-unknown MUST 不返回或发布部分集合。Result validation MUST 拒绝无效、重复、乱序或仍在 target 中保持 Pending 的 retirement。
+
+#### Scenario: Owner 撤销 pending invite
+- **WHEN** revoke command 首次提交并从 target snapshot 删除 matching pending invite
+- **THEN** mutation result 原子保存该 invite 的完整非凭据 projection，application coordinator 向其 TargetVisitorID 发布 Retired push，重复相同 command replay 不推进 revision且只产生幂等同 identity tombstone
+
+#### Scenario: Accept 或 deadline 退役 invite
+- **WHEN** HTTP accept 把 pending invite 转为 Accepted，或 system deadline 精确删除到期 invite
+- **THEN** 首次 result 保存对应 retirement，目标客户端立即失去 accept 能力；commit-unknown 不允许服务端伪造已发布结论
+
+#### Scenario: Terminal close 清理多个 pending invite
+- **WHEN** Owner close、Owner grace/session expiry、assignment invalidation 或 dependency loss terminal close VisitSession 并清除全部 pending invite
+- **THEN** result 按 VisitSessionID/InviteID 稳定保存全部 retirement，coordinator 分别向各精确目标发布 tombstone，不从已经清空的 target snapshot 猜测接收者
+
+#### Scenario: 解码历史 mutation result
+- **WHEN** Redis 中已存在本 change 之前不含 `retired_invites` 字段的合法 replay result
+- **THEN** codec 将缺失字段解释为空集合并保持旧 result 语义；新 result 的 retirement 集合必须确定性编码、解码和等价比较

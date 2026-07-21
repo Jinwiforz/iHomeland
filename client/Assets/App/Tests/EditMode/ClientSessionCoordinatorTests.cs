@@ -304,6 +304,44 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(coordinator.TryTakeConnectionTicket(expiring.Value, out _), Is.False);
         }
 
+        /// <summary>验证 Bearer operation 不发送已知过期 access，而是先共享 Session refresh。</summary>
+        /// <returns>等待 refresh、ticket 与 generation 断言完成的任务。</returns>
+        [Test]
+        public async Task ExpiredAccessRefreshesBeforeConnectionTicket()
+        {
+            var clock = new FakeClock(3000);
+            string observedAccess = null;
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                    CreateAuthentication("account", "session", "expired-access", "refresh"))),
+                RefreshHandler = (_, __) => Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
+                    new ClientTokenPair("fresh-access", "fresh-refresh", 5000, 6000))),
+                TicketHandler = (access, channel, _) =>
+                {
+                    observedAccess = access;
+                    return Task.FromResult(ClientHttpResult<ClientConnectionTicket>.Success(
+                        new ClientConnectionTicket(
+                            "opaque-ticket",
+                            new ClientEndpoint(channel, "game.example.invalid", 4433),
+                            new[] { ClientConnectionScope.Gameplay },
+                            4000)));
+                },
+            };
+            var coordinator = await CreateCoordinatorAsync(api, clock);
+            var login = await coordinator.LoginAsync("fixture-user", "password", CancellationToken.None);
+
+            var issued = await coordinator.IssueConnectionTicketAsync(
+                ClientEndpointChannel.TlsTcp,
+                CancellationToken.None);
+
+            Assert.That(issued.IsSuccess, Is.True);
+            Assert.That(api.RefreshCount, Is.EqualTo(1));
+            Assert.That(observedAccess, Is.EqualTo("fresh-access"));
+            Assert.That(coordinator.TryTakeConnectionTicket(issued.Value, out var ticketUse), Is.True);
+            Assert.That(ticketUse.SourceGeneration, Is.GreaterThan(login.Value.Generation));
+        }
+
         /// <summary>
         /// 确认 invite accept 只提交 current generation 的未过期 reservation，且未知结果不自动重试。
         /// </summary>

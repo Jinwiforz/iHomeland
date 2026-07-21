@@ -129,6 +129,36 @@ func (coordinator *personalWorldVisitCoordinator) BindProjector(projector visitS
 	return nil
 }
 
+// ReconcileStaleOpen 退役由显式 Owner Open 证明阻塞 current assignment 的旧访问。
+//
+// 领域 Service 会在提交前重新取得 placement 权威证据；本方法只派生可重放的 system
+// command，并确保任何已提交 terminal result 都进入统一副作用路径。确定性竞态由随后
+// 一次 Open 读取最新 active index 决议，依赖故障与 CommitUnknown 则原样返回。
+func (coordinator *personalWorldVisitCoordinator) ReconcileStaleOpen(ctx context.Context, worldID personalworld.PersonalWorldID) error {
+	if coordinator == nil || ctx == nil || !worldID.Valid() {
+		return errors.New("stale visit open reconciliation is invalid")
+	}
+	snapshot, found, err := coordinator.visits.ResolveActive(ctx, worldID)
+	if err != nil {
+		coordinator.observeLifecycle("stale_open_reconcile", "failed")
+		return err
+	}
+	if !found {
+		coordinator.observeLifecycle("stale_open_reconcile", "ignored")
+		return nil
+	}
+	commandID, err := assignmentVisitCommandID(snapshot.Assignment(), snapshot.ID(), snapshot.Revision())
+	if err != nil {
+		coordinator.observeLifecycle("stale_open_reconcile", "failed")
+		return err
+	}
+	result, err := coordinator.visits.InvalidateAssignment(ctx, snapshot.ID(), snapshot.Revision(), commandID)
+	if err == nil {
+		coordinator.MutationCommitted(ctx, result)
+	}
+	return coordinator.finishLifecycle("stale_open_reconcile", err)
+}
+
 // OpenCommitted 登记 create/resolve 结果；Open 本身不产生邀请或 terminal 通知。
 func (coordinator *personalWorldVisitCoordinator) OpenCommitted(ctx context.Context, result visitsession.OpenResult) {
 	if coordinator == nil || !result.Valid() {
@@ -345,11 +375,29 @@ func terminalVisitDeadlineError(err error) bool {
 // publishControl 把 committed operation 映射到既有 WSS push，不向无关玩家广播。
 func (coordinator *personalWorldVisitCoordinator) publishControl(result visitsession.MutationResult) {
 	snapshot := result.Snapshot()
+	for _, retired := range result.RetiredInvites() {
+		state := visitv1.VisitInviteState_VISIT_INVITE_STATE_RETIRED
+		message := visitv1.VisitInvitePush_builder{
+			Invite: visitv1.VisitInviteSummary_builder{
+				InviteId:        proto.String(retired.ID().Value()),
+				VisitSessionId:  proto.String(snapshot.ID().Value()),
+				TargetVisitorId: proto.String(retired.TargetID().String()),
+				State:           &state,
+				CreatedRevision: proto.Uint64(retired.CreatedRevision().Uint64()),
+				ExpiresAtMs:     proto.Int64(retired.ExpiresAt().UnixMilli()),
+			}.Build(),
+			OwnerPlayerId: proto.String(snapshot.OwnerID().String()),
+		}.Build()
+		coordinator.publishWSS(retired.TargetID().String(), 2100, message)
+	}
 	if result.Operation() == visitsession.OperationInvalidateAssignment {
 		message := worldv1.WorldAssignmentChangedPush_builder{
 			PersonalWorldId: proto.String(snapshot.WorldID().String()), ReasonKey: proto.String("world.assignment.changed"),
 		}.Build()
-		targets := map[string]struct{}{snapshot.OwnerID().String(): {}}
+		targets := make(map[string]struct{})
+		if ownerConnection, ok := tcpConnectionFromVisitBinding(snapshot.OwnerBinding().ConnectionID()); ok && coordinator.connections.HasConnection(ownerConnection) {
+			targets[snapshot.OwnerID().String()] = struct{}{}
+		}
 		for _, directive := range result.Directives() {
 			targets[directive.VisitorID().String()] = struct{}{}
 		}

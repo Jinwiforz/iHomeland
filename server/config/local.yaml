@@ -25,10 +25,10 @@ publicApi:
     privateKeySecret: ""
   endpoints:
     wss:
-      host: localhost
+      host: 127.0.0.1
       port: 8080
     tlsTcp:
-      host: localhost
+      host: 127.0.0.1
       port: 8444
   limits:
     httpBodyBytes: 4096
@@ -61,7 +61,7 @@ publicApi:
   visitSession:
     capacity: 4
     sessionLifetime: 24h
-    inviteLifetime: 5m
+    inviteLifetime: 30m
     reservationLifetime: 1m
     ownerGrace: 2m
     visitorReconnectGrace: 2m
@@ -107,7 +107,7 @@ publicApi:
     readTimeout: 15s
     writeTimeout: 5s
     keepAlive: 15s
-    idleTimeout: 45s
+    idleTimeout: 30m
     closeTimeout: 3s
     shutdownTimeout: 8s
 storage:

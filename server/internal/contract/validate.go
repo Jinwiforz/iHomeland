@@ -414,6 +414,16 @@ type worldVisitRouteProfile struct {
 // validateWorldVisitRoute 固定 P0 world/visit 的控制面、权威业务面与执行预算。
 // 新消息没有显式 profile 时默认拒绝，确保 size、rate、timeout 与唯一通道必须先经评审。
 func validateWorldVisitRoute(message MessageEntry, route RouteEntry) error {
+	if message.ID == 1 || message.ID == 2 {
+		expectedIdempotency := "REQUEST_ID"
+		if message.ID == 2 {
+			expectedIdempotency = "CORRELATION_ID"
+		}
+		if message.Owner != "common" || route.Channel != "TLS_TCP" || route.AuthScope != "GAMEPLAY" || route.MaxSize != 256 || route.RatePolicy != "gameplay_heartbeat" || route.Idempotency != expectedIdempotency || route.TimeoutMS != 10000 {
+			return fmt.Errorf("gameplay heartbeat message %d does not match its reviewed route profile", message.ID)
+		}
+		return nil
+	}
 	if message.Owner != "world" && message.Owner != "visit" {
 		return nil
 	}

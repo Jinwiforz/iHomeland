@@ -68,7 +68,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - Transport 不自动重试。Caller cancel、deadline、transport、oversized、malformed 与结构有效的 server error 保持不同结果；`Retry-After` 只作为事实返回。
 - 当前不恢复进程退出前的 refresh token；重启回到未认证状态。安全持久化需独立 capability。
 
-`acceptVisitInvite` 只接受 VisitSessionID、InviteID、expected revision 与稳定 idempotency key，并返回匹配且未过期的 reservation；`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease。两者都不能成为 PersonalWorld 或 VisitSession 最终事实，HTTP 对象图不拥有 socket。
+`acceptVisitInvite` 只接受由 current inbox selection 取得的 VisitSessionID、InviteID、expected revision 与稳定 idempotency key，并返回匹配且未过期的 reservation；页面不得提供 correlation 自由文本入口。Accept 成功后客户端退役该 invite，后续 admission/JOIN 失败也不能让已消费 identity 重新可点；commit-unknown 仍等待权威 replacement。`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease。两者都不能成为 PersonalWorld 或 VisitSession 最终事实，HTTP 对象图不拥有 socket。
 
 ### 3. WSS Control
 
@@ -87,22 +87,25 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - TLS 建立后先发送 `tcp-preface.json` 定义的 `IHTP` v1 preface：4-byte big-endian 长度、purpose、32 字节 ticket 与 48 字节 admission；认证失败不会向客户端公开提交阶段，客户端不得猜测或重用任一 credential，必须重新签发完整凭据组
 - preface 成功后才发送 `ReliableEnvelope`；每条业务 frame 同样使用 4-byte big-endian 长度，不得假设一次 socket read 等于一个 frame
 - 使用唯一 receive pump 与 serialized writer，维护严格单调的双向 sequence、有界 pending request/command registry 和 writer backpressure
+- Active connection 每 15 秒通过同一 typed operation、pending correlation 与 serialized writer 发送 `GAMEPLAY_HEARTBEAT_REQUEST(1)`；10 秒内未收到匹配的 `GAMEPLAY_HEARTBEAT_RESPONSE(2)` 即终结 current generation，不允许另建 timer writer、延时猜测成功或以帧 tick 修正状态
 - `OWN_WORLD` 可直接请求 snapshot；`JOIN`/`RECONNECT` 必须把同一 admission 放入首个匹配 command，并在 response 前保持 pending
 - 只接收登记的 response/error 与 2002、2121、2122 push；`VISIT_SAFE_RETURN_PUSH` 到达后立即停止旧 target mutation，等待有界关闭并进入受控返回流程
 - ticket、admission、完整 payload 和 assignment 私有字段不得进入客户端日志；session epoch 失效时同时关闭 WSS/TCP
 
-当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，UI routing/Host/Input 基础设施已独立接入，但产品页面、Scene 与自动恢复仍未接入。
+当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，产品页面、Scene 与显式恢复由上层 Experience 编排，channel 自身不执行后台自动恢复。
+
+客户端只在收到确定的 channel terminal state 后显示网络中断；“重试连接”由玩家显式触发并具有 45 秒整笔 deadline。deadline 覆盖 control readiness、own-world admission、gameplay connection 与 Scene 同步，超时保持可重试界面且释放 single-flight；不会后台无限重试，也不会把尚未提交的连接显示为已进入世界。Development Build 仅记录 generation、阶段、稳定 close reason 与异常类型，不记录 ticket、admission、payload、账号或 endpoint。
 
 ### 5. Account/PersonalWorld/VisitSession Services
 
 - `PersonalWorldService` 保存 primary/current world 与 assignment，完整 replacement 使用单调 revision，control assignment 只作为 refresh hint。
 - `VisitSessionService` 保存 current VisitSession、role、定向 invite inbox 与 control hint，并统一施加 Owner/Visitor 与 expected revision 写入门。
 - `WorldAdmissionCoordinator` 线性化 own-world、join visit、visiting 与 safe-return；迟到 completion 同时经过 session/target generation gate。
-- Services 只公开不可变、无 credential snapshot；后续 UI 不接触 transport type、generated message 或第二份最终事实。
+- Services 只公开不可变、无 credential snapshot；产品 UI 不接触 transport type、generated message 或第二份最终事实。
 
 ### 6. UI Vertical Slice
 
-当前先行能力是空 production registry 的统一 routing/Host/Input 边界：它不读取 Service、不发网络请求、不加载页面资源，也不改变下列竖切范围。下列产品页面只能在后续 `add-client-personal-world-vertical-slice` 中按 route 逐项接线：
+已于 2026-07-21 归档的 `add-client-personal-world-vertical-slice` 通过统一 routing/Host/Input 边界接入下列产品页面。未提交登录前只打开本地 Login route，不读取 credential 快照、不发业务网络请求，也不加载内容场景：
 
 - login
 - home/shell
@@ -110,6 +113,8 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - visit invite/list/detail and member state
 - join/leave/kick/reconnect/safe-return commands
 - server push and errors
+
+真实双客户端验收派生的四个独立 change 同日归档：stale VisitSession Open 由服务端按 current assignment 显式收敛；CreateInvite 只接受非 Owner 的 active Player；撤销、到期、接受或 terminal close 通过既有 message 2100 发布精确 `RETIRED` tombstone；静默 gameplay connection 由 TLS/TCP heartbeat 保活，断线后只允许玩家显式提交有界 single-flight 恢复。上述路径都不使用延时猜测、tick 修正或客户端伪造权威状态。
 
 ## 错误映射
 
@@ -142,7 +147,7 @@ App Start
 
 目标恢复策略要求 WSS 与 TCP 独立重连但共享 session epoch；epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
 
-上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS/TLS-TCP channel、PersonalWorld/VisitSession Services、目标状态机以及空 registry 的 UI routing/Host/Input 基础设施；token 跨进程恢复、独立通道自动恢复策略、产品 UI 与 SceneContext 仍未建立。
+上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS/TLS-TCP channel、PersonalWorld/VisitSession Services、目标状态机、五个 production routes、个人世界 View State/action boundary 与 Scene transition/Context；token 跨进程恢复和独立通道自动恢复策略仍未建立。
 
 ## 世界与访问快照
 
@@ -222,6 +227,10 @@ receive invite
 - Visitor permission 与 Owner-only command 拒绝
 - Owner grace 内恢复和 deadline 到期安全返回
 - stale invite/admission/WorldInstance 拒绝
+- self、missing、inactive invite target 零 mutation 拒绝，合法 active Visitor 仍可受邀
+- revoke、expire、accept 与 terminal close 后 Visitor inbox 应用精确 `RETIRED` tombstone
+- 服务端重启遗留旧 AssignmentStamp VisitSession 后，Owner 首次显式 Open 收敛到 current session
+- 静默 gameplay heartbeat、网络黑洞与显式重连 deadline 收敛
 - Visiting 返回 OwnWorld 后无旧场景订阅或 callback 回写
 
 客户端验收必须与服务端 Go test client 对同一 contract fixtures 得出一致业务结果。

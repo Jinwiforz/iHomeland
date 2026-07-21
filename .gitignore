@@ -19,6 +19,7 @@
 /server/coverage.html
 /server/**/*.test
 /server/**/*.test.exe
+/server/.local/
 
 ## 协议生成代码
 # Proto/OpenAPI、registry 与 fixtures 是源和兼容性基线，不得在此忽略。
@@ -44,6 +45,7 @@
 /client/*.unityproj
 /client/*.sln
 /client/*.slnx
+/client/UIElementsSchema/
 
 ## IDE 本机状态
 .run/

@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
   "routes": [
+    { "messageId": 1, "channel": "TLS_TCP", "authScope": "GAMEPLAY", "qos": "RELIABLE_ORDERED", "maxSize": 256, "ratePolicy": "gameplay_heartbeat", "idempotency": "REQUEST_ID", "timeoutMs": 10000 },
+    { "messageId": 2, "channel": "TLS_TCP", "authScope": "GAMEPLAY", "qos": "RELIABLE_ORDERED", "maxSize": 256, "ratePolicy": "gameplay_heartbeat", "idempotency": "CORRELATION_ID", "timeoutMs": 10000 },
     { "messageId": 500, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 4096, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },
     { "messageId": 501, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 2048, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },
     { "messageId": 502, "channel": "WSS", "authScope": "CONTROL", "qos": "RELIABLE_ORDERED", "maxSize": 1024, "ratePolicy": "server_control", "idempotency": "NONE", "timeoutMs": 0 },

@@ -95,6 +95,9 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>Invite 已转换为 reservation。</summary>
         Accepted = 2,
+
+        /// <summary>服务端已确认该 invite 不再可接受，仅用于精确退役本地 identity。</summary>
+        Retired = 3,
     }
 
     /// <summary>
@@ -162,8 +165,11 @@ namespace IHomeland.Client.Application.World
         /// <summary>旧 Visitor target 已不可写且正在安全返回。</summary>
         ReturningOwnWorld = 5,
 
+        /// <summary>Current gameplay connection 非预期终止，旧 target 已不可交互。</summary>
+        ConnectionLost = 6,
+
         /// <summary>App Scope 已停止且不允许再次转换。</summary>
-        Stopped = 6,
+        Stopped = 7,
     }
 
     /// <summary>
@@ -194,6 +200,9 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>App Scope 已停止。</summary>
         Stopped = 7,
+
+        /// <summary>目标 invite 已被撤销、过期、消费或由终态统一退役。</summary>
+        InviteUnavailable = 8,
     }
 
     /// <summary>
@@ -279,6 +288,22 @@ namespace IHomeland.Client.Application.World
                    Generation == other.Generation &&
                    LeaseExpiresAtMilliseconds == other.LeaseExpiresAtMilliseconds;
         }
+
+        /// <summary>比较服务端公开的 assignment identity，不把可续期 lease deadline 当作 identity。</summary>
+        /// <param name="other">待比较 assignment。</param>
+        /// <returns>World、instance、endpoint 与 generation 均一致时返回 true。</returns>
+        /// <remarks>
+        /// 服务端 AssignmentStamp 明确不包含 expiry；同一 assignment 续租时这些字段保持不变，
+        /// 只有 <see cref="LeaseExpiresAtMilliseconds"/> 单调前进。
+        /// </remarks>
+        internal bool HasSameIdentity(ClientWorldAssignmentProjection other)
+        {
+            return other != null &&
+                   string.Equals(PersonalWorldID, other.PersonalWorldID, StringComparison.Ordinal) &&
+                   string.Equals(WorldInstanceID, other.WorldInstanceID, StringComparison.Ordinal) &&
+                   Endpoint.IsEquivalent(other.Endpoint) &&
+                   Generation == other.Generation;
+        }
     }
 
     /// <summary>
@@ -341,6 +366,19 @@ namespace IHomeland.Client.Application.World
                    (Assignment == null
                        ? other.Assignment == null
                        : Assignment.IsEquivalent(other.Assignment));
+        }
+
+        /// <summary>只比较 PersonalWorld aggregate 事实，不把独立代际的 assignment 混入 world revision。</summary>
+        /// <param name="other">待比较 world。</param>
+        /// <returns>World identity、Owner、lifecycle、revision 与创建时间一致时返回 true。</returns>
+        internal bool HasSameWorldFacts(ClientPersonalWorldProjection other)
+        {
+            return other != null &&
+                   string.Equals(PersonalWorldID, other.PersonalWorldID, StringComparison.Ordinal) &&
+                   string.Equals(OwnerPlayerID, other.OwnerPlayerID, StringComparison.Ordinal) &&
+                   Lifecycle == other.Lifecycle &&
+                   Revision == other.Revision &&
+                   CreatedAtMilliseconds == other.CreatedAtMilliseconds;
         }
     }
 
@@ -461,6 +499,35 @@ namespace IHomeland.Client.Application.World
                 !string.Equals(VisitSessionID, other.VisitSessionID, StringComparison.Ordinal) ||
                 !string.Equals(OwnerPlayerID, other.OwnerPlayerID, StringComparison.Ordinal) ||
                 !Assignment.IsEquivalent(other.Assignment) ||
+                Lifecycle != other.Lifecycle || Revision != other.Revision || Capacity != other.Capacity ||
+                CreatedAtMilliseconds != other.CreatedAtMilliseconds ||
+                ExpiresAtMilliseconds != other.ExpiresAtMilliseconds ||
+                OwnerGraceExpiresAtMilliseconds != other.OwnerGraceExpiresAtMilliseconds ||
+                Role != other.Role || Visitors.Count != other.Visitors.Count)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < Visitors.Count; index++)
+            {
+                if (!Visitors[index].IsEquivalent(other.Visitors[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>比较除 current assignment lease deadline 外的完整 VisitSession replacement 语义。</summary>
+        /// <param name="other">待比较 VisitSession。</param>
+        /// <returns>Aggregate 事实、角色与 assignment identity 一致时返回 true。</returns>
+        internal bool IsEquivalentIgnoringAssignmentLease(ClientVisitSessionProjection other)
+        {
+            if (other == null ||
+                !string.Equals(VisitSessionID, other.VisitSessionID, StringComparison.Ordinal) ||
+                !string.Equals(OwnerPlayerID, other.OwnerPlayerID, StringComparison.Ordinal) ||
+                !Assignment.HasSameIdentity(other.Assignment) ||
                 Lifecycle != other.Lifecycle || Revision != other.Revision || Capacity != other.Capacity ||
                 CreatedAtMilliseconds != other.CreatedAtMilliseconds ||
                 ExpiresAtMilliseconds != other.ExpiresAtMilliseconds ||
@@ -667,24 +734,29 @@ namespace IHomeland.Client.Application.World
     }
 
     /// <summary>
-    /// 保存 VisitSession Service 的当前完整投影、inbox 与 control hint。
+    /// 保存 VisitSession Service 的当前完整投影、inbox、Owner 发出邀请与 control hint。
     /// </summary>
     internal sealed class ClientVisitSessionServiceSnapshot
     {
         /// <summary>创建不可变 Service snapshot。</summary>
         /// <param name="current">Current VisitSession 完整投影。</param>
-        /// <param name="invites">按稳定 key 排序的有效 invite 集合。</param>
+        /// <param name="invites">按稳定 key 排序的有效 inbox invite 集合。</param>
+        /// <param name="outgoingInvites">按稳定 key 排序的有效 Owner 发出邀请集合。</param>
         /// <param name="controlHint">可选 control hint。</param>
         /// <param name="needsRefresh">是否必须请求完整 VisitSession snapshot。</param>
         internal ClientVisitSessionServiceSnapshot(
             ClientVisitSessionProjection current,
             IReadOnlyList<ClientVisitInviteProjection> invites,
+            IReadOnlyList<ClientVisitInviteProjection> outgoingInvites,
             ClientVisitControlHint controlHint,
             bool needsRefresh)
         {
             Current = current;
             Invites = new ReadOnlyCollection<ClientVisitInviteProjection>(
                 new List<ClientVisitInviteProjection>(invites ?? throw new ArgumentNullException(nameof(invites))));
+            OutgoingInvites = new ReadOnlyCollection<ClientVisitInviteProjection>(
+                new List<ClientVisitInviteProjection>(
+                    outgoingInvites ?? throw new ArgumentNullException(nameof(outgoingInvites))));
             ControlHint = controlHint;
             NeedsRefresh = needsRefresh;
         }
@@ -692,8 +764,11 @@ namespace IHomeland.Client.Application.World
         /// <summary>获取 current VisitSession 完整投影。</summary>
         internal ClientVisitSessionProjection Current { get; }
 
-        /// <summary>获取不可修改的有效 invite 集合。</summary>
+        /// <summary>获取只允许 Visitor 接受的不可修改有效 inbox invite 集合。</summary>
         internal IReadOnlyList<ClientVisitInviteProjection> Invites { get; }
+
+        /// <summary>获取只用于 Owner 管理与展示的不可修改有效发出邀请集合。</summary>
+        internal IReadOnlyList<ClientVisitInviteProjection> OutgoingInvites { get; }
 
         /// <summary>获取不冒充完整 snapshot 的 control hint。</summary>
         internal ClientVisitControlHint ControlHint { get; }

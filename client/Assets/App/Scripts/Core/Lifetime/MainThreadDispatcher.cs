@@ -24,6 +24,9 @@ namespace IHomeland.Client.Core.Lifetime
         /// </summary>
         private readonly Queue<Action> _callbacks = new Queue<Action>();
 
+        /// <summary>为 terminal lifecycle 收敛保留的单一槽位，不与普通业务 callback 争用容量。</summary>
+        private Action _criticalCallback;
+
         /// <summary>
         /// 保存允许执行 drain 的 Unity 主线程托管线程 ID。
         /// </summary>
@@ -75,7 +78,7 @@ namespace IHomeland.Client.Core.Lifetime
             {
                 lock (_sync)
                 {
-                    return _callbacks.Count;
+                    return _callbacks.Count + (_criticalCallback == null ? 0 : 1);
                 }
             }
         }
@@ -115,6 +118,7 @@ namespace IHomeland.Client.Core.Lifetime
             {
                 _accepting = false;
                 _callbacks.Clear();
+                _criticalCallback = null;
             }
 
             return Task.CompletedTask;
@@ -150,6 +154,37 @@ namespace IHomeland.Client.Core.Lifetime
             }
         }
 
+        /// <summary>把 terminal lifecycle callback 投递到独立单槽，确保普通队列满时仍可 fail closed。</summary>
+        /// <param name="callback">将在主线程执行的非空终态收敛工作。</param>
+        /// <returns>已接受、终态槽已占用或生命周期已停止。</returns>
+        /// <remarks>
+        /// 此入口只用于连接终止等必须使产品状态立即不可交互的事件；不允许承载普通 PUSH、response
+        /// 或可重试业务工作。单槽保持整体内存有界，也避免通过丢弃普通队列项伪造处理顺序。
+        /// </remarks>
+        internal DispatchPostResult TryPostCritical(Action callback)
+        {
+            if (callback == null)
+            {
+                throw new ArgumentNullException(nameof(callback));
+            }
+
+            lock (_sync)
+            {
+                if (!_accepting)
+                {
+                    return DispatchPostResult.Stopped;
+                }
+
+                if (_criticalCallback != null)
+                {
+                    return DispatchPostResult.QueueFull;
+                }
+
+                _criticalCallback = callback;
+                return DispatchPostResult.Accepted;
+            }
+        }
+
         /// <summary>
         /// 在 Unity 主线程有界执行当前批次 callback，并隔离每个 callback 的异常。
         /// </summary>
@@ -173,12 +208,20 @@ namespace IHomeland.Client.Core.Lifetime
                 Action callback;
                 lock (_sync)
                 {
-                    if (!_accepting || _callbacks.Count == 0)
+                    if (!_accepting || _criticalCallback == null && _callbacks.Count == 0)
                     {
                         break;
                     }
 
-                    callback = _callbacks.Dequeue();
+                    if (_criticalCallback != null)
+                    {
+                        callback = _criticalCallback;
+                        _criticalCallback = null;
+                    }
+                    else
+                    {
+                        callback = _callbacks.Dequeue();
+                    }
                 }
 
                 try

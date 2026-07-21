@@ -367,9 +367,14 @@ namespace IHomeland.Client.Application.World
 
             if (incoming.Revision == current.Revision)
             {
-                return current.IsEquivalent(incoming)
-                    ? ClientProjectionApplyResult.Duplicate
-                    : ClientProjectionApplyResult.Conflict;
+                if (!current.HasSameWorldFacts(incoming))
+                {
+                    return ClientProjectionApplyResult.Conflict;
+                }
+
+                // PersonalWorld revision 与 runtime assignment generation 是两个独立单调门；服务端
+                // 重启可以在 world revision 不变时发布更高 generation 的新 WorldInstance。
+                return CompareAssignment(current.Assignment, incoming.Assignment);
             }
 
             if (!string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
@@ -408,9 +413,19 @@ namespace IHomeland.Client.Application.World
 
             if (incoming.Generation == current.Generation)
             {
-                return current.IsEquivalent(incoming)
+                if (!current.HasSameIdentity(incoming))
+                {
+                    return ClientProjectionApplyResult.Conflict;
+                }
+
+                if (incoming.LeaseExpiresAtMilliseconds < current.LeaseExpiresAtMilliseconds)
+                {
+                    return ClientProjectionApplyResult.Stale;
+                }
+
+                return incoming.LeaseExpiresAtMilliseconds == current.LeaseExpiresAtMilliseconds
                     ? ClientProjectionApplyResult.Duplicate
-                    : ClientProjectionApplyResult.Conflict;
+                    : ClientProjectionApplyResult.Applied;
             }
 
             return ClientProjectionApplyResult.Applied;
@@ -468,7 +483,8 @@ namespace IHomeland.Client.Application.World
 
             if (incoming.Generation == highest.Generation &&
                 (_clearedAssignmentWorlds.Contains(incoming.PersonalWorldID) ||
-                 !incoming.IsEquivalent(highest)))
+                 !incoming.HasSameIdentity(highest) ||
+                 incoming.LeaseExpiresAtMilliseconds < highest.LeaseExpiresAtMilliseconds))
             {
                 return ClientProjectionApplyResult.Conflict;
             }
@@ -494,7 +510,10 @@ namespace IHomeland.Client.Application.World
             }
 
             if (!_highestAssignments.TryGetValue(assignment.PersonalWorldID, out var current) ||
-                assignment.Generation > current.Generation)
+                assignment.Generation > current.Generation ||
+                assignment.Generation == current.Generation &&
+                assignment.HasSameIdentity(current) &&
+                assignment.LeaseExpiresAtMilliseconds > current.LeaseExpiresAtMilliseconds)
             {
                 _highestAssignments[assignment.PersonalWorldID] = assignment;
                 _clearedAssignmentWorlds.Remove(assignment.PersonalWorldID);

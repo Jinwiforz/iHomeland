@@ -87,6 +87,31 @@ func TestRepositoryIntegrationConcurrencyCorruptionAndRestart(t *testing.T) {
 	if err != nil || outcome != domain.FindOutcomeFound || !found.Account.Valid() || !found.Credential.Valid() {
 		t.Fatalf("FindForAuthentication() = %v, %v", outcome, err)
 	}
+	invitable, err := repository.ResolveInvitablePlayer(ctx, found.Account.PlayerID())
+	if err != nil || invitable != domain.InvitablePlayerOutcomeAvailable {
+		t.Fatalf("ResolveInvitablePlayer(active) = %v, %v", invitable, err)
+	}
+	missingPlayer, _ := domain.NewPlayerID("ply_missing" + suffix)
+	invitable, err = repository.ResolveInvitablePlayer(ctx, missingPlayer)
+	if err != nil || invitable != domain.InvitablePlayerOutcomeUnavailable {
+		t.Fatalf("ResolveInvitablePlayer(missing) = %v, %v", invitable, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE accounts SET status = 'inactive' WHERE player_id = ?`, found.Account.PlayerID().String()); err != nil {
+		t.Fatal(err)
+	}
+	invitable, err = repository.ResolveInvitablePlayer(ctx, found.Account.PlayerID())
+	if err != nil || invitable != domain.InvitablePlayerOutcomeUnavailable {
+		t.Fatalf("ResolveInvitablePlayer(inactive) = %v, %v", invitable, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE accounts SET status = 'active' WHERE player_id = ?`, found.Account.PlayerID().String()); err != nil {
+		t.Fatal(err)
+	}
+	cancelledContext, cancelLookup := context.WithCancel(ctx)
+	cancelLookup()
+	invitable, err = repository.ResolveInvitablePlayer(cancelledContext, found.Account.PlayerID())
+	if err == nil || invitable != domain.InvitablePlayerOutcomeUnspecified {
+		t.Fatalf("ResolveInvitablePlayer(dependency) = %v, %v", invitable, err)
+	}
 
 	collision := integrationRecord(t, hasher, found.Account.ID().String(), "ply_c"+suffix, "other."+suffix)
 	if collisionOutcome, collisionErr := repository.Create(ctx, collision); collisionErr == nil || collisionOutcome != domain.CreateOutcomeNotCommitted {

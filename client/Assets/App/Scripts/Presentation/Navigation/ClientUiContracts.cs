@@ -1,9 +1,49 @@
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Lifetime;
+using UnityEngine;
 
 namespace IHomeland.Client.Presentation.Navigation
 {
+    /// <summary>
+    /// 标记由 Composition 显式创建并允许交给产品页面的窄上下文。
+    /// </summary>
+    internal interface IClientUiProductContext
+    {
+    }
+
+    /// <summary>
+    /// 定义通用 Host 与具体产品页面之间的显式 binding seam。
+    /// </summary>
+    internal interface IClientUiProductBinding
+    {
+        /// <summary>在 AppLifetime 启动前注入产品上下文，不能从全局查找。</summary>
+        /// <param name="context">Composition 创建的窄产品上下文。</param>
+        void Configure(IClientUiProductContext context);
+
+        /// <summary>绑定当前 route generation 与取消边界。</summary>
+        /// <param name="binding">Router 创建的不可变 route binding。</param>
+        /// <param name="cancellationToken">Candidate 或 App 停止取消信号。</param>
+        /// <returns>页面订阅和控件 callback 已连接时完成。</returns>
+        Task BindAsync(ClientUiRouteBinding binding, CancellationToken cancellationToken);
+
+        /// <summary>解除页面订阅、控件 callback 与临时输入。</summary>
+        /// <param name="cancellationToken">Route hide 或 App 停止取消信号。</param>
+        /// <returns>页面不再允许提交 command 时完成。</returns>
+        Task UnbindAsync(CancellationToken cancellationToken);
+    }
+
+    /// <summary>
+    /// 为 Unity Inspector 提供可序列化的产品页面 binding 类型边界。
+    /// </summary>
+    /// <remarks>
+    /// Unity 不能直接序列化 interface 字段，因此 Host 使用该抽象组件过滤对象选择器；
+    /// Host 在缓存时还会验证派生类型实现 <see cref="IClientUiProductBinding"/> 的完整生命周期契约。
+    /// </remarks>
+    public abstract class ClientUiProductBindingBehaviour : MonoBehaviour
+    {
+    }
+
     /// <summary>
     /// 定义 route router 对单个 UI Toolkit 或 uGUI view 所需的最小生命周期边界。
     /// </summary>

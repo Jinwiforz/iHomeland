@@ -4,6 +4,68 @@ using IHomeland.Protocol.Common.V1;
 namespace IHomeland.Client.Application.Gameplay
 {
     /// <summary>
+    /// 标识 gameplay 诊断发生的固定生命周期阶段。
+    /// </summary>
+    internal enum ClientGameplayDiagnosticStage
+    {
+        /// <summary>签发 ticket 或建立 transport。</summary>
+        Connect = 0,
+
+        /// <summary>写入认证 preface。</summary>
+        PrefaceWrite = 1,
+
+        /// <summary>读取、framing 或解码 S2C frame。</summary>
+        Reader = 2,
+
+        /// <summary>序列化写入 C2S frame。</summary>
+        Writer = 3,
+
+        /// <summary>等待或处理 active heartbeat。</summary>
+        Heartbeat = 4,
+
+        /// <summary>等待 correlated operation 结果。</summary>
+        Pending = 5,
+
+        /// <summary>线性化关闭 current generation。</summary>
+        Close = 6,
+    }
+
+    /// <summary>
+    /// 保存不含 endpoint、credential、payload、异常文本或业务 identity 的 Development 诊断。
+    /// </summary>
+    internal sealed class ClientGameplayDiagnostic
+    {
+        /// <summary>创建不可变低敏诊断事件。</summary>
+        /// <param name="generation">事件所属 connection generation。</param>
+        /// <param name="stage">固定生命周期阶段。</param>
+        /// <param name="closeReason">稳定关闭分类。</param>
+        /// <param name="exceptionType">可选 CLR 异常类型名，不包含 message 或 stack。</param>
+        internal ClientGameplayDiagnostic(
+            long generation,
+            ClientGameplayDiagnosticStage stage,
+            ClientGameplayCloseReason closeReason,
+            string exceptionType)
+        {
+            Generation = generation;
+            Stage = stage;
+            CloseReason = closeReason;
+            ExceptionType = exceptionType ?? string.Empty;
+        }
+
+        /// <summary>获取事件所属 connection generation。</summary>
+        internal long Generation { get; }
+
+        /// <summary>获取固定生命周期阶段。</summary>
+        internal ClientGameplayDiagnosticStage Stage { get; }
+
+        /// <summary>获取稳定关闭分类。</summary>
+        internal ClientGameplayCloseReason CloseReason { get; }
+
+        /// <summary>获取可选 CLR 异常类型名。</summary>
+        internal string ExceptionType { get; }
+    }
+
+    /// <summary>
     /// 标识唯一 gameplay channel 的安全可观察生命周期。
     /// </summary>
     internal enum ClientGameplayChannelState
@@ -64,6 +126,9 @@ namespace IHomeland.Client.Application.Gameplay
 
         /// <summary>Socket、TLS 或 stream I/O 失败。</summary>
         Transport = 9,
+
+        /// <summary>Active generation 未在冻结 deadline 内完成 gameplay heartbeat。</summary>
+        HeartbeatTimeout = 10,
     }
 
     /// <summary>

@@ -8,6 +8,8 @@ using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Presentation.Navigation;
+using IHomeland.Client.Presentation.PersonalWorld;
+using IHomeland.Client.Scenes.PersonalWorld;
 
 namespace IHomeland.Client.Core.Composition
 {
@@ -65,6 +67,12 @@ namespace IHomeland.Client.Core.Composition
         /// </summary>
         private readonly ClientUiRouter _uiRouter;
 
+        /// <summary>保存个人世界产品表现协调器；isolated host fixture 可以不提供。</summary>
+        private readonly ClientPersonalWorldExperience _personalWorldExperience;
+
+        /// <summary>保存唯一内容 Scene 转换 Host；isolated host fixture 可以不提供。</summary>
+        private readonly ClientWorldSceneTransitionHost _sceneTransitionHost;
+
         /// <summary>
         /// 创建只包含宿主运行边界的对象图结果，供不接入 HTTP capability 的 isolated fixture 使用。
         /// </summary>
@@ -91,7 +99,9 @@ namespace IHomeland.Client.Core.Composition
                 personalWorldService: null,
                 visitSessionService: null,
                 worldAdmissionCoordinator: null,
-                uiRouter: null)
+                uiRouter: null,
+                personalWorldExperience: null,
+                sceneTransitionHost: null)
         {
         }
 
@@ -110,6 +120,8 @@ namespace IHomeland.Client.Core.Composition
         /// <param name="visitSessionService">VisitSession/invite 投影 owner。</param>
         /// <param name="worldAdmissionCoordinator">World target flow owner。</param>
         /// <param name="uiRouter">App Scope 唯一 UI route owner。</param>
+        /// <param name="personalWorldExperience">个人世界产品表现协调器。</param>
+        /// <param name="sceneTransitionHost">唯一内容 Scene 转换 Host。</param>
         /// <exception cref="ArgumentException">单帧 callback 上限非正数时抛出。</exception>
         /// <exception cref="ArgumentNullException">任一必需对象、集合引用或 tickable 元素为 null 时抛出。</exception>
         internal AppCompositionResult(
@@ -124,7 +136,9 @@ namespace IHomeland.Client.Core.Composition
             PersonalWorldService personalWorldService,
             VisitSessionService visitSessionService,
             WorldAdmissionCoordinator worldAdmissionCoordinator,
-            ClientUiRouter uiRouter)
+            ClientUiRouter uiRouter,
+            ClientPersonalWorldExperience personalWorldExperience,
+            ClientWorldSceneTransitionHost sceneTransitionHost)
         {
             Lifetime = lifetime ?? throw new ArgumentNullException(nameof(lifetime));
             Dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -155,6 +169,8 @@ namespace IHomeland.Client.Core.Composition
             _visitSessionService = visitSessionService;
             _worldAdmissionCoordinator = worldAdmissionCoordinator;
             _uiRouter = uiRouter;
+            _personalWorldExperience = personalWorldExperience;
+            _sceneTransitionHost = sceneTransitionHost;
         }
 
         /// <summary>
@@ -224,5 +240,15 @@ namespace IHomeland.Client.Core.Composition
         /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 UI graph 时抛出。</exception>
         internal ClientUiRouter UiRouter => _uiRouter ??
             throw new InvalidOperationException("当前 isolated host composition 不包含 ClientUiRouter。");
+
+        /// <summary>获取完整 Composition 显式连接的个人世界产品 Experience。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接产品 graph 时抛出。</exception>
+        internal ClientPersonalWorldExperience PersonalWorldExperience => _personalWorldExperience ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含个人世界产品 Experience。");
+
+        /// <summary>获取完整 Composition 显式连接的唯一内容 Scene 转换 Host。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接产品 graph 时抛出。</exception>
+        internal ClientWorldSceneTransitionHost SceneTransitionHost => _sceneTransitionHost ??
+            throw new InvalidOperationException("当前 isolated host composition 不包含内容 Scene Host。");
     }
 }

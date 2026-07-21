@@ -28,13 +28,31 @@
       "sha256": "56c16cc51dc2c57dbce4f80ac3dc8172751c4684082e34639833947fd816ccf8"
     },
     {
+      "name": "gameplay-heartbeat-request",
+      "messageId": 1,
+      "protobuf": "ihomeland.common.v1.GameplayHeartbeatRequest",
+      "payloadBase64": "",
+      "payloadJson": "{}",
+      "envelopeBase64": "CAEQARgBIhABAQEBAQEBAQEBAQEBAQEBMAQ4g9CV/7wxQgA=",
+      "sha256": "6b118357eefe81c892198ad29755e5e324191f05999f87d65e7d11cba963678c"
+    },
+    {
+      "name": "gameplay-heartbeat-response",
+      "messageId": 2,
+      "protobuf": "ihomeland.common.v1.GameplayHeartbeatResponse",
+      "payloadBase64": "",
+      "payloadJson": "{}",
+      "envelopeBase64": "CAEQAhgCKhACAgICAgICAgICAgICAgICMAU4hNCV/7wxQgA=",
+      "sha256": "aceadbeec15d24355db7597594abf16fe8221a3dd82c0ae6cd44fc135d02c147"
+    },
+    {
       "name": "world-snapshot-request",
       "messageId": 2000,
       "protobuf": "ihomeland.world.v1.WorldSnapshotRequest",
       "payloadBase64": "",
       "payloadJson": "{}",
-      "envelopeBase64": "CAEQ0A8YASIQAQEBAQEBAQEBAQEBAQEBATAEOIPQlf+8MUIA",
-      "sha256": "74fdcbd5dd8f67a9948b2d04d812659095b64889ce504891cd2031f2f13e27e8"
+      "envelopeBase64": "CAEQ0A8YASIQAQEBAQEBAQEBAQEBAQEBATAGOIXQlf+8MUIA",
+      "sha256": "d37126ff66be05a6c82e10123166f923cdde43759a820a5dda6ecff8aff14d58"
     },
     {
       "name": "world-snapshot-response",
@@ -42,8 +60,8 @@
       "protobuf": "ihomeland.world.v1.WorldSnapshotResponse",
       "payloadBase64": "Co4BCjcKFHB3b3JsZF9maXh0dXJlX293bmVyEhRwbGF5ZXJfZml4dHVyZV9vd25lchgBIAMogNCV/7wxElMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MQ==",
       "payloadJson": "{\"snapshot\":{\"world\":{\"personal_world_id\":\"pworld_fixture_owner\",\"owner_player_id\":\"player_fixture_owner\",\"lifecycle\":\"PERSONAL_WORLD_LIFECYCLE_ACTIVE\",\"revision\":\"3\",\"created_at_ms\":\"1700000000000\"},\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"}}}",
-      "envelopeBase64": "CAEQ0Q8YAiIQAQEBAQEBAQEBAQEBAQEBATAFOITQlf+8MUKRAQqOAQo3ChRwd29ybGRfZml4dHVyZV9vd25lchIUcGxheWVyX2ZpeHR1cmVfb3duZXIYASADKIDQlf+8MRJTChRwd29ybGRfZml4dHVyZV9vd25lchIVd2luc3RfZml4dHVyZV9jdXJyZW50GhsIAhIUZ2FtZS5leGFtcGxlLmludmFsaWQY0SIgAijA+Zz/vDE=",
-      "sha256": "80944cd816d9fc6ca47c5a10cddb6c77768092af2d003f57f47b852aa9e4ac06"
+      "envelopeBase64": "CAEQ0Q8YAiIQAQEBAQEBAQEBAQEBAQEBATAHOIbQlf+8MUKRAQqOAQo3ChRwd29ybGRfZml4dHVyZV9vd25lchIUcGxheWVyX2ZpeHR1cmVfb3duZXIYASADKIDQlf+8MRJTChRwd29ybGRfZml4dHVyZV9vd25lchIVd2luc3RfZml4dHVyZV9jdXJyZW50GhsIAhIUZ2FtZS5leGFtcGxlLmludmFsaWQY0SIgAijA+Zz/vDE=",
+      "sha256": "5eeb7bae73b097679d832372dff697155f8910af9fbf40ed1e6365c3b3724b76"
     },
     {
       "name": "world-snapshot-push",
@@ -51,8 +69,8 @@
       "protobuf": "ihomeland.world.v1.WorldSnapshotPush",
       "payloadBase64": "Co4BCjcKFHB3b3JsZF9maXh0dXJlX293bmVyEhRwbGF5ZXJfZml4dHVyZV9vd25lchgBIAMogNCV/7wxElMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MQ==",
       "payloadJson": "{\"snapshot\":{\"world\":{\"personal_world_id\":\"pworld_fixture_owner\",\"owner_player_id\":\"player_fixture_owner\",\"lifecycle\":\"PERSONAL_WORLD_LIFECYCLE_ACTIVE\",\"revision\":\"3\",\"created_at_ms\":\"1700000000000\"},\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"}}}",
-      "envelopeBase64": "CAEQ0g8YBDAGOIXQlf+8MUKRAQqOAQo3ChRwd29ybGRfZml4dHVyZV9vd25lchIUcGxheWVyX2ZpeHR1cmVfb3duZXIYASADKIDQlf+8MRJTChRwd29ybGRfZml4dHVyZV9vd25lchIVd2luc3RfZml4dHVyZV9jdXJyZW50GhsIAhIUZ2FtZS5leGFtcGxlLmludmFsaWQY0SIgAijA+Zz/vDE=",
-      "sha256": "dace0a9b36cca7f2f3a85a8a13a0d11483f8937307bc653b7b473aec3a430285"
+      "envelopeBase64": "CAEQ0g8YBDAIOIfQlf+8MUKRAQqOAQo3ChRwd29ybGRfZml4dHVyZV9vd25lchIUcGxheWVyX2ZpeHR1cmVfb3duZXIYASADKIDQlf+8MRJTChRwd29ybGRfZml4dHVyZV9vd25lchIVd2luc3RfZml4dHVyZV9jdXJyZW50GhsIAhIUZ2FtZS5leGFtcGxlLmludmFsaWQY0SIgAijA+Zz/vDE=",
+      "sha256": "abb6dc2fd8aab3deb82e72626a3158771ad88e9946231bf29a3d6456e39cb840"
     },
     {
       "name": "world-assignment-changed-push",
@@ -60,8 +78,8 @@
       "protobuf": "ihomeland.world.v1.WorldAssignmentChangedPush",
       "payloadBase64": "ChRwd29ybGRfZml4dHVyZV9vd25lchJTChRwd29ybGRfZml4dHVyZV9vd25lchIVd2luc3RfZml4dHVyZV9jdXJyZW50GhsIAhIUZ2FtZS5leGFtcGxlLmludmFsaWQY0SIgAijA+Zz/vDEaIHdvcmxkLmFzc2lnbm1lbnQuY2hhbmdlZC5maXh0dXJl",
       "payloadJson": "{\"personal_world_id\":\"pworld_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"reason_key\":\"world.assignment.changed.fixture\"}",
-      "envelopeBase64": "CAEQ0w8YBDAHOIbQlf+8MUKNAQoUcHdvcmxkX2ZpeHR1cmVfb3duZXISUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxGiB3b3JsZC5hc3NpZ25tZW50LmNoYW5nZWQuZml4dHVyZQ==",
-      "sha256": "f86e3c7a53ffef282f20343b04292eee7202308a9410b67320479fec2144bd7c"
+      "envelopeBase64": "CAEQ0w8YBDAJOIjQlf+8MUKNAQoUcHdvcmxkX2ZpeHR1cmVfb3duZXISUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxGiB3b3JsZC5hc3NpZ25tZW50LmNoYW5nZWQuZml4dHVyZQ==",
+      "sha256": "b1cf05f5c44ddfce66d1f494f565d00ec7d0b2a2ba41e7b21b785fb42f14b109"
     },
     {
       "name": "visit-invite-push",
@@ -69,8 +87,17 @@
       "protobuf": "ihomeland.visit.v1.VisitInvitePush",
       "payloadBase64": "CkoKEmludml0ZV9maXh0dXJlX29uZRIRdmlzaXRfZml4dHVyZV9vbmUaFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IgASgEMOCkmf+8MRIUcGxheWVyX2ZpeHR1cmVfb3duZXI=",
       "payloadJson": "{\"invite\":{\"invite_id\":\"invite_fixture_one\",\"visit_session_id\":\"visit_fixture_one\",\"target_visitor_id\":\"player_fixture_visitor\",\"state\":\"VISIT_INVITE_STATE_PENDING\",\"created_revision\":\"4\",\"expires_at_ms\":\"1700000060000\"},\"owner_player_id\":\"player_fixture_owner\"}",
-      "envelopeBase64": "CAEQtBAYBDAIOIfQlf+8MUJiCkoKEmludml0ZV9maXh0dXJlX29uZRIRdmlzaXRfZml4dHVyZV9vbmUaFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IgASgEMOCkmf+8MRIUcGxheWVyX2ZpeHR1cmVfb3duZXI=",
-      "sha256": "567590ef5d5188c88249374f98f40a91b796208a82275c9d5011974cc6e2506b"
+      "envelopeBase64": "CAEQtBAYBDAKOInQlf+8MUJiCkoKEmludml0ZV9maXh0dXJlX29uZRIRdmlzaXRfZml4dHVyZV9vbmUaFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IgASgEMOCkmf+8MRIUcGxheWVyX2ZpeHR1cmVfb3duZXI=",
+      "sha256": "e47744e63970cbb2493cdaf389cfd9f892f940c5ab314463ea5d375f94bbc06a"
+    },
+    {
+      "name": "visit-invite-retired-push",
+      "messageId": 2100,
+      "protobuf": "ihomeland.visit.v1.VisitInvitePush",
+      "payloadBase64": "Ck4KFmludml0ZV9maXh0dXJlX3JldGlyZWQSEXZpc2l0X2ZpeHR1cmVfb25lGhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yIAMoBDDgpJn/vDESFHBsYXllcl9maXh0dXJlX293bmVy",
+      "payloadJson": "{\"invite\":{\"invite_id\":\"invite_fixture_retired\",\"visit_session_id\":\"visit_fixture_one\",\"target_visitor_id\":\"player_fixture_visitor\",\"state\":\"VISIT_INVITE_STATE_RETIRED\",\"created_revision\":\"4\",\"expires_at_ms\":\"1700000060000\"},\"owner_player_id\":\"player_fixture_owner\"}",
+      "envelopeBase64": "CAEQtBAYBDALOIrQlf+8MUJmCk4KFmludml0ZV9maXh0dXJlX3JldGlyZWQSEXZpc2l0X2ZpeHR1cmVfb25lGhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yIAMoBDDgpJn/vDESFHBsYXllcl9maXh0dXJlX293bmVy",
+      "sha256": "6199258fe821a240341b84c6d4e05d4dc3c9b975ab84e876988290f302071b5d"
     },
     {
       "name": "visit-owner-availability-push",
@@ -78,8 +105,8 @@
       "protobuf": "ihomeland.visit.v1.VisitOwnerAvailabilityPush",
       "payloadBase64": "ChF2aXNpdF9maXh0dXJlX29uZRAAGLC6l/+8MSAG",
       "payloadJson": "{\"visit_session_id\":\"visit_fixture_one\",\"available\":false,\"grace_expires_at_ms\":\"1700000030000\",\"revision\":\"6\"}",
-      "envelopeBase64": "CAEQtRAYBDAJOIjQlf+8MUIeChF2aXNpdF9maXh0dXJlX29uZRAAGLC6l/+8MSAG",
-      "sha256": "30920d322360fb95ab0239b75883b48b0256a04727fea567decfb966cd9d8e5c"
+      "envelopeBase64": "CAEQtRAYBDAMOIvQlf+8MUIeChF2aXNpdF9maXh0dXJlX29uZRAAGLC6l/+8MSAG",
+      "sha256": "3a46055b3fa08dfd241a6ab294653f3d6ca032fc937b3e8be842a3086934b70b"
     },
     {
       "name": "visit-closed-notice-push",
@@ -87,8 +114,8 @@
       "protobuf": "ihomeland.visit.v1.VisitClosedNoticePush",
       "payloadBase64": "ChF2aXNpdF9maXh0dXJlX29uZRADGAc=",
       "payloadJson": "{\"visit_session_id\":\"visit_fixture_one\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"revision\":\"7\"}",
-      "envelopeBase64": "CAEQthAYBDAKOInQlf+8MUIXChF2aXNpdF9maXh0dXJlX29uZRADGAc=",
-      "sha256": "b89b74b0f1dcd735b95e289d477815d266efe29623f7624c15c081653d33d7b0"
+      "envelopeBase64": "CAEQthAYBDANOIzQlf+8MUIXChF2aXNpdF9maXh0dXJlX29uZRADGAc=",
+      "sha256": "7f6a53870260343f3f7139e59583568793cc7a84c9e5523cf1255154faf1f958"
     },
     {
       "name": "visit-open-command",
@@ -96,8 +123,8 @@
       "protobuf": "ihomeland.visit.v1.VisitOpenCommand",
       "payloadBase64": "",
       "payloadJson": "{}",
-      "envelopeBase64": "CAEQtxAYAyoQAgICAgICAgICAgICAgICAjALOIrQlf+8MUIA",
-      "sha256": "60dba2e4053265bcfa28983a6f59d2e69d71594018bf65f19b92921b82ef72da"
+      "envelopeBase64": "CAEQtxAYAyoQAgICAgICAgICAgICAgICAjAOOI3Qlf+8MUIA",
+      "sha256": "087a2a4b53d25a5175f767f6f1c884429058d123537ee55dba835399557ac33a"
     },
     {
       "name": "visit-open-response",
@@ -105,8 +132,8 @@
       "protobuf": "ihomeland.visit.v1.VisitOpenResponse",
       "payloadBase64": "Cq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0x",
       "payloadJson": "{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"}}",
-      "envelopeBase64": "CAEQuBAYAioQAgICAgICAgICAgICAgICAjAMOIvQlf+8MUKxAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MQ==",
-      "sha256": "05c64b9d9382d8b270675794241936aa80b83bf03011a2f5718ee97faffd5b04"
+      "envelopeBase64": "CAEQuBAYAioQAgICAgICAgICAgICAgICAjAPOI7Qlf+8MUKxAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MQ==",
+      "sha256": "8ac0c899953617ae849e7bd1c6ce9cbfe8790a67f7d30e80cef6ad66a2de4305"
     },
     {
       "name": "visit-create-invite-command",
@@ -114,8 +141,8 @@
       "protobuf": "ihomeland.visit.v1.VisitCreateInviteCommand",
       "payloadBase64": "ChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEODUAxgD",
       "payloadJson": "{\"target_visitor_id\":\"player_fixture_visitor\",\"invite_lifetime_ms\":60000,\"expected_revision\":\"3\"}",
-      "envelopeBase64": "CAEQuRAYAyoQAgICAgICAgICAgICAgICAjANOIzQlf+8MUIeChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEODUAxgD",
-      "sha256": "929b26dc36e8f1b37b567c19c893bb6b38d8e69cc504ff43351c82d82b6e670d"
+      "envelopeBase64": "CAEQuRAYAyoQAgICAgICAgICAgICAgICAjAQOI/Qlf+8MUIeChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEODUAxgD",
+      "sha256": "294c2524e47001f98f4b8a2b14e4a04ea2aa2109d505599e107cf9d572c0c020"
     },
     {
       "name": "visit-create-invite-response",
@@ -123,8 +150,8 @@
       "protobuf": "ihomeland.visit.v1.VisitCreateInviteResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgCEkoKEmludml0ZV9maXh0dXJlX29uZRIRdmlzaXRfZml4dHVyZV9vbmUaFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IgASgEMOCkmf+8MQ==",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]},\"invite\":{\"invite_id\":\"invite_fixture_one\",\"visit_session_id\":\"visit_fixture_one\",\"target_visitor_id\":\"player_fixture_visitor\",\"state\":\"VISIT_INVITE_STATE_PENDING\",\"created_revision\":\"4\",\"expires_at_ms\":\"1700000060000\"}}",
-      "envelopeBase64": "CAEQuhAYAioQAgICAgICAgICAgICAgICAjAOOI3Qlf+8MUKzAgrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAhJKChJpbnZpdGVfZml4dHVyZV9vbmUSEXZpc2l0X2ZpeHR1cmVfb25lGhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yIAEoBDDgpJn/vDE=",
-      "sha256": "1c2bf6d6bad1356a8db6357e9f6531f90b617da9c78267eb397aefdcd134fca7"
+      "envelopeBase64": "CAEQuhAYAioQAgICAgICAgICAgICAgICAjAROJDQlf+8MUKzAgrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAhJKChJpbnZpdGVfZml4dHVyZV9vbmUSEXZpc2l0X2ZpeHR1cmVfb25lGhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yIAEoBDDgpJn/vDE=",
+      "sha256": "4c411acb3901509934b840476867eb5f6b6ec7e04223555c8a057a8f4eb04978"
     },
     {
       "name": "visit-revoke-invite-command",
@@ -132,8 +159,8 @@
       "protobuf": "ihomeland.visit.v1.VisitRevokeInviteCommand",
       "payloadBase64": "ChJpbnZpdGVfZml4dHVyZV9vbmUQBA==",
       "payloadJson": "{\"invite_id\":\"invite_fixture_one\",\"expected_revision\":\"4\"}",
-      "envelopeBase64": "CAEQuxAYAyoQAgICAgICAgICAgICAgICAjAPOI7Qlf+8MUIWChJpbnZpdGVfZml4dHVyZV9vbmUQBA==",
-      "sha256": "cef1502a1c84e7c4c264023734a93115941df7540f1640240619e113b9323913"
+      "envelopeBase64": "CAEQuxAYAyoQAgICAgICAgICAgICAgICAjASOJHQlf+8MUIWChJpbnZpdGVfZml4dHVyZV9vbmUQBA==",
+      "sha256": "33dddf9f4e543d3a8d1e3995e55cfa075a66f22c347e82856b52b1ba1f6ce269"
     },
     {
       "name": "visit-revoke-invite-response",
@@ -141,8 +168,8 @@
       "protobuf": "ihomeland.visit.v1.VisitRevokeInviteResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]}}",
-      "envelopeBase64": "CAEQvBAYAioQAgICAgICAgICAgICAgICAjAQOI/Qlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
-      "sha256": "c820c61810ee73d365d371ccd2206e9a788a374965aadb869b634f1b62488e3f"
+      "envelopeBase64": "CAEQvBAYAioQAgICAgICAgICAgICAgICAjATOJLQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
+      "sha256": "05938237d2330da9c4505579e468693b4fca2c743f882bf5b2239a3ca2d0f2d3"
     },
     {
       "name": "visit-join-command",
@@ -150,8 +177,8 @@
       "protobuf": "ihomeland.visit.v1.VisitJoinCommand",
       "payloadBase64": "CiBmaXh0dXJlLWpvaW4tYWRtaXNzaW9uLW5vdC12YWxpZBAF",
       "payloadJson": "{\"admission_credential\":\"fixture-join-admission-not-valid\",\"expected_revision\":\"5\"}",
-      "envelopeBase64": "CAEQvRAYAyoQAgICAgICAgICAgICAgICAjAROJDQlf+8MUIkCiBmaXh0dXJlLWpvaW4tYWRtaXNzaW9uLW5vdC12YWxpZBAF",
-      "sha256": "6eebc3542de8ea76bc1557b78e0b734a39deb8e5a98dd385a059b23c7e7010c9"
+      "envelopeBase64": "CAEQvRAYAyoQAgICAgICAgICAgICAgICAjAUOJPQlf+8MUIkCiBmaXh0dXJlLWpvaW4tYWRtaXNzaW9uLW5vdC12YWxpZBAF",
+      "sha256": "88f92641df800dc1179091c964111568aa5069929eaadc8ea6f7070cdbcaaf0e"
     },
     {
       "name": "visit-join-response",
@@ -159,8 +186,8 @@
       "protobuf": "ihomeland.visit.v1.VisitJoinResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]}}",
-      "envelopeBase64": "CAEQvhAYAioQAgICAgICAgICAgICAgICAjASOJHQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
-      "sha256": "3fbb511e6af10ec1d4653e0f8fbf9072227b01be72c9d416dc3d8f08deb7c41f"
+      "envelopeBase64": "CAEQvhAYAioQAgICAgICAgICAgICAgICAjAVOJTQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
+      "sha256": "b8668ce677ce85fadfd02ed776c70095f678a0ec3f4a30dba1fecc8c0c4bc201"
     },
     {
       "name": "visit-leave-command",
@@ -168,8 +195,8 @@
       "protobuf": "ihomeland.visit.v1.VisitLeaveCommand",
       "payloadBase64": "CAU=",
       "payloadJson": "{\"expected_revision\":\"5\"}",
-      "envelopeBase64": "CAEQvxAYAyoQAgICAgICAgICAgICAgICAjATOJLQlf+8MUICCAU=",
-      "sha256": "a8ad0ee94e8abc5317f7c822ce9b2d93e785830d8d134991596da701bd392648"
+      "envelopeBase64": "CAEQvxAYAyoQAgICAgICAgICAgICAgICAjAWOJXQlf+8MUICCAU=",
+      "sha256": "d164b281e15bd9dc3bc5637b5a100828bc219f0e72fef6864e89871c24a39107"
     },
     {
       "name": "visit-leave-response",
@@ -177,8 +204,8 @@
       "protobuf": "ihomeland.visit.v1.VisitLeaveResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]}}",
-      "envelopeBase64": "CAEQwBAYAioQAgICAgICAgICAgICAgICAjAUOJPQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
-      "sha256": "79ef0c6c7ad09e4a2fc55dbb50a3dea09b7186b873047af0d7d53d40acfc2caa"
+      "envelopeBase64": "CAEQwBAYAioQAgICAgICAgICAgICAgICAjAXOJbQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
+      "sha256": "aa8d19d72016488632fde7cc2724ee01b73f57ea236c89a999a9cab1c07f3923"
     },
     {
       "name": "visit-kick-command",
@@ -186,8 +213,8 @@
       "protobuf": "ihomeland.visit.v1.VisitKickCommand",
       "payloadBase64": "ChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAU=",
       "payloadJson": "{\"target_visitor_id\":\"player_fixture_visitor\",\"expected_revision\":\"5\"}",
-      "envelopeBase64": "CAEQwRAYAyoQAgICAgICAgICAgICAgICAjAVOJTQlf+8MUIaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAU=",
-      "sha256": "bfd940d312ddade2d38806ff140ecf76c15dc67acc00c24f7ea3ffc6f90b23aa"
+      "envelopeBase64": "CAEQwRAYAyoQAgICAgICAgICAgICAgICAjAYOJfQlf+8MUIaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAU=",
+      "sha256": "6d39268dece754b5cda4f42e6001448331d490c4b7791e86d44fa3660afbe4a5"
     },
     {
       "name": "visit-kick-response",
@@ -195,8 +222,8 @@
       "protobuf": "ihomeland.visit.v1.VisitKickResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]}}",
-      "envelopeBase64": "CAEQwhAYAioQAgICAgICAgICAgICAgICAjAWOJXQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
-      "sha256": "036196269262fd51745ff9101c14a59b874c5c1ea8e6a13b9e97e26300f47f6b"
+      "envelopeBase64": "CAEQwhAYAioQAgICAgICAgICAgICAgICAjAZOJjQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
+      "sha256": "dbd81268c145a8630c8598b8c36b400705d2cabebb23356f08f6e982fb75d17b"
     },
     {
       "name": "visit-reconnect-command",
@@ -204,8 +231,8 @@
       "protobuf": "ihomeland.visit.v1.VisitReconnectCommand",
       "payloadBase64": "CiVmaXh0dXJlLXJlY29ubmVjdC1hZG1pc3Npb24tbm90LXZhbGlkEAY=",
       "payloadJson": "{\"admission_credential\":\"fixture-reconnect-admission-not-valid\",\"expected_revision\":\"6\"}",
-      "envelopeBase64": "CAEQwxAYAyoQAgICAgICAgICAgICAgICAjAXOJbQlf+8MUIpCiVmaXh0dXJlLXJlY29ubmVjdC1hZG1pc3Npb24tbm90LXZhbGlkEAY=",
-      "sha256": "cb231cc21c6e769857206b8eaca366aad242549a4e78d29964600560b3462173"
+      "envelopeBase64": "CAEQwxAYAyoQAgICAgICAgICAgICAgICAjAaOJnQlf+8MUIpCiVmaXh0dXJlLXJlY29ubmVjdC1hZG1pc3Npb24tbm90LXZhbGlkEAY=",
+      "sha256": "1b01be3dd7f1988fbe5b41fcbea2ce72a084fafff70679140f065f09259b0a24"
     },
     {
       "name": "visit-reconnect-response",
@@ -213,8 +240,8 @@
       "protobuf": "ihomeland.visit.v1.VisitReconnectResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]}}",
-      "envelopeBase64": "CAEQxBAYAioQAgICAgICAgICAgICAgICAjAYOJfQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
-      "sha256": "bbe4c51b9b56209b440beb8f262a918ebb178b0dc9fa3cc7a14284d523c49f78"
+      "envelopeBase64": "CAEQxBAYAioQAgICAgICAgICAgICAgICAjAbOJrQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
+      "sha256": "ab723ad4f40f52bada66173c0a43983a6757c7aab462583b5e914a7772582251"
     },
     {
       "name": "visit-close-command",
@@ -222,8 +249,8 @@
       "protobuf": "ihomeland.visit.v1.VisitCloseCommand",
       "payloadBase64": "CAY=",
       "payloadJson": "{\"expected_revision\":\"6\"}",
-      "envelopeBase64": "CAEQxRAYAyoQAgICAgICAgICAgICAgICAjAZOJjQlf+8MUICCAY=",
-      "sha256": "c5b16927edb99cb02afff7c38083c083c5e7f9b1fb855033615422d6d6d65db1"
+      "envelopeBase64": "CAEQxRAYAyoQAgICAgICAgICAgICAgICAjAcOJvQlf+8MUICCAY=",
+      "sha256": "c878ac77bb1e6dba659834419e2921c30d63e15d022321f4232c00b824290265"
     },
     {
       "name": "visit-close-response",
@@ -231,8 +258,8 @@
       "protobuf": "ihomeland.visit.v1.VisitCloseResponse",
       "payloadBase64": "CuQBCq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0xEjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"result\":{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"},\"safe_returns\":[{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}]}}",
-      "envelopeBase64": "CAEQxhAYAioQAgICAgICAgICAgICAgICAjAaOJnQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
-      "sha256": "68f559bd1b5b931229c9a9c781e989f3ef27c640e88fc731a455bff5de827d88"
+      "envelopeBase64": "CAEQxhAYAioQAgICAgICAgICAgICAgICAjAdOJzQlf+8MULnAQrkAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MRIxChF2aXNpdF9maXh0dXJlX29uZRIWcGxheWVyX2ZpeHR1cmVfdmlzaXRvchgDIAEoAg==",
+      "sha256": "029de8d7ebc8e16b33bec037f1c0cfb99c9ac5ae2bdbd5f4378ece6e8af3745b"
     },
     {
       "name": "visit-snapshot-request",
@@ -240,8 +267,8 @@
       "protobuf": "ihomeland.visit.v1.VisitSnapshotRequest",
       "payloadBase64": "",
       "payloadJson": "{}",
-      "envelopeBase64": "CAEQxxAYASIQAQEBAQEBAQEBAQEBAQEBATAbOJrQlf+8MUIA",
-      "sha256": "2fc8ea53705146b2908f4e82de1c9515e1b14348f1b0ae0c1f02cc4eb3ee0010"
+      "envelopeBase64": "CAEQxxAYASIQAQEBAQEBAQEBAQEBAQEBATAeOJ3Qlf+8MUIA",
+      "sha256": "1868f33c2e7e0e16fde1dfc973b89c63aa54dcf388db618d3b39a70f9c3feb1a"
     },
     {
       "name": "visit-snapshot-response",
@@ -249,8 +276,8 @@
       "protobuf": "ihomeland.visit.v1.VisitSnapshotResponse",
       "payloadBase64": "Cq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0x",
       "payloadJson": "{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"}}",
-      "envelopeBase64": "CAEQyBAYAiIQAQEBAQEBAQEBAQEBAQEBATAcOJvQlf+8MUKxAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MQ==",
-      "sha256": "2a6c37f876096d857520a359b72036ed47448c61fd67cca597eee7f216e89198"
+      "envelopeBase64": "CAEQyBAYAiIQAQEBAQEBAQEBAQEBAQEBATAfOJ7Qlf+8MUKxAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MQ==",
+      "sha256": "e16f379d9663ff0bf56e060bfab01aeab9ebf73ebc9b97ef6e5c9ce639e4bcf7"
     },
     {
       "name": "visit-snapshot-push",
@@ -258,8 +285,8 @@
       "protobuf": "ihomeland.visit.v1.VisitSnapshotPush",
       "payloadBase64": "Cq4BChF2aXNpdF9maXh0dXJlX29uZRIUcGxheWVyX2ZpeHR1cmVfb3duZXIaUwoUcHdvcmxkX2ZpeHR1cmVfb3duZXISFXdpbnN0X2ZpeHR1cmVfY3VycmVudBobCAISFGdhbWUuZXhhbXBsZS5pbnZhbGlkGNEiIAIowPmc/7wxIAEoBTAEOhoKFnBsYXllcl9maXh0dXJlX3Zpc2l0b3IQAkCA0JX/vDFIgK3xgL0x",
       "payloadJson": "{\"snapshot\":{\"visit_session_id\":\"visit_fixture_one\",\"owner_player_id\":\"player_fixture_owner\",\"assignment\":{\"personal_world_id\":\"pworld_fixture_owner\",\"world_instance_id\":\"winst_fixture_current\",\"endpoint\":{\"channel\":\"TRANSPORT_CHANNEL_TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"generation\":\"2\",\"lease_expires_at_ms\":\"1700000120000\"},\"lifecycle\":\"VISIT_LIFECYCLE_OPEN\",\"revision\":\"5\",\"capacity\":4,\"visitors\":[{\"player_id\":\"player_fixture_visitor\",\"state\":\"VISIT_MEMBERSHIP_STATE_JOINED\"}],\"created_at_ms\":\"1700000000000\",\"expires_at_ms\":\"1700003600000\"}}",
-      "envelopeBase64": "CAEQyRAYBDAdOJzQlf+8MUKxAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MQ==",
-      "sha256": "9ef9b5d8279b5166cdaaec052a6629bd416deaeac35d5ca727ac9e1315d41221"
+      "envelopeBase64": "CAEQyRAYBDAgOJ/Qlf+8MUKxAQquAQoRdmlzaXRfZml4dHVyZV9vbmUSFHBsYXllcl9maXh0dXJlX293bmVyGlMKFHB3b3JsZF9maXh0dXJlX293bmVyEhV3aW5zdF9maXh0dXJlX2N1cnJlbnQaGwgCEhRnYW1lLmV4YW1wbGUuaW52YWxpZBjRIiACKMD5nP+8MSABKAUwBDoaChZwbGF5ZXJfZml4dHVyZV92aXNpdG9yEAJAgNCV/7wxSICt8YC9MQ==",
+      "sha256": "778803ddb6af11805a1ace86b0a606c28daf769cf3e650ada1d4afbaf7f4c83d"
     },
     {
       "name": "visit-safe-return-push",
@@ -267,8 +294,8 @@
       "protobuf": "ihomeland.visit.v1.VisitSafeReturnPush",
       "payloadBase64": "CjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
       "payloadJson": "{\"directive\":{\"visit_session_id\":\"visit_fixture_one\",\"visitor_id\":\"player_fixture_visitor\",\"reason\":\"SAFE_RETURN_REASON_OWNER_CLOSED\",\"preferred\":\"SAFE_RETURN_DESTINATION_OWN_PERSONAL_WORLD\",\"fallback\":\"SAFE_RETURN_DESTINATION_SAFE_ENTRY\"}}",
-      "envelopeBase64": "CAEQyhAYBDAeOJ3Qlf+8MUIzCjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
-      "sha256": "58b97ae58bd8864f10265bd69ca6a54d8ac75771b4fe726936e166095fc0a93c"
+      "envelopeBase64": "CAEQyhAYBDAhOKDQlf+8MUIzCjEKEXZpc2l0X2ZpeHR1cmVfb25lEhZwbGF5ZXJfZml4dHVyZV92aXNpdG9yGAMgASgC",
+      "sha256": "126ff908981dfbef6ac5962d2d33fa8e0ca83957867dfe9c7d280b42338c6c5d"
     }
   ]
 }

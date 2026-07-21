@@ -493,6 +493,14 @@ func buildWorldVisitGoldenDefinitions(endpoint *sessionv1.Endpoint) []goldenDefi
 		CreatedRevision: proto.Uint64(4),
 		ExpiresAtMs:     proto.Int64(1_700_000_060_000),
 	}.Build()
+	retiredInvite := visitv1.VisitInviteSummary_builder{
+		InviteId:        proto.String("invite_fixture_retired"),
+		VisitSessionId:  proto.String("visit_fixture_one"),
+		TargetVisitorId: proto.String("player_fixture_visitor"),
+		State:           enumPointer(visitv1.VisitInviteState_VISIT_INVITE_STATE_RETIRED),
+		CreatedRevision: proto.Uint64(4),
+		ExpiresAtMs:     proto.Int64(1_700_000_060_000),
+	}.Build()
 	directive := visitv1.SafeReturnDirective_builder{
 		VisitSessionId: proto.String("visit_fixture_one"),
 		VisitorId:      proto.String("player_fixture_visitor"),
@@ -504,11 +512,14 @@ func buildWorldVisitGoldenDefinitions(endpoint *sessionv1.Endpoint) []goldenDefi
 	joinCredential := "fixture-join-admission-not-valid"
 	reconnectCredential := "fixture-reconnect-admission-not-valid"
 	return []goldenDefinition{
+		{name: "gameplay-heartbeat-request", messageID: 1, kind: commonv1.MessageKind_MESSAGE_KIND_REQUEST, message: commonv1.GameplayHeartbeatRequest_builder{}.Build(), typeName: "ihomeland.common.v1.GameplayHeartbeatRequest"},
+		{name: "gameplay-heartbeat-response", messageID: 2, kind: commonv1.MessageKind_MESSAGE_KIND_RESPONSE, message: commonv1.GameplayHeartbeatResponse_builder{}.Build(), typeName: "ihomeland.common.v1.GameplayHeartbeatResponse"},
 		{name: "world-snapshot-request", messageID: 2000, kind: commonv1.MessageKind_MESSAGE_KIND_REQUEST, message: worldv1.WorldSnapshotRequest_builder{}.Build(), typeName: "ihomeland.world.v1.WorldSnapshotRequest"},
 		{name: "world-snapshot-response", messageID: 2001, kind: commonv1.MessageKind_MESSAGE_KIND_RESPONSE, message: worldv1.WorldSnapshotResponse_builder{Snapshot: worldSnapshot}.Build(), typeName: "ihomeland.world.v1.WorldSnapshotResponse"},
 		{name: "world-snapshot-push", messageID: 2002, kind: commonv1.MessageKind_MESSAGE_KIND_PUSH, message: worldv1.WorldSnapshotPush_builder{Snapshot: worldSnapshot}.Build(), typeName: "ihomeland.world.v1.WorldSnapshotPush"},
 		{name: "world-assignment-changed-push", messageID: 2003, kind: commonv1.MessageKind_MESSAGE_KIND_PUSH, message: worldv1.WorldAssignmentChangedPush_builder{PersonalWorldId: proto.String("pworld_fixture_owner"), Assignment: assignment, ReasonKey: proto.String("world.assignment.changed.fixture")}.Build(), typeName: "ihomeland.world.v1.WorldAssignmentChangedPush"},
 		{name: "visit-invite-push", messageID: 2100, kind: commonv1.MessageKind_MESSAGE_KIND_PUSH, message: visitv1.VisitInvitePush_builder{Invite: invite, OwnerPlayerId: proto.String("player_fixture_owner")}.Build(), typeName: "ihomeland.visit.v1.VisitInvitePush"},
+		{name: "visit-invite-retired-push", messageID: 2100, kind: commonv1.MessageKind_MESSAGE_KIND_PUSH, message: visitv1.VisitInvitePush_builder{Invite: retiredInvite, OwnerPlayerId: proto.String("player_fixture_owner")}.Build(), typeName: "ihomeland.visit.v1.VisitInvitePush"},
 		{name: "visit-owner-availability-push", messageID: 2101, kind: commonv1.MessageKind_MESSAGE_KIND_PUSH, message: visitv1.VisitOwnerAvailabilityPush_builder{VisitSessionId: proto.String("visit_fixture_one"), Available: proto.Bool(false), GraceExpiresAtMs: proto.Int64(1_700_000_030_000), Revision: proto.Uint64(6)}.Build(), typeName: "ihomeland.visit.v1.VisitOwnerAvailabilityPush"},
 		{name: "visit-closed-notice-push", messageID: 2102, kind: commonv1.MessageKind_MESSAGE_KIND_PUSH, message: visitv1.VisitClosedNoticePush_builder{VisitSessionId: proto.String("visit_fixture_one"), Reason: enumPointer(visitv1.SafeReturnReason_SAFE_RETURN_REASON_OWNER_CLOSED), Revision: proto.Uint64(7)}.Build(), typeName: "ihomeland.visit.v1.VisitClosedNoticePush"},
 		{name: "visit-open-command", messageID: 2103, kind: commonv1.MessageKind_MESSAGE_KIND_COMMAND, message: visitv1.VisitOpenCommand_builder{}.Build(), typeName: "ihomeland.visit.v1.VisitOpenCommand"},

@@ -28,6 +28,9 @@ const (
 	maximumWorldRuntimeInstances = 10000
 	// maximumSemanticDeadlineEntries 限制单worker持有的语义任务总数。
 	maximumSemanticDeadlineEntries = 1000000
+	// maximumGameplayTCPIdleTimeout 为heartbeat失效或异常客户端保留服务端最终回收上限。
+	// 其他I/O与生命周期timeout仍使用maximumTimeout，避免把单连接空闲策略扩散为通用长等待。
+	maximumGameplayTCPIdleTimeout = 30 * time.Minute
 )
 
 // publicHostPattern 限制客户端可见DNS name为无scheme、path、空label或首尾连字符的安全ASCII形式。
@@ -259,7 +262,7 @@ type GameplayTCPPolicy struct {
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 	// KeepAlive 是操作系统TCP keepalive探测周期。
 	KeepAlive time.Duration `yaml:"keepAlive"`
-	// IdleTimeout 限制连接没有成功业务I/O的寿命。
+	// IdleTimeout 限制连接没有成功合法C2S I/O（包括heartbeat）的寿命。
 	IdleTimeout time.Duration `yaml:"idleTimeout"`
 	// CloseTimeout 限制连接任务与发送队列的关闭等待时间。
 	CloseTimeout time.Duration `yaml:"closeTimeout"`
@@ -283,8 +286,8 @@ func DefaultPublicAPI() PublicAPI {
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    8192,
 		Endpoints: RealtimeEndpoints{
-			WSS:    Endpoint{Host: "localhost", Port: 8080},
-			TLSTCP: Endpoint{Host: "localhost", Port: 8444},
+			WSS:    Endpoint{Host: "127.0.0.1", Port: 8080},
+			TLSTCP: Endpoint{Host: "127.0.0.1", Port: 8444},
 		},
 		Limits:         PublicLimits{HTTPBodyBytes: 4096, RealtimeFrameBytes: 65536},
 		Rates:          rates,
@@ -467,11 +470,14 @@ func (policy GameplayTCPPolicy) Validate(frameBytes int, publicAddress string, d
 	}
 	for name, value := range map[string]time.Duration{
 		"handshakeTimeout": policy.HandshakeTimeout, "readTimeout": policy.ReadTimeout, "writeTimeout": policy.WriteTimeout,
-		"keepAlive": policy.KeepAlive, "idleTimeout": policy.IdleTimeout, "closeTimeout": policy.CloseTimeout, "shutdownTimeout": policy.ShutdownTimeout,
+		"keepAlive": policy.KeepAlive, "closeTimeout": policy.CloseTimeout, "shutdownTimeout": policy.ShutdownTimeout,
 	} {
 		if err := validateDuration("gameplayTcp."+name, value); err != nil {
 			return err
 		}
+	}
+	if policy.IdleTimeout < minimumTimeout || policy.IdleTimeout > maximumGameplayTCPIdleTimeout {
+		return fmt.Errorf("gameplayTcp.idleTimeout must be between %s and %s", minimumTimeout, maximumGameplayTCPIdleTimeout)
 	}
 	if policy.WriteTimeout > policy.IdleTimeout || policy.ReadTimeout > policy.IdleTimeout || policy.KeepAlive >= policy.IdleTimeout ||
 		policy.CloseTimeout > policy.ShutdownTimeout || policy.ShutdownTimeout > policy.IdleTimeout {

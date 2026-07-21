@@ -13,14 +13,14 @@ using IHomeland.Protocol.Visit.V1;
 namespace IHomeland.Client.Application.World
 {
     /// <summary>
-    /// 唯一拥有 current VisitSession、定向 invite inbox 与控制面收敛提示。
+    /// 唯一拥有 current VisitSession、定向 invite inbox、Owner 发出邀请与控制面收敛提示。
     /// </summary>
     internal sealed class VisitSessionService : IAppLifetimeParticipant
     {
-        /// <summary>限制未过期且不同 identity 的定向 invite 数量。</summary>
+        /// <summary>分别限制未过期且不同 identity 的 inbox 与 Owner 发出邀请数量。</summary>
         internal const int InviteCapacity = 128;
 
-        /// <summary>保护投影、inbox、target role 与生命周期。</summary>
+        /// <summary>保护投影、inbox、Owner 发出邀请、target role 与生命周期。</summary>
         private readonly object _sync = new object();
 
         /// <summary>提供 WSS invite/availability/closed typed PUSH。</summary>
@@ -34,6 +34,10 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>按 VisitSessionID + InviteID 保存有界定向 inbox。</summary>
         private readonly Dictionary<string, ClientVisitInviteProjection> _invites =
+            new Dictionary<string, ClientVisitInviteProjection>(StringComparer.Ordinal);
+
+        /// <summary>按 VisitSessionID + InviteID 保存 Owner mutation response 证明的有界发出邀请。</summary>
+        private readonly Dictionary<string, ClientVisitInviteProjection> _outgoingInvites =
             new Dictionary<string, ClientVisitInviteProjection>(StringComparer.Ordinal);
 
         /// <summary>由 coordinator 建立、caller 不能自报的 current role。</summary>
@@ -249,13 +253,34 @@ namespace IHomeland.Client.Application.World
                 if (result == ClientProjectionApplyResult.Applied ||
                     (result == ClientProjectionApplyResult.Duplicate && _current == null))
                 {
-                    _current = incoming;
+                    if (incoming.Role == ClientVisitRole.Owner &&
+                        incoming.Lifecycle == ClientVisitLifecycle.Closed)
+                    {
+                        _retiredSession = incoming;
+                        _current = null;
+                        RemoveOutgoingSessionInvitesLocked(incoming.VisitSessionID);
+                    }
+                    else
+                    {
+                        _current = incoming;
+                        if (incoming.Role == ClientVisitRole.Owner)
+                        {
+                            RetireJoinedVisitorInvitesLocked(incoming);
+                        }
+                    }
+
                     _controlHint = null;
                     _needsRefresh = false;
                     committed = BuildSnapshotLocked();
                 }
                 else if (result == ClientProjectionApplyResult.Conflict)
                 {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                    UnityEngine.Debug.LogWarning(
+                        "[IHOMELAND_PROJECTION] component=VisitSessionService " +
+                        "operation=apply_snapshot outcome=conflict differences=" +
+                        DescribeProjectionDifferences(baseline, incoming));
+#endif
                     _needsRefresh = true;
                     committed = BuildSnapshotLocked();
                 }
@@ -280,45 +305,153 @@ namespace IHomeland.Client.Application.World
                 return ClientProjectionApplyResult.Rejected;
             }
 
+            return ApplyInviteProjection(incoming, outgoing: false);
+        }
+
+        /// <summary>在 HTTP accept 已明确提交后从 inbox 退役对应 pending invite。</summary>
+        /// <param name="visitSessionID">已接受邀请所属 VisitSessionID。</param>
+        /// <param name="inviteID">已消费 InviteID。</param>
+        /// <returns>当前 inbox 包含并移除该 identity 时返回 true。</returns>
+        /// <remarks>
+        /// 此入口只接收 coordinator 从成功 accept response 得到的权威结论；timeout、transport 与
+        /// commit-unknown 不得调用，避免客户端猜测服务端提交结果。
+        /// </remarks>
+        internal bool RetireAcceptedInvite(string visitSessionID, string inviteID)
+        {
+            return RetireInvite(visitSessionID, inviteID);
+        }
+
+        /// <summary>在 HTTP accept 被服务端明确判定为失效后，从 inbox 退役对应 pending invite。</summary>
+        /// <param name="visitSessionID">失效邀请所属 VisitSessionID。</param>
+        /// <param name="inviteID">服务端拒绝的 InviteID。</param>
+        /// <returns>当前 inbox 包含并移除该 identity 时返回 true。</returns>
+        /// <remarks>
+        /// 此入口只接收 coordinator 白名单中的确定性服务端拒绝；容量、限流、依赖失败、timeout、
+        /// transport 与 commit-unknown 不得调用，避免客户端根据瞬时故障猜测邀请事实。
+        /// </remarks>
+        internal bool RetireRejectedInvite(string visitSessionID, string inviteID)
+        {
+            return RetireInvite(visitSessionID, inviteID);
+        }
+
+        /// <summary>按完整 invite identity 幂等移除 inbox 项。</summary>
+        /// <param name="visitSessionID">邀请所属 VisitSessionID。</param>
+        /// <param name="inviteID">待退役 InviteID。</param>
+        /// <returns>当前 inbox 包含并移除该 identity 时返回 true。</returns>
+        private bool RetireInvite(string visitSessionID, string inviteID)
+        {
+            if (!ClientWorldProjectionMapper.IsValidIdentity(visitSessionID) ||
+                !ClientWorldProjectionMapper.IsValidIdentity(inviteID))
+            {
+                return false;
+            }
+
+            ClientVisitSessionServiceSnapshot committed = null;
+            bool removed;
+            lock (_sync)
+            {
+                if (_stopped)
+                {
+                    return false;
+                }
+
+                removed = _invites.Remove(InviteKey(visitSessionID, inviteID));
+                if (removed)
+                {
+                    committed = BuildSnapshotLocked();
+                }
+            }
+
+            Notify(committed, false);
+            return removed;
+        }
+
+        /// <summary>按 identity、revision 与 expiry 提交已验证的邀请投影。</summary>
+        /// <param name="incoming">由 response 或 PUSH 转换的不可变邀请。</param>
+        /// <param name="outgoing">是否保存为 Owner 发出邀请；false 表示 Visitor inbox。</param>
+        /// <returns>稳定 apply 结果。</returns>
+        private ClientProjectionApplyResult ApplyInviteProjection(
+            ClientVisitInviteProjection incoming,
+            bool outgoing)
+        {
+            if (incoming == null)
+            {
+                throw new ArgumentNullException(nameof(incoming));
+            }
+
             ClientVisitSessionServiceSnapshot committed = null;
             ClientProjectionApplyResult result;
             lock (_sync)
             {
-                if (_stopped || incoming.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds)
+                if (_stopped ||
+                    (incoming.State == ClientVisitInviteState.Pending &&
+                     incoming.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds))
                 {
                     return ClientProjectionApplyResult.Rejected;
                 }
 
                 PruneExpiredLocked();
-                var key = InviteKey(incoming.VisitSessionID, incoming.InviteID);
-                if (_invites.TryGetValue(key, out var current))
+                if (outgoing &&
+                    (_targetRole != ClientVisitRole.Owner || _current == null ||
+                     !string.Equals(_current.VisitSessionID, incoming.VisitSessionID, StringComparison.Ordinal) ||
+                     !string.Equals(_current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal)))
                 {
-                    if (incoming.CreatedRevision < current.CreatedRevision)
+                    return ClientProjectionApplyResult.Rejected;
+                }
+
+                var invites = outgoing ? _outgoingInvites : _invites;
+                var key = InviteKey(incoming.VisitSessionID, incoming.InviteID);
+                if (incoming.State != ClientVisitInviteState.Pending)
+                {
+                    var removed = invites.Remove(key);
+                    if (removed)
                     {
-                        return ClientProjectionApplyResult.Stale;
+                        committed = BuildSnapshotLocked();
                     }
 
-                    if (incoming.CreatedRevision == current.CreatedRevision)
-                    {
-                        return current.IsEquivalent(incoming)
-                            ? ClientProjectionApplyResult.Duplicate
-                            : ClientProjectionApplyResult.Conflict;
-                    }
-
-                    _invites[key] = incoming;
-                    committed = BuildSnapshotLocked();
-                    result = ClientProjectionApplyResult.Applied;
+                    result = removed
+                        ? ClientProjectionApplyResult.Applied
+                        : ClientProjectionApplyResult.Duplicate;
                 }
                 else
                 {
-                    if (_invites.Count >= InviteCapacity)
+                    var removedSuperseded = RemoveSupersededTargetInvitesLocked(invites, incoming);
+                    if (invites.TryGetValue(key, out var current))
                     {
-                        return ClientProjectionApplyResult.Overflow;
-                    }
+                        if (incoming.CreatedRevision < current.CreatedRevision)
+                        {
+                            return ClientProjectionApplyResult.Stale;
+                        }
 
-                    _invites[key] = incoming;
-                    committed = BuildSnapshotLocked();
-                    result = ClientProjectionApplyResult.Applied;
+                        if (incoming.CreatedRevision == current.CreatedRevision)
+                        {
+                            result = current.IsEquivalent(incoming)
+                            ? ClientProjectionApplyResult.Duplicate
+                            : ClientProjectionApplyResult.Conflict;
+                            if (removedSuperseded)
+                            {
+                                committed = BuildSnapshotLocked();
+                            }
+                        }
+                        else
+                        {
+                            invites[key] = incoming;
+                            committed = BuildSnapshotLocked();
+                            result = ClientProjectionApplyResult.Applied;
+                        }
+
+                    }
+                    else
+                    {
+                        if (invites.Count >= InviteCapacity)
+                        {
+                            return ClientProjectionApplyResult.Overflow;
+                        }
+
+                        invites[key] = incoming;
+                        committed = BuildSnapshotLocked();
+                        result = ClientProjectionApplyResult.Applied;
+                    }
                 }
             }
 
@@ -411,7 +544,37 @@ namespace IHomeland.Client.Application.World
                     ExpectedRevision = revision,
                 },
                 cancellationToken);
-            return ApplyMutationResult(result, value => value.Result);
+            var mutationApplied = ApplyMutationResult(result, value => value.Result);
+            if (!mutationApplied.IsSuccess)
+            {
+                return mutationApplied;
+            }
+
+            ClientVisitInviteProjection invite;
+            try
+            {
+                string ownerPlayerID;
+                lock (_sync)
+                {
+                    ownerPlayerID = _current?.OwnerPlayerID;
+                }
+
+                invite = ClientWorldProjectionMapper.FromInviteSummary(
+                    mutationApplied.Value?.Invite,
+                    ownerPlayerID);
+            }
+            catch (ClientWorldProjectionException)
+            {
+                return ClientGameplayResult<VisitCreateInviteResponse>.Failed(
+                    ClientGameplayFailureKind.Protocol);
+            }
+
+            var inviteApplied = ApplyInviteProjection(invite, outgoing: true);
+            return inviteApplied == ClientProjectionApplyResult.Applied ||
+                   inviteApplied == ClientProjectionApplyResult.Duplicate
+                ? mutationApplied
+                : ClientGameplayResult<VisitCreateInviteResponse>.Failed(
+                    ClientGameplayFailureKind.Protocol);
         }
 
         /// <summary>以 current revision 撤销 pending invite。</summary>
@@ -432,7 +595,24 @@ namespace IHomeland.Client.Application.World
                 ClientGameplayCatalog.VisitRevokeInvite,
                 new VisitRevokeInviteCommand { InviteId = inviteID, ExpectedRevision = revision },
                 cancellationToken);
-            return ApplyMutationResult(result, value => value.Result);
+            var mutationApplied = ApplyMutationResult(result, value => value.Result);
+            if (!mutationApplied.IsSuccess)
+            {
+                return mutationApplied;
+            }
+
+            ClientVisitSessionServiceSnapshot committed = null;
+            lock (_sync)
+            {
+                if (_current != null &&
+                    _outgoingInvites.Remove(InviteKey(_current.VisitSessionID, inviteID)))
+                {
+                    committed = BuildSnapshotLocked();
+                }
+            }
+
+            Notify(committed, false);
+            return mutationApplied;
         }
 
         /// <summary>以 current revision 移除指定 Visitor。</summary>
@@ -684,15 +864,29 @@ namespace IHomeland.Client.Application.World
 
             if (incoming.Revision == current.Revision)
             {
-                return current.IsEquivalent(incoming)
+                if (!current.IsEquivalentIgnoringAssignmentLease(incoming))
+                {
+                    return ClientProjectionApplyResult.Conflict;
+                }
+
+                if (incoming.Assignment.LeaseExpiresAtMilliseconds <
+                    current.Assignment.LeaseExpiresAtMilliseconds)
+                {
+                    return ClientProjectionApplyResult.Stale;
+                }
+
+                return incoming.Assignment.LeaseExpiresAtMilliseconds ==
+                       current.Assignment.LeaseExpiresAtMilliseconds
                     ? ClientProjectionApplyResult.Duplicate
-                    : ClientProjectionApplyResult.Conflict;
+                    : ClientProjectionApplyResult.Applied;
             }
 
             if (!string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
                 current.CreatedAtMilliseconds != incoming.CreatedAtMilliseconds ||
                 current.ExpiresAtMilliseconds != incoming.ExpiresAtMilliseconds ||
-                !current.Assignment.IsEquivalent(incoming.Assignment) ||
+                !current.Assignment.HasSameIdentity(incoming.Assignment) ||
+                incoming.Assignment.LeaseExpiresAtMilliseconds <
+                current.Assignment.LeaseExpiresAtMilliseconds ||
                 current.Role != incoming.Role)
             {
                 return ClientProjectionApplyResult.Conflict;
@@ -701,12 +895,93 @@ namespace IHomeland.Client.Application.World
             return ClientProjectionApplyResult.Applied;
         }
 
+        /// <summary>生成不包含玩家、世界或连接 identity 的投影差异字段列表。</summary>
+        /// <param name="current">当前已提交投影。</param>
+        /// <param name="incoming">待提交投影。</param>
+        /// <returns>用于 Development 诊断的稳定字段名列表。</returns>
+        private static string DescribeProjectionDifferences(
+            ClientVisitSessionProjection current,
+            ClientVisitSessionProjection incoming)
+        {
+            if (current == null || incoming == null)
+            {
+                return "projection_presence";
+            }
+
+            var differences = new List<string>();
+            AddDifference(differences, "visit_session_id", !string.Equals(
+                current.VisitSessionID,
+                incoming.VisitSessionID,
+                StringComparison.Ordinal));
+            AddDifference(differences, "owner_player_id", !string.Equals(
+                current.OwnerPlayerID,
+                incoming.OwnerPlayerID,
+                StringComparison.Ordinal));
+            AddDifference(differences, "assignment", !current.Assignment.IsEquivalent(incoming.Assignment));
+            AddDifference(differences, "lifecycle", current.Lifecycle != incoming.Lifecycle);
+            AddDifference(differences, "revision", current.Revision != incoming.Revision);
+            AddDifference(differences, "capacity", current.Capacity != incoming.Capacity);
+            AddDifference(differences, "created_at_ms", current.CreatedAtMilliseconds != incoming.CreatedAtMilliseconds);
+            AddDifference(differences, "expires_at_ms", current.ExpiresAtMilliseconds != incoming.ExpiresAtMilliseconds);
+            AddDifference(
+                differences,
+                "owner_grace_expires_at_ms",
+                current.OwnerGraceExpiresAtMilliseconds != incoming.OwnerGraceExpiresAtMilliseconds);
+            AddDifference(differences, "role", current.Role != incoming.Role);
+            AddDifference(differences, "visitors", !VisitorsEquivalent(current.Visitors, incoming.Visitors));
+            return differences.Count == 0 ? "unknown" : string.Join(",", differences);
+        }
+
+        /// <summary>把发生变化的字段名追加到诊断列表。</summary>
+        /// <param name="differences">待追加的差异列表。</param>
+        /// <param name="field">稳定字段名。</param>
+        /// <param name="different">字段是否发生变化。</param>
+        private static void AddDifference(List<string> differences, string field, bool different)
+        {
+            if (different)
+            {
+                differences.Add(field);
+            }
+        }
+
+        /// <summary>比较两个稳定排序的 Visitor 投影集合。</summary>
+        /// <param name="current">当前 Visitor 集合。</param>
+        /// <param name="incoming">待提交 Visitor 集合。</param>
+        /// <returns>数量、顺序和全部字段一致时返回 true。</returns>
+        private static bool VisitorsEquivalent(
+            IReadOnlyList<ClientVisitVisitorProjection> current,
+            IReadOnlyList<ClientVisitVisitorProjection> incoming)
+        {
+            if (current.Count != incoming.Count)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < current.Count; index++)
+            {
+                if (!current[index].IsEquivalent(incoming[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         /// <summary>按当前 UTC 时间惰性清理等于即失效 invite。</summary>
         /// <returns>集合是否发生变化。</returns>
         private bool PruneExpiredLocked()
         {
+            return PruneExpiredLocked(_invites) | PruneExpiredLocked(_outgoingInvites);
+        }
+
+        /// <summary>按当前 UTC 时间惰性清理指定邀请索引。</summary>
+        /// <param name="invites">待清理的 inbox 或 Owner 发出邀请索引。</param>
+        /// <returns>索引是否发生变化。</returns>
+        private bool PruneExpiredLocked(IDictionary<string, ClientVisitInviteProjection> invites)
+        {
             List<string> expired = null;
-            foreach (var pair in _invites)
+            foreach (var pair in invites)
             {
                 if (pair.Value.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds)
                 {
@@ -726,7 +1001,7 @@ namespace IHomeland.Client.Application.World
 
             foreach (var key in expired)
             {
-                _invites.Remove(key);
+                invites.Remove(key);
             }
 
             return true;
@@ -736,17 +1011,147 @@ namespace IHomeland.Client.Application.World
         /// <returns>新 snapshot。</returns>
         private ClientVisitSessionServiceSnapshot BuildSnapshotLocked()
         {
-            var invites = new List<ClientVisitInviteProjection>(_invites.Values);
-            invites.Sort((left, right) =>
+            var invites = SortedInvites(_invites);
+            var outgoingInvites = SortedInvites(_outgoingInvites);
+            return new ClientVisitSessionServiceSnapshot(
+                _current,
+                invites,
+                outgoingInvites,
+                _controlHint,
+                _needsRefresh);
+        }
+
+        /// <summary>按 VisitSessionID 与 InviteID 构造稳定排序的邀请快照。</summary>
+        /// <param name="invites">待快照的 inbox 或 Owner 发出邀请索引。</param>
+        /// <returns>不与内部 dictionary 共享的新列表。</returns>
+        private static List<ClientVisitInviteProjection> SortedInvites(
+            IDictionary<string, ClientVisitInviteProjection> invites)
+        {
+            var sorted = new List<ClientVisitInviteProjection>(invites.Values);
+            sorted.Sort((left, right) =>
             {
                 var session = string.CompareOrdinal(left.VisitSessionID, right.VisitSessionID);
                 return session != 0 ? session : string.CompareOrdinal(left.InviteID, right.InviteID);
             });
-            return new ClientVisitSessionServiceSnapshot(
-                _current,
-                invites,
-                _controlHint,
-                _needsRefresh);
+            return sorted;
+        }
+
+        /// <summary>用同一 target 的更高 created revision 替换本地旧 pending identity。</summary>
+        /// <param name="invites">待收敛的 inbox 或 Owner 发出邀请索引。</param>
+        /// <param name="incoming">服务端证明的新 pending invite。</param>
+        /// <remarks>
+        /// 服务端 aggregate 对同一 target 最多允许一个 pending invite；因此更高 created revision
+        /// 证明旧 identity 已被撤销、接受或到期。反向或同 revision 不在此处删除，仍交给 identity gate。
+        /// </remarks>
+        /// <returns>至少移除一个旧 identity 时返回 true。</returns>
+        private static bool RemoveSupersededTargetInvitesLocked(
+            IDictionary<string, ClientVisitInviteProjection> invites,
+            ClientVisitInviteProjection incoming)
+        {
+            List<string> superseded = null;
+            foreach (var pair in invites)
+            {
+                var current = pair.Value;
+                if (current.State != ClientVisitInviteState.Pending ||
+                    current.CreatedRevision >= incoming.CreatedRevision ||
+                    !string.Equals(current.VisitSessionID, incoming.VisitSessionID, StringComparison.Ordinal) ||
+                    !string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
+                    !string.Equals(current.TargetVisitorID, incoming.TargetVisitorID, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (superseded == null)
+                {
+                    superseded = new List<string>();
+                }
+
+                superseded.Add(pair.Key);
+            }
+
+            if (superseded == null)
+            {
+                return false;
+            }
+
+            foreach (var key in superseded)
+            {
+                invites.Remove(key);
+            }
+
+            return true;
+        }
+
+        /// <summary>清除指定 VisitSession 的全部 Owner 发出邀请。</summary>
+        /// <param name="visitSessionID">已关闭或退出 Owner target 的 VisitSessionID。</param>
+        private void RemoveOutgoingSessionInvitesLocked(string visitSessionID)
+        {
+            List<string> removed = null;
+            foreach (var pair in _outgoingInvites)
+            {
+                if (!string.Equals(
+                        pair.Value.VisitSessionID,
+                        visitSessionID,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (removed == null)
+                {
+                    removed = new List<string>();
+                }
+
+                removed.Add(pair.Key);
+            }
+
+            if (removed == null)
+            {
+                return;
+            }
+
+            foreach (var key in removed)
+            {
+                _outgoingInvites.Remove(key);
+            }
+        }
+
+        /// <summary>根据 Owner 完整 member snapshot 退役已经被接受的 outgoing invite。</summary>
+        /// <param name="snapshot">刚通过 revision gate 的 Owner VisitSession snapshot。</param>
+        /// <remarks>
+        /// Visitor 出现在权威 member 集合中即证明该 target 的 pending invite 已被消费。Owner 不需要
+        /// 等待额外 invite 状态 PUSH，也不能继续向 View 暴露会被服务端拒绝的撤销操作。
+        /// </remarks>
+        private void RetireJoinedVisitorInvitesLocked(ClientVisitSessionProjection snapshot)
+        {
+            if (snapshot.Visitors.Count == 0 || _outgoingInvites.Count == 0)
+            {
+                return;
+            }
+
+            var visitorIDs = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var visitor in snapshot.Visitors)
+            {
+                visitorIDs.Add(visitor.PlayerID);
+            }
+
+            var retiredKeys = new List<string>();
+            foreach (var pair in _outgoingInvites)
+            {
+                if (string.Equals(
+                        pair.Value.VisitSessionID,
+                        snapshot.VisitSessionID,
+                        StringComparison.Ordinal) &&
+                    visitorIDs.Contains(pair.Value.TargetVisitorID))
+                {
+                    retiredKeys.Add(pair.Key);
+                }
+            }
+
+            foreach (var key in retiredKeys)
+            {
+                _outgoingInvites.Remove(key);
+            }
         }
 
         /// <summary>构造不允许 identity 拼接碰撞的内部 invite key。</summary>

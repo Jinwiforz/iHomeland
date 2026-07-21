@@ -166,6 +166,15 @@ namespace IHomeland.Client.Application.Control
         private Task _runTask;
 
         /// <summary>
+        /// 保存当前 run 首次进入 Connected 或在此前稳定失败的单次完成信号。
+        /// </summary>
+        /// <remarks>
+        /// 认证流程依赖该信号建立“可接收 WSS push”屏障，避免玩家已经进入世界但定向邀请仍被
+        /// 服务端判定为 offline。它不表示连接永久存活，后续断线仍由 run 终态处理。
+        /// </remarks>
+        private TaskCompletionSource<bool> _connectionReadiness;
+
+        /// <summary>
         /// 每次显式 run 递增，使迟到 attempt completion 无法提交新状态。
         /// </summary>
         private long _runGeneration;
@@ -314,8 +323,42 @@ namespace IHomeland.Client.Application.Control
                     ClientControlChannelState.Connecting,
                     ClientControlCloseReason.None,
                     1);
+                _connectionReadiness = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
                 _runTask = RunCoreAsync(runGeneration, linkedCancellation);
                 return _runTask;
+            }
+        }
+
+        /// <summary>等待当前显式 run 首次具备接收 control push 的能力。</summary>
+        /// <param name="cancellationToken">调用方停止等待的信号，不会停止 control run。</param>
+        /// <returns>首次进入 Connected 返回 true；此前进入稳定终态返回 false。</returns>
+        /// <exception cref="InvalidOperationException">当前没有显式 run 时抛出。</exception>
+        internal async Task<bool> WaitUntilConnectedAsync(CancellationToken cancellationToken)
+        {
+            Task<bool> readiness;
+            lock (_sync)
+            {
+                if (_snapshot.State == ClientControlChannelState.Connected)
+                {
+                    return true;
+                }
+
+                readiness = _connectionReadiness?.Task ??
+                    throw new InvalidOperationException("ClientControlChannel 当前没有可等待的 active run。");
+            }
+
+            if (!cancellationToken.CanBeCanceled)
+            {
+                return await readiness;
+            }
+
+            var cancellation = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            using (cancellationToken.Register(() => cancellation.TrySetCanceled()))
+            {
+                var completed = await Task.WhenAny(readiness, cancellation.Task);
+                return await completed;
             }
         }
 
@@ -330,6 +373,7 @@ namespace IHomeland.Client.Application.Control
             CancellationTokenSource lifetimeCancellation;
             Task runTask;
             IClientWebSocket activeSocket;
+            TaskCompletionSource<bool> connectionReadiness;
             lock (_sync)
             {
                 if (_stopTask != null)
@@ -347,7 +391,10 @@ namespace IHomeland.Client.Application.Control
                 lifetimeCancellation = _lifetimeCancellation;
                 runTask = _runTask;
                 activeSocket = _activeSocket;
+                connectionReadiness = _connectionReadiness;
             }
+
+            connectionReadiness?.TrySetResult(false);
 
             _ = StopCoreAsync(
                 lifetimeCancellation,
@@ -851,13 +898,31 @@ namespace IHomeland.Client.Application.Control
             ClientControlCloseReason closeReason,
             int attempt)
         {
+            TaskCompletionSource<bool> readiness = null;
+            bool? readinessResult = null;
             lock (_sync)
             {
                 if (runGeneration == _runGeneration &&
                     _snapshot.State != ClientControlChannelState.Stopped)
                 {
                     _snapshot = new ClientControlChannelSnapshot(state, closeReason, attempt);
+                    if (state == ClientControlChannelState.Connected)
+                    {
+                        readiness = _connectionReadiness;
+                        readinessResult = true;
+                    }
+                    else if (state == ClientControlChannelState.Disconnected ||
+                             state == ClientControlChannelState.SessionInvalidated)
+                    {
+                        readiness = _connectionReadiness;
+                        readinessResult = false;
+                    }
                 }
+            }
+
+            if (readinessResult.HasValue)
+            {
+                readiness?.TrySetResult(readinessResult.Value);
             }
         }
 

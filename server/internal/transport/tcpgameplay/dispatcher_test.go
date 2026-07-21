@@ -189,6 +189,7 @@ func TestDispatcherRoutesEveryNonAdmissionOperation(t *testing.T) {
 		messageID  uint32
 		responseID uint32
 	}{
+		{1, 2},
 		{2000, 2001},
 		{2103, 2104},
 		{2105, 2106},

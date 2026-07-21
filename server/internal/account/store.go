@@ -65,6 +65,20 @@ const (
 	FindOutcomeNotFound
 )
 
+// InvitablePlayerOutcome 表达其他领域可消费的最小 Player 可邀请性决议。
+//
+// Missing 与 inactive 必须合并为 unavailable，避免调用方根据结果枚举账号存在性或停用状态。
+type InvitablePlayerOutcome uint8
+
+const (
+	// InvitablePlayerOutcomeUnspecified 表示 adapter 没有返回规范决议。
+	InvitablePlayerOutcomeUnspecified InvitablePlayerOutcome = iota
+	// InvitablePlayerOutcomeAvailable 表示 exact PlayerID 当前属于 active account。
+	InvitablePlayerOutcomeAvailable
+	// InvitablePlayerOutcomeUnavailable 合并 PlayerID missing 与 account inactive。
+	InvitablePlayerOutcomeUnavailable
+)
+
 // CreateRecord 是 repository 必须在同一事务提交的完整注册事实。
 type CreateRecord struct {
 	// Account 包含 account/player identity、canonical username、状态与创建时间。
@@ -91,6 +105,15 @@ type AccountRepository interface {
 	Create(ctx context.Context, record CreateRecord) (CreateOutcome, error)
 	// FindForAuthentication 按 canonical username 读取同一一致性快照；依赖错误不得伪装为 not found。
 	FindForAuthentication(ctx context.Context, username Username) (AuthenticationRecord, FindOutcome, error)
+}
+
+// InvitablePlayerReader 只公开定向业务所需的 active Player 可用性。
+//
+// 实现不得返回 AccountID、username、credential、display name 或 inactive 原因。依赖无法证明
+// available/unavailable 时必须返回 error 与 unspecified，不能猜测目标不存在。
+type InvitablePlayerReader interface {
+	// ResolveInvitablePlayer 按 exact PlayerID 返回统一可用性决议。
+	ResolveInvitablePlayer(ctx context.Context, playerID PlayerID) (InvitablePlayerOutcome, error)
 }
 
 // SessionIssuer 是 account application 对 Session Core 的最窄消费接口。

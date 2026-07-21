@@ -258,12 +258,12 @@ client/
           Protocol/
         Presentation/
           Navigation/
-          Models/
+          PersonalWorld/
           Hosts/
             UIToolkit/
             UGUI/
         Scenes/
-          Contexts/
+          PersonalWorld/
         Editor/
       UI/
         UIToolkit/
@@ -306,14 +306,14 @@ HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第
 ### `Presentation`
 
 - Navigation：当前放置纯 C# `ClientUiRegistry`、`ClientUiRouter`、封闭 route id、稳定 layer/input/lifecycle、generation 与不可变 snapshot；不得引用资源路径或 transport。
-- Models：复杂共享展示投影，按真实页面需求创建；当前不建立空目录或占位 Presenter。
-- Hosts：当前放置持久 `ClientUiHostRoot`、UI Toolkit `UIDocument` adapter 与 uGUI `Canvas/CanvasGroup/EventSystem` adapter；只接受直接引用，不扫描场景、不加载资源、不保存业务事实。
+- PersonalWorld：放置首期 `ClientPersonalWorldExperience`、不可变页面切片、窄语义 actions、production route catalog 与产品 binding；不得复制 Session/World/Visit 最终事实。
+- Hosts：放置持久 `ClientUiHostRoot`、UI Toolkit `PanelRenderer` adapter 与 uGUI `Canvas/CanvasGroup/EventSystem` adapter；只接受直接引用，不扫描场景、不加载资源、不保存业务事实。
 
-当前 production route registry 与双 framework Host 列表保持为空，`Presentation` 没有产品 UXML/USS/Prefab。后续个人世界竖切按一个逻辑 route 一个 active owner 接线，不得把页面、资源 key、credential 或 generated message 塞回 router。
+当前 production registry 只登记 Login、Shell、WorldVisit、WorldHud 与 ConnectionLost，并保持一个逻辑 route 一个 active owner。产品 UXML/USS、WorldHud Prefab 与 `PersonalWorldScene` 由 Unity Editor 创建并通过 Host 直接引用接线；不得把资源 key、credential 或 generated message 塞回 router。
 
-### `Scenes/Contexts`
+### `Scenes/PersonalWorld`
 
-只在正式场景需要应用接口时创建。SceneContext 持有 camera/world/scene UI 引用，随场景卸载。
+`Scenes/PersonalWorld` 放置封闭 scene catalog、唯一 transition Host 与轻量 `PersonalWorldSceneContext`。Context 只持有 camera、lighting、scene root 和低敏表现投影，随场景卸载，不得持有 Session、socket 或 world/visit 权威 snapshot。
 
 个人世界客户端只能在服务端 v1 资格验收后增加 pure C# PersonalWorld、VisitSession 与 WorldAdmission application owner，以及 Infrastructure 下的协议 adapters。多个 owner 可以按已批准 change 共置于窄 feature slice，但不能合并状态所有权。World 场景、Actor 和表现仍归 Scene Scope；不得创建持有 socket、token、world snapshot 与 GameObject 的统一 `WorldManager`。
 

@@ -45,14 +45,21 @@ func TestTCPGameplayHasNoForbiddenArchitectureDependencies(t *testing.T) {
 	}
 }
 
-// TestTCPGameplayCatalogContainsNoHeartbeatOrCrossChannelRoute 保护实现不私自发明heartbeat或复用WSS消息。
-func TestTCPGameplayCatalogContainsNoHeartbeatOrCrossChannelRoute(t *testing.T) {
+// TestTCPGameplayCatalogContainsOnlyRegisteredHeartbeatAndTLSRoutes 保护heartbeat精确登记且不复用WSS消息。
+func TestTCPGameplayCatalogContainsOnlyRegisteredHeartbeatAndTLSRoutes(t *testing.T) {
 	t.Parallel()
 	catalog := contractCatalogForStructure()
+	heartbeats := make(map[uint32]bool)
 	for _, message := range catalog.Messages.Messages {
 		if strings.Contains(strings.ToLower(message.Name), "heartbeat") {
-			t.Fatalf("unregistered heartbeat message %d", message.ID)
+			if message.ID != 1 && message.ID != 2 {
+				t.Fatalf("unregistered heartbeat message %d", message.ID)
+			}
+			heartbeats[message.ID] = true
 		}
+	}
+	if !heartbeats[1] || !heartbeats[2] || len(heartbeats) != 2 {
+		t.Fatalf("registered heartbeat pair is incomplete: %+v", heartbeats)
 	}
 	for _, route := range catalog.Routes.Routes {
 		if route.Channel != "TLS_TCP" {

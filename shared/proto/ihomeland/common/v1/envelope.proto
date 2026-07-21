@@ -22,6 +22,14 @@ enum MessageKind {
   MESSAGE_KIND_ERROR = 5;
 }
 
+// GameplayHeartbeatRequest 请求当前已认证 TLS/TCP gameplay connection 的存活确认。
+// request identity、sequence 与时间观测由 ReliableEnvelope 承载，payload 不携带业务或身份字段。
+message GameplayHeartbeatRequest {}
+
+// GameplayHeartbeatResponse 确认对应 heartbeat request 已被当前 connection 顺序处理。
+// correlation 与服务端时间观测由 ReliableEnvelope 承载，payload 不表达世界或会话状态。
+message GameplayHeartbeatResponse {}
+
 // ReliableEnvelope 将通道无关的路由与 correlation 信息保持在业务 payload 之外。
 // adapter 必须先验证 envelope，再根据 registry 解码 payload，禁止由 payload 覆盖路由身份。
 message ReliableEnvelope {

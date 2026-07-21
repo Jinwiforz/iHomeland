@@ -760,6 +760,14 @@ func (reader integrationOwnedWorldReader) ResolveOwnedWorld(_ context.Context, o
 	return reader.snapshot, visitsession.OwnedWorldOutcomeFound, nil
 }
 
+// integrationInvitablePlayerReader 满足只读恢复helper未调用的目标可邀请性端口。
+type integrationInvitablePlayerReader struct{}
+
+// ResolveInvitablePlayer 返回available；wait helper不会创建邀请。
+func (integrationInvitablePlayerReader) ResolveInvitablePlayer(context.Context, account.PlayerID) (account.InvitablePlayerOutcome, error) {
+	return account.InvitablePlayerOutcomeAvailable, nil
+}
+
 // integrationAssignmentReader 返回已通过production placement store激活的current assignment。
 type integrationAssignmentReader struct {
 	// snapshot 是测试在MySQL/Redis中提交的active assignment。
@@ -793,7 +801,7 @@ func waitForVisitorReconnect(t *testing.T, ownerBootstrap map[string]any, visitI
 	}
 	capacity, _ := visitsession.NewCapacity(uint8(policy.VisitSession.Capacity))
 	visitPolicy, _ := visitsession.NewPolicy(capacity, policy.VisitSession.SessionLifetime, policy.VisitSession.InviteLifetime, policy.VisitSession.ReservationLifetime, policy.VisitSession.OwnerGrace, policy.VisitSession.VisitorReconnectGrace)
-	visits, err := visitsession.NewService(visitStore, integrationOwnedWorldReader{}, integrationAssignmentReader{}, SystemClock{}, RandomIDGenerator{}, visitPolicy)
+	visits, err := visitsession.NewService(visitStore, integrationOwnedWorldReader{}, integrationInvitablePlayerReader{}, integrationAssignmentReader{}, SystemClock{}, RandomIDGenerator{}, visitPolicy)
 	if err != nil {
 		t.Fatal(err)
 	}

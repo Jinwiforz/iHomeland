@@ -32,6 +32,7 @@ type Repository struct {
 }
 
 var _ domain.AccountRepository = (*Repository)(nil)
+var _ domain.InvitablePlayerReader = (*Repository)(nil)
 
 // errUsernameConflict 只在 transaction 内传递已知 username 唯一约束分类。
 var errUsernameConflict = errors.New("account username unique constraint conflict")
@@ -107,6 +108,32 @@ func (repository *Repository) FindForAuthentication(ctx context.Context, usernam
 	}
 	repository.observe("find_for_authentication", "found")
 	return record, domain.FindOutcomeFound, nil
+}
+
+// ResolveInvitablePlayer 按唯一 PlayerID 返回 active 可邀请性，不暴露账号其他事实。
+func (repository *Repository) ResolveInvitablePlayer(ctx context.Context, playerID domain.PlayerID) (domain.InvitablePlayerOutcome, error) {
+	if ctx == nil || !playerID.Valid() {
+		return domain.InvitablePlayerOutcomeUnspecified, repository.failure("resolve_invitable_player", "invalid", errors.New("player identity is invalid"))
+	}
+	var statusValue string
+	err := repository.db.QueryRowContext(ctx, `SELECT status FROM accounts WHERE player_id = ?`, playerID.String()).Scan(&statusValue)
+	if errors.Is(err, sql.ErrNoRows) {
+		repository.observe("resolve_invitable_player", "unavailable")
+		return domain.InvitablePlayerOutcomeUnavailable, nil
+	}
+	if err != nil {
+		return domain.InvitablePlayerOutcomeUnspecified, repository.failure("resolve_invitable_player", "failed", err)
+	}
+	status, err := decodeAccountStatus(statusValue)
+	if err != nil {
+		return domain.InvitablePlayerOutcomeUnspecified, repository.failure("resolve_invitable_player", "corrupt", err)
+	}
+	if status != domain.StatusActive {
+		repository.observe("resolve_invitable_player", "unavailable")
+		return domain.InvitablePlayerOutcomeUnavailable, nil
+	}
+	repository.observe("resolve_invitable_player", "available")
+	return domain.InvitablePlayerOutcomeAvailable, nil
 }
 
 // adapterError 保留受控 cause，默认文本只包含固定 operation/outcome。

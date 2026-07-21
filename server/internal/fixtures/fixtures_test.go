@@ -121,7 +121,9 @@ func TestGoldenPackets(t *testing.T) {
 		}
 	}
 	for _, message := range catalog.Messages.Messages {
-		if message.ID >= 2000 && message.ID <= 2122 && !seenMessageIDs[message.ID] {
+		isGameplay := message.ID == 1 || message.ID == 2 ||
+			(message.ID >= 2000 && message.ID <= 2122)
+		if isGameplay && !seenMessageIDs[message.ID] {
 			t.Fatalf("golden packets do not cover message id %d", message.ID)
 		}
 	}

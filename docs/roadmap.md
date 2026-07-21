@@ -308,7 +308,7 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 实现 TLS/TCP framing、single reader/serialized writer、pending correlation/typed PUSH dispatch、gameplay admission、backpressure 和 close reasons。
 
-**当前实现边界：**HTTP world admission、TLS 1.3/loopback transport、`IHTP` preface、冻结 gameplay route、双向 sequence、有界 pending/writer、typed PUSH、safe-return gate、session invalidation 与 App Scope 逆序停止已经落地；PersonalWorld/VisitSession 最终状态和业务流程由 C2 Services change 接续，UI、Scene 与自动恢复仍不在本 change 内。
+**该 change 归档边界：**HTTP world admission、TLS 1.3/loopback transport、`IHTP` preface、冻结 gameplay route、双向 sequence、有界 pending/writer、typed PUSH、safe-return gate、session invalidation 与 App Scope 逆序停止已经落地；PersonalWorld/VisitSession 最终状态和业务流程由 C2 Services change 接续，UI、Scene 与自动恢复不属于该 change。
 
 ## C2：个人世界客户端竖切
 
@@ -316,7 +316,7 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 实现纯 C# PersonalWorld、WorldInstance、VisitSession、WorldAdmission Services，以及 OwnWorld/JoiningVisit/Visiting/ReturningOwnWorld 状态机。
 
-**当前实现边界：**十个强类型 HTTP operation、不可变 world/visit/invite 投影、revision/generation gate、有界 control hint、Owner/Visitor command policy、credential 内聚的 JOIN/RECONNECT 窄入口、target 状态机与 App Scope 逆序停止已落地。默认初始化保持零网络副作用；UI、SceneContext、Prefab、资源加载、跨进程 token 恢复与独立通道自动恢复留给后续 change。
+**该 change 归档边界：**十个强类型 HTTP operation、不可变 world/visit/invite 投影、revision/generation gate、有界 control hint、Owner/Visitor command policy、credential 内聚的 JOIN/RECONNECT 窄入口、target 状态机与 App Scope 逆序停止已落地。默认初始化保持零网络副作用；UI、SceneContext、Prefab、资源加载、跨进程 token 恢复与独立通道自动恢复不属于该 change。
 
 ### `integrate-dual-ui-routing`
 
@@ -324,17 +324,32 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 **当前状态：**已完成统一 route owner、双 Host、Input/focus、生命周期、Unity 全量测试与 Windows Development build 验收，并于 2026-07-17 归档；`add-client-personal-world-vertical-slice` 的进入条件已满足。
 
-**当前实现边界：**已落地纯 C# 有界事务 route、空 production registry、稳定跨 framework layer、generation/cancellation、唯一 Input System clone owner，以及直接引用的 UI Toolkit/uGUI Host adapters；没有产品 UXML/USS/Prefab、Presenter、SceneContext、资源系统或业务网络动作。BootstrapScene 直接引用、Unity 全量测试与 Windows Development build 均已完成。
+**该 change 归档边界：**已落地纯 C# 有界事务 route、空 production registry、稳定跨 framework layer、generation/cancellation、唯一 Input System clone owner，以及直接引用的 UI Toolkit/uGUI Host adapters；产品 UXML/USS/Prefab、Presenter、SceneContext、资源系统与业务网络动作由后续产品 change 接入。BootstrapScene 直接引用、Unity 全量测试与 Windows Development build 均已完成。
 
 ### `add-client-personal-world-vertical-slice`
 
 交付登录、进入自己的世界、邀请/接受、Visitor 模式、Owner grace、离开/踢出、安全返回、SceneContext generation/cancellation 和 PC 输入/分辨率验收。
+
+**当前状态：**已落地个人世界 Experience/View State/action boundary、五个 production routes、UI Toolkit/uGUI 产品 binding、封闭 PersonalWorldScene transition/Context、Composition 生命周期接入、产品 UXML/USS、WorldHud Prefab、PersonalWorldScene 与 BootstrapScene 接线；Unity 分层测试、Windows Development Player、双客户端访问闭环和显示输入矩阵已经验收。跨进程 token 恢复、独立通道自动恢复和内容资源系统不属于本 change。该 change 已于 2026-07-21 归档，C3 进入条件已满足。
+
+### 竖切验收派生修复
+
+`add-client-personal-world-vertical-slice` 的真实双客户端与故障恢复验收暴露了四个具有独立 owner、失败边界和验收场景的问题，因此分别建立 OpenSpec change，而没有把服务端、协议与客户端修复混入主竖切：
+
+- `recover-stale-visit-session-on-open`：Owner 显式 Open 以 current assignment 证据确定性退役 Redis 中绑定旧 AssignmentStamp 的 active VisitSession，再以原 CommandID 解析唯一新会话；不依赖清库、timer、tick 或重复点击。
+- `validate-visit-invite-target`：Account owner 在 CreateInvite 首次提交前判定目标是否为非 Owner 的 active Player；self、missing 与 inactive 统一低敏拒绝且不推进 revision，不暴露账号枚举信号。
+- `retire-stale-visit-invites`：既有 WSS message 2100 以 `RETIRED` tombstone 发布精确邀请退役事实，客户端按完整 identity 删除 inbox/selection；明确 accept 拒绝保持 OwnWorld 且不伪装进入成功。
+- `recover-idle-gameplay-connection`：TLS/TCP gameplay 增加独立 heartbeat `1/2`，静默连接使用同一 pending/writer/generation owner 保活；显式重连以 45 秒 single-flight deadline 收敛到成功或稳定可重试状态。
+
+四个派生 change 的 delta specs 已同步到长期 specs，并与主竖切一同于 2026-07-21 完成 strict 验证和归档。它们修正首期里程碑内的权威一致性与连接生命周期，不扩展到 Party、Room、ActivityInstance、战斗或内容资源系统。
 
 ## C3：客户端资格验收
 
 ### `qualify-client-v1`
 
 验证 clean install、token restore、WSS/TCP 独立恢复、双客户端 world visit、服务端重启、低/重复 revision、stale callback、Scene/UI 生命周期、Windows Development/Release build 和跨端 fixtures。
+
+**当前状态：**C2 主竖切及其四个验收派生修复均已归档；C3 可在冻结现有行为的基础上补齐 clean install、跨进程 token restore、独立通道恢复、Release build 与持续 soak 资格证据。
 
 ## A1：活动实例与可选协作结构
 

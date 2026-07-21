@@ -109,6 +109,10 @@ namespace IHomeland.Client.Infrastructure.Tcp
     /// </summary>
     internal static class ClientGameplayCatalog
     {
+        /// <summary>证明 current active gameplay connection 存活，不读取或修改业务状态。</summary>
+        internal static readonly ClientGameplayOperation<GameplayHeartbeatRequest, GameplayHeartbeatResponse> GameplayHeartbeat =
+            Request<GameplayHeartbeatRequest, GameplayHeartbeatResponse>(1, 2, 256, 256, 10000, GameplayHeartbeatResponse.Parser);
+
         /// <summary>查询当前 world snapshot。</summary>
         internal static readonly ClientGameplayOperation<WorldSnapshotRequest, WorldSnapshotResponse> WorldSnapshot =
             Request<WorldSnapshotRequest, WorldSnapshotResponse>(2000, 2001, 4096, 65536, 10000, WorldSnapshotResponse.Parser);
@@ -207,6 +211,7 @@ namespace IHomeland.Client.Infrastructure.Tcp
         private static IReadOnlyDictionary<uint, int> BuildResponseMaximums()
         {
             var maximums = new Dictionary<uint, int>();
+            AddResponse(maximums, GameplayHeartbeat);
             AddResponse(maximums, WorldSnapshot);
             AddResponse(maximums, VisitOpen);
             AddResponse(maximums, VisitCreateInvite);
