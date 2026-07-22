@@ -159,7 +159,7 @@ func TestSensitiveBusinessValuesRedactDefaultFormatting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directive, _ := NewSafeReturnDirective(joined.ID(), fixture.visitorA.playerID, SafeReturnReasonVoluntaryLeave)
+	directive, _ := NewSafeReturnDirective(joined.ID(), fixture.visitorA.playerID, SafeReturnReasonVoluntaryLeave, joined.Revision())
 	commandID := mustCommandID(t, "vcmd_format")
 	fingerprint := fingerprintCommand(OperationJoin, "format")
 	result, _ := NewMutationResult(OperationJoin, joined.Snapshot(), commandID, fingerprint, InviteSnapshot{}, AdmissionIntent{}, member, nil)

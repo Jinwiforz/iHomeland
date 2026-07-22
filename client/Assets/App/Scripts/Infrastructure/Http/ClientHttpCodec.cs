@@ -395,11 +395,18 @@ namespace IHomeland.Client.Infrastructure.Http
                     throw Contract("World admission role 与 purpose 不一致。");
                 }
 
+                var visitRevision = checked((ulong)ReadInt64(root, "visitRevision", 0, long.MaxValue));
+                if ((role == ClientWorldRole.Owner) != (visitRevision == 0))
+                {
+                    throw Contract("World admission role 与 visitRevision 不一致。");
+                }
+
                 return new ClientWorldAdmission(
                     credential,
                     ReadEndpoint(ReadObjectProperty(root, "endpoint"), gameplayOnly: true),
                     role,
                     purpose,
+                    visitRevision,
                     ReadInt64(root, "expiresAtMs", 1, long.MaxValue));
             });
         }

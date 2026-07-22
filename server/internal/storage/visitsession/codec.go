@@ -157,6 +157,8 @@ type directiveDTO struct {
 	VisitorID string `json:"visitor_id"`
 	// Reason是客户端不可改写的封闭原因。
 	Reason string `json:"reason"`
+	// Revision绑定产生directive的已提交aggregate版本。
+	Revision uint64 `json:"revision"`
 }
 
 // createResultDTO 保存Open首次完整result。
@@ -294,7 +296,7 @@ func encodeMutationResult(result domain.MutationResult) (string, error) {
 		dto.RetiredInvites = append(dto.RetiredInvites, inviteToDTO(retired))
 	}
 	for _, directive := range result.Directives() {
-		dto.Directives = append(dto.Directives, directiveDTO{VisitSessionID: directive.VisitSessionID().Value(), VisitorID: directive.VisitorID().String(), Reason: directive.Reason().String()})
+		dto.Directives = append(dto.Directives, directiveDTO{VisitSessionID: directive.VisitSessionID().Value(), VisitorID: directive.VisitorID().String(), Reason: directive.Reason().String(), Revision: directive.Revision().Uint64()})
 	}
 	return marshalCommandDTO(dto)
 }
@@ -512,10 +514,11 @@ func directiveFromDTO(dto directiveDTO) (domain.SafeReturnDirective, error) {
 	visitID, visitErr := domain.NewVisitSessionID(dto.VisitSessionID)
 	visitor, visitorErr := account.NewPlayerID(dto.VisitorID)
 	reason, reasonErr := parseSafeReturnReason(dto.Reason)
-	if errors.Join(visitErr, visitorErr, reasonErr) != nil {
+	revision, revisionErr := domain.NewRevision(dto.Revision)
+	if errors.Join(visitErr, visitorErr, reasonErr, revisionErr) != nil {
 		return domain.SafeReturnDirective{}, errors.New("visit safe return directive is invalid")
 	}
-	return domain.NewSafeReturnDirective(visitID, visitor, reason)
+	return domain.NewSafeReturnDirective(visitID, visitor, reason, revision)
 }
 
 // marshalCommandDTO 对完整result实施独立encoded budget。

@@ -95,7 +95,7 @@ func TestSnapshotAndResultCodecRoundTrip(t *testing.T) {
 	if err != nil || !restoredOwnerGrace.Equal(ownerGrace) {
 		t.Fatalf("owner grace round trip failed: %v", err)
 	}
-	directive, _ := domain.NewSafeReturnDirective(fixture.snapshot.ID(), acceptResult.AdmissionIntent().VisitorID(), domain.SafeReturnReasonOwnerClosed)
+	directive, _ := domain.NewSafeReturnDirective(fixture.snapshot.ID(), acceptResult.AdmissionIntent().VisitorID(), domain.SafeReturnReasonOwnerClosed, closeRecord.Result().Snapshot().Revision())
 	commandID, _ := domain.NewCommandID("vcmd_directiveCodec")
 	fingerprint := testFingerprint(t, "directive")
 	directiveResult, err := domain.NewMutationResult(domain.OperationClose, closeRecord.Result().Snapshot(), commandID, fingerprint, domain.InviteSnapshot{}, domain.AdmissionIntent{}, domain.MembershipSnapshot{}, []domain.SafeReturnDirective{directive})
@@ -104,7 +104,7 @@ func TestSnapshotAndResultCodecRoundTrip(t *testing.T) {
 	}
 	directivePayload, _ := encodeMutationResult(directiveResult)
 	restoredDirective, err := decodeMutationResult(directivePayload)
-	if err != nil || len(restoredDirective.Directives()) != 1 || restoredDirective.Directives()[0].Reason() != domain.SafeReturnReasonOwnerClosed {
+	if err != nil || len(restoredDirective.Directives()) != 1 || restoredDirective.Directives()[0].Reason() != domain.SafeReturnReasonOwnerClosed || restoredDirective.Directives()[0].Revision() != closeRecord.Result().Snapshot().Revision() {
 		t.Fatalf("directive round trip failed: %v", err)
 	}
 	pendingResult := testProjectionResults(t, fixture)[0]

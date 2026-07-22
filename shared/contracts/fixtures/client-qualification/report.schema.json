@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ihomeland/client-qualification/report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "qualificationVersion", "startedAt", "durationMs", "contractDigest", "buildDigests", "toolVersions", "qualified", "stages", "records", "failure", "cleanup"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "client-v1" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "contractDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "buildDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development", "release"],
+      "properties": {
+        "development": { "type": "string", "pattern": "^(?:[a-f0-9]{64})?$" },
+        "release": { "type": "string", "pattern": "^(?:[a-f0-9]{64})?$" }
+      }
+    },
+    "toolVersions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unity", "dotnet", "go", "git", "powershell"],
+      "properties": {
+        "unity": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+[a-z][0-9]+$" },
+        "dotnet": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$" },
+        "go": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$" },
+        "git": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$" },
+        "powershell": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$" }
+      }
+    },
+    "qualified": { "type": "boolean" },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "outcome", "durationMs"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "outcome": { "enum": ["pass", "fail"] },
+          "durationMs": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "records": { "$ref": "evidence.schema.json#/properties/records" },
+    "failure": { "type": ["string", "null"], "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "cleanup": { "enum": ["pass", "fail"] }
+  }
+}

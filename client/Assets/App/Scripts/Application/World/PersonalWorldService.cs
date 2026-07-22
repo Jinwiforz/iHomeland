@@ -181,6 +181,17 @@ namespace IHomeland.Client.Application.World
                     RememberAssignmentLocked(incoming.PersonalWorldID, incoming.Assignment);
                     PruneAssignmentHistoryLocked();
                 }
+                else if (result == ClientProjectionApplyResult.Duplicate && _snapshot.NeedsRefresh)
+                {
+                    // 健康 channel 返回的等价完整 replacement 已重新确认 current target；
+                    // 不替换 projection 对象，只结束 control-only refresh gate。
+                    committed = new ClientPersonalWorldServiceSnapshot(
+                        _snapshot.PrimaryWorld,
+                        _snapshot.CurrentWorld,
+                        null,
+                        false);
+                    _snapshot = committed;
+                }
                 else if (result == ClientProjectionApplyResult.Conflict)
                 {
                     committed = MarkRefreshLocked();
@@ -264,6 +275,29 @@ namespace IHomeland.Client.Application.World
                 _retiredPersonalWorldID = _snapshot.CurrentWorld?.PersonalWorldID;
                 _snapshot = committed;
                 PruneAssignmentHistoryLocked();
+            }
+
+            Changed?.Invoke(committed);
+        }
+
+        /// <summary>在control generation断开时退役旧hint并冻结依赖其完整性的能力。</summary>
+        /// <remarks>Current gameplay完整投影保持可读；新control连接不能继承旧generation的hint。</remarks>
+        internal void InvalidateControlProjection()
+        {
+            ClientPersonalWorldServiceSnapshot committed;
+            lock (_sync)
+            {
+                if (_stopped)
+                {
+                    return;
+                }
+
+                committed = new ClientPersonalWorldServiceSnapshot(
+                    _snapshot.PrimaryWorld,
+                    _snapshot.CurrentWorld,
+                    null,
+                    _snapshot.CurrentWorld != null);
+                _snapshot = committed;
             }
 
             Changed?.Invoke(committed);

@@ -67,6 +67,20 @@ namespace IHomeland.Client.Scenes.PersonalWorld
             }
         }
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>获取资格运行可观察的已提交内容Scene owner数量。</summary>
+        internal int QualificationSceneOwnerCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _currentContext != null && _currentScene.IsValid() ? 1 : 0;
+                }
+            }
+        }
+#endif
+
         /// <summary>
         /// 由 Composition 在 AppLifetime 启动前注入唯一 SceneLifetimeOwner。
         /// </summary>

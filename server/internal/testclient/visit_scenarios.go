@@ -239,7 +239,7 @@ func (fixture *joinedVisitFixture) joinAdditionalVisitor(ctx context.Context) (a
 	if err != nil {
 		return additional, err
 	}
-	joinedMessage, err := additional.tcp.Command(ctx, 2109, visitv1.VisitJoinCommand_builder{AdmissionCredential: proto.String(credential), ExpectedRevision: proto.Uint64(fixture.revision)}.Build())
+	joinedMessage, err := additional.tcp.Command(ctx, 2109, visitv1.VisitJoinCommand_builder{AdmissionCredential: proto.String(credential), ExpectedRevision: proto.Uint64(admissionResponse.VisitRevision)}.Build())
 	if err != nil {
 		return additional, err
 	}
@@ -369,7 +369,7 @@ func setupJoinedVisit(ctx context.Context, runtime *ScenarioRuntime) (*joinedVis
 	if err != nil {
 		return fixture, err
 	}
-	joinCommand := visitv1.VisitJoinCommand_builder{AdmissionCredential: proto.String(credential), ExpectedRevision: proto.Uint64(fixture.revision)}.Build()
+	joinCommand := visitv1.VisitJoinCommand_builder{AdmissionCredential: proto.String(credential), ExpectedRevision: proto.Uint64(admissionResponse.VisitRevision)}.Build()
 	joinMessage, err := fixture.visitorTCP.Command(ctx, 2109, joinCommand)
 	if err != nil {
 		return fixture, err

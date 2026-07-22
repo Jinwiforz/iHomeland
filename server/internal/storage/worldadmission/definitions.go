@@ -8,7 +8,7 @@ const (
 	// credentialDefinitionName 是一次性 binding key 的 registry identity。
 	credentialDefinitionName = "worldadmission_credential"
 	// redisSchemaVersion 固定当前 Hash 字段布局。
-	redisSchemaVersion uint16 = 1
+	redisSchemaVersion uint16 = 2
 	// maximumIssueBytes 约束 issue Hash 累计 field/value 字节。
 	maximumIssueBytes = 1024
 	// maximumCredentialBytes 约束完整 binding/tombstone Hash 累计 field/value 字节。

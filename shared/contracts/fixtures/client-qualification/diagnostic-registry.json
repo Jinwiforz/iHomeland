@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "id": "owner-gameplay-recovery",
+      "automaticScenarios": ["gameplay-own-world-recovery", "recovery-race-matrix", "ui-action-matrix"],
+      "connectionGuide": { "role": "owner", "channel": "gameplay", "remotePort": 8444, "protectedRemotePort": 8080 },
+      "manualSteps": [
+        { "id": "start-local-server", "instruction": "确认当前本地服务端与存储正在运行。" },
+        { "id": "launch-isolated-players", "instruction": "运行本次diagnostics目录中的launch-two-players.ps1；profile只隔离存储，不选择账号，必须分别登录Owner与Visitor并确认两者OwnWorld ID不同。" },
+        { "id": "establish-visitor-session", "instruction": "Owner开放访问并邀请Visitor，Visitor接受后进入Owner世界。" },
+        { "id": "disconnect-owner-gameplay", "instruction": "只断开Owner进程RemotePort为8444的Established连接，不操作8080。" },
+        { "id": "assert-owner-authoritative-recovery", "instruction": "确认Owner自动恢复同一开放访问状态、Visitor成员与权威revision，且没有版本不兼容错误或残留弹窗。" },
+        { "id": "assert-single-channel-generations", "instruction": "恢复稳定后确认Owner只保留一条8080和一条8444连接，Visitor仍可正常操作。" }
+      ]
+    },
+    {
+      "id": "visitor-gameplay-reconnect",
+      "automaticScenarios": ["gameplay-visitor-reconnect", "recovery-race-matrix", "ui-action-matrix"],
+      "connectionGuide": { "role": "visitor", "channel": "gameplay", "remotePort": 8444, "protectedRemotePort": 8080 },
+      "manualSteps": [
+        { "id": "start-local-server", "instruction": "确认当前本地服务端与存储正在运行。" },
+        { "id": "launch-isolated-players", "instruction": "运行本次diagnostics目录中的launch-two-players.ps1；profile只隔离存储，不选择账号，必须分别登录Owner与Visitor并确认两者OwnWorld ID不同。" },
+        { "id": "establish-visitor-session", "instruction": "Owner开放访问并邀请Visitor，Visitor接受后进入Owner世界。" },
+        { "id": "disconnect-visitor-gameplay", "instruction": "只断开Visitor进程RemotePort为8444的Established连接，不操作8080。" },
+        { "id": "assert-visitor-grace-reconnect", "instruction": "确认Visitor在grace内自动恢复同一VisitSession而不是进入自己的世界。" },
+        { "id": "assert-owner-member-convergence", "instruction": "确认Owner成员列表收敛为同一个Visitor且没有重复成员、旧弹窗或并行8444连接。" }
+      ]
+    },
+    {
+      "id": "control-recovery",
+      "automaticScenarios": ["control-independent-recovery", "recovery-race-matrix", "ui-action-matrix"],
+      "connectionGuide": { "role": "owner", "channel": "control", "remotePort": 8080, "protectedRemotePort": 8444 },
+      "manualSteps": [
+        { "id": "start-local-server", "instruction": "确认当前本地服务端与存储正在运行。" },
+        { "id": "launch-isolated-players", "instruction": "运行本次diagnostics目录中的launch-two-players.ps1；profile只隔离存储，不选择账号，必须分别登录Owner与Visitor并确认两者OwnWorld ID不同。" },
+        { "id": "establish-visitor-session", "instruction": "Owner开放访问并邀请Visitor，Visitor接受后进入Owner世界。" },
+        { "id": "disconnect-control-channel", "instruction": "只断开Owner进程RemotePort为8080的Established连接，不操作8444。" },
+        { "id": "assert-gameplay-remains-current", "instruction": "确认当前世界与gameplay保持可见且没有重建健康的8444连接。" },
+        { "id": "assert-control-projection-convergence", "instruction": "确认control恢复后旧邀请投影已清理、按钮能力与当前服务器状态一致。" }
+      ]
+    },
+    {
+      "id": "session-restore",
+      "automaticScenarios": ["secure-session-store", "session-restore-races", "ui-action-matrix"],
+      "connectionGuide": null,
+      "manualSteps": [
+        { "id": "start-local-server", "instruction": "确认当前本地服务端与存储正在运行。" },
+        { "id": "launch-isolated-players", "instruction": "运行launch-two-players.ps1 -LaunchRole owner，只启动owner profile并登录Owner账号。" },
+        { "id": "login-and-enter-own-world", "instruction": "确认Owner Player已进入OwnWorld且secure session已经提交。" },
+        { "id": "close-player-process", "instruction": "直接关闭Owner Player进程，不退出账号也不清理diagnostic-owner profile。" },
+        { "id": "restart-same-profile", "instruction": "运行launch-two-players.ps1 -LaunchRole owner，只重启同一owner profile。" },
+        { "id": "assert-passwordless-own-world-restore", "instruction": "确认Owner无需再次输入密码即可轮换session并进入OwnWorld，且没有旧route或连接残留。" }
+      ]
+    },
+    {
+      "id": "ui-scene-lifecycle",
+      "automaticScenarios": ["ui-action-matrix", "ui-scene-lifecycle"],
+      "connectionGuide": null,
+      "manualSteps": [
+        { "id": "start-local-server", "instruction": "确认当前本地服务端与存储正在运行。" },
+        { "id": "launch-isolated-players", "instruction": "运行本次diagnostics目录中的launch-two-players.ps1；profile只隔离存储，不选择账号，必须分别登录Owner与Visitor并确认两者OwnWorld ID不同。" },
+        { "id": "exercise-product-routes", "instruction": "反复打开和关闭访问管理、邀请与世界界面，确认输入和焦点始终属于当前页面。" },
+        { "id": "replace-world-target", "instruction": "完成一次Visitor进入、离开和再次进入以触发世界target与Scene替换。" },
+        { "id": "assert-single-active-ui-owner", "instruction": "确认任一时刻只有一个产品screen和一个modal owner响应输入。" },
+        { "id": "assert-no-stale-modal-or-scene", "instruction": "确认旧弹窗、旧Scene callback和旧HUD不会在新状态提交后重新出现。" }
+      ]
+    }
+  ]
+}

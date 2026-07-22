@@ -29,11 +29,11 @@ local function hash_bytes(key)
 end
 local function issue_complete(key)
   return redis.call('HLEN', key) == 4 and redis.call('PTTL', key) >= 0 and hash_bytes(key) <= __MAX_ISSUE_BYTES__ and
-    redis.call('HGET', key, 'v') == '1' and hex64(redis.call('HGET', key, 'fingerprint')) and
+    redis.call('HGET', key, 'v') == '2' and hex64(redis.call('HGET', key, 'fingerprint')) and
     hex64(redis.call('HGET', key, 'digest')) and decimal(redis.call('HGET', key, 'expires_us'))
 end
 local function credential_complete(key)
-  if redis.call('HLEN', key) ~= 20 or redis.call('PTTL', key) < 0 or hash_bytes(key) > __MAX_CREDENTIAL_BYTES__ or redis.call('HGET', key, 'v') ~= '1' then return false end
+  if redis.call('HLEN', key) ~= 21 or redis.call('PTTL', key) < 0 or hash_bytes(key) > __MAX_CREDENTIAL_BYTES__ or redis.call('HGET', key, 'v') ~= '2' then return false end
   local status = redis.call('HGET', key, 'status')
   local consume_id = redis.call('HGET', key, 'consume_id')
   local consume_fp = redis.call('HGET', key, 'consume_fp')
@@ -42,12 +42,13 @@ local function credential_complete(key)
   local role = redis.call('HGET', key, 'role')
   local purpose = redis.call('HGET', key, 'purpose')
   local visit = redis.call('HGET', key, 'visit')
+	local visit_revision = redis.call('HGET', key, 'visit_revision')
   local host = redis.call('HGET', key, 'host')
   local port = tonumber(redis.call('HGET', key, 'port'))
   local issued = tonumber(redis.call('HGET', key, 'issued_us'))
   local expires = tonumber(redis.call('HGET', key, 'expires_us'))
-  local role_binding = (role == 'owner' and purpose == 'own_world' and visit == 'none') or
-    (role == 'visitor' and (purpose == 'join' or purpose == 'reconnect') and id(visit,'vses_'))
+  local role_binding = (role == 'owner' and purpose == 'own_world' and visit == 'none' and visit_revision == '0') or
+    (role == 'visitor' and (purpose == 'join' or purpose == 'reconnect') and id(visit,'vses_') and decimal(visit_revision) and visit_revision ~= '0')
   return (status == 'issued' or status == 'consumed') and role_binding and
     id(redis.call('HGET', key, 'player'),'ply_') and id(redis.call('HGET', key, 'session'),'ses_') and
     decimal(redis.call('HGET', key, 'epoch')) and redis.call('HGET', key, 'epoch') ~= '0' and
@@ -64,7 +65,7 @@ local function credential_complete(key)
 end
 local function binding_reply(code, key)
   return {code, redis.call('HGET',key,'player'),redis.call('HGET',key,'session'),redis.call('HGET',key,'epoch'),
-    redis.call('HGET',key,'role'),redis.call('HGET',key,'world'),redis.call('HGET',key,'visit'),redis.call('HGET',key,'purpose'),
+    redis.call('HGET',key,'role'),redis.call('HGET',key,'world'),redis.call('HGET',key,'visit'),redis.call('HGET',key,'purpose'),redis.call('HGET',key,'visit_revision'),
     redis.call('HGET',key,'instance'),redis.call('HGET',key,'node'),redis.call('HGET',key,'generation'),redis.call('HGET',key,'fence'),
     redis.call('HGET',key,'channel'),redis.call('HGET',key,'host'),redis.call('HGET',key,'port'),
     redis.call('HGET',key,'issued_us'),redis.call('HGET',key,'expires_us')}
@@ -81,27 +82,28 @@ var luaPrelude = strings.NewReplacer(
 var issueScriptSource = luaPrelude + `
 if redis.call('EXISTS', KEYS[1]) == 1 then
   if not issue_complete(KEYS[1]) then return {'defect'} end
-  if redis.call('HGET',KEYS[1],'fingerprint') ~= ARGV[1] or redis.call('HGET',KEYS[1],'digest') ~= ARGV[2] or redis.call('HGET',KEYS[1],'expires_us') ~= ARGV[17] then return {'conflict'} end
+  if redis.call('HGET',KEYS[1],'fingerprint') ~= ARGV[1] or redis.call('HGET',KEYS[1],'digest') ~= ARGV[2] or redis.call('HGET',KEYS[1],'expires_us') ~= ARGV[18] then return {'conflict'} end
   if redis.call('EXISTS', KEYS[2]) == 0 or not credential_complete(KEYS[2]) then return {'defect'} end
   if redis.call('HGET',KEYS[2],'player') ~= ARGV[3] or redis.call('HGET',KEYS[2],'session') ~= ARGV[4] or
     redis.call('HGET',KEYS[2],'epoch') ~= ARGV[5] or redis.call('HGET',KEYS[2],'role') ~= ARGV[6] or
     redis.call('HGET',KEYS[2],'world') ~= ARGV[7] or redis.call('HGET',KEYS[2],'visit') ~= ARGV[8] or
-    redis.call('HGET',KEYS[2],'purpose') ~= ARGV[9] or redis.call('HGET',KEYS[2],'instance') ~= ARGV[10] or
-    redis.call('HGET',KEYS[2],'node') ~= ARGV[11] or redis.call('HGET',KEYS[2],'generation') ~= ARGV[12] or
-    redis.call('HGET',KEYS[2],'fence') ~= ARGV[13] or redis.call('HGET',KEYS[2],'channel') ~= ARGV[14] or
-    redis.call('HGET',KEYS[2],'host') ~= ARGV[15] or redis.call('HGET',KEYS[2],'port') ~= ARGV[16] or
-    redis.call('HGET',KEYS[2],'expires_us') ~= ARGV[17] or redis.call('HGET',KEYS[2],'issued_us') ~= ARGV[19] then return {'defect'} end
+    redis.call('HGET',KEYS[2],'purpose') ~= ARGV[9] or redis.call('HGET',KEYS[2],'visit_revision') ~= ARGV[10] or
+    redis.call('HGET',KEYS[2],'instance') ~= ARGV[11] or redis.call('HGET',KEYS[2],'node') ~= ARGV[12] or
+    redis.call('HGET',KEYS[2],'generation') ~= ARGV[13] or redis.call('HGET',KEYS[2],'fence') ~= ARGV[14] or
+    redis.call('HGET',KEYS[2],'channel') ~= ARGV[15] or redis.call('HGET',KEYS[2],'host') ~= ARGV[16] or
+    redis.call('HGET',KEYS[2],'port') ~= ARGV[17] or redis.call('HGET',KEYS[2],'expires_us') ~= ARGV[18] or
+    redis.call('HGET',KEYS[2],'issued_us') ~= ARGV[20] then return {'defect'} end
   if redis.call('HGET',KEYS[2],'status') == 'consumed' then return {'consumed'} end
   return {'replay'}
 end
 if redis.call('EXISTS', KEYS[2]) == 1 then return {'defect'} end
-redis.call('HSET',KEYS[1],'v','1','fingerprint',ARGV[1],'digest',ARGV[2],'expires_us',ARGV[17])
-redis.call('PEXPIREAT',KEYS[1],ARGV[18])
-redis.call('HSET',KEYS[2],'v','1','status','issued','consume_id','none','consume_fp','none',
+redis.call('HSET',KEYS[1],'v','2','fingerprint',ARGV[1],'digest',ARGV[2],'expires_us',ARGV[18])
+redis.call('PEXPIREAT',KEYS[1],ARGV[19])
+redis.call('HSET',KEYS[2],'v','2','status','issued','consume_id','none','consume_fp','none',
   'player',ARGV[3],'session',ARGV[4],'epoch',ARGV[5],'role',ARGV[6],'world',ARGV[7],'visit',ARGV[8],
-  'purpose',ARGV[9],'instance',ARGV[10],'node',ARGV[11],'generation',ARGV[12],'fence',ARGV[13],
-  'channel',ARGV[14],'host',ARGV[15],'port',ARGV[16],'issued_us',ARGV[19],'expires_us',ARGV[17])
-redis.call('PEXPIREAT',KEYS[2],ARGV[18])
+  'purpose',ARGV[9],'visit_revision',ARGV[10],'instance',ARGV[11],'node',ARGV[12],'generation',ARGV[13],'fence',ARGV[14],
+  'channel',ARGV[15],'host',ARGV[16],'port',ARGV[17],'issued_us',ARGV[20],'expires_us',ARGV[18])
+redis.call('PEXPIREAT',KEYS[2],ARGV[19])
 return {'created'}
 `
 

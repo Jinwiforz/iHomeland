@@ -349,7 +349,7 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 验证 clean install、token restore、WSS/TCP 独立恢复、双客户端 world visit、服务端重启、低/重复 revision、stale callback、Scene/UI 生命周期、Windows Development/Release build 和跨端 fixtures。
 
-**当前状态：**C2 主竖切及其四个验收派生修复均已归档；C3 可在冻结现有行为的基础上补齐 clean install、跨进程 token restore、独立通道恢复、Release build 与持续 soak 资格证据。
+**当前状态：**`qualify-client-v1` 已于 2026-07-22 完成并归档。Windows secure Session、一次性启动 restore、WSS/gameplay generation-bound recovery、产品恢复阶段、资格 manifest/入口、两种 Player smoke、Development-only 低敏诊断、五分钟恢复 soak、双 Player 产品与分通道故障矩阵、真实服务端同库重启和 store-owner cleanup 均已在同一冻结输入下通过，当前基线可以声明 client-v1 qualified；任一 contract 或 Player build digest 变化都必须重新运行完整资格链。
 
 ## A1：活动实例与可选协作结构
 

@@ -286,6 +286,9 @@ func (application *tcpGameplayApplication) VisitClose(ctx context.Context, opera
 
 // joinOrReconnect 集中维护两个admission mutation的相同id/revision/投影边界。
 func (application *tcpGameplayApplication) joinOrReconnect(ctx context.Context, operation tcpgameplay.OperationContext, qualification worldadmission.Qualification, revision uint64, rawCommandID []byte, reconnect bool) (*visitv1.VisitJoinResponse, error) {
+	if !qualification.Valid() || uint64(qualification.Binding().VisitRevision()) != revision {
+		return nil, tcpgameplay.PublicError{Code: 2105, MessageKey: "error.visit.revision_conflict"}
+	}
 	visit, bindingID, expected, commandID, err := application.visitMutationInput(ctx, operation, revision, rawCommandID)
 	if err != nil {
 		return nil, err
@@ -427,7 +430,7 @@ func (application *tcpGameplayApplication) projectMutation(ctx context.Context, 
 		fallback := visitv1.SafeReturnDestination(directive.FallbackDestination())
 		directives = append(directives, visitv1.SafeReturnDirective_builder{
 			VisitSessionId: proto.String(directive.VisitSessionID().Value()), VisitorId: proto.String(directive.VisitorID().String()),
-			Reason: &reason, Preferred: &preferred, Fallback: &fallback,
+			Reason: &reason, Preferred: &preferred, Fallback: &fallback, Revision: proto.Uint64(directive.Revision().Uint64()),
 		}.Build())
 	}
 	return visitv1.VisitMutationResult_builder{Snapshot: snapshot, SafeReturns: directives}.Build(), nil

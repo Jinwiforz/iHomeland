@@ -10,5 +10,8 @@
 - `../docs/client-ui-architecture.md`
 - `../docs/client-integration.md`
 - `../docs/server-v1-qualification.md`
+- `../docs/client-v1-qualification.md`
 - `../docs/network-transport-architecture.md`
 - `../docs/protocol-compatibility.md`
+
+C3资格由仓库根 `tools/client-qualification/client-qualification.ps1` 唯一编排。缺陷反馈可使用其`diagnose -Scenario`动作定向运行登记fixture并只构建Development Player；该动作固定输出非证据清单，不能替代完整资格。Editor/Development中的 `Assets/App/Scripts/Core/Qualification/` 只提供低敏计数、受控transport故障和run内secure-store cleanup；普通启动零副作用，Release不得包含这些入口。

@@ -253,6 +253,8 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                     Require<Label>("error-label");
                     break;
                 case ClientUiRouteId.ConnectionLost:
+                    Require<Label>("connection-lost-title");
+                    Require<Label>("connection-lost-description");
                     Require<Button>("retry-button");
                     Require<Button>("logout-button");
                     Require<Label>("error-label");
@@ -500,9 +502,52 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             }
 
             var busy = state.ActiveIntent != ClientPersonalWorldIntent.None;
-            Require<Button>("retry-button").SetEnabled(!busy);
+            if (_routeId == ClientUiRouteId.ConnectionLost)
+            {
+                Require<Label>("connection-lost-title").text = RecoveryTitle(state.Phase);
+                Require<Label>("connection-lost-description").text = RecoveryDescription(state.Phase);
+                Require<Button>("retry-button").SetEnabled(
+                    !busy && state.Phase == ClientPersonalWorldPhase.ConnectionLost);
+            }
+            else
+            {
+                Require<Button>("retry-button").SetEnabled(!busy);
+            }
+
             Require<Button>("logout-button").SetEnabled(!busy);
             Require<Label>("error-label").text = FailureText(state.Shell.Failure);
+        }
+
+        /// <summary>把恢复阶段映射为ConnectionLost modal标题。</summary>
+        private static string RecoveryTitle(ClientPersonalWorldPhase phase)
+        {
+            switch (phase)
+            {
+                case ClientPersonalWorldPhase.RecoveringControl:
+                    return "正在恢复控制连接";
+                case ClientPersonalWorldPhase.RecoveringWorld:
+                    return "正在恢复世界连接";
+                case ClientPersonalWorldPhase.AwaitingScene:
+                    return "正在同步世界";
+                default:
+                    return "连接已中断";
+            }
+        }
+
+        /// <summary>把恢复阶段映射为不承诺未提交事实的低敏说明。</summary>
+        private static string RecoveryDescription(ClientPersonalWorldPhase phase)
+        {
+            switch (phase)
+            {
+                case ClientPersonalWorldPhase.RecoveringControl:
+                    return "正在重新核对服务器状态，依赖邀请列表的操作已暂停。";
+                case ClientPersonalWorldPhase.RecoveringWorld:
+                    return "旧世界连接已失效，正在向服务器恢复当前目标。";
+                case ClientPersonalWorldPhase.AwaitingScene:
+                    return "服务器状态已确认，正在加载最新世界。";
+                default:
+                    return "与服务器的连接已经断开，可以重试或退出登录。";
+            }
         }
 
         /// <summary>呈现 VisitSession 权威角色、revision、成员、邀请和动作权限。</summary>
@@ -840,6 +885,10 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                     return "客户端已经停止。";
                 case ClientPersonalWorldFailure.InviteUnavailable:
                     return "邀请已撤销或失效，请选择最新邀请。";
+                case ClientPersonalWorldFailure.SecureStorage:
+                    return "无法安全保存登录状态，请检查系统权限后重试。";
+                case ClientPersonalWorldFailure.ProfileInUse:
+                    return "已有另一个客户端正在使用本机登录状态，请先关闭它再重新启动。";
                 default:
                     return "出现未分类错误，请重试。";
             }

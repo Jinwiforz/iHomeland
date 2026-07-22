@@ -302,11 +302,11 @@ func (visit VisitSession) Leave(visitor Actor, bindingID ConnectionBindingID) (V
 	if !visitor.Valid() || (membership.state != MembershipStateJoined && membership.state != MembershipStateReconnecting) || membership.sessionID != visitor.sessionID || membership.epoch != visitor.epoch || membership.bindingID != bindingID {
 		return VisitSession{}, SafeReturnDirective{}, domainError(operation, ErrorCodeStale)
 	}
-	directive, _ := NewSafeReturnDirective(visit.ID(), visitor.playerID, SafeReturnReasonVoluntaryLeave)
 	next, err := visit.nextRevision(operation)
 	if err != nil {
 		return VisitSession{}, SafeReturnDirective{}, err
 	}
+	directive, _ := NewSafeReturnDirective(visit.ID(), visitor.playerID, SafeReturnReasonVoluntaryLeave, next)
 	target, err := visit.rebuild(next, visit.snapshot.lifecycle, visit.snapshot.ownerBinding, visit.snapshot.ownerGraceGeneration, visit.snapshot.ownerGraceExpiresAt, visit.removeInvite(membership.inviteID), visit.removeMember(index))
 	return target, directive, err
 }
@@ -325,11 +325,11 @@ func (visit VisitSession) Kick(owner Actor, visitorID account.PlayerID) (VisitSe
 	if membership.state != MembershipStateJoined && membership.state != MembershipStateReconnecting {
 		return VisitSession{}, SafeReturnDirective{}, domainError(operation, ErrorCodeInvalidState)
 	}
-	directive, _ := NewSafeReturnDirective(visit.ID(), visitorID, SafeReturnReasonKicked)
 	next, err := visit.nextRevision(operation)
 	if err != nil {
 		return VisitSession{}, SafeReturnDirective{}, err
 	}
+	directive, _ := NewSafeReturnDirective(visit.ID(), visitorID, SafeReturnReasonKicked, next)
 	target, err := visit.rebuild(next, visit.snapshot.lifecycle, visit.snapshot.ownerBinding, visit.snapshot.ownerGraceGeneration, visit.snapshot.ownerGraceExpiresAt, visit.removeInvite(membership.inviteID), visit.removeMember(index))
 	return target, directive, err
 }
@@ -402,11 +402,11 @@ func (visit VisitSession) ExpireVisitorReconnect(visitorID account.PlayerID, gen
 	if observedAt.IsZero() || !expiredAt(observedAt, membership.reconnectExpiresAt) {
 		return VisitSession{}, SafeReturnDirective{}, domainError(operation, ErrorCodeInvalidState)
 	}
-	directive, _ := NewSafeReturnDirective(visit.ID(), visitorID, SafeReturnReasonVisitorReconnectExpired)
 	next, err := visit.nextRevision(operation)
 	if err != nil {
 		return VisitSession{}, SafeReturnDirective{}, err
 	}
+	directive, _ := NewSafeReturnDirective(visit.ID(), visitorID, SafeReturnReasonVisitorReconnectExpired, next)
 	target, err := visit.rebuild(next, visit.snapshot.lifecycle, visit.snapshot.ownerBinding, visit.snapshot.ownerGraceGeneration, visit.snapshot.ownerGraceExpiresAt, visit.removeInvite(membership.inviteID), visit.removeMember(index))
 	return target, directive, err
 }
@@ -487,20 +487,20 @@ func (visit VisitSession) closeWith(operation Operation, reason SafeReturnReason
 	if visit.snapshot.lifecycle == LifecycleClosed {
 		return VisitSession{}, nil, domainError(operation, ErrorCodeInvalidState)
 	}
+	next, err := visit.nextRevision(operation)
+	if err != nil {
+		return VisitSession{}, nil, err
+	}
 	directives := make([]SafeReturnDirective, 0, len(visit.snapshot.memberships))
 	for _, membership := range visit.snapshot.memberships {
 		if membership.state == MembershipStateJoined || membership.state == MembershipStateReconnecting {
-			directive, _ := NewSafeReturnDirective(visit.ID(), membership.visitorID, reason)
+			directive, _ := NewSafeReturnDirective(visit.ID(), membership.visitorID, reason, next)
 			directives = append(directives, directive)
 		}
 	}
 	sort.Slice(directives, func(left, right int) bool {
 		return directives[left].visitorID.String() < directives[right].visitorID.String()
 	})
-	next, err := visit.nextRevision(operation)
-	if err != nil {
-		return VisitSession{}, nil, err
-	}
 	target, err := visit.rebuild(next, LifecycleClosed, visit.snapshot.ownerBinding, 0, time.Time{}, nil, nil)
 	return target, directives, err
 }

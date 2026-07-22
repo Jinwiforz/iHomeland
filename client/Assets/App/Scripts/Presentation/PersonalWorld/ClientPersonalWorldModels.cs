@@ -14,32 +14,44 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// <summary>Experience 尚未完成 App Scope 初始化。</summary>
         Inactive = 0,
 
+        /// <summary>正在一次性读取并轮换安全保存的Session lineage。</summary>
+        RestoringSession = 1,
+
         /// <summary>只显示本地登录页，尚未产生网络副作用。</summary>
-        Login = 1,
+        Login = 2,
 
         /// <summary>正在执行显式 bootstrap 与认证。</summary>
-        Authenticating = 2,
+        Authenticating = 3,
 
         /// <summary>正在解析、连接或加载自己的 PersonalWorld。</summary>
-        EnteringOwnWorld = 3,
+        EnteringOwnWorld = 4,
 
         /// <summary>当前内容场景承载自己的 PersonalWorld。</summary>
-        OwnWorld = 4,
+        OwnWorld = 5,
 
         /// <summary>正在接受定向邀请并切换到 Visitor target。</summary>
-        JoiningVisit = 5,
+        JoiningVisit = 6,
 
         /// <summary>当前内容场景承载受控 Visitor target。</summary>
-        Visiting = 6,
+        Visiting = 7,
 
         /// <summary>旧 Visitor target 已失效，正在安全返回自己的世界。</summary>
-        ReturningOwnWorld = 7,
+        ReturningOwnWorld = 8,
+
+        /// <summary>WSS正在有限恢复且依赖control完整性的动作已冻结。</summary>
+        RecoveringControl = 9,
+
+        /// <summary>Gameplay旧target已失效且正在权威重建。</summary>
+        RecoveringWorld = 10,
+
+        /// <summary>网络target已提交，等待Scene与HUD确认同一generation。</summary>
+        AwaitingScene = 11,
 
         /// <summary>连接中断且需要玩家显式重试或退出。</summary>
-        ConnectionLost = 8,
+        ConnectionLost = 12,
 
         /// <summary>App Scope 已停止，拒绝全部迟到提交。</summary>
-        Stopped = 9,
+        Stopped = 13,
     }
 
     /// <summary>
@@ -91,6 +103,12 @@ namespace IHomeland.Client.Presentation.PersonalWorld
 
         /// <summary>选中的邀请已被撤销、过期、消费或由终态统一退役。</summary>
         InviteUnavailable = 14,
+
+        /// <summary>平台安全存储不可访问或无法原子提交。</summary>
+        SecureStorage = 15,
+
+        /// <summary>另一客户端进程正在使用同一本地登录profile。</summary>
+        ProfileInUse = 16,
     }
 
     /// <summary>

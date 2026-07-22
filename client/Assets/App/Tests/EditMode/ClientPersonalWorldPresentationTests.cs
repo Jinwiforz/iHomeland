@@ -25,10 +25,15 @@ namespace IHomeland.Client.Tests.EditMode
                 ClientPersonalWorldFailure.Transport);
             var inviteUnavailable = ClientPersonalWorldUiToolkitView.FailureText(
                 ClientPersonalWorldFailure.InviteUnavailable);
+            var profileInUse = ClientPersonalWorldUiToolkitView.FailureText(
+                ClientPersonalWorldFailure.ProfileInUse);
 
             Assert.That(unauthenticated, Is.EqualTo("登录状态已失效，请重新登录。"));
             Assert.That(transport, Is.EqualTo("网络连接失败，请检查服务器或网络后重试。"));
             Assert.That(inviteUnavailable, Is.EqualTo("邀请已撤销或失效，请选择最新邀请。"));
+            Assert.That(
+                profileInUse,
+                Is.EqualTo("已有另一个客户端正在使用本机登录状态，请先关闭它再重新启动。"));
             Assert.That(unauthenticated, Does.Not.Contain("client.personal_world"));
             Assert.That(transport, Does.Not.Contain("client.personal_world"));
         }

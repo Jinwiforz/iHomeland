@@ -168,6 +168,79 @@ namespace IHomeland.Client.Application.Gameplay
             }
         }
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>获取资格运行可观察的current socket owner数量。</summary>
+        internal int QualificationSocketOwnerCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _connection != null ? 1 : 0;
+                }
+            }
+        }
+
+        /// <summary>获取资格运行可观察的current heartbeat owner数量。</summary>
+        internal int QualificationHeartbeatOwnerCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _heartbeatTask != null && !_heartbeatTask.IsCompleted ? 1 : 0;
+                }
+            }
+        }
+
+        /// <summary>获取资格运行可观察的current correlation pending数量。</summary>
+        internal int QualificationPendingOperationCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _pending.Count;
+                }
+            }
+        }
+
+        /// <summary>获取资格范围内gameplay subscriber总数。</summary>
+        internal int QualificationSubscriptionCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return CountSubscribers(WorldSnapshotReceived) +
+                           CountSubscribers(VisitSnapshotReceived) +
+                           CountSubscribers(SafeReturnReceived) +
+                           CountSubscribers(UnexpectedDisconnect) +
+                           CountSubscribers(DiagnosticRecorded);
+                }
+            }
+        }
+
+        /// <summary>为Development资格运行提交一次current generation的transport terminal事实。</summary>
+        /// <returns>Current generation处于Active并已开始关闭时返回true。</returns>
+        internal bool InjectQualificationTransportDisconnect()
+        {
+            long generation;
+            lock (_sync)
+            {
+                if (_snapshot.State != ClientGameplayChannelState.Active)
+                {
+                    return false;
+                }
+
+                generation = _generation;
+            }
+
+            BeginClose(generation, ClientGameplayCloseReason.Transport);
+            return true;
+        }
+#endif
+
         /// <summary>启用显式 connect 入口，但不签发 credential 或创建 socket。</summary>
         /// <param name="cancellationToken">初始化前检查的 AppLifetime 信号。</param>
         /// <returns>Channel 已进入 Ready 时完成。</returns>
@@ -1089,6 +1162,7 @@ namespace IHomeland.Client.Application.Gameplay
         /// <param name="reason">稳定关闭原因。</param>
         /// <param name="reader">该 generation 的 reader owner。</param>
         /// <param name="writer">该 generation 的 writer owner。</param>
+        /// <param name="heartbeat">该 generation 的 heartbeat owner。</param>
         /// <returns>三个 owner 都结束且主线程 terminal callback 已取得所有权时完成。</returns>
         private async Task NotifyUnexpectedDisconnectAfterOwnersAsync(
             long generation,
@@ -1228,7 +1302,19 @@ namespace IHomeland.Client.Application.Gameplay
                    admission.Purpose == ClientWorldAdmissionPurpose.Reconnect);
         }
 
-        /// <summary>替换不可变低敏 snapshot；调用方持有 `_sync`。</summary>
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>计算单个event当前subscriber数量。</summary>
+        /// <param name="subscribers">可空multicast delegate。</param>
+        /// <returns>当前invocation list长度。</returns>
+        private static int CountSubscribers(Delegate subscribers)
+        {
+            return subscribers?.GetInvocationList().Length ?? 0;
+        }
+#endif
+
+        /// <summary>在channel同步边界内提交当前generation的不可变健康快照。</summary>
+        /// <param name="state">待发布的gameplay channel状态。</param>
+        /// <param name="reason">该状态对应的稳定关闭原因。</param>
         private void SetSnapshotLocked(
             ClientGameplayChannelState state,
             ClientGameplayCloseReason reason)

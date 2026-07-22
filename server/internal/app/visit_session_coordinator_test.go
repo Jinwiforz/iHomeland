@@ -123,7 +123,7 @@ func TestVisitCoordinatorMapsAvailabilityAndAssignmentLoss(t *testing.T) {
 	}
 	tcp.addConnection(ownerConnection)
 	target, _ := account.NewPlayerID("ply_targetFixture")
-	directive, _ := visitsession.NewSafeReturnDirective(closed.ID(), target, visitsession.SafeReturnReasonAssignmentChanged)
+	directive, _ := visitsession.NewSafeReturnDirective(closed.ID(), target, visitsession.SafeReturnReasonAssignmentChanged, closed.Revision())
 	coordinator.MutationCommitted(context.Background(), coordinatorSimpleResult(t, visitsession.OperationInvalidateAssignment, closed, "vcmd_fixtureInvalidation", []visitsession.SafeReturnDirective{directive}))
 	if wss.count(2003) != 2 || wss.count(2102) != 2 || tcp.visitorCount(2122) != 1 {
 		t.Fatalf("assignment effects changed=%d closed=%d return=%d", wss.count(2003), wss.count(2102), tcp.visitorCount(2122))

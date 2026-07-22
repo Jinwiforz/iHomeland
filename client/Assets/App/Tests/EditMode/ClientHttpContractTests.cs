@@ -290,14 +290,14 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             var admission = codec.DecodeWorldAdmission(Utf8(
-                "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"OWN_WORLD\",\"role\":\"OWNER\"}"));
+                "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"OWN_WORLD\",\"role\":\"OWNER\",\"visitRevision\":0}"));
             Assert.That(admission.Purpose, Is.EqualTo(ClientWorldAdmissionPurpose.OwnWorld));
             Assert.That(admission.ToString(), Does.Not.Contain(admission.Credential));
 
             Assert.Throws<ArgumentException>(() => codec.EncodeWorldAdmission(
                 ClientWorldAdmissionTarget.VisitWorld("visit/invalid")));
             Assert.Throws<ClientHttpContractException>(() => codec.DecodeWorldAdmission(Utf8(
-                "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"JOIN\",\"role\":\"OWNER\"}")));
+                "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"game.example.invalid\",\"port\":4433},\"expiresAtMs\":1700000030000,\"purpose\":\"JOIN\",\"role\":\"OWNER\",\"visitRevision\":7}")));
         }
 
         /// <summary>

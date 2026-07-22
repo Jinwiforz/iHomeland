@@ -44,6 +44,16 @@ namespace IHomeland.Client.Infrastructure.Http
         /// 本地环境、版本或生命周期前置条件不成立。
         /// </summary>
         LocalPolicy = 6,
+
+        /// <summary>
+        /// OS安全存储无法原子提交或退休refresh lineage。
+        /// </summary>
+        SecureStorage = 7,
+
+        /// <summary>
+        /// 另一进程已经拥有同一production secure profile。
+        /// </summary>
+        SecureStorageProfileInUse = 8,
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using IHomeland.Client.Core.Bootstrap;
 using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
@@ -36,11 +37,33 @@ namespace IHomeland.Client.Tests.PlayMode
         public IEnumerator TearDownRoots()
         {
             var roots = Object.FindObjectsByType<AppRoot>(FindObjectsInactive.Include);
+            var stops = new List<Task>();
             foreach (var root in roots)
             {
                 if (root != null)
                 {
-                    Object.Destroy(root.gameObject);
+                    stops.Add(root.StopAsync());
+                }
+            }
+
+            while (stops.Exists(stop => !stop.IsCompleted))
+            {
+                yield return null;
+            }
+
+            foreach (var stop in stops)
+            {
+                Assert.That(stop.IsCanceled, Is.False, "测试清理不应取消 App Scope 停止事务。");
+                Assert.That(stop.IsFaulted, Is.False, stop.Exception?.ToString());
+            }
+
+            Assert.That(AppRoot.QualificationClaimedOwnerCount, Is.Zero);
+
+            foreach (var root in roots)
+            {
+                if (root != null)
+                {
+                    Object.DestroyImmediate(root.gameObject);
                 }
             }
 
@@ -48,13 +71,11 @@ namespace IHomeland.Client.Tests.PlayMode
             {
                 if (inputAsset != null)
                 {
-                    Object.Destroy(inputAsset);
+                    Object.DestroyImmediate(inputAsset);
                 }
             }
 
             _inputAssets.Clear();
-
-            yield return null;
         }
 
         /// <summary>
@@ -64,16 +85,13 @@ namespace IHomeland.Client.Tests.PlayMode
         [UnityTest]
         public IEnumerator DuplicateBootstrapKeepsOneRunningRoot()
         {
-            var first = CreateBootstrapRoot("PrimaryAppRoot");
-            yield return null;
-            var duplicate = CreateBootstrapRoot("DuplicateAppRoot");
-            yield return null;
+            var first = CreateBootstrapRoot("PrimaryAppRoot", out var firstBootstrap);
+            yield return WaitForSuccessfulTask(firstBootstrap.StartupCompletion);
+            _ = CreateBootstrapRoot("DuplicateAppRoot", out var duplicateBootstrap);
+            yield return WaitForSuccessfulTask(duplicateBootstrap.StartupCompletion);
 
-            var roots = Object.FindObjectsByType<AppRoot>(FindObjectsInactive.Include);
-            Assert.That(roots, Has.Length.EqualTo(1));
-            Assert.That(roots[0], Is.SameAs(first));
+            Assert.That(AppRoot.QualificationClaimedOwnerCount, Is.EqualTo(1));
             Assert.That(first.State, Is.EqualTo(AppLifetimeState.Running));
-            Assert.That(duplicate == null, Is.True);
         }
 
         /// <summary>
@@ -84,8 +102,8 @@ namespace IHomeland.Client.Tests.PlayMode
         public IEnumerator RunningRootSurvivesActiveSceneReplacement()
         {
             var originalScene = SceneManager.GetActiveScene();
-            var root = CreateBootstrapRoot("PersistentAppRoot");
-            yield return null;
+            var root = CreateBootstrapRoot("PersistentAppRoot", out var bootstrap);
+            yield return WaitForSuccessfulTask(bootstrap.StartupCompletion);
             var replacementScene = SceneManager.CreateScene("RuntimeReplacementScene");
 
             Assert.That(SceneManager.SetActiveScene(replacementScene), Is.True);
@@ -144,14 +162,16 @@ namespace IHomeland.Client.Tests.PlayMode
         [UnityTest]
         public IEnumerator DestroyedRootReleasesClaimForNextRun()
         {
-            var first = CreateBootstrapRoot("FirstRunRoot");
-            yield return null;
-            Object.Destroy(first.gameObject);
-            yield return null;
-            yield return null;
+            var first = CreateBootstrapRoot("FirstRunRoot", out var firstBootstrap);
+            yield return WaitForSuccessfulTask(firstBootstrap.StartupCompletion);
+            var stop = first.StopAsync();
+            yield return WaitForSuccessfulTask(stop);
 
-            var second = CreateBootstrapRoot("SecondRunRoot");
-            yield return null;
+            Assert.That(AppRoot.QualificationClaimedOwnerCount, Is.Zero);
+            Object.DestroyImmediate(first.gameObject);
+
+            var second = CreateBootstrapRoot("SecondRunRoot", out var secondBootstrap);
+            yield return WaitForSuccessfulTask(secondBootstrap.StartupCompletion);
 
             Assert.That(second, Is.Not.Null);
             Assert.That(second.State, Is.EqualTo(AppLifetimeState.Running));
@@ -177,10 +197,11 @@ namespace IHomeland.Client.Tests.PlayMode
                 "AppBootstrap 缺少 ClientEnvironmentProfile 直接序列化引用。");
 
             gameObject.SetActive(true);
-            yield return null;
+            yield return WaitForSuccessfulTask(bootstrap.StartupCompletion);
 
             Assert.That(bootstrap.enabled, Is.False);
             Assert.That(root.State, Is.EqualTo(AppLifetimeState.Created));
+            Assert.That(AppRoot.QualificationClaimedOwnerCount, Is.Zero);
         }
 
         /// <summary>
@@ -208,31 +229,50 @@ namespace IHomeland.Client.Tests.PlayMode
                 new Regex("Production HTTP base URI 必须使用 HTTPS", RegexOptions.CultureInvariant));
 
             gameObject.SetActive(true);
-            yield return null;
-            yield return null;
+            yield return WaitForSuccessfulTask(bootstrap.StartupCompletion);
 
-            Assert.That(root == null, Is.True);
-            var replacement = CreateBootstrapRoot("ReplacementAfterInvalidEnvironment");
-            yield return null;
+            Assert.That(root.State, Is.EqualTo(AppLifetimeState.Created));
+            Assert.That(AppRoot.QualificationClaimedOwnerCount, Is.Zero);
+            Object.DestroyImmediate(gameObject);
+            var replacement = CreateBootstrapRoot(
+                "ReplacementAfterInvalidEnvironment",
+                out var replacementBootstrap);
+            yield return WaitForSuccessfulTask(replacementBootstrap.StartupCompletion);
             Assert.That(replacement.State, Is.EqualTo(AppLifetimeState.Running));
-            Object.Destroy(profile);
+            Object.DestroyImmediate(profile);
         }
 
         /// <summary>
         /// 创建一个以直接引用接线、激活后立即 bootstrap 的测试 GameObject。
         /// </summary>
         /// <param name="name">用于诊断场景层级的 GameObject 名称。</param>
+        /// <param name="bootstrap">返回公开当前真实启动事务的 Host。</param>
         /// <returns>已经激活并开始启动的 AppRoot。</returns>
-        private AppRoot CreateBootstrapRoot(string name)
+        private AppRoot CreateBootstrapRoot(string name, out AppBootstrap bootstrap)
         {
             var gameObject = new GameObject(name);
             gameObject.SetActive(false);
             var root = gameObject.AddComponent<AppRoot>();
             var uiHostRoot = AddUiHostRoot(gameObject);
-            var bootstrap = gameObject.AddComponent<AppBootstrap>();
+            bootstrap = gameObject.AddComponent<AppBootstrap>();
             bootstrap.ConfigureBeforeActivation(root, uiHostRoot, CreateTestEnvironment());
             gameObject.SetActive(true);
             return root;
+        }
+
+        /// <summary>等待被测生命周期事务的真实完成边界，并把取消或异常作为测试失败报告。</summary>
+        /// <param name="operation">由产品生命周期对象返回的唯一事务。</param>
+        /// <returns>事务成功完成时结束的 Unity 协程。</returns>
+        private static IEnumerator WaitForSuccessfulTask(Task operation)
+        {
+            Assert.That(operation, Is.Not.Null);
+            while (!operation.IsCompleted)
+            {
+                yield return null;
+            }
+
+            Assert.That(operation.IsCanceled, Is.False, "生命周期事务不应被意外取消。");
+            Assert.That(operation.IsFaulted, Is.False, operation.Exception?.ToString());
         }
 
         /// <summary>

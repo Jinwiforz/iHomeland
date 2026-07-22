@@ -22,7 +22,7 @@ func TestDefinitionsRegisterBoundedExpiringHashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, definition := range definitions {
-		if definition.Owner != "worldadmission" || definition.TTLPolicy != storageredis.TTLRequired || definition.SchemaVersion != 1 || definition.MaxEncodedBytes <= 0 {
+		if definition.Owner != "worldadmission" || definition.TTLPolicy != storageredis.TTLRequired || definition.SchemaVersion != redisSchemaVersion || definition.MaxEncodedBytes <= 0 {
 			t.Fatalf("invalid definition: %#v", definition)
 		}
 		key, buildErr := keyspace.Build(definition.Name, "fixture")

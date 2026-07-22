@@ -387,7 +387,7 @@ func (service *Service) ResolveAdmissionEligibility(ctx context.Context, authent
 	if err != nil {
 		return AdmissionEligibility{}, &Error{operation: OperationResolve, code: ErrorCodeDependencyDefect, cause: err}
 	}
-	return AdmissionEligibility{intent: intent, purpose: purpose}, nil
+	return AdmissionEligibility{intent: intent, purpose: purpose, revision: snapshot.Revision()}, nil
 }
 
 // earliestDeadline 返回非空绝对时间中的最早值。

@@ -63,12 +63,12 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - Production base URI 必须为 HTTPS；Local/Test 的明文例外必须同时满足显式环境和 loopback host。
 - App Scope 初始化不自动联网；后续 application flow 只能在 AppRoot Running 后显式调用 `ClientBootstrapService`。
 - Version/config 两步全部通过后才发布配置；协议或最低客户端版本不兼容时阻止认证调用。
-- Password 只存在于 register/login 调用；access token、refresh token 与 ticket 只由 `SessionCoordinator` 管理，不写入 Scene、Prefab、ScriptableObject、PlayerPrefs 或日志。
+- Password 只存在于 register/login 调用；access token、refresh token 与 ticket 只由 `SessionCoordinator` 管理，不写入 Scene、Prefab、ScriptableObject、PlayerPrefs 或日志。refresh lineage 只有在 Windows DPAPI `CurrentUser`、environment binding、原子 replace 与 owner-specific mutex 全部成功后才能提交 current Session；access token、ticket 与 admission 永不持久化。
 - Refresh single-flight，并以 session generation 拒绝迟到结果；后续等待方可以独立取消。Refresh/logout commit-unknown 进入 `Unresolved`，直到新的 register/login 或显式 forget 前不得继续 authenticated operation。
 - Transport 不自动重试。Caller cancel、deadline、transport、oversized、malformed 与结构有效的 server error 保持不同结果；`Retry-After` 只作为事实返回。
-- 当前不恢复进程退出前的 refresh token；重启回到未认证状态。安全持久化需独立 capability。
+- App 启动由一次性 `ClientSessionRestoreCoordinator` 执行 `Read -> bootstrap -> refresh -> secure replace -> Session commit`。无 record 或 Unsupported 进入 Login；明确 rejected/corrupt/commit-unknown 退役旧 lineage；无法确定的 transport/storage 结果只显示稳定低敏失败，不创建第二个 Session、control 或 target。
 
-`acceptVisitInvite` 只接受由 current inbox selection 取得的 VisitSessionID、InviteID、expected revision 与稳定 idempotency key，并返回匹配且未过期的 reservation；页面不得提供 correlation 自由文本入口。Accept 成功后客户端退役该 invite，后续 admission/JOIN 失败也不能让已消费 identity 重新可点；commit-unknown 仍等待权威 replacement。`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease。两者都不能成为 PersonalWorld 或 VisitSession 最终事实，HTTP 对象图不拥有 socket。
+`acceptVisitInvite` 只接受由 current inbox selection 取得的 VisitSessionID、InviteID、expected revision 与稳定 idempotency key，并返回匹配且未过期的 reservation；页面不得提供 correlation 自由文本入口。Accept 成功后客户端退役该 invite，后续 admission/JOIN 失败也不能让已消费 identity 重新可点；commit-unknown 仍等待权威 replacement。`issueWorldAdmission` 只产生绑定 session generation、expiry 与单次交付的短期 lease；Visitor admission 还携带签发判断冻结的权威 `visitRevision`，JOIN/RECONNECT 首帧必须使用该值，不能使用断线前 projection、算术推导或冲突探测。两者都不能成为 PersonalWorld 或 VisitSession 最终事实，HTTP 对象图不拥有 socket。
 
 ### 3. WSS Control
 
@@ -92,9 +92,11 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 - 只接收登记的 response/error 与 2002、2121、2122 push；`VISIT_SAFE_RETURN_PUSH` 到达后立即停止旧 target mutation，等待有界关闭并进入受控返回流程
 - ticket、admission、完整 payload 和 assignment 私有字段不得进入客户端日志；session epoch 失效时同时关闭 WSS/TCP
 
-当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，产品页面、Scene 与显式恢复由上层 Experience 编排，channel 自身不执行后台自动恢复。
+当前客户端已接入独立 gameplay channel owner；实现结构与生命周期见[客户端运行时架构](client-architecture.md#当前-tlstcp-gameplay-边界)。该边界只交付 transport、强类型 operation 与可信 PUSH；最终 snapshot 与 target flow 由纯 C# Services/coordinator 保存，唯一 `ClientConnectionRecoveryCoordinator` 消费 typed channel lifecycle 并拥有 automatic/manual single-flight，channel 自身不猜测业务 target。
 
-客户端只在收到确定的 channel terminal state 后显示网络中断；“重试连接”由玩家显式触发并具有 45 秒整笔 deadline。deadline 覆盖 control readiness、own-world admission、gameplay connection 与 Scene 同步，超时保持可重试界面且释放 single-flight；不会后台无限重试，也不会把尚未提交的连接显示为已进入世界。Development Build 仅记录 generation、阶段、稳定 close reason 与异常类型，不记录 ticket、admission、payload、账号或 endpoint。
+WSS 与 gameplay 独立恢复但共享 Session owner。WSS `Recovering` 只冻结依赖 inbox/hint 完整性的邀请动作，健康 gameplay 与 Scene 不重建；新 control generation 必须经 gameplay 请求完整 world/Visit snapshot 后才恢复能力。Gameplay unexpected disconnect 先撤销旧 mutation、HUD/Scene binding，再按冻结 descriptor 恢复 OwnWorld 或在 grace 内以 `VisitReconnectCommand` 作为 Visitor 新连接唯一首帧。冻结descriptor同时绑定服务端Session identity/epoch与本地generation：同一Session上的access refresh可把generation单调重绑定到current，不同Session、epoch或换账号必须拒绝继承。automatic terminal 后才开放 manual retry；两者共用 45 秒总 deadline 和 session/recovery/target/scene 四重提交 gate，不使用无限重试、延时猜测或 tick 修正。
+
+C3资格按 `automatic -> soak -> prepare-manual -> finalize` 继续同一run：两种Player smoke必须观察App Scope的低敏Running标记；Development soak使用run内绝对存储根、环境传入的一次性测试凭据和三轮双通道故障；人工阶段固定两个隔离profile。Soak/人工secure record只能由Player内正式Session/store owner精确删除，Release smoke发现当前Windows用户已有default record时直接拒绝，不轮换或清理操作者数据。
 
 ### 5. Account/PersonalWorld/VisitSession Services
 
@@ -138,16 +140,15 @@ UI 不展示内部 exception、SQL、Redis 或完整凭据。
 ```text
 App Start
   -> HTTPS version/config
-  -> register/login（当前不跨进程恢复 token）
+  -> secure restore 成功则无密码进入 current Session
+  -> 无可恢复 lineage 时 register/login
   -> acquire WSS/TCP tickets
   -> connect control/business channels
   -> resolve own-world or active visit context
   -> open target screen
 ```
 
-目标恢复策略要求 WSS 与 TCP 独立重连但共享 session epoch；epoch 失效时必须停止业务、清理本地 session、关闭全部通道并回到登录流程。
-
-上述完整恢复序列仍是目标状态。当前已具备 HTTP 强类型边界、显式 WSS/TLS-TCP channel、PersonalWorld/VisitSession Services、目标状态机、五个 production routes、个人世界 View State/action boundary 与 Scene transition/Context；token 跨进程恢复和独立通道自动恢复策略仍未建立。
+WSS 与 TCP 独立恢复并共享 session owner；epoch 失效时停止业务、退役 secure lineage、关闭全部通道并回到登录流程。恢复 snapshot 只保存服务端Session identity/epoch、本地generation与低敏descriptor，不复制 credential、endpoint 或第二份业务事实；同一Session的refresh只推进本地generation，不同Session不能复活旧target。Scene 成功加载并提交 HUD 之前不能关闭恢复 modal。
 
 ## 世界与访问快照
 

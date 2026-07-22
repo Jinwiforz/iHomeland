@@ -310,7 +310,7 @@ func reservationProjection(result worldentry.ReservationResult) map[string]any {
 
 // admissionProjection 省略binding、assignment、session lineage与幂等identity。
 func admissionProjection(result worldentry.AdmissionResult) map[string]any {
-	return map[string]any{"credential": result.Credential.Value(), "endpoint": endpointProjection(result.Endpoint), "role": strings.ToUpper(result.Role.String()), "purpose": strings.ToUpper(result.Purpose.String()), "expiresAtMs": unixMilliseconds(result.ExpiresAt)}
+	return map[string]any{"credential": result.Credential.Value(), "endpoint": endpointProjection(result.Endpoint), "role": strings.ToUpper(result.Role.String()), "purpose": strings.ToUpper(result.Purpose.String()), "visitRevision": uint64(result.VisitRevision), "expiresAtMs": unixMilliseconds(result.ExpiresAt)}
 }
 
 // unixMilliseconds 按协议要求确定性向下转换UTC微秒时间。

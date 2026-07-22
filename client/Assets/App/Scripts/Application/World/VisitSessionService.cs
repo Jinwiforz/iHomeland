@@ -210,6 +210,31 @@ namespace IHomeland.Client.Application.World
             Notify(committed, false);
         }
 
+        /// <summary>在control generation断开时原子退役旧inbox、outgoing invite与hint。</summary>
+        /// <remarks>
+        /// 完整current VisitSession来自健康gameplay，因而保持可读；所有只由旧WSS窗口证明的
+        /// 可点identity立即清除，直到新generation完成权威snapshot reconciliation。
+        /// </remarks>
+        internal void InvalidateControlProjection()
+        {
+            ClientVisitSessionServiceSnapshot committed;
+            lock (_sync)
+            {
+                if (_stopped)
+                {
+                    return;
+                }
+
+                _invites.Clear();
+                _outgoingInvites.Clear();
+                _controlHint = null;
+                _needsRefresh = _current != null;
+                committed = BuildSnapshotLocked();
+            }
+
+            Notify(committed, false);
+        }
+
         /// <summary>提交完整 VisitSession replacement，并施加 identity/revision gate。</summary>
         /// <param name="snapshot">Generated 完整快照。</param>
         /// <param name="role">由 current flow 建立的角色。</param>
@@ -269,6 +294,14 @@ namespace IHomeland.Client.Application.World
                         }
                     }
 
+                    _controlHint = null;
+                    _needsRefresh = false;
+                    committed = BuildSnapshotLocked();
+                }
+                else if (result == ClientProjectionApplyResult.Duplicate && _needsRefresh)
+                {
+                    // 同一完整 replacement 已重新由健康 channel 确认；保留 current 对象身份，
+                    // 只提交 control reconciliation 的完成事实。
                     _controlHint = null;
                     _needsRefresh = false;
                     committed = BuildSnapshotLocked();
@@ -864,35 +897,72 @@ namespace IHomeland.Client.Application.World
 
             if (incoming.Revision == current.Revision)
             {
-                if (!current.IsEquivalentIgnoringAssignmentLease(incoming))
+                if (!current.IsEquivalentIgnoringAssignment(incoming))
                 {
                     return ClientProjectionApplyResult.Conflict;
                 }
 
-                if (incoming.Assignment.LeaseExpiresAtMilliseconds <
-                    current.Assignment.LeaseExpiresAtMilliseconds)
-                {
-                    return ClientProjectionApplyResult.Stale;
-                }
-
-                return incoming.Assignment.LeaseExpiresAtMilliseconds ==
-                       current.Assignment.LeaseExpiresAtMilliseconds
-                    ? ClientProjectionApplyResult.Duplicate
-                    : ClientProjectionApplyResult.Applied;
+                return CompareAssignment(current.Assignment, incoming.Assignment);
             }
 
             if (!string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
                 current.CreatedAtMilliseconds != incoming.CreatedAtMilliseconds ||
                 current.ExpiresAtMilliseconds != incoming.ExpiresAtMilliseconds ||
-                !current.Assignment.HasSameIdentity(incoming.Assignment) ||
-                incoming.Assignment.LeaseExpiresAtMilliseconds <
-                current.Assignment.LeaseExpiresAtMilliseconds ||
                 current.Role != incoming.Role)
             {
                 return ClientProjectionApplyResult.Conflict;
             }
 
+            var assignment = CompareAssignment(current.Assignment, incoming.Assignment);
+            if (assignment == ClientProjectionApplyResult.Conflict ||
+                assignment == ClientProjectionApplyResult.Stale)
+            {
+                return assignment;
+            }
+
             return ClientProjectionApplyResult.Applied;
+        }
+
+        /// <summary>按独立assignment generation比较VisitSession携带的current placement。</summary>
+        /// <param name="current">已提交assignment。</param>
+        /// <param name="incoming">权威完整replacement携带的assignment。</param>
+        /// <returns>Generation倒退为Stale，同代identity冲突为Conflict，更高代或续租为Applied。</returns>
+        private static ClientProjectionApplyResult CompareAssignment(
+            ClientWorldAssignmentProjection current,
+            ClientWorldAssignmentProjection incoming)
+        {
+            if (current == null || incoming == null ||
+                !string.Equals(
+                    current.PersonalWorldID,
+                    incoming.PersonalWorldID,
+                    StringComparison.Ordinal))
+            {
+                return ClientProjectionApplyResult.Conflict;
+            }
+
+            if (incoming.Generation < current.Generation)
+            {
+                return ClientProjectionApplyResult.Stale;
+            }
+
+            if (incoming.Generation > current.Generation)
+            {
+                return ClientProjectionApplyResult.Applied;
+            }
+
+            if (!current.HasSameIdentity(incoming))
+            {
+                return ClientProjectionApplyResult.Conflict;
+            }
+
+            if (incoming.LeaseExpiresAtMilliseconds < current.LeaseExpiresAtMilliseconds)
+            {
+                return ClientProjectionApplyResult.Stale;
+            }
+
+            return incoming.LeaseExpiresAtMilliseconds == current.LeaseExpiresAtMilliseconds
+                ? ClientProjectionApplyResult.Duplicate
+                : ClientProjectionApplyResult.Applied;
         }
 
         /// <summary>生成不包含玩家、世界或连接 identity 的投影差异字段列表。</summary>
@@ -1223,26 +1293,38 @@ namespace IHomeland.Client.Application.World
         /// <param name="push">Gameplay channel 已先关闭 mutation gate 的 PUSH。</param>
         private void OnSafeReturnPush(VisitSafeReturnPush push)
         {
+            ApplySafeReturn(push?.Directive);
+        }
+
+        /// <summary>校验 safe-return identity 与 revision，并只向 current Visitor target 交付非迟到指令。</summary>
+        /// <param name="directive">Gameplay channel 解码得到的权威指令。</param>
+        /// <returns>指令是否通过 current target 的权威版本门。</returns>
+        internal bool ApplySafeReturn(SafeReturnDirective directive)
+        {
             ClientSafeReturnProjection projection;
             try
             {
-                projection = ClientWorldProjectionMapper.FromSafeReturn(push?.Directive);
+                projection = ClientWorldProjectionMapper.FromSafeReturn(directive);
             }
             catch (ClientWorldProjectionException)
             {
-                return;
+                return false;
             }
 
             lock (_sync)
             {
                 if (_stopped || _targetRole != ClientVisitRole.Visitor ||
-                    !string.Equals(_targetVisitSessionID, projection.VisitSessionID, StringComparison.Ordinal))
+                    !string.Equals(_targetVisitSessionID, projection.VisitSessionID, StringComparison.Ordinal) ||
+                    (_current != null &&
+                     string.Equals(_current.VisitSessionID, projection.VisitSessionID, StringComparison.Ordinal) &&
+                     projection.Revision < _current.Revision))
                 {
-                    return;
+                    return false;
                 }
             }
 
             SafeReturnReceived?.Invoke(projection);
+            return true;
         }
 
         /// <summary>在锁外通知 snapshot 与可选 conflict。</summary>

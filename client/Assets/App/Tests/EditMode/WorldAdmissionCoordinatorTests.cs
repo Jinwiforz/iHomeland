@@ -227,6 +227,38 @@ namespace IHomeland.Client.Tests.EditMode
             await fixture.StopAsync();
         }
 
+        /// <summary>验证WSS断代立即移除stale outgoing invite且不丢弃健康Owner gameplay snapshot。</summary>
+        [Test]
+        public async Task ControlInvalidationRetiresOutgoingInviteAndKeepsOwnerSnapshot()
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            Assert.That((await fixture.VisitService.OpenAsync(CancellationToken.None)).IsSuccess, Is.True);
+            Assert.That(
+                (await fixture.VisitService.CreateInviteAsync(
+                    "player_other",
+                    60_000,
+                    CancellationToken.None)).IsSuccess,
+                Is.True);
+            Assert.That(fixture.VisitService.Snapshot.OutgoingInvites, Has.Count.EqualTo(1));
+            var current = fixture.VisitService.Snapshot.Current;
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var descriptor), Is.True);
+            Assert.That(descriptor.VisitSessionID, Is.EqualTo("visit_one"));
+
+            operations.InvalidateControlOnlyState();
+
+            Assert.That(fixture.VisitService.Snapshot.Current, Is.SameAs(current));
+            Assert.That(fixture.VisitService.Snapshot.OutgoingInvites, Is.Empty);
+            Assert.That(fixture.VisitService.Snapshot.NeedsRefresh, Is.True);
+            Assert.That(
+                await operations.ReconcileControlAsync(descriptor, CancellationToken.None),
+                Is.EqualTo(ClientConnectionRecoveryResultKind.Succeeded));
+            Assert.That(fixture.VisitService.Snapshot.NeedsRefresh, Is.False);
+            Assert.That(fixture.Factory.ConnectionCount, Is.EqualTo(1));
+            await fixture.StopAsync();
+        }
+
         /// <summary>验证 member snapshot 会退役已经被接受的 outgoing invite，旧撤销按钮不再暴露。</summary>
         [Test]
         public async Task OwnerMemberSnapshotRetiresConsumedOutgoingInvite()
@@ -248,8 +280,8 @@ namespace IHomeland.Client.Tests.EditMode
                 OwnerPlayerId = "player_owner",
                 Assignment = new WorldAssignment
                 {
-                    PersonalWorldId = "world_owner",
-                    WorldInstanceId = "instance_owner",
+                    PersonalWorldId = "world_self",
+                    WorldInstanceId = "instance_self",
                     Endpoint = new Endpoint
                     {
                         Channel = TransportChannel.TlsTcp,
@@ -381,6 +413,208 @@ namespace IHomeland.Client.Tests.EditMode
             await fixture.StopAsync();
         }
 
+        /// <summary>验证OwnWorld恢复使用冻结descriptor重建新connection并接受同identity replacement。</summary>
+        [Test]
+        public async Task OwnWorldRecoveryRebuildsAuthoritativeTarget()
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var descriptor), Is.True);
+            Assert.That(descriptor.Kind, Is.EqualTo(ClientRecoveryTargetKind.OwnWorld));
+
+            fixture.Factory.CurrentConnection.Dispose();
+            await DrainUntilAsync(
+                fixture.Dispatcher,
+                () => fixture.Coordinator.Snapshot.State == ClientWorldFlowState.ConnectionLost);
+
+            var result = await operations.RecoverWorldAsync(descriptor, CancellationToken.None);
+            Assert.That(result, Is.EqualTo(ClientConnectionRecoveryResultKind.Succeeded));
+            Assert.That(fixture.Coordinator.Snapshot.State, Is.EqualTo(ClientWorldFlowState.OwnWorld));
+            Assert.That(fixture.Factory.CurrentConnection.FirstBusinessMessageID, Is.EqualTo(2000));
+            Assert.That(operations.TryValidateRecoveredTarget(descriptor, out var targetGeneration), Is.True);
+            Assert.That(targetGeneration, Is.GreaterThan(descriptor.TargetGeneration));
+            await fixture.StopAsync();
+        }
+
+        /// <summary>验证开放访问的Owner恢复时先收敛VisitSession，再允许target validation成功。</summary>
+        [Test]
+        public async Task OwnWorldRecoveryReconcilesOpenOwnerVisitBeforeValidation()
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            Assert.That((await fixture.VisitService.OpenAsync(CancellationToken.None)).IsSuccess, Is.True);
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var descriptor), Is.True);
+            Assert.That(descriptor.Kind, Is.EqualTo(ClientRecoveryTargetKind.OwnWorld));
+            Assert.That(descriptor.VisitSessionID, Is.EqualTo("visit_one"));
+            Assert.That(descriptor.VisitRevision, Is.EqualTo(2));
+
+            fixture.Factory.NextVisitRevision = descriptor.VisitRevision;
+            fixture.Factory.CurrentConnection.Dispose();
+            await DrainUntilAsync(
+                fixture.Dispatcher,
+                () => fixture.Coordinator.Snapshot.State == ClientWorldFlowState.ConnectionLost);
+
+            var result = await operations.RecoverWorldAsync(descriptor, CancellationToken.None);
+
+            Assert.That(result, Is.EqualTo(ClientConnectionRecoveryResultKind.Succeeded));
+            Assert.That(fixture.Coordinator.Snapshot.State, Is.EqualTo(ClientWorldFlowState.OwnWorld));
+            Assert.That(fixture.Factory.CurrentConnection.VisitSnapshotRequests, Is.EqualTo(1));
+            Assert.That(fixture.VisitService.Snapshot.Current, Is.Not.Null);
+            Assert.That(fixture.VisitService.Snapshot.Current.VisitSessionID, Is.EqualTo("visit_one"));
+            Assert.That(operations.TryValidateRecoveredTarget(descriptor, out _), Is.True);
+            await fixture.StopAsync();
+        }
+
+        /// <summary>验证server replacement退役旧VisitSession或assignment时Owner提交新OwnWorld。</summary>
+        /// <param name="errorCode">证明旧访问目标不可恢复的公开错误码。</param>
+        [TestCase(2002)]
+        [TestCase(2100)]
+        public async Task OwnWorldRecoveryRetiresUnavailableOwnerVisitAndCommitsOwnWorld(
+            int errorCode)
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            Assert.That((await fixture.VisitService.OpenAsync(CancellationToken.None)).IsSuccess, Is.True);
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var descriptor), Is.True);
+            Assert.That(descriptor.VisitSessionID, Is.EqualTo("visit_one"));
+
+            fixture.Factory.NextVisitSnapshotErrorCode = errorCode;
+            fixture.Factory.CurrentConnection.Dispose();
+            await DrainUntilAsync(
+                fixture.Dispatcher,
+                () => fixture.Coordinator.Snapshot.State == ClientWorldFlowState.ConnectionLost);
+
+            var result = await operations.RecoverWorldAsync(descriptor, CancellationToken.None);
+
+            Assert.That(result, Is.EqualTo(ClientConnectionRecoveryResultKind.ReturningOwnWorld));
+            Assert.That(fixture.Coordinator.Snapshot.State, Is.EqualTo(ClientWorldFlowState.OwnWorld));
+            Assert.That(fixture.Factory.ConnectionCount, Is.EqualTo(3));
+            Assert.That(fixture.Factory.CurrentConnection.VisitSnapshotRequests, Is.Zero);
+            Assert.That(fixture.VisitService.Snapshot.Current, Is.Null);
+            Assert.That(fixture.WorldService.Snapshot.CurrentWorld, Is.Not.Null);
+            Assert.That(operations.TryCaptureTarget(out var replacement), Is.True);
+            Assert.That(replacement.Kind, Is.EqualTo(ClientRecoveryTargetKind.OwnWorld));
+            Assert.That(string.IsNullOrEmpty(replacement.VisitSessionID), Is.True);
+            await fixture.StopAsync();
+        }
+
+        /// <summary>验证Visitor恢复以RECONNECT作为唯一首帧并恢复同一VisitSession。</summary>
+        [Test]
+        public async Task VisitorRecoveryUsesReconnectFirstFrame()
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            Assert.That(
+                fixture.VisitService.ApplyInvite(CoordinatorFixture.Invite()),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                await fixture.Coordinator.JoinVisitAsync(
+                    "visit_one",
+                    "invite_one",
+                    CancellationToken.None),
+                Is.True);
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var descriptor), Is.True);
+            Assert.That(descriptor.Kind, Is.EqualTo(ClientRecoveryTargetKind.Visiting));
+            Assert.That(descriptor.VisitRevision, Is.EqualTo(3));
+
+            fixture.Factory.CurrentConnection.Dispose();
+            await DrainUntilAsync(
+                fixture.Dispatcher,
+                () => fixture.Coordinator.Snapshot.State == ClientWorldFlowState.ConnectionLost);
+            fixture.Api.UseReconnectAdmission(4);
+
+            var result = await operations.RecoverWorldAsync(descriptor, CancellationToken.None);
+            Assert.That(result, Is.EqualTo(ClientConnectionRecoveryResultKind.Succeeded));
+            Assert.That(fixture.Factory.CurrentConnection.FirstBusinessMessageID, Is.EqualTo(2115));
+            Assert.That(fixture.Factory.CurrentConnection.LastReconnectExpectedRevision, Is.EqualTo(4));
+            Assert.That(fixture.Coordinator.Snapshot.State, Is.EqualTo(ClientWorldFlowState.Visiting));
+            Assert.That(fixture.Coordinator.Snapshot.VisitSessionID, Is.EqualTo("visit_one"));
+            Assert.That(fixture.VisitService.Snapshot.Current.Role, Is.EqualTo(ClientVisitRole.Visitor));
+            await fixture.StopAsync();
+        }
+
+        /// <summary>验证Visitor断线后的access refresh可安全重绑定冻结descriptor并恢复同一VisitSession。</summary>
+        [Test]
+        public async Task VisitorRecoveryRebindsDescriptorAfterSessionRefresh()
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            Assert.That(
+                fixture.VisitService.ApplyInvite(CoordinatorFixture.Invite()),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                await fixture.Coordinator.JoinVisitAsync(
+                    "visit_one",
+                    "invite_one",
+                    CancellationToken.None),
+                Is.True);
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var frozen), Is.True);
+
+            fixture.Factory.CurrentConnection.Dispose();
+            await DrainUntilAsync(
+                fixture.Dispatcher,
+                () => fixture.Coordinator.Snapshot.State == ClientWorldFlowState.ConnectionLost);
+            var refresh = await fixture.Session.RefreshAsync(CancellationToken.None);
+            Assert.That(refresh.IsSuccess, Is.True);
+            Assert.That(refresh.Value.Generation, Is.GreaterThan(frozen.SessionGeneration));
+            Assert.That(operations.TryCaptureTarget(out var rebound), Is.True);
+            Assert.That(rebound.SessionGeneration, Is.EqualTo(refresh.Value.Generation));
+            Assert.That(rebound.HasSameSessionLineage(frozen), Is.True);
+
+            fixture.Api.UseReconnectAdmission(4);
+            var result = await operations.RecoverWorldAsync(frozen, CancellationToken.None);
+
+            Assert.That(result, Is.EqualTo(ClientConnectionRecoveryResultKind.Succeeded));
+            Assert.That(fixture.Coordinator.Snapshot.State, Is.EqualTo(ClientWorldFlowState.Visiting));
+            Assert.That(fixture.Coordinator.Snapshot.VisitSessionID, Is.EqualTo("visit_one"));
+            Assert.That(operations.TryValidateRecoveredTarget(frozen, out _), Is.True);
+            await fixture.StopAsync();
+        }
+
+        /// <summary>验证Visitor在公开grace绝对边界不再签发RECONNECT，而是权威返回OwnWorld。</summary>
+        [Test]
+        public async Task VisitorRecoveryAtGraceDeadlineReturnsOwnWorldWithoutReconnectAdmission()
+        {
+            var fixture = await CoordinatorFixture.CreateAsync(blockBootstrap: false);
+            Assert.That(await fixture.Coordinator.EnterOwnWorldAsync(CancellationToken.None), Is.True);
+            Assert.That(
+                fixture.VisitService.ApplyInvite(CoordinatorFixture.Invite()),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                await fixture.Coordinator.JoinVisitAsync(
+                    "visit_one",
+                    "invite_one",
+                    CancellationToken.None),
+                Is.True);
+            var operations = (IClientConnectionRecoveryOperations)fixture.Coordinator;
+            Assert.That(operations.TryCaptureTarget(out var descriptor), Is.True);
+
+            fixture.Factory.CurrentConnection.Dispose();
+            await DrainUntilAsync(
+                fixture.Dispatcher,
+                () => fixture.Coordinator.Snapshot.State == ClientWorldFlowState.ConnectionLost);
+            fixture.SetUtcNowMilliseconds(descriptor.ReconnectExpiresAtMilliseconds);
+            var admissionsBeforeRecovery = fixture.Api.AdmissionCalls;
+
+            var result = await operations.RecoverWorldAsync(descriptor, CancellationToken.None);
+
+            Assert.That(
+                result,
+                Is.EqualTo(ClientConnectionRecoveryResultKind.ReturningOwnWorld),
+                $"flow={fixture.Coordinator.Snapshot.State}/{fixture.Coordinator.Snapshot.Failure} " +
+                $"bootstrap={fixture.Api.BootstrapCalls} admission={fixture.Api.AdmissionCalls}");
+            Assert.That(fixture.Api.AdmissionCalls, Is.EqualTo(admissionsBeforeRecovery + 1));
+            Assert.That(fixture.Factory.CurrentConnection.FirstBusinessMessageID, Is.EqualTo(2000));
+            Assert.That(fixture.Coordinator.Snapshot.State, Is.EqualTo(ClientWorldFlowState.OwnWorld));
+            Assert.That(fixture.VisitService.Snapshot.Current, Is.Null);
+            await fixture.StopAsync();
+        }
+
         /// <summary>验证停止使 current generation 失效并拒绝后续 flow。</summary>
         [Test]
         public async Task ShutdownRejectsLateAndNewFlow()
@@ -460,7 +694,8 @@ namespace IHomeland.Client.Tests.EditMode
                 VisitSessionService visitService,
                 WorldAdmissionCoordinator coordinator,
                 ScriptedHttpApi api,
-                ScriptedConnectionFactory factory)
+                ScriptedConnectionFactory factory,
+                FixedClock clock)
             {
                 Configuration = configuration;
                 Session = session;
@@ -471,6 +706,7 @@ namespace IHomeland.Client.Tests.EditMode
                 Coordinator = coordinator;
                 Api = api;
                 Factory = factory;
+                Clock = clock;
             }
 
             /// <summary>获取配置 owner。</summary>
@@ -500,6 +736,21 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>获取可控 connection factory。</summary>
             internal ScriptedConnectionFactory Factory { get; }
 
+            /// <summary>保存fixture唯一可控Unix毫秒时钟。</summary>
+            private FixedClock Clock { get; }
+
+            /// <summary>把fixture时钟推进到指定绝对Unix毫秒。</summary>
+            /// <param name="value">不得回退的Unix毫秒值。</param>
+            internal void SetUtcNowMilliseconds(long value)
+            {
+                if (value < Clock.UtcNowMilliseconds)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+
+                Clock.UtcNowMilliseconds = value;
+            }
+
             /// <summary>按 production 初始化顺序创建并认证完整对象图。</summary>
             /// <param name="blockBootstrap">是否阻塞第一次 world bootstrap。</param>
             /// <returns>已初始化且 authenticated fixture。</returns>
@@ -514,7 +765,12 @@ namespace IHomeland.Client.Tests.EditMode
                         new ClientPublicLimits(4096, 65536))));
                 var api = new ScriptedHttpApi(Endpoint, blockBootstrap);
                 var clock = new FixedClock();
-                var session = new SessionCoordinator(configuration, api, clock);
+                var session = new SessionCoordinator(
+                    configuration,
+                    api,
+                    clock,
+                    new FakeClientSecureSessionStore(),
+                    FakeClientSecureSessionStore.EnvironmentBinding);
                 await session.InitializeAsync(CancellationToken.None);
                 Assert.That(
                     (await session.LoginAsync("fixture-user", "password", CancellationToken.None)).IsSuccess,
@@ -532,7 +788,7 @@ namespace IHomeland.Client.Tests.EditMode
                 await gameplay.InitializeAsync(CancellationToken.None);
                 var world = new PersonalWorldService(null, gameplay);
                 var visit = new VisitSessionService(null, gameplay, clock);
-                var coordinator = new WorldAdmissionCoordinator(session, gameplay, world, visit);
+                var coordinator = new WorldAdmissionCoordinator(session, clock, gameplay, world, visit);
                 await world.InitializeAsync(CancellationToken.None);
                 await visit.InitializeAsync(CancellationToken.None);
                 await coordinator.InitializeAsync(CancellationToken.None);
@@ -545,7 +801,8 @@ namespace IHomeland.Client.Tests.EditMode
                     visit,
                     coordinator,
                     api,
-                    factory);
+                    factory,
+                    clock);
             }
 
             /// <summary>创建 current target Visitor 的定向 invite。</summary>
@@ -609,6 +866,12 @@ namespace IHomeland.Client.Tests.EditMode
                 /// <summary>可选阻塞 bootstrap completion。</summary>
                 private readonly TaskCompletionSource<ClientHttpResult<ClientWorldBootstrap>> _bootstrapGate;
 
+                /// <summary>保存最近一次 accept 或显式恢复推进后的权威 VisitSession revision。</summary>
+                private long _visitAdmissionRevision;
+
+                /// <summary>保存下一次 Visitor admission 的服务端权威用途。</summary>
+                private ClientWorldAdmissionPurpose _visitAdmissionPurpose = ClientWorldAdmissionPurpose.Join;
+
                 /// <summary>创建 scripted HTTP fake。</summary>
                 internal ScriptedHttpApi(ClientEndpoint endpoint, bool blockBootstrap)
                 {
@@ -626,11 +889,27 @@ namespace IHomeland.Client.Tests.EditMode
                 /// <summary>获取接受邀请 HTTP 调用次数。</summary>
                 internal int AcceptInviteCalls { get; private set; }
 
+                /// <summary>获取world admission签发调用次数。</summary>
+                internal int AdmissionCalls { get; private set; }
+
                 /// <summary>控制后续 bootstrap 返回 transport failure。</summary>
                 internal bool FailBootstrap { get; set; }
 
                 /// <summary>控制 accept 返回指定 registry 错误；0 表示成功。</summary>
                 internal int AcceptInviteErrorCode { get; set; }
+
+                /// <summary>把既有 Visitor membership 推进到服务端恢复 revision，并令后续 admission 用于 RECONNECT。</summary>
+                /// <param name="authoritativeRevision">服务端处理断线事实后的当前 VisitSession revision。</param>
+                internal void UseReconnectAdmission(ulong authoritativeRevision)
+                {
+                    if (authoritativeRevision == 0)
+                    {
+                        throw new ArgumentOutOfRangeException(nameof(authoritativeRevision));
+                    }
+
+                    _visitAdmissionRevision = checked((long)authoritativeRevision);
+                    _visitAdmissionPurpose = ClientWorldAdmissionPurpose.Reconnect;
+                }
 
                 /// <summary>等待第一次 bootstrap 调用到达。</summary>
                 /// <returns>调用已到达时完成。</returns>
@@ -666,8 +945,17 @@ namespace IHomeland.Client.Tests.EditMode
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(string refreshToken, CancellationToken cancellationToken) =>
-                    throw new NotSupportedException();
+                public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
+                    string refreshToken,
+                    CancellationToken cancellationToken)
+                {
+                    return Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
+                        new ClientTokenPair(
+                            "access_refreshed",
+                            "refresh_rotated",
+                            95_000,
+                            100_000)));
+                }
 
                 /// <inheritdoc />
                 public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(string accessToken, CancellationToken cancellationToken) =>
@@ -681,7 +969,7 @@ namespace IHomeland.Client.Tests.EditMode
                             "0102030405060708090a0b0c0d0e0f10",
                             _endpoint,
                             new[] { ClientConnectionScope.Gameplay },
-                            90_000)));
+                            120_000)));
                 }
 
                 /// <inheritdoc />
@@ -723,24 +1011,28 @@ namespace IHomeland.Client.Tests.EditMode
                                 Array.Empty<ClientErrorDetail>())));
                     }
 
+                    _visitAdmissionRevision = checked(request.ExpectedRevision + 1);
+                    _visitAdmissionPurpose = ClientWorldAdmissionPurpose.Join;
                     return Task.FromResult(ClientHttpResult<ClientVisitReservation>.Success(
                         new ClientVisitReservation(
                             request.VisitSessionID,
-                            checked(request.ExpectedRevision + 1),
+                            _visitAdmissionRevision,
                             80_000)));
                 }
 
                 /// <inheritdoc />
                 public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(string accessToken, ClientWorldAdmissionTarget target, string idempotencyKey, CancellationToken cancellationToken)
                 {
+                    AdmissionCalls++;
                     var visit = target.Kind == ClientWorldAdmissionTargetKind.VisitWorld;
                     return Task.FromResult(ClientHttpResult<ClientWorldAdmission>.Success(
                         new ClientWorldAdmission(
                             "wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                             _endpoint,
                             visit ? ClientWorldRole.Visitor : ClientWorldRole.Owner,
-                            visit ? ClientWorldAdmissionPurpose.Join : ClientWorldAdmissionPurpose.OwnWorld,
-                            90_000)));
+                            visit ? _visitAdmissionPurpose : ClientWorldAdmissionPurpose.OwnWorld,
+                            visit ? checked((ulong)_visitAdmissionRevision) : 0UL,
+                            120_000)));
                 }
 
                 /// <summary>创建 current actor 的 HTTP bootstrap。</summary>
@@ -772,6 +1064,12 @@ namespace IHomeland.Client.Tests.EditMode
                 /// <summary>获取已创建 connection 数量。</summary>
                 internal int ConnectionCount { get; private set; }
 
+                /// <summary>获取或设置下一条connection返回的初始权威VisitSession revision。</summary>
+                internal ulong NextVisitRevision { get; set; } = 1;
+
+                /// <summary>获取或设置下一条connection对VisitSnapshot返回的公开错误码；0表示成功。</summary>
+                internal int NextVisitSnapshotErrorCode { get; set; }
+
                 /// <summary>获取已写入 gameplay channel 的 request/command 数量。</summary>
                 internal int OperationCount { get; private set; }
 
@@ -781,8 +1079,9 @@ namespace IHomeland.Client.Tests.EditMode
                     cancellationToken.ThrowIfCancellationRequested();
                     ConnectionCount++;
                     CurrentConnection = new ScriptedConnection(
-                        ConnectionCount,
-                        () => OperationCount++);
+                        () => OperationCount++,
+                        NextVisitRevision,
+                        NextVisitSnapshotErrorCode);
                     return Task.FromResult<IClientGameplayConnection>(CurrentConnection);
                 }
             }
@@ -799,9 +1098,6 @@ namespace IHomeland.Client.Tests.EditMode
                 /// <summary>通知 reader 有数据或连接已关闭。</summary>
                 private readonly SemaphoreSlim _signal = new SemaphoreSlim(0);
 
-                /// <summary>标识 own 初次、visit 或 own return connection。</summary>
-                private readonly int _connectionIndex;
-
                 /// <summary>记录每个已解析 operation，供 policy 测试确认没有写入。</summary>
                 private readonly Action _recordOperation;
 
@@ -809,24 +1105,44 @@ namespace IHomeland.Client.Tests.EditMode
                 private ulong _sequence;
 
                 /// <summary>保存 fixture 当前 VisitSession revision，使连续 mutation 遵循真实服务端单调事实。</summary>
-                private ulong _visitRevision = 1;
+                private ulong _visitRevision;
 
                 /// <summary>保存当前 connection 已创建 invite 数量，用于产生不可复用 identity。</summary>
                 private int _inviteSequence;
 
+                /// <summary>保存VisitSnapshot需要返回的公开错误码；0表示正常快照。</summary>
+                private readonly int _visitSnapshotErrorCode;
+
                 /// <summary>区分首个 IHTP preface 与后续 framed envelope。</summary>
                 private bool _prefaceWritten;
+
+                /// <summary>标识当前connection已经由JOIN或RECONNECT绑定Visitor target。</summary>
+                private bool _visitorTarget;
 
                 /// <summary>保存 dispose 状态。</summary>
                 private bool _disposed;
 
+                /// <summary>获取preface后的首个typed业务message ID。</summary>
+                internal uint FirstBusinessMessageID { get; private set; }
+
+                /// <summary>获取最近一条 RECONNECT 首帧携带的权威 expected revision。</summary>
+                internal ulong LastReconnectExpectedRevision { get; private set; }
+
+                /// <summary>获取当前connection收到的VisitSession完整快照请求数。</summary>
+                internal int VisitSnapshotRequests { get; private set; }
+
                 /// <summary>创建指定用途的 scripted connection。</summary>
-                /// <param name="connectionIndex">连接用途序号。</param>
                 /// <param name="recordOperation">记录已解析业务 operation 的 callback。</param>
-                internal ScriptedConnection(int connectionIndex, Action recordOperation)
+                /// <param name="visitRevision">该connection可读取的初始权威VisitSession revision。</param>
+                /// <param name="visitSnapshotErrorCode">VisitSnapshot公开错误码；0表示正常快照。</param>
+                internal ScriptedConnection(
+                    Action recordOperation,
+                    ulong visitRevision,
+                    int visitSnapshotErrorCode)
                 {
-                    _connectionIndex = connectionIndex;
                     _recordOperation = recordOperation;
+                    _visitRevision = visitRevision;
+                    _visitSnapshotErrorCode = visitSnapshotErrorCode;
                 }
 
                 /// <inheritdoc />
@@ -868,16 +1184,22 @@ namespace IHomeland.Client.Tests.EditMode
                     }
 
                     var envelope = ParseFrame(buffer);
+                    if (FirstBusinessMessageID == 0)
+                    {
+                        FirstBusinessMessageID = envelope.MessageId;
+                    }
+
                     _recordOperation();
                     IMessage response;
                     uint responseID;
+                    ErrorPayload publicError = null;
                     switch (envelope.MessageId)
                     {
                         case 2000:
                             responseID = 2001;
                             response = new WorldSnapshotResponse
                             {
-                                Snapshot = _connectionIndex % 2 == 0
+                                Snapshot = _visitorTarget
                                     ? World("world_owner", "player_owner", "instance_owner")
                                     : World("world_self", "player_visitor", "instance_self"),
                             };
@@ -930,6 +1252,7 @@ namespace IHomeland.Client.Tests.EditMode
                             break;
                         case 2109:
                             var join = VisitJoinCommand.Parser.ParseFrom(envelope.Payload);
+                            _visitorTarget = true;
                             _visitRevision = join.ExpectedRevision + 1;
                             responseID = 2110;
                             response = new VisitJoinResponse
@@ -939,6 +1262,45 @@ namespace IHomeland.Client.Tests.EditMode
                                     Snapshot = Visit(_visitRevision, VisitLifecycle.Open),
                                 },
                             };
+                            break;
+                        case 2115:
+                            var reconnect = VisitReconnectCommand.Parser.ParseFrom(envelope.Payload);
+                            LastReconnectExpectedRevision = reconnect.ExpectedRevision;
+                            _visitorTarget = true;
+                            _visitRevision = reconnect.ExpectedRevision + 1;
+                            responseID = 2116;
+                            response = new VisitReconnectResponse
+                            {
+                                Result = new VisitMutationResult
+                                {
+                                    Snapshot = Visit(_visitRevision, VisitLifecycle.Open),
+                                },
+                            };
+                            break;
+                        case 2119:
+                            VisitSnapshotRequests++;
+                            responseID = 2120;
+                            if (_visitSnapshotErrorCode != 0)
+                            {
+                                Assert.That(
+                                    ClientErrorRegistry.TryGet(_visitSnapshotErrorCode, out var knownError),
+                                    Is.True);
+                                publicError = new ErrorPayload
+                                {
+                                    Code = (uint)knownError.Code,
+                                    MessageKey = knownError.MessageKey,
+                                    Retryable = knownError.Retryable,
+                                    RequestId = envelope.RequestId,
+                                };
+                                response = null;
+                            }
+                            else
+                            {
+                                response = new VisitSnapshotResponse
+                                {
+                                    Snapshot = Visit(_visitRevision, VisitLifecycle.Open),
+                                };
+                            }
                             break;
                         case 2111:
                             var leave = VisitLeaveCommand.Parser.ParseFrom(envelope.Payload);
@@ -987,10 +1349,12 @@ namespace IHomeland.Client.Tests.EditMode
                     {
                         ProtocolVersion = 1,
                         MessageId = responseID,
-                        Kind = MessageKind.Response,
+                        Kind = publicError == null ? MessageKind.Response : MessageKind.Error,
                         Sequence = ++_sequence,
                         TimestampMs = 1,
-                        Payload = response.ToByteString(),
+                        Payload = publicError == null
+                            ? response.ToByteString()
+                            : publicError.ToByteString(),
                     };
                     if (envelope.Kind == MessageKind.Command)
                     {
@@ -1079,13 +1443,15 @@ namespace IHomeland.Client.Tests.EditMode
                 /// <param name="revision">Aggregate revision。</param>
                 /// <param name="lifecycle">Visit lifecycle。</param>
                 /// <returns>Generated VisitSession snapshot。</returns>
-                private static VisitSessionSnapshot Visit(ulong revision, VisitLifecycle lifecycle)
+                private VisitSessionSnapshot Visit(ulong revision, VisitLifecycle lifecycle)
                 {
+                    var worldID = _visitorTarget ? "world_owner" : "world_self";
+                    var instanceID = _visitorTarget ? "instance_owner" : "instance_self";
                     return new VisitSessionSnapshot
                     {
                         VisitSessionId = "visit_one",
                         OwnerPlayerId = "player_owner",
-                        Assignment = Assignment("world_owner", "instance_owner"),
+                        Assignment = Assignment(worldID, instanceID),
                         Lifecycle = lifecycle,
                         Revision = revision,
                         Capacity = 4,
@@ -1120,7 +1486,7 @@ namespace IHomeland.Client.Tests.EditMode
             private sealed class FixedClock : IClientClock
             {
                 /// <summary>获取固定 Unix 时间，单位为毫秒。</summary>
-                public long UtcNowMilliseconds => 1_000;
+                public long UtcNowMilliseconds { get; set; } = 1_000;
             }
         }
     }

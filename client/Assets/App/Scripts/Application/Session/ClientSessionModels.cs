@@ -270,6 +270,9 @@ namespace IHomeland.Client.Application.Session
         /// <summary>获取服务端权威 purpose。</summary>
         internal ClientWorldAdmissionPurpose Purpose => _admission.Purpose;
 
+        /// <summary>获取 Visitor 首帧必须使用的权威 VisitSession revision；Owner 为零。</summary>
+        internal ulong VisitRevision => _admission.VisitRevision;
+
         /// <summary>获取绝对 Unix expiry，单位为毫秒。</summary>
         internal long ExpiresAtMilliseconds => _admission.ExpiresAtMilliseconds;
 
@@ -331,8 +334,9 @@ namespace IHomeland.Client.Application.Session
             }
 
             return admission.Purpose == ClientWorldAdmissionPurpose.OwnWorld
-                ? admission.Role == ClientWorldRole.Owner
+                ? admission.Role == ClientWorldRole.Owner && admission.VisitRevision == 0
                 : admission.Role == ClientWorldRole.Visitor &&
+                  admission.VisitRevision > 0 &&
                   (admission.Purpose == ClientWorldAdmissionPurpose.Join ||
                    admission.Purpose == ClientWorldAdmissionPurpose.Reconnect);
         }

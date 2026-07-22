@@ -124,7 +124,7 @@ func runVisitDisconnectReconnect(ctx context.Context, runtime *ScenarioRuntime) 
 	if err := fixture.visitorTCP.Close(); err != nil {
 		return err
 	}
-	snapshot, err := pollVisitSnapshot(ctx, fixture.ownerTCP, func(snapshot *visitv1.VisitSessionSnapshot) bool {
+	_, err = pollVisitSnapshot(ctx, fixture.ownerTCP, func(snapshot *visitv1.VisitSessionSnapshot) bool {
 		return membershipState(snapshot, fixture.visitor.actor.PlayerID) == visitv1.VisitMembershipState_VISIT_MEMBERSHIP_STATE_RECONNECTING
 	})
 	if err != nil {
@@ -159,7 +159,7 @@ func runVisitDisconnectReconnect(ctx context.Context, runtime *ScenarioRuntime) 
 	if err != nil {
 		return err
 	}
-	command := visitv1.VisitReconnectCommand_builder{AdmissionCredential: proto.String(credential), ExpectedRevision: proto.Uint64(snapshot.GetRevision())}.Build()
+	command := visitv1.VisitReconnectCommand_builder{AdmissionCredential: proto.String(credential), ExpectedRevision: proto.Uint64(admissionResponse.VisitRevision)}.Build()
 	message, err := reconnected.Command(ctx, 2115, command)
 	if err != nil {
 		return err

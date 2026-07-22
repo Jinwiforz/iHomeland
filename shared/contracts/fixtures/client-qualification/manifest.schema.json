@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ihomeland/client-qualification/manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "qualificationVersion", "scenarios"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "client-v1" },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "group", "mandatory", "execution", "preconditions", "budgetMs", "expectedOutcome", "buildProfiles", "evidenceOwner"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "group": { "enum": ["contract", "session", "control", "gameplay", "ui-scene", "build", "soak", "product", "fault", "governance"] },
+        "mandatory": { "type": "boolean" },
+        "execution": { "enum": ["tool", "editmode", "playmode", "player-automatic", "player-manual"] },
+        "preconditions": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "uniqueItems": true
+        },
+        "budgetMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 },
+        "expectedOutcome": { "const": "pass" },
+        "buildProfiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["source", "development", "release"] }
+        },
+        "evidenceOwner": { "enum": ["qualification-tool", "unity-editmode", "unity-playmode", "player-runner", "operator"] }
+      }
+    }
+  }
+}

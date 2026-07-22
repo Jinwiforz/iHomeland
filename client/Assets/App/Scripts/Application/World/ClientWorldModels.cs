@@ -168,8 +168,11 @@ namespace IHomeland.Client.Application.World
         /// <summary>Current gameplay connection 非预期终止，旧 target 已不可交互。</summary>
         ConnectionLost = 6,
 
+        /// <summary>唯一恢复owner正在重建断线前冻结target。</summary>
+        RecoveringTarget = 7,
+
         /// <summary>App Scope 已停止且不允许再次转换。</summary>
-        Stopped = 7,
+        Stopped = 8,
     }
 
     /// <summary>
@@ -519,15 +522,14 @@ namespace IHomeland.Client.Application.World
             return true;
         }
 
-        /// <summary>比较除 current assignment lease deadline 外的完整 VisitSession replacement 语义。</summary>
-        /// <param name="other">待比较 VisitSession。</param>
-        /// <returns>Aggregate 事实、角色与 assignment identity 一致时返回 true。</returns>
-        internal bool IsEquivalentIgnoringAssignmentLease(ClientVisitSessionProjection other)
+        /// <summary>比较除current assignment外的完整VisitSession replacement语义。</summary>
+        /// <param name="other">待比较VisitSession。</param>
+        /// <returns>Aggregate事实、角色与稳定排序Visitor集合一致时返回true。</returns>
+        internal bool IsEquivalentIgnoringAssignment(ClientVisitSessionProjection other)
         {
             if (other == null ||
                 !string.Equals(VisitSessionID, other.VisitSessionID, StringComparison.Ordinal) ||
                 !string.Equals(OwnerPlayerID, other.OwnerPlayerID, StringComparison.Ordinal) ||
-                !Assignment.HasSameIdentity(other.Assignment) ||
                 Lifecycle != other.Lifecycle || Revision != other.Revision || Capacity != other.Capacity ||
                 CreatedAtMilliseconds != other.CreatedAtMilliseconds ||
                 ExpiresAtMilliseconds != other.ExpiresAtMilliseconds ||
@@ -668,18 +670,21 @@ namespace IHomeland.Client.Application.World
         /// <param name="reason">权威返回原因。</param>
         /// <param name="preferred">首选返回目标。</param>
         /// <param name="fallback">首选不可用时的 fallback。</param>
+        /// <param name="revision">产生该返回结果的已提交 aggregate 版本。</param>
         internal ClientSafeReturnProjection(
             string visitSessionID,
             string visitorID,
             ClientSafeReturnReason reason,
             ClientSafeReturnDestination preferred,
-            ClientSafeReturnDestination fallback)
+            ClientSafeReturnDestination fallback,
+            ulong revision)
         {
             VisitSessionID = visitSessionID ?? throw new ArgumentNullException(nameof(visitSessionID));
             VisitorID = visitorID ?? throw new ArgumentNullException(nameof(visitorID));
             Reason = reason;
             Preferred = preferred;
             Fallback = fallback;
+            Revision = revision;
         }
 
         /// <summary>获取产生返回的 VisitSession 标识。</summary>
@@ -696,6 +701,9 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>获取 fallback 返回目标。</summary>
         internal ClientSafeReturnDestination Fallback { get; }
+
+        /// <summary>获取产生该指令的已提交 aggregate 版本。</summary>
+        internal ulong Revision { get; }
     }
 
     /// <summary>

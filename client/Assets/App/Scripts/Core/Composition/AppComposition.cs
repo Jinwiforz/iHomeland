@@ -8,6 +8,7 @@ using IHomeland.Client.Application.World;
 using IHomeland.Client.Core.Configuration;
 using IHomeland.Client.Core.Lifetime;
 using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Infrastructure.Security;
 using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Client.Presentation.Hosts;
@@ -143,10 +144,40 @@ namespace IHomeland.Client.Core.Composition
             var httpApi = new ClientHttpApi(transport, codec);
             var bootstrapService = new ClientBootstrapService(environment, httpApi, configurationStore);
             var clock = new SystemClientClock();
+            var environmentBinding = ClientSecureSessionEnvironmentBinding.Create(environment);
+            var processArguments = Environment.GetCommandLineArgs();
+            var isDebugBuild = UnityEngine.Application.isEditor || UnityEngine.Debug.isDebugBuild;
+            var secureSessionProfile = ClientSecureSessionProfile.Resolve(
+                environment.EnvironmentKind,
+                processArguments,
+                isDebugBuild);
+            var secureSessionRoot = ClientSecureSessionProfile.ResolveStorageRoot(
+                environment.EnvironmentKind,
+                processArguments,
+                isDebugBuild,
+                UnityEngine.Application.persistentDataPath);
+            var windowsSecureStorage =
+                UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsEditor ||
+                UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsPlayer;
+            IClientSecureSessionStore secureSessionStore = windowsSecureStorage
+                ? (IClientSecureSessionStore)new ClientSecureSessionFileStore(
+                    secureSessionRoot,
+                    secureSessionProfile,
+                    environmentBinding,
+                    new WindowsDpapiDataProtector(),
+                    platformSupported: true)
+                : new UnsupportedClientSecureSessionStore();
             var sessionCoordinator = new SessionCoordinator(
                 configurationStore,
                 httpApi,
-                clock);
+                clock,
+                secureSessionStore,
+                environmentBinding);
+            var sessionRestoreCoordinator = new ClientSessionRestoreCoordinator(
+                secureSessionStore,
+                bootstrapService,
+                sessionCoordinator,
+                ClientSessionRestoreCoordinator.DefaultRestoreDeadline);
             var controlCatalog = new ClientControlCatalog();
             var controlCodec = new ClientControlCodec(controlCatalog);
             var gameplayChannel = new ClientGameplayChannel(
@@ -173,9 +204,16 @@ namespace IHomeland.Client.Core.Composition
             var visitSessionService = new VisitSessionService(controlChannel, gameplayChannel, clock);
             var worldAdmissionCoordinator = new WorldAdmissionCoordinator(
                 sessionCoordinator,
+                clock,
                 gameplayChannel,
                 personalWorldService,
                 visitSessionService);
+            var connectionRecoveryCoordinator = new ClientConnectionRecoveryCoordinator(
+                sessionCoordinator,
+                controlChannel,
+                gameplayChannel,
+                worldAdmissionCoordinator,
+                ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
             var sceneLifetimeOwner = new SceneLifetimeOwner();
             if (productExperience)
             {
@@ -199,6 +237,9 @@ namespace IHomeland.Client.Core.Composition
                 experience = new ClientPersonalWorldExperience(
                     bootstrapService,
                     sessionCoordinator,
+                    sessionRestoreCoordinator,
+                    connectionRecoveryCoordinator,
+                    dispatcher,
                     controlChannel,
                     personalWorldService,
                     visitSessionService,
@@ -211,19 +252,22 @@ namespace IHomeland.Client.Core.Composition
                 uiHostRoot.ConfigureProductBindings(experience);
             }
 
-            // 逆序停止先拒绝产品 intent，再关闭 UI route、Scene、world flow/subscriber、WSS、TCP、Session、HTTP、Configuration，最后释放 Input 并拒绝主线程回写。
+            // 逆序停止先拒绝产品 intent，再关闭 UI route、Scene、world flow/subscriber、WSS、TCP、Session、安全存储、HTTP、Configuration，最后释放 Input 并拒绝主线程回写。
             var participants = new List<IAppLifetimeParticipant>
             {
                 dispatcher,
                 uiHostRoot,
                 configurationStore,
                 transport,
+                secureSessionStore,
                 sessionCoordinator,
+                sessionRestoreCoordinator,
                 gameplayChannel,
                 controlChannel,
                 personalWorldService,
                 visitSessionService,
                 worldAdmissionCoordinator,
+                connectionRecoveryCoordinator,
                 sceneLifetimeOwner,
             };
             if (productExperience)
@@ -250,6 +294,7 @@ namespace IHomeland.Client.Core.Composition
                 personalWorldService,
                 visitSessionService,
                 worldAdmissionCoordinator,
+                connectionRecoveryCoordinator,
                 uiRouter,
                 experience,
                 sceneTransitionHost);

@@ -96,7 +96,7 @@ namespace IHomeland.Client.Tests.EditMode
                 body = await request.Content.ReadAsStringAsync();
                 return JsonResponse(
                     HttpStatusCode.Created,
-                    "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"127.0.0.1\",\"port\":4433},\"expiresAtMs\":2000,\"purpose\":\"OWN_WORLD\",\"role\":\"OWNER\"}");
+                    "{\"credential\":\"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"endpoint\":{\"channel\":\"TLS_TCP\",\"host\":\"127.0.0.1\",\"port\":4433},\"expiresAtMs\":2000,\"purpose\":\"OWN_WORLD\",\"role\":\"OWNER\",\"visitRevision\":0}");
             });
             var transport = CreateTransport(handler);
             await transport.InitializeAsync(CancellationToken.None);

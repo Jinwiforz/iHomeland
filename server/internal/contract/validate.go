@@ -740,7 +740,7 @@ func validateWorldHTTPSchemas(root map[string]any, paths map[string]any) error {
 	if err := requireExactSchema(schemas, "WorldAssignment", []string{"personalWorldId", "worldInstanceId", "endpoint", "generation", "leaseExpiresAtMs"}, []string{"personalWorldId", "worldInstanceId", "endpoint", "generation", "leaseExpiresAtMs"}); err != nil {
 		return err
 	}
-	if err := requireExactSchema(schemas, "WorldAdmissionResponse", []string{"credential", "endpoint", "role", "purpose", "expiresAtMs"}, []string{"credential", "endpoint", "role", "purpose", "expiresAtMs"}); err != nil {
+	if err := requireExactSchema(schemas, "WorldAdmissionResponse", []string{"credential", "endpoint", "role", "purpose", "visitRevision", "expiresAtMs"}, []string{"credential", "endpoint", "role", "purpose", "visitRevision", "expiresAtMs"}); err != nil {
 		return err
 	}
 	if err := requireExactSchema(schemas, "GameplayEndpoint", []string{"channel", "host", "port"}, []string{"channel", "host", "port"}); err != nil {
@@ -765,6 +765,10 @@ func validateWorldHTTPSchemas(root map[string]any, paths map[string]any) error {
 	}
 	if !exactStringEnum(responseProperties["role"], []string{"OWNER", "VISITOR"}) || !exactStringEnum(responseProperties["purpose"], []string{"OWN_WORLD", "JOIN", "RECONNECT"}) {
 		return errors.New("OpenAPI admission role and purpose must remain closed")
+	}
+	visitRevision, ok := responseProperties["visitRevision"].(map[string]any)
+	if !ok || visitRevision["type"] != "integer" || visitRevision["format"] != "int64" || visitRevision["minimum"] != 0 {
+		return errors.New("OpenAPI admission visitRevision must remain a non-negative int64")
 	}
 	gameplayEndpoint := schemas["GameplayEndpoint"].(map[string]any)
 	gameplayProperties := gameplayEndpoint["properties"].(map[string]any)

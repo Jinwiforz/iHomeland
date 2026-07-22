@@ -200,7 +200,7 @@ func integrationBinding(t *testing.T, now time.Time) (domain.Binding, session.Au
 	fence, _ := placement.NewFencingToken(1)
 	stamp, _ := placement.NewAssignmentStamp(worldID, instanceID, nodeID, generation, fence)
 	endpoint, _ := session.NewEndpoint(session.ChannelTLSTCP, "game.example.invalid", 4433)
-	binding, err := domain.NewBinding(playerID, sessionID, session.InitialEpoch, domain.RoleVisitor, worldID, visitID, domain.PurposeJoin, stamp, endpoint, now, now.Add(time.Minute))
+	binding, err := domain.NewBinding(playerID, sessionID, session.InitialEpoch, domain.RoleVisitor, worldID, visitID, domain.PurposeJoin, visitsession.InitialRevision, stamp, endpoint, now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

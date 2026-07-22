@@ -67,7 +67,7 @@ func executeSemanticCase(t *testing.T, testCase semanticCase) {
 	}
 	binding := fixture.binding
 	if purpose == PurposeReconnect {
-		binding, _ = NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeReconnect, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
+		binding, _ = NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeReconnect, visitsession.InitialRevision, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
 	}
 	issued, err := fixture.service.Issue(context.Background(), mustIssueID(t, "semantic_"+testCase.Name), binding)
 	if err != nil {
@@ -93,7 +93,7 @@ func executeSemanticCase(t *testing.T, testCase semanticCase) {
 		}
 		consumeID = mustConsumeID(t, "consume_replayed_"+testCase.Name)
 	case "STALE_SESSION_EPOCH":
-		binding, _ = NewBinding(fixture.playerID, fixture.sessionID, session.Epoch(2), RoleVisitor, fixture.worldID, fixture.visitID, purpose, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
+		binding, _ = NewBinding(fixture.playerID, fixture.sessionID, session.Epoch(2), RoleVisitor, fixture.worldID, fixture.visitID, purpose, visitsession.InitialRevision, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
 		issued, err = fixture.service.Issue(context.Background(), mustIssueID(t, "semantic_epoch_"+testCase.Name), binding)
 		if err != nil {
 			t.Fatal(err)

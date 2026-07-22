@@ -139,13 +139,13 @@ func TestVisitorLeaveKickAndReconnect(t *testing.T) {
 		t.Fatalf("old leave should be stale: %v", err)
 	}
 	left, directive, err := recovered.Leave(fixture.visitorA, newBinding)
-	if err != nil || directive.Reason() != SafeReturnReasonVoluntaryLeave || left.Snapshot().ActiveMemberCount() != 0 {
+	if err != nil || directive.Reason() != SafeReturnReasonVoluntaryLeave || directive.Revision() != left.Revision() || left.Snapshot().ActiveMemberCount() != 0 {
 		t.Fatalf("leave visitor: directive=%#v err=%v", directive, err)
 	}
 
 	joined, _ = joinedFixture(t, fixture, fixture.visitorA, "vinv_kick", "vbind_kick")
 	kicked, directive, err := joined.Kick(fixture.owner, fixture.visitorA.playerID)
-	if err != nil || directive.Reason() != SafeReturnReasonKicked || kicked.Snapshot().ActiveMemberCount() != 0 {
+	if err != nil || directive.Reason() != SafeReturnReasonKicked || directive.Revision() != kicked.Revision() || kicked.Snapshot().ActiveMemberCount() != 0 {
 		t.Fatalf("kick visitor: directive=%#v err=%v", directive, err)
 	}
 	if _, _, err := joined.Kick(fixture.visitorB, fixture.visitorA.playerID); !IsErrorCode(err, ErrorCodeForbidden) {
@@ -171,7 +171,7 @@ func TestVisitorReconnectExpiryMatchesGeneration(t *testing.T) {
 		t.Fatalf("early timer should fail: %v", err)
 	}
 	expired, directive, err := reconnecting.ExpireVisitorReconnect(fixture.visitorA.playerID, member.ReconnectGeneration(), binding, deadline, deadline)
-	if err != nil || directive.Reason() != SafeReturnReasonVisitorReconnectExpired || expired.Snapshot().ActiveMemberCount() != 0 {
+	if err != nil || directive.Reason() != SafeReturnReasonVisitorReconnectExpired || directive.Revision() != expired.Revision() || expired.Snapshot().ActiveMemberCount() != 0 {
 		t.Fatalf("expire reconnect: directive=%#v err=%v", directive, err)
 	}
 }
@@ -224,7 +224,7 @@ func TestBatchCloseReasonsAndStableOrder(t *testing.T) {
 	if closed.RoleOf(fixture.owner) != RoleUnspecified || closed.RoleOf(fixture.visitorA) != RoleUnspecified {
 		t.Fatal("terminal session retained an active role projection")
 	}
-	if len(directives) != 2 || directives[0].VisitorID().String() != fixture.visitorA.playerID.String() || directives[0].Reason() != SafeReturnReasonAssignmentChanged || directives[1].Reason() != SafeReturnReasonAssignmentChanged {
+	if len(directives) != 2 || directives[0].VisitorID().String() != fixture.visitorA.playerID.String() || directives[0].Reason() != SafeReturnReasonAssignmentChanged || directives[0].Revision() != closed.Revision() || directives[1].Reason() != SafeReturnReasonAssignmentChanged || directives[1].Revision() != closed.Revision() {
 		t.Fatalf("unstable directives: %#v", directives)
 	}
 }

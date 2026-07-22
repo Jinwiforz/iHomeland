@@ -239,6 +239,40 @@ namespace IHomeland.Client.Tests.EditMode
             await harness.Channel.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>确认终态通知内立即发起下一代run不会被旧run的finally清理窗口拒绝。</summary>
+        [Test]
+        public async Task Run_TerminalNotification_AllowsImmediateNextGeneration()
+        {
+            var factory = new FakeSocketFactory(
+                new FakeSocket(true, ClientWebSocketConnectRequest.ControlSubprotocol),
+                new FakeSocket(false, "unexpected.control.v1"));
+            var harness = await CreateHarnessAsync(factory, Array.Empty<TimeSpan>());
+            Task nextRun = null;
+            var terminalCount = 0;
+            harness.Channel.HealthChanged += snapshot =>
+            {
+                if (snapshot.State != ClientControlChannelState.Disconnected ||
+                    ++terminalCount != 1)
+                {
+                    return;
+                }
+
+                nextRun = harness.Channel.RunAsync(CancellationToken.None);
+            };
+
+            var firstRun = harness.Channel.RunAsync(CancellationToken.None);
+            await firstRun;
+            Assert.That(nextRun, Is.Not.Null);
+            await nextRun;
+
+            Assert.That(harness.HttpApi.TicketCount, Is.EqualTo(2));
+            Assert.That(harness.Channel.Snapshot.Generation, Is.GreaterThan(1));
+            Assert.That(
+                harness.Channel.Snapshot.CloseReason,
+                Is.EqualTo(ClientControlCloseReason.ProtocolFailure));
+            await harness.Channel.StopAsync(CancellationToken.None);
+        }
+
         /// <summary>
         /// 确认 App Scope stop 取消 pending receive、执行 close 并只释放 socket 一次。
         /// </summary>
@@ -258,6 +292,29 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(harness.Channel.Snapshot.State, Is.EqualTo(ClientControlChannelState.Stopped));
             Assert.That(socket.CloseCount, Is.EqualTo(1));
             Assert.That(socket.DisposeCount, Is.EqualTo(1));
+        }
+
+        /// <summary>确认Development资格故障只取消current attempt并使用新ticket恢复同一run。</summary>
+        [Test]
+        public async Task QualificationFault_CancelsAttemptAndRecoversSameRun()
+        {
+            var first = new FakeSocket(false, ClientWebSocketConnectRequest.ControlSubprotocol);
+            var second = new FakeSocket(false, ClientWebSocketConnectRequest.ControlSubprotocol);
+            var harness = await CreateHarnessAsync(
+                new FakeSocketFactory(first, second),
+                new[] { TimeSpan.FromMilliseconds(1) },
+                delay: new FakeDelay());
+            var run = harness.Channel.RunAsync(CancellationToken.None);
+            await WaitForAttemptAsync(harness.Channel, 1, ClientControlChannelState.Connected);
+
+            Assert.That(harness.Channel.InjectQualificationTransportDisconnect(), Is.True);
+            await WaitForAttemptAsync(harness.Channel, 2, ClientControlChannelState.Connected);
+
+            Assert.That(first.DisposeCount, Is.EqualTo(1));
+            Assert.That(harness.HttpApi.TicketCount, Is.EqualTo(2));
+            Assert.That(harness.Channel.QualificationRunOwnerCount, Is.EqualTo(1));
+            await harness.Channel.StopAsync(CancellationToken.None);
+            await run;
         }
 
         /// <summary>
@@ -287,6 +344,36 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(received, Is.Empty);
         }
 
+        /// <summary>确认上一connection已排队PUSH不能在同run下一attempt连上后重新进入业务投影。</summary>
+        [Test]
+        public async Task Recovery_DropsQueuedPushFromRetiredConnectionAttempt()
+        {
+            var first = new FakeSocket(
+                false,
+                ClientWebSocketConnectRequest.ControlSubprotocol,
+                ReceiveStep.Binary(EnvelopeBytes(500, 1, new MaintenancePush()), true),
+                ReceiveStep.Close(WebSocketCloseStatus.NormalClosure));
+            var second = new FakeSocket(
+                false,
+                ClientWebSocketConnectRequest.ControlSubprotocol);
+            var harness = await CreateHarnessAsync(
+                new FakeSocketFactory(first, second),
+                new[] { TimeSpan.FromMilliseconds(1) });
+            var received = new List<ClientControlPush>();
+            harness.Channel.PushReceived += received.Add;
+
+            var run = harness.Channel.RunAsync(CancellationToken.None);
+            await WaitForAttemptAsync(harness.Channel, 2, ClientControlChannelState.Connected);
+            Assert.That(harness.Dispatcher.PendingCount, Is.EqualTo(1));
+
+            var drain = harness.Dispatcher.Drain(8);
+
+            Assert.That(drain.Errors, Is.Empty);
+            Assert.That(received, Is.Empty);
+            await harness.Channel.StopAsync(CancellationToken.None);
+            await run;
+        }
+
         /// <summary>
         /// 创建初始化、配置和认证均已完成的 control test harness。
         /// </summary>
@@ -309,7 +396,12 @@ namespace IHomeland.Client.Tests.EditMode
                     new[] { new ClientEndpoint(ClientEndpointChannel.Wss, "127.0.0.1", 8443) },
                     new ClientPublicLimits(4096, 65536))));
             var httpApi = new FakeHttpApi();
-            var session = new SessionCoordinator(configurationStore, httpApi, new FakeClock(1000));
+            var session = new SessionCoordinator(
+                configurationStore,
+                httpApi,
+                new FakeClock(1000),
+                new FakeClientSecureSessionStore(),
+                FakeClientSecureSessionStore.EnvironmentBinding);
             await session.InitializeAsync(CancellationToken.None);
             var login = await session.LoginAsync("fixture", "password", CancellationToken.None);
             Assert.That(login.IsSuccess, Is.True);
@@ -332,6 +424,50 @@ namespace IHomeland.Client.Tests.EditMode
                 retryDelays);
             await channel.InitializeAsync(CancellationToken.None);
             return new ChannelHarness(channel, dispatcher, session, httpApi);
+        }
+
+        /// <summary>等待指定attempt进入目标状态，不使用真实网络或业务延时。</summary>
+        /// <param name="channel">被测control owner。</param>
+        /// <param name="attempt">目标attempt序号。</param>
+        /// <param name="state">目标健康状态。</param>
+        /// <returns>目标snapshot已提交时完成。</returns>
+        private static async Task WaitForAttemptAsync(
+            ClientControlChannel channel,
+            int attempt,
+            ClientControlChannelState state)
+        {
+            var completion = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            Action<ClientControlChannelSnapshot> handler = snapshot =>
+            {
+                if (snapshot.Attempt == attempt && snapshot.State == state)
+                {
+                    completion.TrySetResult(true);
+                }
+            };
+            channel.HealthChanged += handler;
+            try
+            {
+                handler(channel.Snapshot);
+                using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+                using (deadline.Token.Register(() => completion.TrySetCanceled()))
+                {
+                    await completion.Task;
+                }
+
+                return;
+            }
+            catch (TaskCanceledException)
+            {
+                var final = channel.Snapshot;
+                Assert.Fail(
+                    $"Control attempt未进入目标状态：expected={attempt}/{state}, " +
+                    $"actual={final.Attempt}/{final.State}/{final.CloseReason}。");
+            }
+            finally
+            {
+                channel.HealthChanged -= handler;
+            }
         }
 
         /// <summary>

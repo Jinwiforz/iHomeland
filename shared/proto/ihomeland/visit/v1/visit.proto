@@ -135,6 +135,8 @@ message SafeReturnDirective {
   SafeReturnDestination preferred = 4;
   // fallback 是 preferred 不可用时的安全目标类别。
   SafeReturnDestination fallback = 5;
+  // revision 是产生该返回结果的已提交 aggregate 版本，用于拒绝同一 VisitSession 的迟到旧指令。
+  uint64 revision = 6;
 }
 
 // VisitMutationResult 是 mutation response 共享的完整首次提交结果。

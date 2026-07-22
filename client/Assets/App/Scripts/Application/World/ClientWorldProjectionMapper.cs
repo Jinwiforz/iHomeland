@@ -305,12 +305,18 @@ namespace IHomeland.Client.Application.World
                 throw Invalid("Safe-return preferred 与 fallback 必须不同。");
             }
 
+            if (directive.Revision == 0)
+            {
+                throw Invalid("Safe-return revision 无效。");
+            }
+
             return new ClientSafeReturnProjection(
                 RequireIdentity(directive.VisitSessionId, "VisitSessionID"),
                 RequireIdentity(directive.VisitorId, "VisitorID"),
                 MapSafeReturnReason(directive.Reason),
                 preferred,
-                fallback);
+                fallback,
+                directive.Revision);
         }
 
         /// <summary>把 HTTP assignment 转换为统一 application projection。</summary>

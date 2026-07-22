@@ -195,7 +195,7 @@ func (service *Service) IssueWorldAdmission(ctx context.Context, authenticated s
 			return AdmissionResult{}, operationError(ErrorCodeWorldNotReady, nil)
 		}
 		deadline := earliest(now.Add(service.admissionLifetime), authenticated.Deadline(), assignment.Lease().ExpiresAt())
-		binding, err = worldadmission.NewBinding(playerID, auth.SessionID(), auth.Epoch(), worldadmission.RoleOwner, world.ID(), visitsession.VisitSessionID{}, worldadmission.PurposeOwnWorld, assignment.Stamp(), endpoint, now, deadline)
+		binding, err = worldadmission.NewBinding(playerID, auth.SessionID(), auth.Epoch(), worldadmission.RoleOwner, world.ID(), visitsession.VisitSessionID{}, worldadmission.PurposeOwnWorld, 0, assignment.Stamp(), endpoint, now, deadline)
 	} else {
 		eligibility, eligibilityErr := service.visits.ResolveAdmissionEligibility(ctx, authenticated, target.VisitSessionID)
 		if eligibilityErr != nil {
@@ -210,7 +210,7 @@ func (service *Service) IssueWorldAdmission(ctx context.Context, authenticated s
 			purpose = worldadmission.PurposeReconnect
 		}
 		deadline := earliest(now.Add(service.admissionLifetime), intent.ExpiresAt(), authenticated.Deadline())
-		binding, err = worldadmission.NewBinding(playerID, auth.SessionID(), auth.Epoch(), worldadmission.RoleVisitor, intent.Assignment().WorldID(), target.VisitSessionID, purpose, intent.Assignment(), endpoint, now, deadline)
+		binding, err = worldadmission.NewBinding(playerID, auth.SessionID(), auth.Epoch(), worldadmission.RoleVisitor, intent.Assignment().WorldID(), target.VisitSessionID, purpose, eligibility.Revision(), intent.Assignment(), endpoint, now, deadline)
 	}
 	if err != nil {
 		return AdmissionResult{}, operationError(ErrorCodeDependencyDefect, err)
@@ -227,7 +227,7 @@ func (service *Service) IssueWorldAdmission(ctx context.Context, authenticated s
 	if !issued.Valid() || !admissionReplayMatches(committed, binding) {
 		return AdmissionResult{}, operationError(ErrorCodeDependencyDefect, nil)
 	}
-	result := AdmissionResult{Credential: issued.Credential(), Endpoint: committed.Endpoint(), Role: committed.Role(), Purpose: committed.Purpose(), ExpiresAt: committed.ExpiresAt()}
+	result := AdmissionResult{Credential: issued.Credential(), Endpoint: committed.Endpoint(), Role: committed.Role(), Purpose: committed.Purpose(), VisitRevision: committed.VisitRevision(), ExpiresAt: committed.ExpiresAt()}
 	if !result.Valid() {
 		return AdmissionResult{}, operationError(ErrorCodeDependencyDefect, nil)
 	}

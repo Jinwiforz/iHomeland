@@ -49,6 +49,8 @@
 
 Protobuf schema lint、breaking check 与 generator 调度统一由 Buf 完成，项目不维护第二套公开编译或生成命令，也不持久化 descriptor 中间产物。Go generator 与官方 `protoc` 按锁定版本安装在项目 `.local/`，C# 由 Buf 的 `protoc_builtin` 调度；生成程序集所需的官方 `Google.Protobuf` 从锁定 NuGet 包恢复，不通过 Unity Package Manager 或系统 NuGet 隐式解析。开发者和 CI 不直接调用 `protoc`，全部协议动作仍只通过已跟踪的 `tools/proto/` 入口执行。
 
+Windows客户端secure Session使用操作系统DPAPI `CurrentUser`，不引入第三方加密库，也不自制密钥派生或密文格式。资格工具必须使用 `client/ProjectSettings/ProjectVersion.txt` 锁定的Unity Editor；Development与Release由同一Windows build owner生成，Release不得编译Development-only profile、诊断或故障注入入口。
+
 包装入口在进程内设置：
 
 - `GOMODCACHE=.local/cache/go/mod`

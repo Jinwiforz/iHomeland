@@ -181,7 +181,8 @@
           },
           "expiresAtMs": 1700000030000,
           "purpose": "OWN_WORLD",
-          "role": "OWNER"
+          "role": "OWNER",
+          "visitRevision": 0
         }
       }
     },
@@ -209,7 +210,8 @@
           },
           "expiresAtMs": 1700000030000,
           "purpose": "JOIN",
-          "role": "VISITOR"
+          "role": "VISITOR",
+          "visitRevision": 5
         }
       }
     },

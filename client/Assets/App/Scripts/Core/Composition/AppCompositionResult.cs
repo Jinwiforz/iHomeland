@@ -7,6 +7,9 @@ using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
 using IHomeland.Client.Core.Lifetime;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+using IHomeland.Client.Core.Qualification;
+#endif
 using IHomeland.Client.Presentation.Navigation;
 using IHomeland.Client.Presentation.PersonalWorld;
 using IHomeland.Client.Scenes.PersonalWorld;
@@ -62,6 +65,9 @@ namespace IHomeland.Client.Core.Composition
         /// </summary>
         private readonly WorldAdmissionCoordinator _worldAdmissionCoordinator;
 
+        /// <summary>保存唯一connection recovery intent owner；isolated host fixture可以不提供。</summary>
+        private readonly ClientConnectionRecoveryCoordinator _connectionRecoveryCoordinator;
+
         /// <summary>
         /// 保存当前 App Scope 唯一 UI route owner；isolated host fixture 可以不提供。
         /// </summary>
@@ -99,6 +105,7 @@ namespace IHomeland.Client.Core.Composition
                 personalWorldService: null,
                 visitSessionService: null,
                 worldAdmissionCoordinator: null,
+                connectionRecoveryCoordinator: null,
                 uiRouter: null,
                 personalWorldExperience: null,
                 sceneTransitionHost: null)
@@ -119,6 +126,7 @@ namespace IHomeland.Client.Core.Composition
         /// <param name="personalWorldService">PersonalWorld/assignment 投影 owner。</param>
         /// <param name="visitSessionService">VisitSession/invite 投影 owner。</param>
         /// <param name="worldAdmissionCoordinator">World target flow owner。</param>
+        /// <param name="connectionRecoveryCoordinator">唯一connection recovery intent owner。</param>
         /// <param name="uiRouter">App Scope 唯一 UI route owner。</param>
         /// <param name="personalWorldExperience">个人世界产品表现协调器。</param>
         /// <param name="sceneTransitionHost">唯一内容 Scene 转换 Host。</param>
@@ -136,6 +144,7 @@ namespace IHomeland.Client.Core.Composition
             PersonalWorldService personalWorldService,
             VisitSessionService visitSessionService,
             WorldAdmissionCoordinator worldAdmissionCoordinator,
+            ClientConnectionRecoveryCoordinator connectionRecoveryCoordinator,
             ClientUiRouter uiRouter,
             ClientPersonalWorldExperience personalWorldExperience,
             ClientWorldSceneTransitionHost sceneTransitionHost)
@@ -168,6 +177,7 @@ namespace IHomeland.Client.Core.Composition
             _personalWorldService = personalWorldService;
             _visitSessionService = visitSessionService;
             _worldAdmissionCoordinator = worldAdmissionCoordinator;
+            _connectionRecoveryCoordinator = connectionRecoveryCoordinator;
             _uiRouter = uiRouter;
             _personalWorldExperience = personalWorldExperience;
             _sceneTransitionHost = sceneTransitionHost;
@@ -250,5 +260,23 @@ namespace IHomeland.Client.Core.Composition
         /// <exception cref="InvalidOperationException">Isolated host fixture 未连接产品 graph 时抛出。</exception>
         internal ClientWorldSceneTransitionHost SceneTransitionHost => _sceneTransitionHost ??
             throw new InvalidOperationException("当前 isolated host composition 不包含内容 Scene Host。");
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>创建只读取现有owner的Development资格诊断聚合器。</summary>
+        /// <returns>不登记生命周期或subscriber的低敏只读诊断。</returns>
+        /// <exception cref="InvalidOperationException">Isolated host fixture未连接完整产品graph时抛出。</exception>
+        internal ClientQualificationDiagnostics CreateQualificationDiagnostics()
+        {
+            return new ClientQualificationDiagnostics(
+                ControlChannel,
+                GameplayChannel,
+                _connectionRecoveryCoordinator == null
+                    ? throw new InvalidOperationException("当前 isolated host composition 不包含恢复产品 graph。")
+                    : _connectionRecoveryCoordinator,
+                Dispatcher,
+                UiRouter,
+                SceneTransitionHost);
+        }
+#endif
     }
 }

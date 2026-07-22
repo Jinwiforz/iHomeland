@@ -263,8 +263,8 @@ func validWorldHTTPSchemaDocument() (map[string]any, map[string]any) {
 			"WorldAdmissionResponse": closedSchema(map[string]any{
 				"credential": map[string]any{"type": "string", "minLength": 32, "maxLength": 4096, "pattern": safeOpaqueCredentialPattern, "description": "opaque credential"},
 				"endpoint":   map[string]any{"$ref": "#/components/schemas/GameplayEndpoint"}, "role": map[string]any{"type": "string", "enum": []any{"OWNER", "VISITOR"}},
-				"purpose": map[string]any{"type": "string", "enum": []any{"OWN_WORLD", "JOIN", "RECONNECT"}}, "expiresAtMs": map[string]any{"type": "integer"},
-			}, "credential", "endpoint", "role", "purpose", "expiresAtMs"),
+				"purpose": map[string]any{"type": "string", "enum": []any{"OWN_WORLD", "JOIN", "RECONNECT"}}, "visitRevision": map[string]any{"type": "integer", "format": "int64", "minimum": 0}, "expiresAtMs": map[string]any{"type": "integer"},
+			}, "credential", "endpoint", "role", "purpose", "visitRevision", "expiresAtMs"),
 			"GameplayEndpoint": closedSchema(map[string]any{
 				"channel": map[string]any{"type": "string", "enum": []any{"TLS_TCP"}}, "host": map[string]any{"type": "string"}, "port": map[string]any{"type": "integer"},
 			}, "channel", "host", "port"),

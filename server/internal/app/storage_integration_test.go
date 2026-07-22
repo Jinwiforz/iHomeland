@@ -161,15 +161,18 @@ func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
 	if issuedAdmission["credential"] != replayedAdmission["credential"] || issuedAdmission["expiresAtMs"] != replayedAdmission["expiresAtMs"] {
 		t.Fatalf("admission replay drifted: first=%#v replay=%#v", issuedAdmission, replayedAdmission)
 	}
-	gameplayConnection, _ := exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, accepted, visitID)
+	if uint64(issuedAdmission["visitRevision"].(float64)) != uint64(accepted["reservation"].(map[string]any)["revision"].(float64)) {
+		t.Fatalf("JOIN admission revision drifted: admission=%#v reservation=%#v", issuedAdmission, accepted)
+	}
+	gameplayConnection, _ := exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, visitID)
 	_ = gameplayConnection.Close()
 	reconnectRevision := waitForVisitorReconnect(t, ownerBootstrap, visitID)
 	reconnectTicket := request(http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
 	reconnectAdmission := requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-reconnect-admission-1", http.StatusCreated)
-	if reconnectAdmission["purpose"] != "RECONNECT" {
-		t.Fatalf("reconnect admission purpose=%v", reconnectAdmission["purpose"])
+	if reconnectAdmission["purpose"] != "RECONNECT" || uint64(reconnectAdmission["visitRevision"].(float64)) != reconnectRevision {
+		t.Fatalf("reconnect admission binding=%#v currentRevision=%d", reconnectAdmission, reconnectRevision)
 	}
-	gameplayConnection, reconnectRevision = exerciseTCPReconnect(t, gameplayTLS, reconnectTicket, reconnectAdmission, reconnectRevision, visitID)
+	gameplayConnection, reconnectRevision = exerciseTCPReconnect(t, gameplayTLS, reconnectTicket, reconnectAdmission, visitID)
 	leaveRevision := exerciseTCPLeave(t, gameplayConnection, reconnectRevision)
 	expectTCPSafeReturnAndClose(t, gameplayConnection, visitID, visitorID)
 
@@ -393,17 +396,16 @@ func (client *integrationTCPGameplay) expectWorldReadFailClosed(t *testing.T) {
 }
 
 // exerciseTCPJoin 穿过真实 listener、Redis ticket/admission 与 VisitSession store 执行一次 JOIN。
-func exerciseTCPJoin(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, accepted map[string]any, visitID string) (net.Conn, uint64) {
+func exerciseTCPJoin(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, visitID string) (net.Conn, uint64) {
 	t.Helper()
 	connection := dialTCPGameplay(t, tlsConfig, ticket)
 	preface, err := tcpgameplay.EncodePreface(ticket["ticket"].(string), admission["credential"].(string), worldadmission.PurposeJoin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reservation := accepted["reservation"].(map[string]any)
 	command := visitv1.VisitJoinCommand_builder{
 		AdmissionCredential: proto.String(admission["credential"].(string)),
-		ExpectedRevision:    proto.Uint64(uint64(reservation["revision"].(float64))),
+		ExpectedRevision:    proto.Uint64(uint64(admission["visitRevision"].(float64))),
 	}.Build()
 	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(command)
 	if err != nil {
@@ -438,7 +440,7 @@ func exerciseTCPJoin(t *testing.T, tlsConfig *tls.Config, ticket map[string]any,
 }
 
 // exerciseTCPReconnect 使用新 ticket 与 RECONNECT admission 恢复 Visitor binding。
-func exerciseTCPReconnect(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, revision uint64, visitID string) (net.Conn, uint64) {
+func exerciseTCPReconnect(t *testing.T, tlsConfig *tls.Config, ticket map[string]any, admission map[string]any, visitID string) (net.Conn, uint64) {
 	t.Helper()
 	connection := dialTCPGameplay(t, tlsConfig, ticket)
 	preface, err := tcpgameplay.EncodePreface(ticket["ticket"].(string), admission["credential"].(string), worldadmission.PurposeReconnect)
@@ -447,7 +449,7 @@ func exerciseTCPReconnect(t *testing.T, tlsConfig *tls.Config, ticket map[string
 	}
 	command := visitv1.VisitReconnectCommand_builder{
 		AdmissionCredential: proto.String(admission["credential"].(string)),
-		ExpectedRevision:    proto.Uint64(revision),
+		ExpectedRevision:    proto.Uint64(uint64(admission["visitRevision"].(float64))),
 	}.Build()
 	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(command)
 	if err != nil {

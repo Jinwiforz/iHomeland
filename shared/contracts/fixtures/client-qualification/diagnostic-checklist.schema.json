@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/client-qualification/diagnostic-checklist.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "diagnosticVersion", "qualificationEvidence", "scenarioId", "contractDigest", "developmentBuildDigest", "buildArtifact", "launcherArtifact", "profiles", "automatedStages", "connectionGuide", "manualSteps"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "diagnosticVersion": { "const": "client-v1-diagnostic" },
+    "qualificationEvidence": { "const": false },
+    "scenarioId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "contractDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "developmentBuildDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "buildArtifact": { "const": "development/iHomeland.exe" },
+    "launcherArtifact": { "const": "launch-two-players.ps1" },
+    "profiles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": { "enum": ["diagnostic-owner", "diagnostic-visitor"] }
+    },
+    "automatedStages": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "outcome", "durationMs"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "outcome": { "enum": ["pass", "fail"] },
+          "durationMs": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "connectionGuide": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "channel", "remotePort", "protectedRemotePort"],
+          "properties": {
+            "role": { "enum": ["owner", "visitor"] },
+            "channel": { "enum": ["control", "gameplay"] },
+            "remotePort": { "enum": [8080, 8444] },
+            "protectedRemotePort": { "enum": [8080, 8444] }
+          }
+        }
+      ]
+    },
+    "manualSteps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "instruction"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "instruction": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[^\\r\\n]+$" }
+        }
+      }
+    }
+  }
+}

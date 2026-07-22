@@ -248,14 +248,15 @@ client/
         Application/
           Bootstrap/
           Control/
+          Gameplay/
           Session/
-          Account/
           World/                  # PersonalWorld、VisitSession 与 admission flow 的 C2 feature slice
         Infrastructure/
           Http/
           WebSocket/
           Tcp/
           Protocol/
+          Security/               # Windows DPAPI、ACL、atomic file 与 profile ownership
         Presentation/
           Navigation/
           PersonalWorld/
@@ -297,11 +298,17 @@ client/
 
 `Application/World` 只共置紧密协作的不可变 model/mapper、`PersonalWorldService`、`VisitSessionService` 与 `WorldAdmissionCoordinator`；三类 owner 的事实和转换职责仍然分离，该目录不得演变为统一 `WorldManager` 或第二套网络 router。尚未出现独立业务需求的 `Account` 及其他 application 目录不得为了目标树完整而创建空壳。
 
+`Application/Session` 同时放置secure record契约与一次性startup restore owner；`Application/World` 中的 `ClientConnectionRecoveryCoordinator` 只保存generation、阶段和冻结低敏descriptor，不复制Session、World或Visit最终事实。
+
 ### `Infrastructure`
 
 HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第二份业务事实。
 
-当前 `Infrastructure/Http` 放置冻结 operation catalog、JSON codec、共享 transport、result/error projection 与强类型 API；`Infrastructure/WebSocket` 只提供单次连接 adapter、封闭 control route catalog 与 generated Protobuf codec；`Infrastructure/Tcp` 提供 exact stream transport、`IHTP` preface、framing、封闭 gameplay route catalog 与 generated Protobuf codec。三者都不保存业务状态。
+当前 `Infrastructure/Http` 放置冻结 operation catalog、JSON codec、共享 transport、result/error projection 与强类型 API；`Infrastructure/WebSocket` 只提供单次连接 adapter、封闭 control route catalog 与 generated Protobuf codec；`Infrastructure/Tcp` 提供 exact stream transport、`IHTP` preface、framing、封闭 gameplay route catalog 与 generated Protobuf codec。`Infrastructure/Security` 独占Windows DPAPI、ACL、atomic replace、owner-specific path和named mutex；非Windows明确Unsupported。以上adapter都不保存第二份业务状态。
+
+客户端C3 manifest/schema、automatic registry与diagnostic registry位于 `shared/contracts/fixtures/client-qualification/`，唯一资格聚合入口及其独立失败回归位于 `tools/client-qualification/`；回归通过AST装载入口函数，不复制第二套资格实现。正式运行build、日志、evidence与report只进入ignored `.local/client-qualification/<run-id>/`；不构成证据的定向Development build、启动器与清单只进入ignored `.local/client-diagnostics/<run-id>/`。真实Player服务端进程替换诊断同样位于该工具目录，其低敏日志和信号只进入ignored `.local/client-recovery-diagnostics/<run-id>/`，不得被正式`finalize`读取。具体规则见[客户端v1资格验收](client-v1-qualification.md)。
+
+`client/Assets/App/Scripts/Core/Qualification/` 只在Editor或Development Player中编译低敏资源计数、真实产品graph soak与secure-store owner cleanup驱动。它不是产品service locator或第二套恢复实现；没有显式qualification mode时零副作用，Release必须完全移除该目录内的可执行入口和参数词汇。
 
 ### `Presentation`
 

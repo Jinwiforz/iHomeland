@@ -136,6 +136,20 @@ namespace IHomeland.Client.Presentation.Navigation
             }
         }
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>获取资格范围内route snapshot subscriber数量。</summary>
+        internal int QualificationSubscriptionCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _snapshotChanged?.GetInvocationList().Length ?? 0;
+                }
+            }
+        }
+#endif
+
         /// <summary>
         /// 进入可接收显式导航的空状态；不会打开 route 或访问业务 Service。
         /// </summary>

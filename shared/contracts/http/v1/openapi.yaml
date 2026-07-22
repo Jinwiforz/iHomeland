@@ -560,7 +560,7 @@ components:
     WorldAdmissionResponse:
       type: object
       additionalProperties: false
-      required: [credential, endpoint, role, purpose, expiresAtMs]
+      required: [credential, endpoint, role, purpose, visitRevision, expiresAtMs]
       properties:
         credential:
           type: string
@@ -576,6 +576,11 @@ components:
         purpose:
           type: string
           enum: [OWN_WORLD, JOIN, RECONNECT]
+        visitRevision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Visitor admission 签发时冻结的权威 VisitSession revision；OWN_WORLD 固定为 0。
         expiresAtMs:
           type: integer
           format: int64

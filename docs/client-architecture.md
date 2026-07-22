@@ -164,7 +164,7 @@ SessionCoordinator + ClientConfigurationStore
 - `ClientControlChannel` 只在显式 `RunAsync` 后签发 WSS ticket；App Scope 初始化仍不访问网络。
 - 每次 connection attempt 都单独签发并取得一次 ticket，固定连接 `/v1/control` 与 `ihomeland.control.v1`；旧 ticket、query、cookie 和 fallback endpoint 都没有入口。
 - Runtime API 不提供 application `SendAsync`。每个 connection 只有一个 receive pump，负责有界 fragment 重组、严格连续 sequence 与 9 类 generated PUSH 解码。
-- 普通 PUSH 经既有有界 `MainThreadDispatcher` 进入 Unity 主线程；forced logout/session invalidation 先以来源 generation 与更高 epoch 清除唯一 Session owner，再终止自动恢复。
+- 普通 PUSH 经既有有界 `MainThreadDispatcher` 进入 Unity 主线程；forced logout/session invalidation 先以来源 generation 与更高 epoch 清除唯一 Session owner。`SessionCoordinator.Invalidated` 只发布一次 Authenticated 到非认证终态的权威边界，Experience 在主线程重读 current Session 后退役 world target、Scene/HUD 与全部产品 route 并回到 Login；迟到事件不能覆盖后续显式登录。
 - 只有瞬时 transport/普通 peer close 消耗固定有限 backoff；协议、授权、失效、背压与停止均 fail closed，普通 WSS 中断不擅自清除 HTTP session。
 
 该边界不拥有 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现 TLS/TCP、业务 request/response 或客户端 control command。
@@ -184,11 +184,15 @@ SessionCoordinator + ClientConfigurationStore
 - 每个 connection generation 只有一个 reader 与一个 serialized writer；pending、writer item、writer encoded bytes 和主线程投递均有硬上限，断线或背压会恰好完成等待方并撤销 generation。
 - Active generation 由 channel 内唯一 heartbeat owner 每 15 秒提交 `GAMEPLAY_HEARTBEAT_REQUEST(1)`，并通过同一 correlation/pending、writer、codec 和 terminal close 路径等待 `GAMEPLAY_HEARTBEAT_RESPONSE(2)`；close、safe-return、session invalidation 或新 generation 建立后，旧 heartbeat 不得继续写入。
 - Caller cancel 只结束本地等待，仍保留有界 correlation 以安全消费迟到 response；JOIN/RECONNECT 只允许携带当前 admission 的首个匹配 command。
-- 三类登记 PUSH 才能进入主线程；safe-return 在投递前先关闭旧 target mutation gate，session epoch 失效会同步撤销匹配 gameplay generation。Remote、protocol、timeout、backpressure 或 transport 终止会在 reader/writer 都确认退出后，通过主线程保留槽发布一次 terminal disconnect；显式 close、safe-return、session invalidation 与 shutdown 不发布该事件。
+- 三类登记 PUSH 才能进入主线程；safe-return 在投递前先关闭旧 target mutation gate，且其权威 VisitSession revision 必须不低于客户端已提交的同 session revision，重新加入后迟到的旧指令只会被丢弃。session epoch 失效会同步撤销匹配 gameplay generation。Remote、protocol、timeout、backpressure 或 transport 终止会在 reader/writer 都确认退出后，通过主线程保留槽发布一次 terminal disconnect；显式 close、safe-return、session invalidation 与 shutdown 不发布该事件。
 
 该边界不保存 PersonalWorld、VisitSession、assignment 或 UI 最终状态，也不实现页面、Scene 或自动重试；它只向下述 Services/coordinator 交付 typed response/PUSH。
 
-产品层的“重试连接”是玩家显式触发的 single-flight 事务，不是 tick 或后台无限修正。整笔 control 恢复、own-world admission、gameplay 建连和 Scene 同步共享 45 秒总 deadline；超时后保留 `ConnectionLost` 与可重试按钮，并对称释放 active intent。control 已经 Connected 时复用 current run，不能重复创建第二条连接；旧 generation 的完成或诊断回调不能覆盖新一代状态。
+`ClientConnectionRecoveryCoordinator` 是 automatic/manual 恢复的唯一 intent owner，不是 tick 或后台无限修正。WSS 恢复只失效 control-only projection并通过健康 gameplay收敛完整 snapshot；gameplay恢复持有冻结低敏 target descriptor，OwnWorld重建 admission/connection/snapshot，Visitor以 typed RECONNECT首帧恢复同一 membership。Descriptor 以服务端 Session identity/epoch 约束血统；同一血统的access refresh只允许本地generation单调升代，不同session或换账号不能继承旧target。整笔恢复共享45秒总deadline与session/recovery/target/scene四重gate；只有Scene/HUD提交后回到Idle，terminal后才开放manual retry。
+
+Session authority 高于 connection recovery。Session 一旦进入 `Unauthenticated`、`Unresolved` 或 `Stopped`，客户端不再把恢复快照仅映射为关闭弹窗；`WorldAdmissionCoordinator.InvalidateSession` 会使当前 intent 和 target generation 失效、清除 world/visit target 投影，Experience 串行失效 Scene route、卸载内容 Scene 并只保留 Login。Experience 只消费 `SessionCoordinator.Invalidated` 发布的单调 generation；target 清理产生的后续 `Changed` 只刷新投影，不能重新制造 Login/Scene 收敛事务。该迁移不发起无凭据的 leave，也不依赖按钮、延时或 frame tick。
+
+Editor/Development Player 额外编译只读 `Core/Qualification` 边界。它从既有 owner 的锁内派生 AppRoot、channel generation、run/socket/heartbeat/recovery intent、pending、dispatcher、subscription 与 Scene owner 计数，不保存第二份状态，也不执行修正。五分钟 soak 的显式 transport fault 只取消 current control attempt 或提交 current gameplay generation 的既有 terminal 分类，后续仍由同一生产恢复状态机处理；Release 预处理后不包含 profile、存储根、诊断、fault 或 soak 入口。
 
 ### 当前 PersonalWorld/VisitSession Services 边界
 
@@ -206,7 +210,7 @@ HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
 - Coordinator 只允许 `Inactive -> ResolvingOwnWorld -> OwnWorld -> JoiningVisit -> Visiting -> ReturningOwnWorld -> OwnWorld` 的正常转换，并同时校验 session generation 与 target generation；active gameplay 非预期终止会进入 `ConnectionLost`、清除 current target 投影，只有显式进入 own-world 才建立新 generation。
 - JOIN/RECONNECT admission credential 只由 gameplay channel 内部写入首个 command；Services、coordinator、snapshot、subscriber 与日志均不能读取。
 - Owner/Visitor command 使用 current role 与 revision 在写入前 fail closed。Caller cancel、commit-unknown 或 revision conflict 不触发隐式 mutation 重试。
-- App Scope 初始化只登记 subscriber 并打开本地 Login route；只有玩家显式 register/login 或重试才开始 bootstrap 与业务联网。跨进程 token 恢复、独立通道自动恢复和内容资源系统仍属于后续 change。
+- App Scope 按安全存储、Session restore、channels/services、recovery、Scene/UI、Experience 的顺序初始化。启动存在合法 refresh lineage 时一次性轮换并直接进入 OwnWorld；无record/Unsupported才打开 Login。独立通道恢复已经由唯一 coordinator 接线；内容资源系统仍属于后续 change。
 
 ### 当前 UI routing/Host 边界
 

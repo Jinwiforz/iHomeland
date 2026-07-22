@@ -41,7 +41,7 @@ ih:<env>:<owner>:<kind>:<identity...>
 | `ih:<env>:visitsession:session:<visitSessionID>` | visitsession | Visitor membership、revision、expiry、Owner grace 与完整运行快照 | 进程重启只读取 Redis 仍保留的合法值；丢失后访问安全结束，不影响持久世界事实 |
 | `ih:<env>:visitsession:command:<commandID>` | visitsession | Create/transition 首次完整结果与重放证据 | 进程重启只读取 Redis 仍保留的合法值；丢失后禁止猜测首次提交结果 |
 | `ih:<env>:worldadmission:issue:<issueIdDigest>` | worldadmission | 签发 identity、binding fingerprint 与首次 credential digest | 不恢复；保留到业务 expiry 加 replay retention，用于解析 response loss |
-| `ih:<env>:worldadmission:credential:<credentialDigest>` | worldadmission | 一次性 credential binding 与 consume tombstone | 不恢复；业务到期即失效，physical TTL 只保留有界重放证据 |
+| `ih:<env>:worldadmission:credential:<credentialDigest>` | worldadmission | 一次性 credential binding（含 Visitor 签发 revision）与 consume tombstone | 不恢复；业务到期即失效，physical TTL 只保留有界重放证据 |
 | `ih:<env>:rate:<scope>:<identity>` | owning adapter | 限流窗口 | 丢失后最多放宽一个窗口 |
 | `ih:<env>:lock:<owner>:<resourceID>` | owning module | 必要短租约 | 不恢复，必须有 TTL 与 fencing/idempotency |
 
@@ -283,7 +283,7 @@ deadline 但仍在 physical retention 窗口内的 active index 会 fail closed�
 
 | Field | 类型/编码 | 中文短注释 | 规则 |
 |---|---|---|---|
-| `v` | canonical decimal `uint16` | Schema 版本号 | 固定为 `1` |
+| `v` | canonical decimal `uint16` | Schema 版本号 | 固定为 `2` |
 | `fingerprint` | lowercase hex | 签发语义指纹(SHA-256,32字节) | 绑定全部 actor/role/target/purpose/session/assignment/endpoint/deadline |
 | `digest` | lowercase hex | 凭据摘要(SHA-256,32字节) | 对 raw opaque credential 计算；不保存 raw 值 |
 | `expires_us` | canonical decimal `int64` | 凭据到期时间(UTC Unix微秒) | 等于即失效；必须与 credential Hash 一致 |
@@ -302,7 +302,7 @@ deadline 但仍在 physical retention 窗口内的 active index 会 fail closed�
 
 | Field | 类型/编码 | 中文短注释 | 规则 |
 |---|---|---|---|
-| `v` | canonical decimal `uint16` | Schema 版本号 | 固定为 `1` |
+| `v` | canonical decimal `uint16` | Schema 版本号 | 固定为 `2` |
 | `status` | enum string | 消费状态 | `issued` 或 `consumed` |
 | `consume_id` | string/`none` | 首次消费 ID | issued 为 `none`；consumed 必填安全 ASCII |
 | `consume_fp` | lowercase hex/`none` | 首次消费指纹(SHA-256,32字节) | consumed 必填，绑定 AuthContext、endpoint、purpose 与 consume ID |
@@ -313,6 +313,7 @@ deadline 但仍在 physical retention 窗口内的 active index 会 fail closed�
 | `world` | string | 个人世界 ID | 必须等于完整 assignment 的 world |
 | `visit` | string/`none` | 访客会话 ID | Owner 为 `none`；Visitor 必填 |
 | `purpose` | enum string | 准入用途 | `own_world`、`join` 或 `reconnect`，与 role/visit 组合严格匹配 |
+| `visit_revision` | canonical decimal `uint64` | Visitor 签发时的 VisitSession revision | Owner 固定为 `0`；Visitor 为正数并进入签发指纹与响应重放 |
 | `instance` | string | 世界实例 ID | 完整 AssignmentStamp 字段 |
 | `node` | string | 运行节点 ID | 完整 AssignmentStamp 内部字段，不投影给客户端 |
 | `generation` | canonical decimal `uint64` | 分配世代 | 正整数 |

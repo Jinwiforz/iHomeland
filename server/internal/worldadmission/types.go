@@ -268,6 +268,8 @@ type Binding struct {
 	visitSessionID visitsession.VisitSessionID
 	// purpose 防止OWN_WORLD、JOIN与RECONNECT互换。
 	purpose Purpose
+	// visitRevision 冻结 Visitor admission 签发时的权威 VisitSession CAS 版本；Owner 为零值。
+	visitRevision visitsession.Revision
 	// assignment 保存不可公开但必须完整比较的current stamp。
 	assignment placement.AssignmentStamp
 	// endpoint 是唯一允许消费的TLS/TCP目标。
@@ -279,15 +281,15 @@ type Binding struct {
 }
 
 // NewBinding 校验 application 从 AuthContext、领域与 placement 派生的完整事实。
-func NewBinding(playerID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, role Role, worldID personalworld.PersonalWorldID, visitSessionID visitsession.VisitSessionID, purpose Purpose, assignment placement.AssignmentStamp, endpoint session.Endpoint, issuedAt time.Time, expiresAt time.Time) (Binding, error) {
-	binding := Binding{playerID: playerID, sessionID: sessionID, epoch: epoch, role: role, worldID: worldID, visitSessionID: visitSessionID, purpose: purpose, assignment: assignment, endpoint: endpoint, issuedAt: canonicalTime(issuedAt), expiresAt: canonicalTime(expiresAt)}
+func NewBinding(playerID account.PlayerID, sessionID session.SessionID, epoch session.Epoch, role Role, worldID personalworld.PersonalWorldID, visitSessionID visitsession.VisitSessionID, purpose Purpose, visitRevision visitsession.Revision, assignment placement.AssignmentStamp, endpoint session.Endpoint, issuedAt time.Time, expiresAt time.Time) (Binding, error) {
+	binding := Binding{playerID: playerID, sessionID: sessionID, epoch: epoch, role: role, worldID: worldID, visitSessionID: visitSessionID, purpose: purpose, visitRevision: visitRevision, assignment: assignment, endpoint: endpoint, issuedAt: canonicalTime(issuedAt), expiresAt: canonicalTime(expiresAt)}
 	if !binding.Valid() {
 		return Binding{}, errors.New("world admission binding is incomplete")
 	}
-	if role == RoleOwner && (purpose != PurposeOwnWorld || visitSessionID.Valid()) {
+	if role == RoleOwner && (purpose != PurposeOwnWorld || visitSessionID.Valid() || visitRevision.Valid()) {
 		return Binding{}, errors.New("owner admission binding is inconsistent")
 	}
-	if role == RoleVisitor && ((purpose != PurposeJoin && purpose != PurposeReconnect) || !visitSessionID.Valid()) {
+	if role == RoleVisitor && ((purpose != PurposeJoin && purpose != PurposeReconnect) || !visitSessionID.Valid() || !visitRevision.Valid()) {
 		return Binding{}, errors.New("visitor admission binding is inconsistent")
 	}
 	return binding, nil
@@ -314,6 +316,9 @@ func (binding Binding) VisitSessionID() visitsession.VisitSessionID { return bin
 // Purpose 返回不可跨状态复用的用途。
 func (binding Binding) Purpose() Purpose { return binding.purpose }
 
+// VisitRevision 返回 Visitor admission 冻结的 VisitSession revision；Owner 返回零值。
+func (binding Binding) VisitRevision() visitsession.Revision { return binding.visitRevision }
+
 // Assignment 返回必须与 current placement 完整相等的 stamp。
 func (binding Binding) Assignment() placement.AssignmentStamp { return binding.assignment }
 
@@ -331,12 +336,12 @@ func (binding Binding) Valid() bool {
 	if !binding.playerID.Valid() || !binding.sessionID.Valid() || !binding.epoch.Valid() || !binding.role.Valid() || !binding.worldID.Valid() || !binding.purpose.Valid() || !binding.assignment.Valid() || !binding.endpoint.Valid() || binding.endpoint.Channel() != session.ChannelTLSTCP || binding.issuedAt.IsZero() || !binding.expiresAt.After(binding.issuedAt) || binding.assignment.WorldID() != binding.worldID {
 		return false
 	}
-	return (binding.role == RoleOwner && binding.purpose == PurposeOwnWorld && !binding.visitSessionID.Valid()) || (binding.role == RoleVisitor && binding.visitSessionID.Valid() && (binding.purpose == PurposeJoin || binding.purpose == PurposeReconnect))
+	return (binding.role == RoleOwner && binding.purpose == PurposeOwnWorld && !binding.visitSessionID.Valid() && !binding.visitRevision.Valid()) || (binding.role == RoleVisitor && binding.visitSessionID.Valid() && binding.visitRevision.Valid() && (binding.purpose == PurposeJoin || binding.purpose == PurposeReconnect))
 }
 
 // Equal 比较完整授权事实。
 func (binding Binding) Equal(other Binding) bool {
-	return binding.playerID == other.playerID && binding.sessionID == other.sessionID && binding.epoch == other.epoch && binding.role == other.role && binding.worldID == other.worldID && binding.visitSessionID == other.visitSessionID && binding.purpose == other.purpose && binding.assignment.Equal(other.assignment) && binding.endpoint.Equal(other.endpoint) && binding.issuedAt.Equal(other.issuedAt) && binding.expiresAt.Equal(other.expiresAt)
+	return binding.playerID == other.playerID && binding.sessionID == other.sessionID && binding.epoch == other.epoch && binding.role == other.role && binding.worldID == other.worldID && binding.visitSessionID == other.visitSessionID && binding.purpose == other.purpose && binding.visitRevision == other.visitRevision && binding.assignment.Equal(other.assignment) && binding.endpoint.Equal(other.endpoint) && binding.issuedAt.Equal(other.issuedAt) && binding.expiresAt.Equal(other.expiresAt)
 }
 
 // String 防止默认格式化泄漏内部授权事实。

@@ -46,11 +46,27 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// </remarks>
         private readonly SemaphoreSlim _sceneSynchronizationGate = new SemaphoreSlim(1, 1);
 
+        /// <summary>串行化恢复快照到View State、route与Scene的整笔表现提交。</summary>
+        /// <remarks>
+        /// Coordinator snapshot可以在旧场景同步等待期间被新代际替换；本gate与current snapshot校验共同阻止
+        /// 迟到观察任务在成功恢复后重新打开ConnectionLost modal。
+        /// </remarks>
+        private readonly SemaphoreSlim _recoveryPresentationGate = new SemaphoreSlim(1, 1);
+
         /// <summary>执行显式 version/config bootstrap。</summary>
         private readonly ClientBootstrapService _bootstrapService;
 
         /// <summary>保存唯一认证事实并执行认证动作。</summary>
         private readonly SessionCoordinator _sessionCoordinator;
+
+        /// <summary>保存production启动restore终态；isolated fixture为空。</summary>
+        private readonly ClientSessionRestoreCoordinator _sessionRestoreCoordinator;
+
+        /// <summary>保存 automatic/manual 通道恢复的唯一 intent owner；产品与测试必须同构。</summary>
+        private readonly ClientConnectionRecoveryCoordinator _connectionRecoveryCoordinator;
+
+        /// <summary>把channel与恢复owner的后台通知收敛到唯一Unity主线程。</summary>
+        private readonly MainThreadDispatcher _mainThreadDispatcher;
 
         /// <summary>运行唯一 WSS control connection。</summary>
         private readonly ClientControlChannel _controlChannel;
@@ -100,6 +116,22 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// <summary>标识 control run 已进入稳定断开并正在显示 ConnectionLost。</summary>
         private bool _connectionLost;
 
+        /// <summary>标识启动restore结果尚未映射为产品route。</summary>
+        private bool _restoringSession;
+
+        /// <summary>合并后台恢复通知，保证队列中最多只有一个表现刷新callback。</summary>
+        private int _recoveryDispatchPending;
+
+        /// <summary>保存尚未由Login收敛事务消费的最新Session失效generation。</summary>
+        /// <remarks>
+        /// 该generation只来自Session owner的单次权威失效边界。World target清理产生的后续Changed通知
+        /// 不得重新制造Session失效意图，否则会在Login已提交后形成路由与Scene反馈环。
+        /// </remarks>
+        private long _pendingSessionInvalidationGeneration;
+
+        /// <summary>标识 Login 收敛事务已经取得唯一所有权。</summary>
+        private bool _returningToLogin;
+
         /// <summary>保存锁内复制、锁外调用的页面状态 subscriber。</summary>
         private Action<ClientPersonalWorldViewState> _viewStateChanged;
 
@@ -108,6 +140,9 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// </summary>
         /// <param name="bootstrapService">认证前 bootstrap 用例。</param>
         /// <param name="sessionCoordinator">唯一 Session owner。</param>
+        /// <param name="sessionRestoreCoordinator">Production启动restore owner；isolated fixture为空。</param>
+        /// <param name="connectionRecoveryCoordinator">唯一连接恢复 owner；产品与测试使用同一状态机。</param>
+        /// <param name="mainThreadDispatcher">唯一Unity主线程投递owner。</param>
         /// <param name="controlChannel">唯一 control channel owner。</param>
         /// <param name="personalWorldService">PersonalWorld projection owner。</param>
         /// <param name="visitSessionService">VisitSession projection owner。</param>
@@ -120,6 +155,9 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         internal ClientPersonalWorldExperience(
             ClientBootstrapService bootstrapService,
             SessionCoordinator sessionCoordinator,
+            ClientSessionRestoreCoordinator sessionRestoreCoordinator,
+            ClientConnectionRecoveryCoordinator connectionRecoveryCoordinator,
+            MainThreadDispatcher mainThreadDispatcher,
             ClientControlChannel controlChannel,
             PersonalWorldService personalWorldService,
             VisitSessionService visitSessionService,
@@ -130,6 +168,11 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         {
             _bootstrapService = bootstrapService ?? throw new ArgumentNullException(nameof(bootstrapService));
             _sessionCoordinator = sessionCoordinator ?? throw new ArgumentNullException(nameof(sessionCoordinator));
+            _sessionRestoreCoordinator = sessionRestoreCoordinator;
+            _connectionRecoveryCoordinator = connectionRecoveryCoordinator ??
+                throw new ArgumentNullException(nameof(connectionRecoveryCoordinator));
+            _mainThreadDispatcher = mainThreadDispatcher ??
+                throw new ArgumentNullException(nameof(mainThreadDispatcher));
             _controlChannel = controlChannel ?? throw new ArgumentNullException(nameof(controlChannel));
             _personalWorldService = personalWorldService ?? throw new ArgumentNullException(nameof(personalWorldService));
             _visitSessionService = visitSessionService ?? throw new ArgumentNullException(nameof(visitSessionService));
@@ -184,7 +227,7 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         }
 
         /// <summary>
-        /// 订阅权威投影并只打开本地 Login route；不会执行任何网络调用。
+        /// 映射一次性restore结果；冷启动打开Login，成功restore则直接建立control并进入OwnWorld。
         /// </summary>
         /// <param name="cancellationToken">取消 Experience 初始化等待。</param>
         /// <returns>本地登录入口已经提交时完成。</returns>
@@ -202,7 +245,24 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 _lifetimeCancellation = new CancellationTokenSource();
                 _running = true;
                 _presentationGeneration++;
+                _restoringSession = _sessionRestoreCoordinator != null;
                 SubscribeLocked();
+                RebuildViewStateLocked();
+            }
+
+            PublishCurrent();
+            var restore = _sessionRestoreCoordinator?.Result;
+            if (restore != null && restore.Outcome == ClientSessionRestoreOutcome.Restored)
+            {
+                await CompleteStartupRestoreAsync(cancellationToken);
+                return;
+            }
+
+            lock (_sync)
+            {
+                _restoringSession = false;
+                _failure = MapRestoreFailure(restore?.Outcome);
+                _failureIntent = ClientPersonalWorldIntent.None;
                 RebuildViewStateLocked();
             }
 
@@ -213,6 +273,87 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             }
 
             PublishCurrent();
+        }
+
+        /// <summary>在不重复bootstrap或refresh的前提下完成已恢复Session的产品启动。</summary>
+        /// <param name="cancellationToken">AppLifetime初始化取消信号。</param>
+        /// <returns>OwnWorld与Scene已提交，或稳定失败界面已提交时完成。</returns>
+        private async Task CompleteStartupRestoreAsync(CancellationToken cancellationToken)
+        {
+            long generation;
+            CancellationToken lifetime;
+            lock (_sync)
+            {
+                if (!_running || !_sessionCoordinator.TryGetCurrent(out _))
+                {
+                    throw new InvalidOperationException("Restored结果缺少current Session。");
+                }
+
+                _restoringSession = false;
+                _failure = ClientPersonalWorldFailure.None;
+                _failureIntent = ClientPersonalWorldIntent.None;
+                generation = _presentationGeneration;
+                lifetime = _lifetimeCancellation.Token;
+                RebuildViewStateLocked();
+            }
+
+            var opened = await _uiRouter.OpenAsync(ClientUiRouteId.Shell, 0, cancellationToken);
+            if (!opened.Committed && !opened.IsSuccess)
+            {
+                throw new InvalidOperationException($"Shell route初始化失败：{opened.Code}。");
+            }
+
+            PublishCurrent();
+            using (var deadline = new CancellationTokenSource(_connectionRecoveryTimeout))
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(
+                       cancellationToken,
+                       lifetime,
+                       deadline.Token))
+            {
+                try
+                {
+                    var controlRun = _controlChannel.RunAsync(lifetime);
+                    _ = ObserveControlRunAsync(controlRun, generation, cancellationOwner: null);
+                    if (!await _controlChannel.WaitUntilConnectedAsync(linked.Token))
+                    {
+                        await EnterConnectionLostAsync(generation);
+                        return;
+                    }
+
+                    var entered = await _worldAdmissionCoordinator.EnterOwnWorldAsync(linked.Token);
+                    if (entered && await SynchronizeSceneAsync(generation, linked.Token))
+                    {
+                        return;
+                    }
+
+                    var failure = entered
+                        ? ClientPersonalWorldFailure.DependencyUnavailable
+                        : MapWorldFailure(_worldAdmissionCoordinator.Snapshot.Failure);
+                    if (failure == ClientPersonalWorldFailure.Transport)
+                    {
+                        await EnterConnectionLostAsync(generation);
+                        return;
+                    }
+
+                    SetFailure(failure);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!cancellationToken.IsCancellationRequested &&
+                        !lifetime.IsCancellationRequested)
+                    {
+                        await EnterConnectionLostAsync(generation);
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+                catch (Exception)
+                {
+                    await EnterConnectionLostAsync(generation);
+                }
+            }
         }
 
         /// <summary>
@@ -278,7 +419,14 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// <summary>显式重建 control、own-world target 与 Scene/HUD，并在全部提交后关闭断开提示。</summary>
         /// <param name="cancellationToken">调用方取消等待的信号。</param>
         /// <returns>连接重新进入 Connected 或稳定失败时的低敏结果。</returns>
-        public async Task<ClientPersonalWorldActionResult> RetryConnectionAsync(
+        public Task<ClientPersonalWorldActionResult> RetryConnectionAsync(
+            CancellationToken cancellationToken)
+        {
+            return RetryConnectionCoordinatedAsync(cancellationToken);
+        }
+
+        /// <summary>通过唯一恢复owner执行manual single-flight并等待Scene第四重gate。</summary>
+        private async Task<ClientPersonalWorldActionResult> RetryConnectionCoordinatedAsync(
             CancellationToken cancellationToken)
         {
             if (!TryBeginIntent(ClientPersonalWorldIntent.Reconnect, out var generation, out var token))
@@ -286,74 +434,71 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 return RejectBusyOrStopped();
             }
 
-            CancellationTokenSource controlRunCancellation = null;
-            var controlRunObserved = false;
-            var controlConnected = _controlChannel.Snapshot.State == ClientControlChannelState.Connected;
-            using (var deadline = new CancellationTokenSource(_connectionRecoveryTimeout))
-            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                       token,
-                       cancellationToken,
-                       deadline.Token))
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cancellationToken))
             {
                 try
                 {
-                    if (!controlConnected)
-                    {
-                        // 页面 token 只约束恢复等待；control 首次 Connected 后必须继续由 App Scope owner 持有。
-                        controlRunCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-                        var runTask = _controlChannel.RunAsync(controlRunCancellation.Token);
-                        controlRunObserved = true;
-                        _ = ObserveControlRunAsync(runTask, generation, controlRunCancellation);
-                        controlConnected = await _controlChannel.WaitUntilConnectedAsync(linked.Token);
-                        if (!controlConnected)
-                        {
-                            return FinishIntent(generation, ClientPersonalWorldFailure.Transport);
-                        }
-                    }
-
-                    var entered = await _worldAdmissionCoordinator.EnterOwnWorldAsync(linked.Token);
-                    var sceneReady = entered && await SynchronizeSceneAsync(generation, linked.Token);
-                    if (!sceneReady)
-                    {
-                        var failure = entered
-                            ? ClientPersonalWorldFailure.DependencyUnavailable
-                            : MapWorldFailure(_worldAdmissionCoordinator.Snapshot.Failure);
-                        return FinishIntent(generation, failure);
-                    }
-
-                    lock (_sync)
-                    {
-                        if (_running && generation == _presentationGeneration)
-                        {
-                            _connectionLost = false;
-                        }
-                    }
-
-                    // ConnectionLost route token 属于即将关闭的 View，不能反向取消已经提交的恢复事务。
-                    await CloseRouteAsync(ClientUiRouteId.ConnectionLost, token);
-                    return FinishIntent(generation, ClientPersonalWorldFailure.None);
-                }
-                catch (OperationCanceledException)
-                {
-                    if (deadline.IsCancellationRequested &&
-                        !token.IsCancellationRequested &&
-                        !cancellationToken.IsCancellationRequested)
+                    if (!_connectionRecoveryCoordinator.BeginManualRecovery())
                     {
                         return FinishIntent(generation, ClientPersonalWorldFailure.Transport);
                     }
 
+                    var intentGeneration = _connectionRecoveryCoordinator.Snapshot.IntentGeneration;
+                    var settled = await _connectionRecoveryCoordinator.WaitForSettledAsync(
+                        intentGeneration,
+                        linked.Token);
+                    if (settled.Phase == ClientConnectionRecoveryPhase.AwaitingSceneCommit)
+                    {
+                        var committed = await CommitRecoverySceneAsync(
+                            settled,
+                            generation,
+                            linked.Token);
+                        return FinishIntent(
+                            generation,
+                            committed
+                                ? ClientPersonalWorldFailure.None
+                                : ClientPersonalWorldFailure.DependencyUnavailable);
+                    }
+
+                    if (settled.Phase == ClientConnectionRecoveryPhase.Idle)
+                    {
+                        // 没有冻结target表示断开发生在首次OwnWorld提交前；恢复control后走正常OwnWorld入口。
+                        var flow = _worldAdmissionCoordinator.Snapshot;
+                        if (flow.State != ClientWorldFlowState.OwnWorld &&
+                            flow.State != ClientWorldFlowState.Visiting)
+                        {
+                            var entered = await _worldAdmissionCoordinator.EnterOwnWorldAsync(linked.Token);
+                            if (!entered || !await SynchronizeSceneAsync(generation, linked.Token))
+                            {
+                                return FinishIntent(
+                                    generation,
+                                    entered
+                                        ? ClientPersonalWorldFailure.DependencyUnavailable
+                                        : MapWorldFailure(_worldAdmissionCoordinator.Snapshot.Failure));
+                            }
+                        }
+
+                        lock (_sync)
+                        {
+                            if (_running && generation == _presentationGeneration)
+                            {
+                                _connectionLost = false;
+                            }
+                        }
+
+                        await CloseRouteAsync(ClientUiRouteId.ConnectionLost, token);
+                        return FinishIntent(generation, ClientPersonalWorldFailure.None);
+                    }
+
+                    return FinishIntent(generation, MapRecoveryFailure(settled.Result));
+                }
+                catch (OperationCanceledException)
+                {
                     return FinishCancellation(generation, cancellationToken);
                 }
                 catch (Exception)
                 {
                     return FinishIntent(generation, ClientPersonalWorldFailure.Internal);
-                }
-                finally
-                {
-                    if (!controlConnected)
-                    {
-                        CancelControlRun(controlRunCancellation, dispose: !controlRunObserved);
-                    }
                 }
             }
         }
@@ -392,7 +537,7 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                     }
 
                     // Session 已清理后必须完成本地回收；页面 token 不再有权中断该阶段。
-                    await ReturnToLoginAsync(generation, token);
+                    await ReturnToLoginAsync(generation);
                     // ReturnToLoginAsync 会推进 presentation generation 并终结当前 intent；
                     // 此处不能再用旧代际调用 FinishIntent，否则成功退出会被误报为 Stopped。
                     return ClientPersonalWorldActionResult.Success();
@@ -600,6 +745,8 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 _failure = ClientPersonalWorldFailure.Stopped;
                 _failureIntent = ClientPersonalWorldIntent.None;
                 _connectionLost = false;
+                _restoringSession = false;
+                _pendingSessionInvalidationGeneration = 0;
                 UnsubscribeLocked();
                 _viewStateChanged = null;
                 lifetime = _lifetimeCancellation;
@@ -799,7 +946,7 @@ namespace IHomeland.Client.Presentation.PersonalWorld
 
                 if (!_sessionCoordinator.TryGetCurrent(out _))
                 {
-                    await ReturnToLoginAsync(generation, CancellationToken.None);
+                    await ReturnToLoginAsync(generation);
                     return;
                 }
 
@@ -914,17 +1061,20 @@ namespace IHomeland.Client.Presentation.PersonalWorld
 
         /// <summary>清理当前产品表现并以新代际返回 Login。</summary>
         /// <param name="generation">发起清理时的表现代际。</param>
-        /// <param name="cancellationToken">清理等待取消信号。</param>
         /// <returns>Login route 已打开时完成。</returns>
-        private async Task ReturnToLoginAsync(long generation, CancellationToken cancellationToken)
+        private async Task ReturnToLoginAsync(long generation)
         {
             lock (_sync)
             {
-                if (!_running || generation != _presentationGeneration)
+                if (!_running ||
+                    generation != _presentationGeneration ||
+                    _returningToLogin)
                 {
                     return;
                 }
 
+                _returningToLogin = true;
+                _pendingSessionInvalidationGeneration = 0;
                 _presentationGeneration++;
                 _activeIntent = ClientPersonalWorldIntent.None;
                 _failure = ClientPersonalWorldFailure.None;
@@ -934,16 +1084,48 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 generation = _presentationGeneration;
             }
 
-            await CloseRouteAsync(ClientUiRouteId.ConnectionLost, cancellationToken);
-            await CloseRouteAsync(ClientUiRouteId.WorldVisit, cancellationToken);
-            await CloseRouteAsync(ClientUiRouteId.WorldHud, cancellationToken);
-            await CloseRouteAsync(ClientUiRouteId.Shell, cancellationToken);
-            if (IsCurrent(generation))
+            try
             {
-                await _uiRouter.OpenAsync(ClientUiRouteId.Login, 0, cancellationToken);
-            }
+                _worldAdmissionCoordinator.InvalidateSession();
+                await _sceneSynchronizationGate.WaitAsync(CancellationToken.None);
+                try
+                {
+                    await CloseRouteAsync(ClientUiRouteId.ConnectionLost, CancellationToken.None);
+                    await CloseRouteAsync(ClientUiRouteId.WorldVisit, CancellationToken.None);
+                    await CloseRouteAsync(ClientUiRouteId.WorldHud, CancellationToken.None);
+                    var sceneGeneration = _sceneTransition.Snapshot.SceneGeneration;
+                    if (sceneGeneration > 0)
+                    {
+                        await _uiRouter.InvalidateSceneAsync(
+                            sceneGeneration,
+                            CancellationToken.None);
+                    }
 
-            PublishCurrent();
+                    await _sceneTransition.UnloadAsync(CancellationToken.None);
+                    await CloseRouteAsync(ClientUiRouteId.Shell, CancellationToken.None);
+                    if (IsCurrent(generation) && !_sessionCoordinator.TryGetCurrent(out _))
+                    {
+                        await _uiRouter.OpenAsync(
+                            ClientUiRouteId.Login,
+                            0,
+                            CancellationToken.None);
+                    }
+                }
+                finally
+                {
+                    _sceneSynchronizationGate.Release();
+                }
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    _returningToLogin = false;
+                    RebuildViewStateLocked();
+                }
+
+                PublishCurrent();
+            }
         }
 
         /// <summary>订阅既有权威 owner 的状态边界。</summary>
@@ -954,9 +1136,12 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 return;
             }
 
+            _sessionCoordinator.Invalidated += OnSessionInvalidated;
             _personalWorldService.Changed += OnPersonalWorldChanged;
             _visitSessionService.Changed += OnVisitSessionChanged;
             _worldAdmissionCoordinator.Changed += OnWorldFlowChanged;
+            _connectionRecoveryCoordinator.Changed += OnConnectionRecoveryChanged;
+
             _subscribed = true;
         }
 
@@ -968,10 +1153,66 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 return;
             }
 
+            _sessionCoordinator.Invalidated -= OnSessionInvalidated;
             _personalWorldService.Changed -= OnPersonalWorldChanged;
             _visitSessionService.Changed -= OnVisitSessionChanged;
             _worldAdmissionCoordinator.Changed -= OnWorldFlowChanged;
+            _connectionRecoveryCoordinator.Changed -= OnConnectionRecoveryChanged;
+
             _subscribed = false;
+        }
+
+        /// <summary>把任意线程发布的 Session 失效边界合并后投递到 Unity 主线程。</summary>
+        /// <param name="generation">Session owner 清除 lineage 后的 generation。</param>
+        private void OnSessionInvalidated(long generation)
+        {
+            if (generation <= 0)
+            {
+                return;
+            }
+
+            lock (_sync)
+            {
+                if (!_running || generation <= _pendingSessionInvalidationGeneration)
+                {
+                    return;
+                }
+
+                _pendingSessionInvalidationGeneration = generation;
+            }
+
+            QueueAuthoritativePresentationConvergence();
+        }
+
+        /// <summary>按最新 Session authority 退役 target、Scene 与全部产品 route，并回到 Login。</summary>
+        /// <returns>失效表现已经提交或被后续显式登录取代时完成。</returns>
+        private async Task ObserveSessionInvalidationAsync()
+        {
+            try
+            {
+                long generation;
+                lock (_sync)
+                {
+                    if (!_running ||
+                        _sessionCoordinator.TryGetCurrent(out _) ||
+                        _pendingSessionInvalidationGeneration <= 0)
+                    {
+                        return;
+                    }
+
+                    _pendingSessionInvalidationGeneration = 0;
+                    generation = _presentationGeneration;
+                }
+
+                await ReturnToLoginAsync(generation);
+            }
+            catch (Exception)
+            {
+                if (IsRunning() && !_sessionCoordinator.TryGetCurrent(out _))
+                {
+                    RebuildAndPublish();
+                }
+            }
         }
 
         /// <summary>收敛 PersonalWorld 快照变化。</summary>
@@ -997,12 +1238,222 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             ClearFailureForAuthority(worldAuthority: true);
             RebuildAndPublish();
             long generation;
+            bool synchronizeScene;
             lock (_sync)
             {
                 generation = _presentationGeneration;
+                // Login收敛事务已经持有完整Scene/route所有权；Session失效引发的Inactive通知
+                // 仍刷新权威投影，但不能并行启动第二笔Scene卸载。
+                synchronizeScene = !_returningToLogin;
             }
 
-            _ = ObserveSceneSynchronizationAsync(generation);
+            if (synchronizeScene)
+            {
+                _ = ObserveSceneSynchronizationAsync(generation, snapshot.TargetGeneration);
+            }
+        }
+
+        /// <summary>把任意channel线程发布的恢复snapshot合并后投递到Unity主线程。</summary>
+        /// <param name="snapshot">已由恢复owner提交的不可变snapshot；内容由callback执行时重读。</param>
+        private void OnConnectionRecoveryChanged(ClientConnectionRecoverySnapshot snapshot)
+        {
+            QueueAuthoritativePresentationConvergence();
+        }
+
+        /// <summary>
+        /// 合并 Session 与 connection recovery 通知，只排队一个重读全部权威 owner 的主线程 callback。
+        /// </summary>
+        private void QueueAuthoritativePresentationConvergence()
+        {
+            if (Interlocked.Exchange(ref _recoveryDispatchPending, 1) != 0)
+            {
+                return;
+            }
+
+            Action callback = () =>
+            {
+                Interlocked.Exchange(ref _recoveryDispatchPending, 0);
+                if (!_sessionCoordinator.TryGetCurrent(out _))
+                {
+                    _ = ObserveSessionInvalidationAsync();
+                }
+                else
+                {
+                    _ = ObserveConnectionRecoveryAsync(_connectionRecoveryCoordinator.Snapshot);
+                }
+            };
+            var posted = _mainThreadDispatcher.TryPost(callback);
+            if (posted == DispatchPostResult.QueueFull)
+            {
+                posted = _mainThreadDispatcher.TryPostCritical(callback);
+            }
+
+            if (posted != DispatchPostResult.Accepted)
+            {
+                Interlocked.Exchange(ref _recoveryDispatchPending, 0);
+            }
+        }
+
+        /// <summary>在Unity主线程把恢复阶段映射为能力、route与Scene提交。</summary>
+        /// <param name="snapshot">当前恢复owner snapshot。</param>
+        /// <returns>表现收敛完成时结束。</returns>
+        private async Task ObserveConnectionRecoveryAsync(ClientConnectionRecoverySnapshot snapshot)
+        {
+            var entered = false;
+            long generation = 0;
+            bool hasSession;
+            try
+            {
+                await _recoveryPresentationGate.WaitAsync(CancellationToken.None);
+                entered = true;
+                lock (_sync)
+                {
+                    if (!_running)
+                    {
+                        return;
+                    }
+
+                    generation = _presentationGeneration;
+                }
+
+                if (!IsCurrentRecoverySnapshot(snapshot, generation))
+                {
+                    return;
+                }
+
+                lock (_sync)
+                {
+                    hasSession = _sessionCoordinator.TryGetCurrent(out _);
+                    _connectionLost = hasSession &&
+                                      (snapshot.Phase == ClientConnectionRecoveryPhase.RecoveringWorld ||
+                                       snapshot.Phase == ClientConnectionRecoveryPhase.AwaitingSceneCommit ||
+                                       snapshot.Phase == ClientConnectionRecoveryPhase.ConnectionLost);
+                    _failure = hasSession &&
+                               snapshot.Phase == ClientConnectionRecoveryPhase.ConnectionLost
+                        ? MapRecoveryFailure(snapshot.Result)
+                        : ClientPersonalWorldFailure.None;
+                    _failureIntent = hasSession && _failure != ClientPersonalWorldFailure.None
+                        ? ClientPersonalWorldIntent.Reconnect
+                        : ClientPersonalWorldIntent.None;
+                    RebuildViewStateLocked();
+                }
+
+                PublishCurrent();
+                if (!hasSession)
+                {
+                    await ReturnToLoginAsync(generation);
+                    return;
+                }
+
+                switch (snapshot.Phase)
+                {
+                    case ClientConnectionRecoveryPhase.RecoveringWorld:
+                        await _uiRouter.OpenAsync(
+                            ClientUiRouteId.ConnectionLost,
+                            sceneGeneration: 0,
+                            CancellationToken.None);
+                        if (!IsCurrentRecoverySnapshot(snapshot, generation))
+                        {
+                            return;
+                        }
+
+                        await SynchronizeSceneAsync(generation, CancellationToken.None);
+                        break;
+                    case ClientConnectionRecoveryPhase.AwaitingSceneCommit:
+                        await _uiRouter.OpenAsync(
+                            ClientUiRouteId.ConnectionLost,
+                            sceneGeneration: 0,
+                            CancellationToken.None);
+                        if (!IsCurrentRecoverySnapshot(snapshot, generation))
+                        {
+                            return;
+                        }
+
+                        await CommitRecoverySceneAsync(snapshot, generation, CancellationToken.None);
+                        break;
+                    case ClientConnectionRecoveryPhase.ConnectionLost:
+                        await SynchronizeSceneAsync(generation, CancellationToken.None);
+                        if (!IsCurrentRecoverySnapshot(snapshot, generation))
+                        {
+                            return;
+                        }
+
+                        await _uiRouter.OpenAsync(
+                            ClientUiRouteId.ConnectionLost,
+                            sceneGeneration: 0,
+                            CancellationToken.None);
+                        break;
+                    case ClientConnectionRecoveryPhase.Idle:
+                        await CloseRouteAsync(ClientUiRouteId.ConnectionLost, CancellationToken.None);
+                        break;
+                }
+            }
+            catch (Exception)
+            {
+                if (snapshot.Phase == ClientConnectionRecoveryPhase.AwaitingSceneCommit &&
+                    IsCurrentRecoverySnapshot(snapshot, generation))
+                {
+                    _connectionRecoveryCoordinator.FailSceneCommit(
+                        snapshot.IntentGeneration,
+                        snapshot.TargetGeneration,
+                        ClientConnectionRecoveryResultKind.Internal);
+                }
+            }
+            finally
+            {
+                if (entered)
+                {
+                    _recoveryPresentationGate.Release();
+                }
+            }
+        }
+
+        /// <summary>加载current target Scene/HUD并提交恢复第四重gate。</summary>
+        /// <param name="snapshot">AwaitingSceneCommit snapshot。</param>
+        /// <param name="generation">当前表现代际。</param>
+        /// <param name="cancellationToken">调用方等待取消信号。</param>
+        /// <returns>Scene gate已提交时返回true。</returns>
+        private async Task<bool> CommitRecoverySceneAsync(
+            ClientConnectionRecoverySnapshot snapshot,
+            long generation,
+            CancellationToken cancellationToken)
+        {
+            if (snapshot.Phase != ClientConnectionRecoveryPhase.AwaitingSceneCommit)
+            {
+                return false;
+            }
+
+            if (!await SynchronizeSceneAsync(generation, cancellationToken))
+            {
+                _connectionRecoveryCoordinator.FailSceneCommit(
+                    snapshot.IntentGeneration,
+                    snapshot.TargetGeneration,
+                    ClientConnectionRecoveryResultKind.Internal);
+                return false;
+            }
+
+            if (!_connectionRecoveryCoordinator.ConfirmSceneCommit(
+                    snapshot.IntentGeneration,
+                    snapshot.TargetGeneration))
+            {
+                return _connectionRecoveryCoordinator.Snapshot.Phase ==
+                       ClientConnectionRecoveryPhase.Idle;
+            }
+
+            lock (_sync)
+            {
+                if (_running && generation == _presentationGeneration)
+                {
+                    _connectionLost = false;
+                    _failure = ClientPersonalWorldFailure.None;
+                    _failureIntent = ClientPersonalWorldIntent.None;
+                    RebuildViewStateLocked();
+                }
+            }
+
+            PublishCurrent();
+            await CloseRouteAsync(ClientUiRouteId.ConnectionLost, cancellationToken);
+            return true;
         }
 
         /// <summary>在对应权威 replacement 到达后清除已经过期的 action failure。</summary>
@@ -1079,12 +1530,18 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// <summary>从既有 owner 当前快照重建页面投影；调用方必须持有锁。</summary>
         private void RebuildViewStateLocked()
         {
-            var phase = _connectionLost
-                ? ClientPersonalWorldPhase.ConnectionLost
+            var recovery = _connectionRecoveryCoordinator.Snapshot;
+            var hasSession = _sessionCoordinator.TryGetCurrent(out _);
+            var phase = _restoringSession
+                ? ClientPersonalWorldPhase.RestoringSession
                 : _activeIntent == ClientPersonalWorldIntent.Login ||
-                        _activeIntent == ClientPersonalWorldIntent.Register
+                  _activeIntent == ClientPersonalWorldIntent.Register
                     ? ClientPersonalWorldPhase.Authenticating
-                    : MapPhase(_worldAdmissionCoordinator.Snapshot.State);
+                    : hasSession && recovery.Phase != ClientConnectionRecoveryPhase.Idle
+                        ? MapRecoveryPhase(recovery.Phase)
+                        : _connectionLost
+                            ? ClientPersonalWorldPhase.ConnectionLost
+                            : MapPhase(_worldAdmissionCoordinator.Snapshot.State);
             _viewState = BuildViewStateLocked(phase);
         }
 
@@ -1138,16 +1595,19 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             }
 
             var loginVisible = !hasSession;
-            var shellVisible = hasSession && phase != ClientPersonalWorldPhase.OwnWorld &&
-                               phase != ClientPersonalWorldPhase.Visiting;
+            var recovery = _connectionRecoveryCoordinator.Snapshot;
             var hudVisible = currentWorld?.Assignment != null &&
                              (phase == ClientPersonalWorldPhase.OwnWorld ||
-                              phase == ClientPersonalWorldPhase.Visiting);
+                              phase == ClientPersonalWorldPhase.Visiting ||
+                              phase == ClientPersonalWorldPhase.RecoveringControl);
+            var shellVisible = hasSession && !hudVisible;
             var visitVisible = currentVisit != null || visitSnapshot.Invites.Count > 0;
             var failure = _failure != ClientPersonalWorldFailure.None
                 ? _failure
                 : MapWorldFailure(worldFlow.Failure);
-            var idle = _activeIntent == ClientPersonalWorldIntent.None && !_connectionLost;
+            var idle = _activeIntent == ClientPersonalWorldIntent.None &&
+                       !_connectionLost &&
+                       recovery.Phase == ClientConnectionRecoveryPhase.Idle;
             var actions = new ClientWorldVisitActionState(
                 idle && isOwner && currentVisit == null,
                 idle && hasOpenOwnerVisit,
@@ -1230,9 +1690,12 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// <summary>
         /// 观察由权威 PUSH 或 safe-return 触发的场景同步，防止 async void 与未观察异常。
         /// </summary>
-        /// <param name="generation">事件处理捕获的表现代际。</param>
+        /// <param name="generation">事件处理捕获的表总代际。</param>
+        /// <param name="targetGeneration">触发同步的权威 target generation。</param>
         /// <returns>场景与 route 收敛后的观察任务。</returns>
-        private async Task ObserveSceneSynchronizationAsync(long generation)
+        private async Task ObserveSceneSynchronizationAsync(
+            long generation,
+            long targetGeneration)
         {
             try
             {
@@ -1240,11 +1703,42 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             }
             catch (Exception)
             {
-                if (IsCurrent(generation))
+                if (IsCurrentWorldPresentation(generation, targetGeneration) &&
+                    !HasCommittedSceneForTarget(targetGeneration))
                 {
                     SetFailure(ClientPersonalWorldFailure.DependencyUnavailable);
                 }
             }
+        }
+
+        /// <summary>检查异步Scene观察仍绑定当前presentation与target代际。</summary>
+        /// <param name="generation">观察任务捕获的表总代际。</param>
+        /// <param name="targetGeneration">观察任务捕获的target generation。</param>
+        /// <returns>两个代际和Experience生命周期均仍current时返回true。</returns>
+        private bool IsCurrentWorldPresentation(long generation, long targetGeneration)
+        {
+            if (!IsCurrent(generation))
+            {
+                return false;
+            }
+
+            return _worldAdmissionCoordinator.Snapshot.TargetGeneration == targetGeneration &&
+                   IsCurrent(generation);
+        }
+
+        /// <summary>判断当前PersonalWorld Scene已经提交指定权威target。</summary>
+        /// <param name="targetGeneration">待校验的current target generation。</param>
+        /// <returns>世界终态与Scene identity完全一致时返回true。</returns>
+        private bool HasCommittedSceneForTarget(long targetGeneration)
+        {
+            var flow = _worldAdmissionCoordinator.Snapshot;
+            var scene = _sceneTransition.Snapshot;
+            return flow.TargetGeneration == targetGeneration &&
+                   (flow.State == ClientWorldFlowState.OwnWorld ||
+                    flow.State == ClientWorldFlowState.Visiting) &&
+                   scene.SceneId == ClientWorldSceneId.PersonalWorld &&
+                   scene.TargetGeneration == targetGeneration &&
+                   scene.SceneGeneration > 0;
         }
 
         /// <summary>观察输入事件触发的异步导航，避免 Unity 回调产生未观察异常。</summary>
@@ -1450,6 +1944,23 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             }
         }
 
+        /// <summary>检查恢复观察仍对应current Coordinator snapshot与表现代际。</summary>
+        /// <param name="snapshot">观察任务捕获的不可变恢复快照。</param>
+        /// <param name="generation">观察任务捕获的表现代际。</param>
+        /// <returns>快照、表现代际和Experience生命周期都仍current时返回true。</returns>
+        private bool IsCurrentRecoverySnapshot(
+            ClientConnectionRecoverySnapshot snapshot,
+            long generation)
+        {
+            if (!IsCurrent(generation))
+            {
+                return false;
+            }
+
+            return ReferenceEquals(_connectionRecoveryCoordinator.Snapshot, snapshot) &&
+                   IsCurrent(generation);
+        }
+
         /// <summary>检查 Experience 是否允许页面动作。</summary>
         /// <returns>当前 App Scope 仍运行时返回 true。</returns>
         private bool IsRunning()
@@ -1500,12 +2011,92 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                     return ClientPersonalWorldPhase.Visiting;
                 case ClientWorldFlowState.ReturningOwnWorld:
                     return ClientPersonalWorldPhase.ReturningOwnWorld;
+                case ClientWorldFlowState.RecoveringTarget:
+                    return ClientPersonalWorldPhase.RecoveringWorld;
                 case ClientWorldFlowState.ConnectionLost:
                     return ClientPersonalWorldPhase.ConnectionLost;
                 case ClientWorldFlowState.Stopped:
                     return ClientPersonalWorldPhase.Stopped;
                 default:
                     return ClientPersonalWorldPhase.ConnectionLost;
+            }
+        }
+
+        /// <summary>将唯一恢复owner阶段映射为产品阶段。</summary>
+        /// <param name="phase">generation-bound恢复阶段。</param>
+        /// <returns>页面可展示的封闭阶段。</returns>
+        private static ClientPersonalWorldPhase MapRecoveryPhase(
+            ClientConnectionRecoveryPhase phase)
+        {
+            switch (phase)
+            {
+                case ClientConnectionRecoveryPhase.RecoveringControl:
+                    return ClientPersonalWorldPhase.RecoveringControl;
+                case ClientConnectionRecoveryPhase.RecoveringWorld:
+                    return ClientPersonalWorldPhase.RecoveringWorld;
+                case ClientConnectionRecoveryPhase.AwaitingSceneCommit:
+                    return ClientPersonalWorldPhase.AwaitingScene;
+                case ClientConnectionRecoveryPhase.ConnectionLost:
+                    return ClientPersonalWorldPhase.ConnectionLost;
+                case ClientConnectionRecoveryPhase.Stopped:
+                    return ClientPersonalWorldPhase.Stopped;
+                default:
+                    return ClientPersonalWorldPhase.ConnectionLost;
+            }
+        }
+
+        /// <summary>将启动restore终态映射为低敏页面失败。</summary>
+        /// <param name="outcome">可为空的production restore终态。</param>
+        /// <returns>冷启动无record不显示错误，其余失败使用封闭类别。</returns>
+        private static ClientPersonalWorldFailure MapRestoreFailure(
+            ClientSessionRestoreOutcome? outcome)
+        {
+            switch (outcome)
+            {
+                case null:
+                case ClientSessionRestoreOutcome.NotAvailable:
+                case ClientSessionRestoreOutcome.Restored:
+                    return ClientPersonalWorldFailure.None;
+                case ClientSessionRestoreOutcome.Rejected:
+                    return ClientPersonalWorldFailure.Unauthenticated;
+                case ClientSessionRestoreOutcome.Unresolved:
+                    return ClientPersonalWorldFailure.Transport;
+                case ClientSessionRestoreOutcome.StorageFailure:
+                    return ClientPersonalWorldFailure.SecureStorage;
+                case ClientSessionRestoreOutcome.ProfileInUse:
+                    return ClientPersonalWorldFailure.ProfileInUse;
+                case ClientSessionRestoreOutcome.Stopped:
+                    return ClientPersonalWorldFailure.Stopped;
+                default:
+                    return ClientPersonalWorldFailure.Internal;
+            }
+        }
+
+        /// <summary>将恢复owner终态映射为低敏页面失败。</summary>
+        /// <param name="result">generation-bound恢复结果。</param>
+        /// <returns>封闭页面失败。</returns>
+        private static ClientPersonalWorldFailure MapRecoveryFailure(
+            ClientConnectionRecoveryResultKind result)
+        {
+            switch (result)
+            {
+                case ClientConnectionRecoveryResultKind.Succeeded:
+                case ClientConnectionRecoveryResultKind.ReturningOwnWorld:
+                    return ClientPersonalWorldFailure.None;
+                case ClientConnectionRecoveryResultKind.Transport:
+                case ClientConnectionRecoveryResultKind.Deadline:
+                case ClientConnectionRecoveryResultKind.None:
+                    return ClientPersonalWorldFailure.Transport;
+                case ClientConnectionRecoveryResultKind.Protocol:
+                    return ClientPersonalWorldFailure.ProtocolIncompatible;
+                case ClientConnectionRecoveryResultKind.Authentication:
+                    return ClientPersonalWorldFailure.Unauthenticated;
+                case ClientConnectionRecoveryResultKind.Policy:
+                    return ClientPersonalWorldFailure.Permission;
+                case ClientConnectionRecoveryResultKind.Stopped:
+                    return ClientPersonalWorldFailure.Stopped;
+                default:
+                    return ClientPersonalWorldFailure.Internal;
             }
         }
 
@@ -1585,6 +2176,10 @@ namespace IHomeland.Client.Presentation.PersonalWorld
                 case ClientHttpFailureKind.MalformedResponse:
                 case ClientHttpFailureKind.ResponseTooLarge:
                     return ClientPersonalWorldFailure.ProtocolIncompatible;
+                case ClientHttpFailureKind.SecureStorage:
+                    return ClientPersonalWorldFailure.SecureStorage;
+                case ClientHttpFailureKind.SecureStorageProfileInUse:
+                    return ClientPersonalWorldFailure.ProfileInUse;
                 default:
                     return ClientPersonalWorldFailure.Internal;
             }

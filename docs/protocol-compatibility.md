@@ -164,6 +164,8 @@ WSS control 只发送 registry 登记的 9 类 `SERVER_TO_CLIENT/PUSH`，每条�
 
 Visit message 2100 继续是邀请创建与退役的唯一 WSS route。`VisitInviteState` 的 `PENDING`、`ACCEPTED` 与 `RETIRED` 是封闭公开值；`RETIRED` 必须携带与原邀请相同的 VisitSessionID、InviteID、OwnerPlayerID、TargetVisitorID、created revision 与 absolute expiry，只表达该 identity 已不可接受，不携带 credential、endpoint、membership 或内部关闭原因。客户端按完整 identity 幂等应用 tombstone，不能把 unknown enum 当作 Pending，也不能新增第二个退役 message ID。
 
+`SafeReturnDirective.revision` 是产生该指令的权威 VisitSession revision。客户端已提交同一 VisitSession 的更高 revision 时必须拒绝迟到指令，避免旧 generation 在重新加入后撤销新 membership；缺失或为 `0` 的 revision 属于无效 projection。
+
 TLS/TCP gameplay 在 `ReliableEnvelope` stream 前使用版本化 `IHTP` authentication preface。preface 使用独立 4-byte big-endian frame、固定 ticket/admission 语法和封闭 purpose，不登记业务 message ID；格式基线由 `shared/contracts/fixtures/realtime/tcp-preface.json` 持有。后续 stream 只接受 registry 中 common heartbeat `1-2` 与 world/visit `2000-2002`、`2103-2122` 的精确 TLS_TCP route：C2S REQUEST/COMMAND 与 S2C RESPONSE/ERROR/PUSH 不能调换方向、kind、correlation 或 generated payload type。response/error 必须回显原 request/command identity，push 不携带 correlation。heartbeat `1/2` 只证明 active connection 存活，不能承载或修改业务事实。
 
 ## World/Visit 公开投影与 credential 分层
@@ -172,7 +174,7 @@ TLS/TCP gameplay 在 `ReliableEnvelope` stream 前使用版本化 `IHTP` authent
 - Wire 绝对时间统一使用 Unix epoch milliseconds，并在字段名使用 `_at_ms` 或 `_expires_at_ms`；这不改变服务端持久事实的时间精度。
 - HTTPS bearer 只证明 account/session lineage；`ConnectionTicket` 只允许连接一个 endpoint/channel；invite 与 `AdmissionIntent` 只表达领域资格；opaque world admission 才允许已认证 TLS/TCP connection 进入 current world target。
 - Admission purpose 必须显式为 `OWN_WORLD`、`JOIN` 或 `RECONNECT`。Visitor 的 `JOIN` 只匹配 active reserved membership，`RECONNECT` 只匹配 active reconnecting membership；GAMEPLAY scope 本身不授予 Owner/Visitor role。
-- Admission 只由 OpenAPI `WorldAdmissionResponse` 公开安全 ASCII opaque credential、endpoint、role、purpose 与 expiry；realtime schema 原样消费同一 string，不重复定义响应 DTO，也不公开可伪造 claims JSON。完整 binding、credential digest/consume identity 原子消费与 replay 防护规则由 `docs/network-transport-architecture.md` 的 World Admission 章节持有。
+- Admission 只由 OpenAPI `WorldAdmissionResponse` 公开安全 ASCII opaque credential、endpoint、role、purpose、Visitor `visitRevision` 与 expiry；`visitRevision` 是签发判断冻结并纳入幂等 binding 的首帧 CAS 事实，`OWN_WORLD` 固定为 `0`。realtime schema 原样消费同一 string，不重复定义响应 DTO，也不公开可伪造 claims JSON。完整 binding、credential digest/consume identity 原子消费与 replay 防护规则由 `docs/network-transport-architecture.md` 的 World Admission 章节持有。
 
 ## 生成与验证
 

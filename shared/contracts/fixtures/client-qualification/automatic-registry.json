@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    { "scenarioId": "contract-clean-generation", "runner": "protocol-and-static", "selectors": ["tools/proto/proto.ps1:verify", "ClientQualificationContractTests"] },
+    { "scenarioId": "secure-session-store", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.ClientSecureSessionModelsTests", "IHomeland.Client.Tests.EditMode.ClientSecureSessionStoreTests"] },
+    { "scenarioId": "session-restore-races", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.ClientSessionCoordinatorTests", "IHomeland.Client.Tests.EditMode.ClientSessionRestoreCoordinatorTests"] },
+    { "scenarioId": "control-independent-recovery", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.ClientControlChannelTests", "IHomeland.Client.Tests.EditMode.ClientConnectionRecoveryCoordinatorTests"] },
+    { "scenarioId": "gameplay-own-world-recovery", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.ClientGameplayChannelTests", "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"] },
+    { "scenarioId": "gameplay-visitor-reconnect", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"] },
+    { "scenarioId": "recovery-race-matrix", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.ClientConnectionRecoveryCoordinatorTests", "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests"] },
+    { "scenarioId": "ui-action-matrix", "runner": "unity-editmode", "selectors": ["IHomeland.Client.Tests.EditMode.ClientPersonalWorldExperienceTests", "IHomeland.Client.Tests.EditMode.ClientPersonalWorldPresentationTests", "IHomeland.Client.Tests.EditMode.ClientUiRouterTests"] },
+    { "scenarioId": "ui-scene-lifecycle", "runner": "unity-playmode", "selectors": ["IHomeland.Client.Tests.PlayMode.AppRootPlayModeTests", "IHomeland.Client.Tests.PlayMode.ClientProductHostPlayModeTests", "IHomeland.Client.Tests.PlayMode.ClientUiHostPlayModeTests", "IHomeland.Client.Tests.PlayMode.PersonalWorldSceneContextPlayModeTests"] },
+    { "scenarioId": "windows-development-build", "runner": "unity-build", "selectors": ["ClientDevelopmentBuild.BuildWindowsDevelopment"] },
+    { "scenarioId": "windows-release-build", "runner": "unity-build", "selectors": ["ClientDevelopmentBuild.BuildWindowsRelease"] },
+    { "scenarioId": "release-surface-scan", "runner": "release-scan", "selectors": ["release-managed-surface"] },
+    { "scenarioId": "development-player-smoke", "runner": "player-smoke", "selectors": ["development-startup"] },
+    { "scenarioId": "release-player-smoke", "runner": "player-smoke", "selectors": ["release-startup"] },
+    { "scenarioId": "five-minute-recovery-soak", "runner": "player-soak", "selectors": ["development-recovery-soak"] },
+    { "scenarioId": "credential-redaction", "runner": "redaction", "selectors": ["qualification-output-redaction"] },
+    { "scenarioId": "documentation-governance", "runner": "governance", "selectors": ["openspec-docs-git-governance"] }
+  ]
+}

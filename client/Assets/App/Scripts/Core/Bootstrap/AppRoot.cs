@@ -3,6 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Lifetime;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+using IHomeland.Client.Core.Qualification;
+#endif
 using UnityEngine;
 
 namespace IHomeland.Client.Core.Bootstrap
@@ -33,19 +36,19 @@ namespace IHomeland.Client.Core.Bootstrap
         private Task _startTask;
 
         /// <summary>
+        /// 保存包含 claim 释放的共享停止任务，使显式停止与 Unity callback 观察同一终态。
+        /// </summary>
+        private Task _stopTask;
+
+        /// <summary>
         /// 保存已捕获异常的停止观察任务，防止 Unity callback 产生未观察异常。
         /// </summary>
         private Task _stopObserverTask;
 
         /// <summary>
-        /// 表示当前实例持有静态唯一性 claim，销毁时必须对称释放。
+        /// 表示当前实例持有静态唯一性 claim，停止完成时必须对称释放。
         /// </summary>
         private bool _ownsClaim;
-
-        /// <summary>
-        /// 表示 GameObject 销毁后应在共享停止任务完成时释放唯一性 claim。
-        /// </summary>
-        private bool _releaseClaimAfterStop;
 
         /// <summary>
         /// 获取当前 App Scope 生命周期状态；尚未绑定对象图时返回 Created。
@@ -54,12 +57,22 @@ namespace IHomeland.Client.Core.Bootstrap
             ? AppLifetimeState.Created
             : _composition.Lifetime.State;
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>获取资格运行可观察的进程内AppRoot唯一性owner数量。</summary>
+        internal static int QualificationClaimedOwnerCount => ReferenceEquals(_claimedRoot, null) ? 0 : 1;
+#endif
+
         /// <summary>
         /// 尝试取得进程内唯一 AppRoot 所有权。
         /// </summary>
         /// <returns>当前实例成为唯一 root 或已经持有 claim 时返回 true；存在其他 root 时返回 false。</returns>
         internal bool TryClaim()
         {
+            if (_stopTask != null)
+            {
+                return false;
+            }
+
             if (!ReferenceEquals(_claimedRoot, null) && !ReferenceEquals(_claimedRoot, this))
             {
                 return false;
@@ -119,16 +132,38 @@ namespace IHomeland.Client.Core.Bootstrap
         }
 
         /// <summary>
-        /// 显式请求 App Scope 幂等逆序停止。
+        /// 显式请求 App Scope 幂等逆序停止，并在停止终态对称释放唯一性 claim。
         /// </summary>
-        /// <returns>全部可执行清理均已尝试后的共享停止任务。</returns>
+        /// <remarks>
+        /// Claim 的生命周期与 App Scope 可运行性一致，而不是与 Unity 延迟 Destroy 的帧时序一致。
+        /// 即使清理失败，旧对象图也已经进入不可重启终态，因此仍必须允许下一套 root 争用。
+        /// </remarks>
+        /// <returns>全部可执行清理均已尝试且唯一性 claim 已释放后的共享停止任务。</returns>
         /// <exception cref="AppShutdownException">一个或多个参与者停止失败或超时时通过返回任务抛出。</exception>
         internal Task StopAsync()
         {
-            return _composition == null
-                ? Task.CompletedTask
-                : _composition.Lifetime.StopAsync();
+            if (_stopTask == null)
+            {
+                _stopTask = StopAndReleaseClaimAsync();
+            }
+
+            return _stopTask;
         }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>创建当前完整产品graph的Development资格只读诊断。</summary>
+        /// <returns>不拥有生命周期或业务事实的诊断聚合器。</returns>
+        /// <exception cref="InvalidOperationException">尚未绑定完整产品Composition时抛出。</exception>
+        internal ClientQualificationDiagnostics CreateQualificationDiagnostics()
+        {
+            if (_composition == null)
+            {
+                throw new InvalidOperationException("AppRoot尚未绑定AppComposition结果。");
+            }
+
+            return _composition.CreateQualificationDiagnostics();
+        }
+#endif
 
         /// <summary>
         /// 每帧有界排空主线程 callback，并驱动 Composition 冻结的 tickable 快照。
@@ -168,7 +203,7 @@ namespace IHomeland.Client.Core.Bootstrap
         /// </summary>
         private void OnApplicationQuit()
         {
-            BeginObservedStop(releaseClaimAfterStop: false);
+            BeginObservedStop();
         }
 
         /// <summary>
@@ -176,7 +211,7 @@ namespace IHomeland.Client.Core.Bootstrap
         /// </summary>
         private void OnDestroy()
         {
-            BeginObservedStop(releaseClaimAfterStop: true);
+            BeginObservedStop();
         }
 
         /// <summary>
@@ -189,17 +224,30 @@ namespace IHomeland.Client.Core.Bootstrap
         }
 
         /// <summary>
-        /// 只创建一次捕获全部停止异常的观察任务，避免 Unity callback 使用 async void。
+        /// 只创建一次捕获共享停止异常的观察任务，避免 Unity callback 使用 async void。
         /// </summary>
-        /// <param name="releaseClaimAfterStop">停止结束后是否允许下一套 App Scope 争用唯一性。</param>
-        private void BeginObservedStop(bool releaseClaimAfterStop)
+        private void BeginObservedStop()
         {
-            _releaseClaimAfterStop |= releaseClaimAfterStop;
             if (_stopObserverTask == null)
             {
                 _stopObserverTask = StopAndLogAsync();
             }
-            else if (_stopObserverTask.IsCompleted && _releaseClaimAfterStop)
+        }
+
+        /// <summary>
+        /// 等待对象图停止，并在任意终态释放当前实例持有的唯一性 claim。
+        /// </summary>
+        /// <returns>清理和 claim 释放均结束时完成的共享任务。</returns>
+        private async Task StopAndReleaseClaimAsync()
+        {
+            try
+            {
+                if (_composition != null)
+                {
+                    await _composition.Lifetime.StopAsync();
+                }
+            }
+            finally
             {
                 ReleaseClaim();
             }
@@ -218,13 +266,6 @@ namespace IHomeland.Client.Core.Bootstrap
             catch (Exception stopError)
             {
                 Debug.LogException(stopError, this);
-            }
-            finally
-            {
-                if (_releaseClaimAfterStop)
-                {
-                    ReleaseClaim();
-                }
             }
         }
 

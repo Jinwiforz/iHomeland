@@ -158,7 +158,22 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(service.Snapshot.NeedsRefresh, Is.True);
         }
 
-        /// <summary>验证 VisitSession revision 与 current assignment lease 使用各自的单调门。</summary>
+        /// <summary>验证同一 VisitSession 的旧成员返回指令不能退出更高 revision 的新成员关系。</summary>
+        [Test]
+        public void SafeReturnRejectsDirectiveOlderThanCurrentMembership()
+        {
+            var service = new VisitSessionService(new FakeClock(1_000));
+            Assert.That(service.SetTargetRole(ClientVisitRole.Visitor, "visit_one"), Is.True);
+            Assert.That(service.ApplySnapshot(Visit(8), ClientVisitRole.Visitor), Is.EqualTo(ClientProjectionApplyResult.Applied));
+            var received = 0;
+            service.SafeReturnReceived += _ => received++;
+
+            Assert.That(service.ApplySafeReturn(SafeReturn(7)), Is.False);
+            Assert.That(service.ApplySafeReturn(SafeReturn(8)), Is.True);
+            Assert.That(received, Is.EqualTo(1));
+        }
+
+        /// <summary>验证VisitSession revision与current assignment generation/lease使用各自的单调门。</summary>
         [Test]
         public void VisitSnapshotAcceptsCurrentAssignmentLeaseRenewal()
         {
@@ -186,6 +201,22 @@ namespace IHomeland.Client.Tests.EditMode
             var changedIdentity = Visit(6);
             changedIdentity.Assignment.WorldInstanceId = "instance_other";
             Assert.That(service.ApplySnapshot(changedIdentity, ClientVisitRole.Owner), Is.EqualTo(ClientProjectionApplyResult.Conflict));
+
+            var assignmentReplacement = Visit(5);
+            assignmentReplacement.Assignment = Assignment(3, 20_000, "instance_replacement");
+            Assert.That(
+                service.ApplySnapshot(assignmentReplacement, ClientVisitRole.Owner),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(service.Snapshot.Current.Revision, Is.EqualTo(5));
+            Assert.That(service.Snapshot.Current.Assignment.Generation, Is.EqualTo(3));
+            Assert.That(
+                service.Snapshot.Current.Assignment.WorldInstanceID,
+                Is.EqualTo("instance_replacement"));
+
+            var regressedGeneration = Visit(6);
+            Assert.That(
+                service.ApplySnapshot(regressedGeneration, ClientVisitRole.Owner),
+                Is.EqualTo(ClientProjectionApplyResult.Stale));
         }
 
         /// <summary>验证 Visitor 集合必须稳定排序、唯一且不包含 Owner。</summary>
@@ -362,6 +393,29 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(service.Snapshot.NeedsRefresh, Is.True);
         }
 
+        /// <summary>验证control generation失效会冻结invite能力但保留健康gameplay完整snapshot。</summary>
+        [Test]
+        public void ControlInvalidationClearsInvitesWithoutDiscardingGameplaySnapshot()
+        {
+            var service = new VisitSessionService(new FakeClock(1_000));
+            service.SetTargetRole(ClientVisitRole.Visitor, "visit_one");
+            Assert.That(
+                service.ApplySnapshot(Visit(4), ClientVisitRole.Visitor),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+            Assert.That(
+                service.ApplyInvite(Invite("invite_one", 5, 20_000)),
+                Is.EqualTo(ClientProjectionApplyResult.Applied));
+
+            service.InvalidateControlProjection();
+
+            Assert.That(service.Snapshot.Current, Is.Not.Null);
+            Assert.That(service.Snapshot.Current.Revision, Is.EqualTo(4));
+            Assert.That(service.Snapshot.Invites, Is.Empty);
+            Assert.That(service.Snapshot.OutgoingInvites, Is.Empty);
+            Assert.That(service.Snapshot.ControlHint, Is.Null);
+            Assert.That(service.Snapshot.NeedsRefresh, Is.True);
+        }
+
         /// <summary>验证初始化与停止只登记/解除 subscriber，且停止后拒绝迟到输入。</summary>
         [Test]
         public async Task ServicesStopRejectsLateProjection()
@@ -413,6 +467,22 @@ namespace IHomeland.Client.Tests.EditMode
                     new ClientEndpoint(ClientEndpointChannel.TlsTcp, "world.example.test", 9443),
                     generation,
                     20_000));
+        }
+
+        /// <summary>创建带权威 aggregate revision 的 safe-return fixture。</summary>
+        /// <param name="revision">产生指令的已提交 aggregate 版本。</param>
+        /// <returns>完整 generated safe-return 指令。</returns>
+        private static SafeReturnDirective SafeReturn(ulong revision)
+        {
+            return new SafeReturnDirective
+            {
+                VisitSessionId = "visit_one",
+                VisitorId = "player_visitor",
+                Reason = SafeReturnReason.Kicked,
+                Preferred = SafeReturnDestination.OwnPersonalWorld,
+                Fallback = SafeReturnDestination.SafeEntry,
+                Revision = revision,
+            };
         }
 
         /// <summary>创建 generated world fixture。</summary>

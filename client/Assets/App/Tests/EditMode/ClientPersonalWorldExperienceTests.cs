@@ -120,6 +120,38 @@ namespace IHomeland.Client.Tests.EditMode
             }
         }
 
+        /// <summary>验证第二个production profile writer得到明确提示而不是未分类内部错误。</summary>
+        [Test]
+        public async Task ProfileInUseRemainsStableThroughLoginPresentation()
+        {
+            var secureStore = new FakeClientSecureSessionStore
+            {
+                ReplaceOutcome = ClientSecureSessionStoreOutcome.ProfileInUse,
+            };
+            var fixture = await ExperienceFixture.CreateAsync(
+                secureSessionStore: secureStore);
+            try
+            {
+                fixture.Api.BootstrapSucceeds = true;
+                fixture.Api.AuthenticationSucceeds = true;
+
+                var result = await fixture.Experience.LoginAsync(
+                    "player",
+                    "temporary-password",
+                    CancellationToken.None);
+
+                Assert.That(result.Failure, Is.EqualTo(ClientPersonalWorldFailure.ProfileInUse));
+                Assert.That(
+                    fixture.Experience.ViewState.Login.Failure,
+                    Is.EqualTo(ClientPersonalWorldFailure.ProfileInUse));
+                Assert.That(fixture.Session.TryGetCurrent(out _), Is.False);
+            }
+            finally
+            {
+                await fixture.StopAsync();
+            }
+        }
+
         /// <summary>验证成功认证先提交唯一 Session，再以 control readiness 阻止离线进入 own-world。</summary>
         [Test]
         public async Task SuccessfulLoginCommitsSessionButControlFailureBlocksOwnWorld()
@@ -134,7 +166,6 @@ namespace IHomeland.Client.Tests.EditMode
                     "player",
                     "temporary-password",
                     CancellationToken.None);
-                await WaitUntilAsync(() => fixture.Api.ConnectionTicketCalls == 1);
 
                 Assert.That(result.Failure, Is.EqualTo(ClientPersonalWorldFailure.Transport));
                 Assert.That(fixture.Session.TryGetCurrent(out var session), Is.True);
@@ -244,8 +275,9 @@ namespace IHomeland.Client.Tests.EditMode
                     "temporary-password",
                     CancellationToken.None);
 
-                await WaitUntilAsync(
-                    () => fixture.Experience.ViewState.Phase == ClientPersonalWorldPhase.ConnectionLost);
+                await WaitForPhaseAsync(
+                    fixture.Experience,
+                    ClientPersonalWorldPhase.ConnectionLost);
 
                 Assert.That(fixture.Session.TryGetCurrent(out _), Is.True);
                 Assert.That(
@@ -258,14 +290,12 @@ namespace IHomeland.Client.Tests.EditMode
             }
         }
 
-        /// <summary>验证显式恢复具有整笔 deadline，且 pending 期间重复点击不会创建第二条 control run。</summary>
+        /// <summary>验证caller取消只结束页面等待，不会取消已转交App Scope的恢复owner。</summary>
         [Test]
-        public async Task ConnectionRecoveryDeadlineReleasesSingleFlightAndCancelsControlRun()
+        public async Task ConnectionRecoveryCallerCancellationDoesNotCancelAppScopeOwner()
         {
             var socketFactory = new SequencedWebSocketFactory();
-            var fixture = await ExperienceFixture.CreateAsync(
-                socketFactory,
-                TimeSpan.FromMilliseconds(100));
+            var fixture = await ExperienceFixture.CreateAsync(socketFactory);
             try
             {
                 fixture.Api.BootstrapSucceeds = true;
@@ -274,28 +304,36 @@ namespace IHomeland.Client.Tests.EditMode
                     "player",
                     "temporary-password",
                     CancellationToken.None);
-                await WaitUntilAsync(
-                    () => fixture.Experience.ViewState.Phase == ClientPersonalWorldPhase.ConnectionLost);
+                await WaitForPhaseAsync(
+                    fixture.Experience,
+                    ClientPersonalWorldPhase.ConnectionLost);
 
-                var recovery = fixture.Experience.RetryConnectionAsync(CancellationToken.None);
-                await socketFactory.WaitForRecoveryConnectAsync();
+                using (var recoveryCancellation = new CancellationTokenSource())
+                {
+                    var recovery = fixture.Experience.RetryConnectionAsync(recoveryCancellation.Token);
+                    await socketFactory.WaitForRecoveryConnectAsync();
 
-                var duplicate = await fixture.Experience.RetryConnectionAsync(CancellationToken.None);
-                Assert.That(duplicate.Failure, Is.EqualTo(ClientPersonalWorldFailure.Permission));
-                Assert.That(
-                    fixture.Experience.ViewState.ActiveIntent,
-                    Is.EqualTo(ClientPersonalWorldIntent.Reconnect));
+                    var duplicate = await fixture.Experience.RetryConnectionAsync(CancellationToken.None);
+                    Assert.That(duplicate.Failure, Is.EqualTo(ClientPersonalWorldFailure.Permission));
+                    Assert.That(
+                        fixture.Experience.ViewState.ActiveIntent,
+                        Is.EqualTo(ClientPersonalWorldIntent.Reconnect));
 
-                var result = await recovery;
-                await socketFactory.WaitForRecoveryCancellationAsync();
+                    recoveryCancellation.Cancel();
+                    var result = await recovery;
 
-                Assert.That(result.Failure, Is.EqualTo(ClientPersonalWorldFailure.Transport));
-                Assert.That(
-                    fixture.Experience.ViewState.ActiveIntent,
-                    Is.EqualTo(ClientPersonalWorldIntent.None));
-                Assert.That(
-                    fixture.Experience.ViewState.Phase,
-                    Is.EqualTo(ClientPersonalWorldPhase.ConnectionLost));
+                    Assert.That(result.Failure, Is.EqualTo(ClientPersonalWorldFailure.CallerCancelled));
+                    Assert.That(
+                        fixture.Experience.ViewState.ActiveIntent,
+                        Is.EqualTo(ClientPersonalWorldIntent.None));
+                    Assert.That(
+                        fixture.Experience.ViewState.Phase,
+                        Is.EqualTo(ClientPersonalWorldPhase.RecoveringControl));
+                    Assert.That(
+                        socketFactory.RecoveryCancellationObserved,
+                        Is.False,
+                        "页面caller取消不得终止App Scope持有的control恢复。");
+                }
             }
             finally
             {
@@ -303,9 +341,9 @@ namespace IHomeland.Client.Tests.EditMode
             }
         }
 
-        /// <summary>验证 Session owner 清除当前 lineage 后，control 终态只能返回新代际 Login。</summary>
+        /// <summary>验证 Session owner 清除当前 lineage 后，无需按钮即可退役 target 并返回 Login。</summary>
         [Test]
-        public async Task SessionInvalidationReturnsToLoginAndRejectsOldPresentation()
+        public async Task SessionInvalidationAutomaticallyReturnsToLoginAndRejectsOldPresentation()
         {
             var fixture = await ExperienceFixture.CreateAsync();
             try
@@ -316,14 +354,24 @@ namespace IHomeland.Client.Tests.EditMode
                     "player",
                     "temporary-password",
                     CancellationToken.None);
-                await WaitUntilAsync(
-                    () => fixture.Experience.ViewState.Phase == ClientPersonalWorldPhase.ConnectionLost);
+                await WaitForPhaseAsync(
+                    fixture.Experience,
+                    ClientPersonalWorldPhase.ConnectionLost);
                 var oldGeneration = fixture.Experience.ViewState.PresentationGeneration;
+                var unloadCalls = fixture.SceneTransition.UnloadCalls;
 
-                fixture.Session.Forget();
-                await fixture.Experience.RetryConnectionAsync(CancellationToken.None);
-                await WaitUntilAsync(
-                    () => fixture.Experience.ViewState.Phase == ClientPersonalWorldPhase.Login);
+                await fixture.Session.ForgetAsync(CancellationToken.None);
+                var drain = fixture.Dispatcher.Drain(maximumCallbacks: 16);
+                Assert.That(drain.Errors, Is.Empty);
+                Assert.That(
+                    drain.ExecutedCount,
+                    Is.LessThan(16),
+                    "Session失效收敛不得通过world-flow通知重新填满同一dispatcher批次。");
+                await WaitForPhaseAsync(
+                    fixture.Experience,
+                    ClientPersonalWorldPhase.Login);
+                await Task.Yield();
+                var settledDrain = fixture.Dispatcher.Drain(maximumCallbacks: 16);
 
                 Assert.That(fixture.Session.TryGetCurrent(out _), Is.False);
                 Assert.That(
@@ -331,8 +379,21 @@ namespace IHomeland.Client.Tests.EditMode
                     Is.GreaterThan(oldGeneration));
                 Assert.That(fixture.Experience.ViewState.Login.Visible, Is.True);
                 Assert.That(
+                    fixture.Admission.Snapshot.State,
+                    Is.EqualTo(ClientWorldFlowState.Inactive));
+                Assert.That(fixture.World.Snapshot.CurrentWorld, Is.Null);
+                Assert.That(
                     fixture.Router.CurrentSnapshot.Items[0].Definition.RouteId,
                     Is.EqualTo(ClientUiRouteId.Login));
+                Assert.That(settledDrain.Errors, Is.Empty);
+                Assert.That(
+                    settledDrain.ExecutedCount,
+                    Is.Zero,
+                    "Login提交后不得遗留第二笔Session失效表现事务。");
+                Assert.That(
+                    fixture.SceneTransition.UnloadCalls,
+                    Is.EqualTo(unloadCalls + 1),
+                    "同一Session失效generation只能卸载一次内容Scene。");
             }
             finally
             {
@@ -354,8 +415,9 @@ namespace IHomeland.Client.Tests.EditMode
                     "player",
                     "temporary-password",
                     CancellationToken.None);
-                await WaitUntilAsync(
-                    () => fixture.Experience.ViewState.Phase == ClientPersonalWorldPhase.ConnectionLost);
+                await WaitForPhaseAsync(
+                    fixture.Experience,
+                    ClientPersonalWorldPhase.ConnectionLost);
 
                 var result = await fixture.Experience.LogoutAsync(CancellationToken.None);
 
@@ -416,22 +478,38 @@ namespace IHomeland.Client.Tests.EditMode
             await fixture.StopAsync();
         }
 
-        /// <summary>在有限 deadline 内等待异步观察任务提交状态。</summary>
-        /// <param name="predicate">待满足的确定性条件。</param>
-        /// <returns>条件满足时完成。</returns>
-        private static async Task WaitUntilAsync(Func<bool> predicate)
+        /// <summary>通过不可变View State事件等待目标产品阶段，不使用sleep或轮询猜测。</summary>
+        /// <param name="experience">被测唯一产品Experience。</param>
+        /// <param name="expected">期望提交的稳定产品阶段。</param>
+        /// <returns>目标阶段已经由Experience提交时完成的任务。</returns>
+        private static async Task WaitForPhaseAsync(
+            ClientPersonalWorldExperience experience,
+            ClientPersonalWorldPhase expected)
         {
-            for (var attempt = 0; attempt < 100; attempt++)
+            var completion = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            void OnChanged(ClientPersonalWorldViewState state)
             {
-                if (predicate())
+                if (state.Phase == expected)
+                {
+                    completion.TrySetResult(true);
+                }
+            }
+
+            experience.ViewStateChanged += OnChanged;
+            try
+            {
+                if (experience.ViewState.Phase == expected)
                 {
                     return;
                 }
 
-                await Task.Delay(1);
+                await completion.Task;
             }
-
-            Assert.Fail("异步 Experience 状态未在有限调度轮次内收敛。");
+            finally
+            {
+                experience.ViewStateChanged -= OnChanged;
+            }
         }
 
         /// <summary>组合只登记 Login route 且不会建立真实连接的最小 Experience 对象图。</summary>
@@ -448,6 +526,7 @@ namespace IHomeland.Client.Tests.EditMode
                 PersonalWorldService world,
                 VisitSessionService visit,
                 WorldAdmissionCoordinator admission,
+                ClientConnectionRecoveryCoordinator recovery,
                 FixtureSceneTransition sceneTransition,
                 ClientUiRouter router,
                 ClientPersonalWorldExperience experience)
@@ -461,6 +540,7 @@ namespace IHomeland.Client.Tests.EditMode
                 World = world;
                 Visit = visit;
                 Admission = admission;
+                Recovery = recovery;
                 SceneTransition = sceneTransition;
                 Router = router;
                 Experience = experience;
@@ -493,6 +573,9 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>获取 world flow owner。</summary>
             internal WorldAdmissionCoordinator Admission { get; }
 
+            /// <summary>获取与产品组合一致的唯一连接恢复 owner。</summary>
+            internal ClientConnectionRecoveryCoordinator Recovery { get; }
+
             /// <summary>获取测试 Scene transition。</summary>
             internal FixtureSceneTransition SceneTransition { get; }
 
@@ -505,13 +588,13 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>标识测试是否已经单独停止 Experience。</summary>
             internal bool ExperienceStopped { get; set; }
 
-            /// <summary>创建并只初始化 Router 与 Experience。</summary>
+            /// <summary>创建与产品同构但不建立真实连接的最小对象图。</summary>
             /// <param name="webSocketFactory">可选的确定性 control socket factory。</param>
-            /// <param name="connectionRecoveryTimeout">可选的整笔恢复 deadline。</param>
+            /// <param name="secureSessionStore">可选的确定性secure store fake。</param>
             /// <returns>Login route 已提交的 fixture。</returns>
             internal static async Task<ExperienceFixture> CreateAsync(
                 IClientWebSocketFactory webSocketFactory = null,
-                TimeSpan? connectionRecoveryTimeout = null)
+                FakeClientSecureSessionStore secureSessionStore = null)
             {
                 var environment = ClientEnvironment.Create(
                     ClientEnvironmentKind.Test,
@@ -521,7 +604,12 @@ namespace IHomeland.Client.Tests.EditMode
                 var api = new RecordingHttpApi();
                 var configuration = new ClientConfigurationStore();
                 var clock = new FixedClock();
-                var session = new SessionCoordinator(configuration, api, clock);
+                var session = new SessionCoordinator(
+                    configuration,
+                    api,
+                    clock,
+                    secureSessionStore ?? new FakeClientSecureSessionStore(),
+                    FakeClientSecureSessionStore.EnvironmentBinding);
                 var dispatcher = new MainThreadDispatcher(Environment.CurrentManagedThreadId, 16);
                 var gameplay = new ClientGameplayChannel(
                     configuration,
@@ -542,7 +630,13 @@ namespace IHomeland.Client.Tests.EditMode
                     gameplay.InvalidateSession);
                 var world = new PersonalWorldService(control, gameplay);
                 var visit = new VisitSessionService(control, gameplay, clock);
-                var admission = new WorldAdmissionCoordinator(session, gameplay, world, visit);
+                var admission = new WorldAdmissionCoordinator(session, clock, gameplay, world, visit);
+                var recovery = new ClientConnectionRecoveryCoordinator(
+                    session,
+                    control,
+                    gameplay,
+                    admission,
+                    ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
                 var host = new FixtureViewHost(ClientUiRouteId.Login);
                 var registry = new ClientUiRegistry(
                     new[]
@@ -569,18 +663,21 @@ namespace IHomeland.Client.Tests.EditMode
                 await world.InitializeAsync(CancellationToken.None);
                 await visit.InitializeAsync(CancellationToken.None);
                 await admission.InitializeAsync(CancellationToken.None);
+                await recovery.InitializeAsync(CancellationToken.None);
                 await sceneTransition.InitializeAsync(CancellationToken.None);
                 await router.InitializeAsync(CancellationToken.None);
                 var experience = new ClientPersonalWorldExperience(
                     new ClientBootstrapService(environment, api, configuration),
                     session,
+                    null,
+                    recovery,
+                    dispatcher,
                     control,
                     world,
                     visit,
                     admission,
                     router,
                     sceneTransition,
-                    connectionRecoveryTimeout ??
                     ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
                 await experience.InitializeAsync(CancellationToken.None);
                 return new ExperienceFixture(
@@ -593,6 +690,7 @@ namespace IHomeland.Client.Tests.EditMode
                     world,
                     visit,
                     admission,
+                    recovery,
                     sceneTransition,
                     router,
                     experience);
@@ -610,6 +708,7 @@ namespace IHomeland.Client.Tests.EditMode
 
                 await Router.StopAsync(CancellationToken.None);
                 await SceneTransition.StopAsync(CancellationToken.None);
+                await Recovery.StopAsync(CancellationToken.None);
                 await Admission.StopAsync(CancellationToken.None);
                 await Visit.StopAsync(CancellationToken.None);
                 await World.StopAsync(CancellationToken.None);
@@ -880,6 +979,9 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>获取空场景快照。</summary>
             public ClientWorldSceneSnapshot Snapshot { get; } = ClientWorldSceneSnapshot.Empty;
 
+            /// <summary>获取测试观察到的内容Scene卸载次数。</summary>
+            internal int UnloadCalls { get; private set; }
+
             /// <summary>初始化无副作用。</summary>
             public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -888,8 +990,11 @@ namespace IHomeland.Client.Tests.EditMode
                 Task.FromResult(ClientWorldSceneTransitionCode.LoadFailed);
 
             /// <summary>卸载保持成功。</summary>
-            public Task<ClientWorldSceneTransitionCode> UnloadAsync(CancellationToken cancellationToken) =>
-                Task.FromResult(ClientWorldSceneTransitionCode.Succeeded);
+            public Task<ClientWorldSceneTransitionCode> UnloadAsync(CancellationToken cancellationToken)
+            {
+                UnloadCalls++;
+                return Task.FromResult(ClientWorldSceneTransitionCode.Succeeded);
+            }
 
             /// <summary>没有 current Context，拒绝投影。</summary>
             public bool TryApply(ClientPersonalWorldViewState viewState) => false;
@@ -955,7 +1060,7 @@ namespace IHomeland.Client.Tests.EditMode
             }
         }
 
-        /// <summary>第一次连接返回稳定失败，第二次连接保持 pending 直到恢复 deadline 取消。</summary>
+        /// <summary>第一次连接返回稳定失败，第二次连接保持 pending 直到恢复 owner 取消。</summary>
         private sealed class SequencedWebSocketFactory : IClientWebSocketFactory
         {
             /// <summary>记录已经创建的 socket 数量。</summary>
@@ -979,12 +1084,8 @@ namespace IHomeland.Client.Tests.EditMode
                 return _recoverySocket.WaitForConnectAsync();
             }
 
-            /// <summary>等待整笔恢复 deadline 传递到平台连接阶段。</summary>
-            /// <returns>恢复 socket 已观察到取消时完成。</returns>
-            internal Task WaitForRecoveryCancellationAsync()
-            {
-                return _recoverySocket.WaitForCancellationAsync();
-            }
+            /// <summary>获取恢复 socket 是否已被 owner 取消。</summary>
+            internal bool RecoveryCancellationObserved => _recoverySocket.CancellationObserved;
         }
 
         /// <summary>模拟一直等待但严格服从 cancellation 的平台 WebSocket。</summary>
@@ -1003,6 +1104,9 @@ namespace IHomeland.Client.Tests.EditMode
 
             /// <summary>连接未成功时没有协商 subprotocol。</summary>
             public string SubProtocol => null;
+
+            /// <summary>获取平台连接是否已观察到 owner cancellation。</summary>
+            internal bool CancellationObserved => _cancellationObserved.Task.IsCompleted;
 
             /// <summary>保持 pending，直到调用方传入的恢复 deadline 取消。</summary>
             public async Task ConnectAsync(
@@ -1043,13 +1147,6 @@ namespace IHomeland.Client.Tests.EditMode
             internal Task WaitForConnectAsync()
             {
                 return _connectStarted.Task;
-            }
-
-            /// <summary>等待测试 socket 观察到取消。</summary>
-            /// <returns>ConnectAsync 取消清理已执行时完成。</returns>
-            internal Task WaitForCancellationAsync()
-            {
-                return _cancellationObserved.Task;
             }
 
             /// <summary>测试 socket 不持有平台资源。</summary>

@@ -88,7 +88,13 @@ namespace IHomeland.Client.Tests.PlayMode
                 panelRenderer.panelSettings = panelSettings;
                 panelRenderer.visualTreeAsset = visualTreeAsset;
                 VisualElement panelRoot = null;
-                panelRenderer.RegisterUIReloadCallback((_, value, __) => panelRoot = value);
+                var panelReady = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                panelRenderer.RegisterUIReloadCallback((_, value, __) =>
+                {
+                    panelRoot = value;
+                    panelReady.TrySetResult(true);
+                });
 
                 var binding = root.AddComponent<ScriptedProductBinding>();
                 var host = root.AddComponent<ClientUiToolkitHost>();
@@ -100,17 +106,17 @@ namespace IHomeland.Client.Tests.PlayMode
                 // 复现 Player 启动顺序：AppBootstrap 会在 PanelRenderer 首次 reload 前立即打开 Login。
                 var viewHost = (IClientUiViewHost)host;
                 var initialization = viewHost.InitializeAsync(CancellationToken.None);
-                const int panelReadyFrameBudget = 10;
-                for (var frame = 0; frame < panelReadyFrameBudget && !initialization.IsCompleted; frame++)
+                var ready = Task.WhenAll(initialization, panelReady.Task);
+                while (!ready.IsCompleted)
                 {
                     yield return null;
                 }
 
                 Assert.That(panelRoot, Is.Not.Null);
                 Assert.That(
-                    initialization.IsCompletedSuccessfully,
+                    ready.IsCompletedSuccessfully,
                     Is.True,
-                    initialization.Exception?.ToString());
+                    ready.Exception?.ToString());
 
                 var firstBinding = new ClientUiRouteBinding(
                     ClientUiRouteId.Login,

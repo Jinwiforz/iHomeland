@@ -136,13 +136,19 @@ type AdmissionResult struct {
 	Role worldadmission.Role
 	// Purpose 由目标与membership state决定。
 	Purpose worldadmission.Purpose
+	// VisitRevision 是 Visitor 首帧必须使用的权威 VisitSession CAS 版本；Owner 为零值。
+	VisitRevision visitsession.Revision
 	// ExpiresAt 是等于即失效的UTC微秒deadline。
 	ExpiresAt time.Time
 }
 
 // Valid 报告公开签发结果字段是否完整。
 func (result AdmissionResult) Valid() bool {
-	return result.Credential.Valid() && result.Endpoint.Valid() && result.Role.Valid() && result.Purpose.Valid() && !result.ExpiresAt.IsZero()
+	if !result.Credential.Valid() || !result.Endpoint.Valid() || !result.Role.Valid() || !result.Purpose.Valid() || result.ExpiresAt.IsZero() {
+		return false
+	}
+	return (result.Role == worldadmission.RoleOwner && !result.VisitRevision.Valid()) ||
+		(result.Role == worldadmission.RoleVisitor && result.VisitRevision.Valid())
 }
 
 // String 防止默认格式化递归展开credential与内部identity。

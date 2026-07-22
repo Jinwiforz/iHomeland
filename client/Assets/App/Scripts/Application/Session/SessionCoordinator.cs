@@ -38,6 +38,21 @@ namespace IHomeland.Client.Application.Session
         private readonly IClientClock _clock;
 
         /// <summary>
+        /// 原子持久化唯一refresh lineage的安全存储port。
+        /// </summary>
+        private readonly IClientSecureSessionStore _secureSessionStore;
+
+        /// <summary>
+        /// 绑定当前product/environment/protocol的稳定低敏摘要。
+        /// </summary>
+        private readonly string _environmentBinding;
+
+        /// <summary>
+        /// 串行化secure record mutation与对应内存commit，锁内不执行HTTP。
+        /// </summary>
+        private readonly SemaphoreSlim _credentialMutation = new SemaphoreSlim(1, 1);
+
+        /// <summary>
         /// 保存当前 lifecycle/session 状态，只能在锁内访问。
         /// </summary>
         private ClientSessionOwnerState _state = ClientSessionOwnerState.Unauthenticated;
@@ -62,6 +77,9 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         private Task<ClientHttpResult<ClientSessionSnapshot>> _refreshTask;
 
+        /// <summary>启动restore正在独占unauthenticated入口。</summary>
+        private bool _restoreInProgress;
+
         /// <summary>
         /// 表示 owner 已由 AppLifetime 初始化，停止后不得重启。
         /// </summary>
@@ -73,15 +91,27 @@ namespace IHomeland.Client.Application.Session
         /// <param name="configurationStore">App Scope 唯一 Configuration owner。</param>
         /// <param name="httpApi">强类型 HTTP operation 边界。</param>
         /// <param name="clock">Credential expiry 使用的 UTC 时钟。</param>
+        /// <param name="secureSessionStore">唯一refresh lineage安全存储owner。</param>
+        /// <param name="environmentBinding">当前环境的稳定secure record binding。</param>
         /// <exception cref="ArgumentNullException">任一依赖为空时抛出。</exception>
         internal SessionCoordinator(
             ClientConfigurationStore configurationStore,
             IClientHttpApi httpApi,
-            IClientClock clock)
+            IClientClock clock,
+            IClientSecureSessionStore secureSessionStore,
+            string environmentBinding)
         {
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
             _httpApi = httpApi ?? throw new ArgumentNullException(nameof(httpApi));
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _secureSessionStore = secureSessionStore ??
+                throw new ArgumentNullException(nameof(secureSessionStore));
+            _environmentBinding = environmentBinding ??
+                throw new ArgumentNullException(nameof(environmentBinding));
+            if (_environmentBinding.Length != 64)
+            {
+                throw new ArgumentException("Environment binding长度无效。", nameof(environmentBinding));
+            }
         }
 
         /// <summary>
@@ -97,6 +127,15 @@ namespace IHomeland.Client.Application.Session
                 }
             }
         }
+
+        /// <summary>
+        /// 当前已认证 lineage 被权威清除后通知 App Scope 消费者；参数为清除后 generation。
+        /// </summary>
+        /// <remarks>
+        /// 事件只表示 Authenticated 到非认证终态的单向边界，不用于广播 token refresh。
+        /// Subscriber 必须在执行时重读 current Session，避免迟到通知覆盖后续显式登录。
+        /// </remarks>
+        internal event Action<long> Invalidated;
 
         /// <summary>
         /// 在不访问网络的情况下启用 session operation。
@@ -160,6 +199,187 @@ namespace IHomeland.Client.Application.Session
         }
 
         /// <summary>
+        /// 使用启动时读取的current refresh lineage执行唯一轮换，并在安全替换后发布snapshot。
+        /// </summary>
+        /// <param name="record">已经由secure store解封并通过schema验证的record。</param>
+        /// <param name="cancellationToken">有界启动恢复取消信号；取消refresh视为commit unknown。</param>
+        /// <returns>封闭恢复终态与仅成功时存在的current snapshot。</returns>
+        internal async Task<ClientSessionRestoreResult> RestoreAsync(
+            ClientSecureSessionRecord record,
+            CancellationToken cancellationToken)
+        {
+            if (record == null)
+            {
+                throw new ArgumentNullException(nameof(record));
+            }
+
+            long intent;
+            long invalidatedGeneration = 0;
+            lock (_sync)
+            {
+                if (!_initialized ||
+                    _state == ClientSessionOwnerState.Stopped ||
+                    _state != ClientSessionOwnerState.Unauthenticated ||
+                    _restoreInProgress ||
+                    !_configurationStore.TryGetCurrent(out _))
+                {
+                    return ClientSessionRestoreResult.Failed(
+                        _state == ClientSessionOwnerState.Stopped
+                            ? ClientSessionRestoreOutcome.Stopped
+                            : ClientSessionRestoreOutcome.Unresolved);
+                }
+
+                _restoreInProgress = true;
+                intent = ++_latestAuthenticationIntent;
+            }
+
+            try
+            {
+                if (!string.Equals(
+                        record.EnvironmentBinding,
+                        _environmentBinding,
+                        StringComparison.Ordinal) ||
+                    record.RefreshExpiresAtMilliseconds <= _clock.UtcNowMilliseconds ||
+                    record.Session.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds)
+                {
+                    var retired = await RetireRestoreRecordAsync(
+                        intent,
+                        ClientSessionOwnerState.Unauthenticated);
+                    return ClientSessionRestoreResult.Failed(retired
+                        ? ClientSessionRestoreOutcome.Rejected
+                        : ClientSessionRestoreOutcome.StorageFailure);
+                }
+
+                var refresh = await _httpApi.RefreshAsync(
+                    record.RefreshToken,
+                    cancellationToken);
+                if (!refresh.IsSuccess)
+                {
+                    if (IsUnauthenticated(refresh.ServerError))
+                    {
+                        var rejected = await RetireRestoreRecordAsync(
+                            intent,
+                            ClientSessionOwnerState.Unauthenticated);
+                        return ClientSessionRestoreResult.Failed(rejected
+                            ? ClientSessionRestoreOutcome.Rejected
+                            : ClientSessionRestoreOutcome.StorageFailure);
+                    }
+
+                    if (IsCommitUnknown(refresh.Failure))
+                    {
+                        var outcome = refresh.Failure.Kind == ClientHttpFailureKind.Stopped
+                            ? ClientSessionRestoreOutcome.Stopped
+                            : ClientSessionRestoreOutcome.Unresolved;
+                        var retired = await RetireRestoreRecordAsync(
+                            intent,
+                            ClientSessionOwnerState.Unresolved);
+                        return ClientSessionRestoreResult.Failed(retired
+                            ? outcome
+                            : ClientSessionRestoreOutcome.StorageFailure);
+                    }
+
+                    // 已收到非认证类服务端响应，或请求在发送前被本地策略拒绝时，
+                    // refresh lineage 尚未被消费；本次启动不重试，但保留record供下次进程恢复。
+                    return ClientSessionRestoreResult.Failed(
+                        ClientSessionRestoreOutcome.Unresolved);
+                }
+
+                await _credentialMutation.WaitAsync(CancellationToken.None);
+                try
+                {
+                    bool canPersist;
+                    lock (_sync)
+                    {
+                        canPersist = _state == ClientSessionOwnerState.Unauthenticated &&
+                                     _restoreInProgress &&
+                                     intent == _latestAuthenticationIntent;
+                    }
+
+                    if (!canPersist)
+                    {
+                        await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                        return ClientSessionRestoreResult.Failed(
+                            ClientSessionRestoreOutcome.Stopped);
+                    }
+
+                    var candidate = new ClientSessionSnapshot(
+                        record.Account,
+                        record.Session,
+                        refresh.Value,
+                        generation: 0);
+                    var stored = await _secureSessionStore.ReplaceAsync(
+                        ClientSecureSessionRecord.FromSnapshot(
+                            _environmentBinding,
+                            candidate),
+                        CancellationToken.None);
+                    if (!stored.IsSuccess)
+                    {
+                        lock (_sync)
+                        {
+                            if (_state != ClientSessionOwnerState.Stopped &&
+                                intent == _latestAuthenticationIntent)
+                            {
+                                invalidatedGeneration = ClearLocked(
+                                    ClientSessionOwnerState.Unresolved);
+                            }
+                        }
+
+                        PublishInvalidated(invalidatedGeneration);
+
+                        await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                        return ClientSessionRestoreResult.Failed(
+                            ClientSessionRestoreOutcome.StorageFailure);
+                    }
+
+                    ClientSessionSnapshot committed;
+                    lock (_sync)
+                    {
+                        if (_state != ClientSessionOwnerState.Unauthenticated ||
+                            !_restoreInProgress ||
+                            intent != _latestAuthenticationIntent)
+                        {
+                            committed = null;
+                        }
+                        else
+                        {
+                            _generation++;
+                            _snapshot = new ClientSessionSnapshot(
+                                record.Account,
+                                record.Session,
+                                refresh.Value,
+                                _generation);
+                            _state = ClientSessionOwnerState.Authenticated;
+                            committed = _snapshot;
+                        }
+                    }
+
+                    if (committed == null)
+                    {
+                        await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                        return ClientSessionRestoreResult.Failed(
+                            ClientSessionRestoreOutcome.Stopped);
+                    }
+
+                    return ClientSessionRestoreResult.Restored(committed);
+                }
+                finally
+                {
+                    _credentialMutation.Release();
+                }
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    if (intent == _latestAuthenticationIntent)
+                    {
+                        _restoreInProgress = false;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Single-flight 轮换当前 token pair，并以 source generation 拒绝迟到结果。
         /// </summary>
         /// <param name="cancellationToken">第一个调用方拥有底层请求；后续调用方可独立取消等待。</param>
@@ -214,21 +434,21 @@ namespace IHomeland.Client.Application.Session
             var source = access.Value;
 
             var result = await _httpApi.LogoutAsync(source.Tokens.AccessToken, cancellationToken);
-            lock (_sync)
+            ClientSessionOwnerState? terminalState = null;
+            if (result.IsSuccess || IsUnauthenticated(result.ServerError))
             {
-                if (!IsCurrent(source.Generation))
-                {
-                    return result;
-                }
+                terminalState = ClientSessionOwnerState.Unauthenticated;
+            }
+            else if (IsCommitUnknown(result.Failure))
+            {
+                terminalState = ClientSessionOwnerState.Unresolved;
+            }
 
-                if (result.IsSuccess || IsUnauthenticated(result.ServerError))
-                {
-                    ClearLocked(ClientSessionOwnerState.Unauthenticated);
-                }
-                else if (IsCommitUnknown(result.Failure))
-                {
-                    ClearLocked(ClientSessionOwnerState.Unresolved);
-                }
+            if (terminalState.HasValue &&
+                !await RetireCurrentLineageAsync(source.Generation, terminalState.Value))
+            {
+                return SecureStorageFailure<ClientHttpEmpty>(
+                    ClientHttpOperationCatalog.LogoutSession.OperationID);
             }
 
             return result;
@@ -260,7 +480,9 @@ namespace IHomeland.Client.Application.Session
                 cancellationToken);
             if (!result.IsSuccess)
             {
-                HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
+                await HandleAuthoritativeUnauthenticatedAsync(
+                    source.Generation,
+                    result.ServerError);
                 return ConvertFailure<ClientConnectionTicket, ClientConnectionTicketLease>(result);
             }
 
@@ -307,7 +529,9 @@ namespace IHomeland.Client.Application.Session
                 cancellationToken);
             if (!result.IsSuccess)
             {
-                HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
+                await HandleAuthoritativeUnauthenticatedAsync(
+                    source.Generation,
+                    result.ServerError);
                 return result;
             }
 
@@ -349,7 +573,9 @@ namespace IHomeland.Client.Application.Session
                 cancellationToken);
             if (!result.IsSuccess)
             {
-                HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
+                await HandleAuthoritativeUnauthenticatedAsync(
+                    source.Generation,
+                    result.ServerError);
                 return result;
             }
 
@@ -398,7 +624,9 @@ namespace IHomeland.Client.Application.Session
                 cancellationToken);
             if (!result.IsSuccess)
             {
-                HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
+                await HandleAuthoritativeUnauthenticatedAsync(
+                    source.Generation,
+                    result.ServerError);
                 return ConvertFailure<ClientWorldAdmission, ClientWorldAdmissionLease>(result);
             }
 
@@ -497,34 +725,80 @@ namespace IHomeland.Client.Application.Session
         /// <param name="sourceGeneration">WSS ticket 单次交付时捕获的本地 session generation。</param>
         /// <param name="invalidatedEpoch">服务端 forced logout/session invalidation 公布的新 epoch。</param>
         /// <returns>来源仍 current 且新 epoch 更高、因而已清除 snapshot 时返回 true。</returns>
-        internal bool TryInvalidateFromControl(long sourceGeneration, ulong invalidatedEpoch)
+        internal async Task<bool> TryInvalidateFromControlAsync(
+            long sourceGeneration,
+            ulong invalidatedEpoch)
         {
-            lock (_sync)
+            long invalidatedGeneration = 0;
+            await _credentialMutation.WaitAsync(CancellationToken.None);
+            try
             {
-                if (_state != ClientSessionOwnerState.Authenticated ||
-                    _snapshot == null ||
-                    _snapshot.Generation != sourceGeneration ||
-                    invalidatedEpoch <= (ulong)_snapshot.Session.SessionEpoch)
+                lock (_sync)
                 {
-                    return false;
+                    if (_state != ClientSessionOwnerState.Authenticated ||
+                        _snapshot == null ||
+                        _snapshot.Generation != sourceGeneration ||
+                        invalidatedEpoch <= (ulong)_snapshot.Session.SessionEpoch)
+                    {
+                        return false;
+                    }
+
+                    invalidatedGeneration = ClearLocked(
+                        ClientSessionOwnerState.Unauthenticated);
                 }
 
-                ClearLocked(ClientSessionOwnerState.Unauthenticated);
+                PublishInvalidated(invalidatedGeneration);
+
+                var deleted = await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                if (!IsRetired(deleted.Outcome))
+                {
+                    lock (_sync)
+                    {
+                        if (_state == ClientSessionOwnerState.Unauthenticated && _snapshot == null)
+                        {
+                            _state = ClientSessionOwnerState.Unresolved;
+                        }
+                    }
+                }
+
                 return true;
+            }
+            finally
+            {
+                _credentialMutation.Release();
             }
         }
 
         /// <summary>
         /// 显式放弃本地 session lineage，不声称远端 logout 已完成。
         /// </summary>
-        internal void Forget()
+        internal async Task<ClientSecureSessionStoreOutcome> ForgetAsync(
+            CancellationToken cancellationToken)
         {
-            lock (_sync)
+            long invalidatedGeneration = 0;
+            await _credentialMutation.WaitAsync(cancellationToken);
+            try
             {
-                if (_state != ClientSessionOwnerState.Stopped)
+                lock (_sync)
                 {
-                    ClearLocked(ClientSessionOwnerState.Unauthenticated);
+                    if (_state == ClientSessionOwnerState.Stopped)
+                    {
+                        return ClientSecureSessionStoreOutcome.Stopped;
+                    }
+
+                    _latestAuthenticationIntent++;
+                    invalidatedGeneration = ClearLocked(
+                        ClientSessionOwnerState.Unauthenticated);
                 }
+
+                PublishInvalidated(invalidatedGeneration);
+
+                var deleted = await _secureSessionStore.DeleteAsync(cancellationToken);
+                return deleted.Outcome;
+            }
+            finally
+            {
+                _credentialMutation.Release();
             }
         }
 
@@ -533,15 +807,19 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         /// <param name="cancellationToken">同步清理不等待该信号。</param>
         /// <returns>Owner 已进入 Stopped 时完成的任务。</returns>
-        public Task StopAsync(CancellationToken cancellationToken)
+        public async Task StopAsync(CancellationToken cancellationToken)
         {
+            long invalidatedGeneration;
             lock (_sync)
             {
                 _latestAuthenticationIntent++;
-                ClearLocked(ClientSessionOwnerState.Stopped);
+                invalidatedGeneration = ClearLocked(ClientSessionOwnerState.Stopped);
             }
 
-            return Task.CompletedTask;
+            PublishInvalidated(invalidatedGeneration);
+
+            await _credentialMutation.WaitAsync(cancellationToken);
+            _credentialMutation.Release();
         }
 
         /// <summary>
@@ -574,23 +852,89 @@ namespace IHomeland.Client.Application.Session
                 return ConvertFailure<ClientAuthentication, ClientSessionSnapshot>(result);
             }
 
-            lock (_sync)
+            ClientHttpResult<ClientSessionSnapshot> commitResult;
+            var retireCandidate = false;
+            await _credentialMutation.WaitAsync(CancellationToken.None);
+            try
             {
-                if (_state == ClientSessionOwnerState.Stopped || intent != _latestAuthenticationIntent)
+                bool canPersist;
+                lock (_sync)
                 {
-                    return LocalPolicy<ClientSessionSnapshot>(
-                        operationID);
+                    canPersist = _state != ClientSessionOwnerState.Stopped &&
+                                 intent == _latestAuthenticationIntent;
                 }
 
-                _generation++;
-                _snapshot = new ClientSessionSnapshot(
-                    result.Value.Account,
-                    result.Value.Session,
-                    result.Value.Tokens,
-                    _generation);
-                _state = ClientSessionOwnerState.Authenticated;
-                return ClientHttpResult<ClientSessionSnapshot>.Success(_snapshot);
+                if (!canPersist)
+                {
+                    retireCandidate = true;
+                    commitResult = LocalPolicy<ClientSessionSnapshot>(operationID);
+                }
+                else
+                {
+                    var persistedCandidate = new ClientSessionSnapshot(
+                        result.Value.Account,
+                        result.Value.Session,
+                        result.Value.Tokens,
+                        generation: 0);
+                    var stored = await _secureSessionStore.ReplaceAsync(
+                        ClientSecureSessionRecord.FromSnapshot(
+                            _environmentBinding,
+                            persistedCandidate),
+                        CancellationToken.None);
+                    if (!stored.IsSuccess)
+                    {
+                        retireCandidate = true;
+                        commitResult = SecureStorageFailure<ClientSessionSnapshot>(
+                            operationID,
+                            stored.Outcome);
+                    }
+                    else
+                    {
+                        ClientSessionSnapshot committed;
+                        lock (_sync)
+                        {
+                            if (_state == ClientSessionOwnerState.Stopped ||
+                                intent != _latestAuthenticationIntent)
+                            {
+                                committed = null;
+                            }
+                            else
+                            {
+                                _generation++;
+                                _snapshot = new ClientSessionSnapshot(
+                                    result.Value.Account,
+                                    result.Value.Session,
+                                    result.Value.Tokens,
+                                    _generation);
+                                _state = ClientSessionOwnerState.Authenticated;
+                                committed = _snapshot;
+                            }
+                        }
+
+                        if (committed == null)
+                        {
+                            await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                            retireCandidate = true;
+                            commitResult = LocalPolicy<ClientSessionSnapshot>(operationID);
+                        }
+                        else
+                        {
+                            commitResult = ClientHttpResult<ClientSessionSnapshot>.Success(committed);
+                        }
+                    }
+                }
             }
+            finally
+            {
+                _credentialMutation.Release();
+            }
+
+            if (retireCandidate)
+            {
+                await RetireUnpublishedServerSessionAsync(result.Value.Tokens.AccessToken);
+            }
+
+            return commitResult;
         }
 
         /// <summary>
@@ -607,6 +951,7 @@ namespace IHomeland.Client.Application.Session
             TaskCompletionSource<ClientHttpResult<ClientSessionSnapshot>> completion,
             Task<ClientHttpResult<ClientSessionSnapshot>> sharedTask)
         {
+            long invalidatedGeneration = 0;
             try
             {
                 var result = await _httpApi.RefreshAsync(
@@ -615,30 +960,110 @@ namespace IHomeland.Client.Application.Session
                 ClientHttpResult<ClientSessionSnapshot> mapped;
                 if (!result.IsSuccess)
                 {
-                    HandleAuthoritativeUnauthenticated(source.Generation, result.ServerError);
-                    HandleCommitUnknown(source.Generation, result.Failure);
-                    mapped = ConvertFailure<ClientTokenPair, ClientSessionSnapshot>(result);
+                    ClientSessionOwnerState? terminalState = null;
+                    if (IsUnauthenticated(result.ServerError))
+                    {
+                        terminalState = ClientSessionOwnerState.Unauthenticated;
+                    }
+                    else if (IsCommitUnknown(result.Failure))
+                    {
+                        terminalState = ClientSessionOwnerState.Unresolved;
+                    }
+
+                    var retired = !terminalState.HasValue ||
+                                  await RetireCurrentLineageAsync(
+                                      source.Generation,
+                                      terminalState.Value);
+                    mapped = retired
+                        ? ConvertFailure<ClientTokenPair, ClientSessionSnapshot>(result)
+                        : SecureStorageFailure<ClientSessionSnapshot>(
+                            ClientHttpOperationCatalog.RefreshSession.OperationID);
                 }
                 else
                 {
-                    lock (_sync)
+                    await _credentialMutation.WaitAsync(CancellationToken.None);
+                    try
                     {
-                        if (!IsCurrent(source.Generation))
+                        lock (_sync)
                         {
-                            mapped = LocalPolicy<ClientSessionSnapshot>(
-                                ClientHttpOperationCatalog.RefreshSession.OperationID);
+                            if (!IsCurrent(source.Generation))
+                            {
+                                mapped = LocalPolicy<ClientSessionSnapshot>(
+                                    ClientHttpOperationCatalog.RefreshSession.OperationID);
+                            }
+                            else
+                            {
+                                mapped = null;
+                            }
                         }
-                        else
+
+                        if (mapped == null)
                         {
-                            _generation++;
-                            _snapshot = new ClientSessionSnapshot(
+                            var candidate = new ClientSessionSnapshot(
                                 source.Account,
                                 source.Session,
                                 result.Value,
-                                _generation);
-                            _state = ClientSessionOwnerState.Authenticated;
-                            mapped = ClientHttpResult<ClientSessionSnapshot>.Success(_snapshot);
+                                generation: 0);
+                            var stored = await _secureSessionStore.ReplaceAsync(
+                                ClientSecureSessionRecord.FromSnapshot(
+                                    _environmentBinding,
+                                    candidate),
+                                CancellationToken.None);
+                            if (!stored.IsSuccess)
+                            {
+                                lock (_sync)
+                                {
+                                    if (IsCurrent(source.Generation))
+                                    {
+                                        invalidatedGeneration = ClearLocked(
+                                            ClientSessionOwnerState.Unresolved);
+                                    }
+                                }
+
+                                PublishInvalidated(invalidatedGeneration);
+
+                                await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                                mapped = SecureStorageFailure<ClientSessionSnapshot>(
+                                    ClientHttpOperationCatalog.RefreshSession.OperationID);
+                            }
+                            else
+                            {
+                                ClientSessionSnapshot committed;
+                                lock (_sync)
+                                {
+                                    if (!IsCurrent(source.Generation))
+                                    {
+                                        committed = null;
+                                    }
+                                    else
+                                    {
+                                        _generation++;
+                                        _snapshot = new ClientSessionSnapshot(
+                                            source.Account,
+                                            source.Session,
+                                            result.Value,
+                                            _generation);
+                                        _state = ClientSessionOwnerState.Authenticated;
+                                        committed = _snapshot;
+                                    }
+                                }
+
+                                if (committed == null)
+                                {
+                                    await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                                    mapped = LocalPolicy<ClientSessionSnapshot>(
+                                        ClientHttpOperationCatalog.RefreshSession.OperationID);
+                                }
+                                else
+                                {
+                                    mapped = ClientHttpResult<ClientSessionSnapshot>.Success(committed);
+                                }
+                            }
                         }
+                    }
+                    finally
+                    {
+                        _credentialMutation.Release();
                     }
                 }
 
@@ -723,6 +1148,7 @@ namespace IHomeland.Client.Application.Session
         {
             return _initialized &&
                    _state != ClientSessionOwnerState.Stopped &&
+                   !_restoreInProgress &&
                    _configurationStore.TryGetCurrent(out _);
         }
 
@@ -770,7 +1196,7 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         /// <param name="sourceGeneration">Operation 发起时的 session generation。</param>
         /// <param name="serverError">可选服务端错误。</param>
-        private void HandleAuthoritativeUnauthenticated(
+        private async Task HandleAuthoritativeUnauthenticatedAsync(
             long sourceGeneration,
             ClientServerError serverError)
         {
@@ -779,34 +1205,105 @@ namespace IHomeland.Client.Application.Session
                 return;
             }
 
-            lock (_sync)
-            {
-                if (IsCurrent(sourceGeneration))
-                {
-                    ClearLocked(ClientSessionOwnerState.Unauthenticated);
-                }
-            }
+            await RetireCurrentLineageAsync(
+                sourceGeneration,
+                ClientSessionOwnerState.Unauthenticated);
         }
 
         /// <summary>
-        /// 对可能已经在远端提交的 refresh/logout 本地失败撤销旧 credential lineage。
+        /// 在credential mutation owner内清除current lineage并精确退休secure record。
         /// </summary>
-        /// <param name="sourceGeneration">Operation 发起时的 session generation。</param>
-        /// <param name="failure">可选本地失败。</param>
-        private void HandleCommitUnknown(long sourceGeneration, ClientHttpFailure failure)
+        /// <param name="sourceGeneration">触发终态的session generation。</param>
+        /// <param name="nextState">Unauthenticated或Unresolved终态。</param>
+        /// <returns>来源已经非current或record已安全退休时返回true。</returns>
+        private async Task<bool> RetireCurrentLineageAsync(
+            long sourceGeneration,
+            ClientSessionOwnerState nextState)
         {
-            if (!IsCommitUnknown(failure))
+            long invalidatedGeneration = 0;
+            await _credentialMutation.WaitAsync(CancellationToken.None);
+            try
             {
-                return;
-            }
-
-            lock (_sync)
-            {
-                if (IsCurrent(sourceGeneration))
+                lock (_sync)
                 {
-                    ClearLocked(ClientSessionOwnerState.Unresolved);
+                    if (!IsCurrent(sourceGeneration))
+                    {
+                        return true;
+                    }
+
+                    invalidatedGeneration = ClearLocked(nextState);
                 }
+
+                PublishInvalidated(invalidatedGeneration);
+
+                var deleted = await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                var retired = IsRetired(deleted.Outcome);
+                if (!retired)
+                {
+                    lock (_sync)
+                    {
+                        if (_snapshot == null && _state == nextState)
+                        {
+                            _state = ClientSessionOwnerState.Unresolved;
+                        }
+                    }
+                }
+
+                return retired;
             }
+            finally
+            {
+                _credentialMutation.Release();
+            }
+        }
+
+        /// <summary>退休尚未发布为current的启动record并设置对应Session终态。</summary>
+        /// <param name="restoreIntent">唯一启动restore intent。</param>
+        /// <param name="nextState">Rejected或commit-unknown对应终态。</param>
+        /// <returns>Record已删除或原本不存在时返回true。</returns>
+        private async Task<bool> RetireRestoreRecordAsync(
+            long restoreIntent,
+            ClientSessionOwnerState nextState)
+        {
+            long invalidatedGeneration = 0;
+            await _credentialMutation.WaitAsync(CancellationToken.None);
+            try
+            {
+                lock (_sync)
+                {
+                    if (_state != ClientSessionOwnerState.Stopped &&
+                        restoreIntent == _latestAuthenticationIntent)
+                    {
+                        invalidatedGeneration = ClearLocked(nextState);
+                    }
+                }
+
+                PublishInvalidated(invalidatedGeneration);
+
+                var deleted = await _secureSessionStore.DeleteAsync(CancellationToken.None);
+                return IsRetired(deleted.Outcome);
+            }
+            finally
+            {
+                _credentialMutation.Release();
+            }
+        }
+
+        /// <summary>尽力使未发布的服务端session失效，且不改变任何current本地事实。</summary>
+        /// <param name="accessToken">仅当前候选持有的opaque access token。</param>
+        /// <returns>服务端调用得出封闭结果时完成。</returns>
+        private async Task RetireUnpublishedServerSessionAsync(string accessToken)
+        {
+            await _httpApi.LogoutAsync(accessToken, CancellationToken.None);
+        }
+
+        /// <summary>判断store delete是否已经保证旧lineage不可恢复。</summary>
+        /// <param name="outcome">封闭store outcome。</param>
+        /// <returns>成功删除或原本不存在时返回true。</returns>
+        private static bool IsRetired(ClientSecureSessionStoreOutcome outcome)
+        {
+            return outcome == ClientSecureSessionStoreOutcome.Succeeded ||
+                   outcome == ClientSecureSessionStoreOutcome.NotFound;
         }
 
         /// <summary>
@@ -854,11 +1351,41 @@ namespace IHomeland.Client.Application.Session
         /// 清除 credential 引用、递增 generation 并迁移到指定非 Authenticated 状态。
         /// </summary>
         /// <param name="nextState">Unauthenticated、Unresolved 或 Stopped。</param>
-        private void ClearLocked(ClientSessionOwnerState nextState)
+        private long ClearLocked(ClientSessionOwnerState nextState)
         {
+            var invalidated = _state == ClientSessionOwnerState.Authenticated && _snapshot != null;
             _generation++;
             _snapshot = null;
             _state = nextState;
+            return invalidated ? _generation : 0;
+        }
+
+        /// <summary>在 owner 锁外隔离发布一次已提交的 Session 失效边界。</summary>
+        /// <param name="generation">清除后的 generation；零表示本次没有清除认证 lineage。</param>
+        private void PublishInvalidated(long generation)
+        {
+            if (generation <= 0)
+            {
+                return;
+            }
+
+            var subscribers = Invalidated;
+            if (subscribers == null)
+            {
+                return;
+            }
+
+            foreach (Action<long> subscriber in subscribers.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(generation);
+                }
+                catch (Exception)
+                {
+                    // Session 已提交为失效终态；单个观察者故障不得回滚 credential owner。
+                }
+            }
         }
 
         /// <summary>
@@ -871,6 +1398,23 @@ namespace IHomeland.Client.Application.Session
         {
             return ClientHttpResult<T>.Failed(new ClientHttpFailure(
                 ClientHttpFailureKind.LocalPolicy,
+                operationID));
+        }
+
+        /// <summary>创建不携带路径、exception或credential的安全存储失败。</summary>
+        /// <typeparam name="T">原operation成功投影类型。</typeparam>
+        /// <param name="operationID">触发原子commit的冻结operationId。</param>
+        /// <param name="storeOutcome">触发失败的封闭store结果；只单独保留profile ownership。</param>
+        /// <returns>SecureStorage或profile-in-use本地失败。</returns>
+        private static ClientHttpResult<T> SecureStorageFailure<T>(
+            string operationID,
+            ClientSecureSessionStoreOutcome storeOutcome =
+                ClientSecureSessionStoreOutcome.StorageFailure)
+        {
+            return ClientHttpResult<T>.Failed(new ClientHttpFailure(
+                storeOutcome == ClientSecureSessionStoreOutcome.ProfileInUse
+                    ? ClientHttpFailureKind.SecureStorageProfileInUse
+                    : ClientHttpFailureKind.SecureStorage,
                 operationID));
         }
 

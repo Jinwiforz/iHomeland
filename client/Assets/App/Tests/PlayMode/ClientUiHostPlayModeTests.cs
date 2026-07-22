@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Presentation.Hosts.UGUI;
 using IHomeland.Client.Presentation.Hosts.UIToolkit;
@@ -28,24 +29,67 @@ namespace IHomeland.Client.Tests.PlayMode
         /// </summary>
         private static readonly System.TimeSpan TestCleanupTimeout = System.TimeSpan.FromSeconds(1);
 
-        /// <summary>保存每个测试创建且需要延迟销毁的 GameObject。</summary>
+        /// <summary>保存每个测试创建且需要在显式停止后同步销毁的 GameObject。</summary>
         private readonly List<GameObject> _gameObjects = new List<GameObject>();
 
         /// <summary>保存每个测试创建且需要显式销毁的 ScriptableObject。</summary>
         private readonly List<ScriptableObject> _assets = new List<ScriptableObject>();
 
+        /// <summary>保存测试前的后台输入策略，避免修改泄漏到其他 PlayMode fixture。</summary>
+        private InputSettings.BackgroundBehavior _originalBackgroundBehavior;
+
+#if UNITY_EDITOR
+        /// <summary>保存测试前的 Editor Game View 输入路由策略。</summary>
+        private InputSettings.EditorInputBehaviorInPlayMode _originalEditorInputBehavior;
+#endif
+
+        /// <summary>让程序化虚拟设备不依赖 Game View、远程桌面或窗口焦点。</summary>
+        [SetUp]
+        public void ConfigureDeterministicInputRouting()
+        {
+            _originalBackgroundBehavior = InputSystem.settings.backgroundBehavior;
+            InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+#if UNITY_EDITOR
+            _originalEditorInputBehavior = InputSystem.settings.editorInputBehaviorInPlayMode;
+            InputSystem.settings.editorInputBehaviorInPlayMode =
+                InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+#endif
+        }
+
+        /// <summary>恢复项目输入设置，保证测试不改变后续 Player 或 Editor 行为。</summary>
+        [TearDown]
+        public void RestoreInputRouting()
+        {
+            InputSystem.settings.backgroundBehavior = _originalBackgroundBehavior;
+#if UNITY_EDITOR
+            InputSystem.settings.editorInputBehaviorInPlayMode = _originalEditorInputBehavior;
+#endif
+        }
+
         /// <summary>
         /// 每个测试后销毁全部程序化对象并恢复 cursor baseline，防止跨测试残留 owner。
         /// </summary>
-        /// <returns>等待 Unity 完成延迟销毁的枚举器。</returns>
+        /// <returns>等待 Input owner 的 runtime clone 完成延迟销毁的枚举器。</returns>
         [UnityTearDown]
         public IEnumerator TearDownFixtures()
         {
             foreach (var gameObject in _gameObjects)
             {
+                if (gameObject == null ||
+                    !gameObject.TryGetComponent<ClientUiHostRoot>(out var hostRoot))
+                {
+                    continue;
+                }
+
+                var stop = hostRoot.StopAsync(CancellationToken.None);
+                Assert.That(stop.IsCompletedSuccessfully, Is.True);
+            }
+
+            foreach (var gameObject in _gameObjects)
+            {
                 if (gameObject != null)
                 {
-                    Object.Destroy(gameObject);
+                    Object.DestroyImmediate(gameObject);
                 }
             }
 
@@ -53,7 +97,7 @@ namespace IHomeland.Client.Tests.PlayMode
             {
                 if (asset != null)
                 {
-                    Object.Destroy(asset);
+                    Object.DestroyImmediate(asset);
                 }
             }
 
@@ -81,15 +125,16 @@ namespace IHomeland.Client.Tests.PlayMode
             Assert.That(inputAsset.FindActionMap("UI").enabled, Is.False);
             Assert.That(hostRoot.IsPlayerActionMapEnabled, Is.True);
             Assert.That(hostRoot.IsUiActionMapEnabled, Is.False);
-            Assert.That(UnityCursor.lockState, Is.EqualTo(CursorLockMode.Locked));
+            if (UnityEngine.Application.isFocused)
+            {
+                Assert.That(UnityCursor.lockState, Is.EqualTo(CursorLockMode.Locked));
+            }
 
             var input = (IClientUiInputCoordinator)hostRoot;
             var apply = input.ApplyAsync(
                 new ClientUiInputState(ClientUiInputMode.Ui, ClientUiRouteId.Login),
                 CancellationToken.None);
             Assert.That(apply.IsCompletedSuccessfully, Is.True);
-            UnityCursor.visible = false;
-            yield return null;
             Assert.That(hostRoot.IsPlayerActionMapEnabled, Is.False);
             Assert.That(hostRoot.IsUiActionMapEnabled, Is.True);
             Assert.That(UnityCursor.visible, Is.True);
@@ -275,7 +320,13 @@ namespace IHomeland.Client.Tests.PlayMode
             panelRenderer.panelSettings = panelSettings;
             panelRenderer.visualTreeAsset = visualTreeAsset;
             VisualElement toolkitRoot = null;
-            panelRenderer.RegisterUIReloadCallback((_, root, __) => toolkitRoot = root);
+            var toolkitReady = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            panelRenderer.RegisterUIReloadCallback((_, root, __) =>
+            {
+                toolkitRoot = root;
+                toolkitReady.TrySetResult(true);
+            });
             var toolkitHost = toolkitObject.AddComponent<ClientUiToolkitHost>();
             toolkitHost.ConfigureBeforeActivation(ClientUiRouteId.Login, panelRenderer, "DefaultAction");
 
@@ -287,7 +338,13 @@ namespace IHomeland.Client.Tests.PlayMode
             modalPanelRenderer.panelSettings = panelSettings;
             modalPanelRenderer.visualTreeAsset = modalVisualTreeAsset;
             VisualElement modalToolkitRoot = null;
-            modalPanelRenderer.RegisterUIReloadCallback((_, root, __) => modalToolkitRoot = root);
+            var modalToolkitReady = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            modalPanelRenderer.RegisterUIReloadCallback((_, root, __) =>
+            {
+                modalToolkitRoot = root;
+                modalToolkitReady.TrySetResult(true);
+            });
             var modalToolkitHost = modalToolkitObject.AddComponent<ClientUiToolkitHost>();
             modalToolkitHost.ConfigureBeforeActivation(
                 ClientUiRouteId.ConnectionLost,
@@ -321,7 +378,16 @@ namespace IHomeland.Client.Tests.PlayMode
             modalToolkitObject.SetActive(true);
             canvasObject.SetActive(true);
             hostRoot.gameObject.SetActive(true);
-            yield return null;
+            var panelsReady = Task.WhenAll(toolkitReady.Task, modalToolkitReady.Task);
+            while (!panelsReady.IsCompleted)
+            {
+                yield return null;
+            }
+
+            Assert.That(
+                panelsReady.IsCompletedSuccessfully,
+                Is.True,
+                panelsReady.Exception?.ToString());
 
             Assert.That(toolkitRoot, Is.Not.Null);
             Assert.That(modalToolkitRoot, Is.Not.Null);

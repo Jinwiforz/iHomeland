@@ -162,6 +162,31 @@ namespace IHomeland.Client.Tests.EditMode
             await fixture.StopAsync();
         }
 
+        /// <summary>验证Development资格故障提交真实transport terminal并释放socket与heartbeat owner。</summary>
+        [Test]
+        public async Task QualificationFault_UsesTransportTerminalPath()
+        {
+            var fixture = await GameplayFixture.CreateAsync(blockGameplayWrites: false);
+            Assert.That(await fixture.ConnectOwnWorldAsync(), Is.True);
+            var disconnects = 0;
+            ClientGameplayChannelSnapshot terminal = null;
+            fixture.Channel.UnexpectedDisconnect += snapshot =>
+            {
+                disconnects++;
+                terminal = snapshot;
+            };
+
+            Assert.That(fixture.Channel.InjectQualificationTransportDisconnect(), Is.True);
+            await DrainUntilAsync(fixture.Dispatcher, () => disconnects == 1);
+
+            Assert.That(terminal, Is.Not.Null);
+            Assert.That(terminal.CloseReason, Is.EqualTo(ClientGameplayCloseReason.Transport));
+            Assert.That(fixture.Channel.QualificationSocketOwnerCount, Is.Zero);
+            Assert.That(fixture.Channel.QualificationHeartbeatOwnerCount, Is.Zero);
+            Assert.That(fixture.Channel.QualificationPendingOperationCount, Is.Zero);
+            await fixture.StopAsync();
+        }
+
         /// <summary>
         /// 验证 writer encoded-byte budget 先于无界积压拒绝并完成全部 pending。
         /// </summary>
@@ -549,7 +574,12 @@ namespace IHomeland.Client.Tests.EditMode
                         new[] { endpoint },
                         new ClientPublicLimits(4096, 65536))));
                 var api = new FakeHttpApi(endpoint);
-                var session = new SessionCoordinator(configurationStore, api, new FakeClock());
+                var session = new SessionCoordinator(
+                    configurationStore,
+                    api,
+                    new FakeClock(),
+                    new FakeClientSecureSessionStore(),
+                    FakeClientSecureSessionStore.EnvironmentBinding);
                 await session.InitializeAsync(CancellationToken.None);
                 var login = await session.LoginAsync("fixture-user", "password", CancellationToken.None);
                 var dispatcher = new MainThreadDispatcher(Environment.CurrentManagedThreadId, 32);
@@ -679,6 +709,7 @@ namespace IHomeland.Client.Tests.EditMode
                         _endpoint,
                         visit ? ClientWorldRole.Visitor : ClientWorldRole.Owner,
                         visit ? ClientWorldAdmissionPurpose.Join : ClientWorldAdmissionPurpose.OwnWorld,
+                        visit ? 2UL : 0UL,
                         9000)));
             }
         }

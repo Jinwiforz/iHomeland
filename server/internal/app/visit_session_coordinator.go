@@ -528,7 +528,7 @@ func (coordinator *personalWorldVisitCoordinator) publishSafeReturns(directives 
 		fallback := visitv1.SafeReturnDestination(directive.FallbackDestination())
 		projected := visitv1.SafeReturnDirective_builder{
 			VisitSessionId: proto.String(directive.VisitSessionID().Value()), VisitorId: proto.String(directive.VisitorID().String()),
-			Reason: &reason, Preferred: &preferred, Fallback: &fallback,
+			Reason: &reason, Preferred: &preferred, Fallback: &fallback, Revision: proto.Uint64(directive.Revision().Uint64()),
 		}.Build()
 		_, err := coordinator.tcp.PublishVisitor(directive.VisitSessionID().Value(), directive.VisitorID().String(), 2122, visitv1.VisitSafeReturnPush_builder{Directive: projected}.Build())
 		coordinator.observeDelivery("safe_return", err, tcpgameplay.ErrConnectionNotFound)

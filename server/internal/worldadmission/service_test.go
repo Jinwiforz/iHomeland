@@ -55,7 +55,7 @@ func TestIssueReplaysFirstWindowWhenRequestClockAdvances(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture.clock.now = fixture.now.Add(time.Microsecond)
-	later, err := NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, fixture.stamp, fixture.endpoint, fixture.clock.now, fixture.binding.ExpiresAt().Add(time.Microsecond))
+	later, err := NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, visitsession.InitialRevision, fixture.stamp, fixture.endpoint, fixture.clock.now, fixture.binding.ExpiresAt().Add(time.Microsecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,9 +81,15 @@ func TestIssueIsDeterministicAndIdempotent(t *testing.T) {
 	if err != nil || again.Credential().Value() != replayed.Credential().Value() {
 		t.Fatalf("credential changed across replay: err=%v", err)
 	}
-	changed, _ := NewBinding(fixture.playerID, fixture.sessionID, session.Epoch(2), RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
+	changed, _ := NewBinding(fixture.playerID, fixture.sessionID, session.Epoch(2), RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, visitsession.InitialRevision, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
 	if result, err := fixture.service.Issue(context.Background(), id, changed); result.Valid() || !IsErrorCode(err, ErrorCodeIdempotencyConflict) {
 		t.Fatalf("changed binding result=%#v err=%v", result, err)
+	}
+	changedRevision, _ := visitsession.NewRevision(uint64(visitsession.InitialRevision) + 1)
+	changed, _ = NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, changedRevision, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
+	result, err := fixture.service.Issue(context.Background(), id, changed)
+	if err != nil || !result.Replayed() || result.Binding().VisitRevision() != visitsession.InitialRevision {
+		t.Fatalf("changed visit revision replay=%#v err=%v", result, err)
 	}
 }
 
@@ -122,7 +128,7 @@ func TestVerifyRejectsContradictoryStoreBinding(t *testing.T) {
 	}
 	otherPlayer, _ := account.NewPlayerID("ply_admissionOther")
 	otherSession, _ := session.NewSessionID("ses_admissionOther")
-	otherBinding, err := NewBinding(otherPlayer, otherSession, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
+	otherBinding, err := NewBinding(otherPlayer, otherSession, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeJoin, visitsession.InitialRevision, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +179,7 @@ func TestVisitQualificationPreservesPurpose(t *testing.T) {
 	if err != nil || strings.Contains(fmt.Sprintf("%#v", visitQualification), fixture.playerID.String()) {
 		t.Fatalf("join bridge err=%v", err)
 	}
-	reconnectBinding, err := NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeReconnect, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
+	reconnectBinding, err := NewBinding(fixture.playerID, fixture.sessionID, session.InitialEpoch, RoleVisitor, fixture.worldID, fixture.visitID, PurposeReconnect, visitsession.InitialRevision, fixture.stamp, fixture.endpoint, fixture.now, fixture.binding.ExpiresAt())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +252,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	stamp, _ := placement.NewAssignmentStamp(worldID, instanceID, nodeID, generation, fence)
 	assignment, _ := placement.NewAssignmentSnapshot(stamp, placement.PhaseActive, now.Add(-time.Minute), now.Add(time.Minute), now)
 	endpoint, _ := session.NewEndpoint(session.ChannelTLSTCP, "game.example.invalid", 4433)
-	binding, err := NewBinding(playerID, sessionID, session.InitialEpoch, RoleVisitor, worldID, visitID, PurposeJoin, stamp, endpoint, now, now.Add(30*time.Second))
+	binding, err := NewBinding(playerID, sessionID, session.InitialEpoch, RoleVisitor, worldID, visitID, PurposeJoin, visitsession.InitialRevision, stamp, endpoint, now, now.Add(30*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

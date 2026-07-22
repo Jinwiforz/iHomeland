@@ -180,7 +180,8 @@ func (service *Service) replayIssue(issueID IssueID, candidate Binding, existing
 	return IssueResult{credential: credential, binding: existing.Binding, replayed: true}, nil
 }
 
-// sameBindingAuthority 比较除服务端签发窗口外全部不可变授权事实。
+// sameBindingAuthority 比较response-loss重试必须稳定的目标事实。
+// Visit revision 与签发窗口均返回首次冻结值，不能把重试时新读到的值拼接进旧credential。
 func sameBindingAuthority(left Binding, right Binding) bool {
 	return left.PlayerID() == right.PlayerID() && left.SessionID() == right.SessionID() && left.Epoch() == right.Epoch() &&
 		left.Role() == right.Role() && left.WorldID() == right.WorldID() && left.VisitSessionID() == right.VisitSessionID() &&
@@ -293,6 +294,7 @@ func fingerprintBinding(binding Binding) Digest {
 	writeString(hasher, binding.WorldID().String())
 	writeString(hasher, binding.VisitSessionID().Value())
 	writeUint64(hasher, uint64(binding.Purpose()))
+	writeUint64(hasher, uint64(binding.VisitRevision()))
 	writeAssignment(hasher, binding.Assignment())
 	writeEndpoint(hasher, binding.Endpoint())
 	writeInt64(hasher, binding.IssuedAt().UnixMicro())

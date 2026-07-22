@@ -2,6 +2,9 @@ using System;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
 using IHomeland.Client.Core.Configuration;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+using IHomeland.Client.Core.Qualification;
+#endif
 using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Scenes.PersonalWorld;
 using UnityEngine;
@@ -53,6 +56,16 @@ namespace IHomeland.Client.Core.Bootstrap
         private ClientEnvironment _configuredEnvironment;
 
         /// <summary>
+        /// 保存当前 Host 唯一启动事务，使测试和生命周期诊断等待实际完成边界。
+        /// </summary>
+        private Task _startupTask = Task.CompletedTask;
+
+        /// <summary>
+        /// 获取当前 Host 的唯一启动事务；完成表示成功运行或失败清理已经收敛。
+        /// </summary>
+        internal Task StartupCompletion => _startupTask;
+
+        /// <summary>
         /// 在 Unity 主线程争用唯一 root、构造对象图并观察完整启动结果。
         /// </summary>
         /// <remarks>
@@ -60,6 +73,16 @@ namespace IHomeland.Client.Core.Bootstrap
         /// OnDestroy 会共享同一停止结果，不会重复清理参与者。
         /// </remarks>
         private async void Awake()
+        {
+            _startupTask = StartAsync();
+            await _startupTask;
+        }
+
+        /// <summary>
+        /// 执行可观察的唯一启动事务，并在返回前完成成功提交或失败清理。
+        /// </summary>
+        /// <returns>启动或失败回滚已经收敛时完成的任务。</returns>
+        private async Task StartAsync()
         {
             if (_appRoot == null)
             {
@@ -123,6 +146,11 @@ namespace IHomeland.Client.Core.Bootstrap
                     : new AppComposition().Build(environment, _uiHostRoot, _sceneTransitionHost);
                 _appRoot.Attach(composition);
                 await _appRoot.StartAsync();
+                // 固定低敏生命周期标记供发布 smoke 与现场诊断确认完整 App Scope 已启动。
+                Debug.Log("[IHOMELAND_APP] state=running");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                ClientQualificationPlayerSoak.TryStart(composition);
+#endif
             }
             catch (Exception startupError)
             {

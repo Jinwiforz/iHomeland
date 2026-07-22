@@ -56,6 +56,8 @@ Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具
 - `Cached` 只保留已初始化 Host，关闭时仍会 hide/unbind；`Recreate` 完整 dispose；`SceneBound` 必须绑定正 Scene generation。
 - 未登记 route、错误 scene generation、队列过载、调用取消、停止、策略拒绝和 Host failure 都返回稳定结果；结果区分未提交拒绝、幂等未变化、已提交成功和 post-commit failure，不把内部异常文本暴露给页面。
 - `ClientPersonalWorldExperience` 从既有 Session/World/Visit owner 派生不可变低敏 View State，并向页面提供窄语义 action；它不复制权威事实，不持有 credential 或 Unity object。
+- Experience 明确呈现 `RestoringSession`、`RecoveringControl`、`RecoveringWorld`、`AwaitingScene` 与 terminal `ConnectionLost`。control 恢复期间健康 gameplay/HUD 保持显示但邀请动作冻结；gameplay 恢复立即撤销旧 Scene/input，只有新 Scene/HUD generation 提交后关闭 modal。
+- Development资格soak只通过Experience现有菜单/取消intent反复打开关闭WorldVisit，并从Router/Scene owner读取低敏计数；它不直接操作VisualElement、GameObject、focus或cursor，也不能绕过route generation。真实UI Toolkit/uGUI、focus/cursor和Scene teardown仍由PlayMode mandatory场景证明。
 - Login、Shell、WorldVisit 与 ConnectionLost 使用 UI Toolkit，WorldHud 使用 scene-bound uGUI。产品 UXML/USS、Prefab 与 Scene 必须由 Unity Editor 创建并以直接引用接线，不得把资源路径加入 route definition。
 - 首期只使用一个项目 USS 表达 color、typography、spacing、focus、disabled、loading 与 error 语义；当前不引入 Theme manager、Resources 或 Addressables。
 

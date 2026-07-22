@@ -215,6 +215,8 @@ type WorldAdmissionResponse struct {
 	Role string `json:"role"`
 	// Purpose 是 OWN_WORLD、JOIN 或 RECONNECT。
 	Purpose string `json:"purpose"`
+	// VisitRevision 是 Visitor 首帧使用的权威 VisitSession CAS 版本；Owner 为零。
+	VisitRevision uint64 `json:"visitRevision"`
 	// ExpiresAtMS 是 credential 到期时刻，单位为 Unix epoch millisecond。
 	ExpiresAtMS int64 `json:"expiresAtMs"`
 }
@@ -493,10 +495,10 @@ func (response WorldAdmissionResponse) validate(kind string) error {
 	if !validAdmissionCredential(response.Credential) || response.Endpoint.Channel != "TLS_TCP" || !validEndpoint(response.Endpoint) || response.ExpiresAtMS <= 0 {
 		return errors.New("world admission projection is incomplete")
 	}
-	if kind == "OWN_WORLD" && (response.Role != "OWNER" || response.Purpose != "OWN_WORLD") {
+	if kind == "OWN_WORLD" && (response.Role != "OWNER" || response.Purpose != "OWN_WORLD" || response.VisitRevision != 0) {
 		return errors.New("own-world admission binding is inconsistent")
 	}
-	if kind == "VISIT_WORLD" && (response.Role != "VISITOR" || response.Purpose != "JOIN" && response.Purpose != "RECONNECT") {
+	if kind == "VISIT_WORLD" && (response.Role != "VISITOR" || response.Purpose != "JOIN" && response.Purpose != "RECONNECT" || response.VisitRevision == 0) {
 		return errors.New("visit-world admission binding is inconsistent")
 	}
 	return nil

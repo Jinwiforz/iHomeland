@@ -107,14 +107,16 @@ type SafeReturnDirective struct {
 	preferred SafeReturnDestination
 	// fallback 表示 preferred 不可用时的安全入口。
 	fallback SafeReturnDestination
+	// revision 绑定产生该结果的已提交 aggregate 版本，防止旧成员关系的迟到指令影响新成员关系。
+	revision Revision
 }
 
 // NewSafeReturnDirective 构造不含 endpoint、credential 或客户端 world identity 的结果。
-func NewSafeReturnDirective(visitSessionID VisitSessionID, visitorID account.PlayerID, reason SafeReturnReason) (SafeReturnDirective, error) {
-	if !visitSessionID.Valid() || !visitorID.Valid() || !reason.Valid() {
+func NewSafeReturnDirective(visitSessionID VisitSessionID, visitorID account.PlayerID, reason SafeReturnReason, revision Revision) (SafeReturnDirective, error) {
+	if !visitSessionID.Valid() || !visitorID.Valid() || !reason.Valid() || !revision.Valid() {
 		return SafeReturnDirective{}, errors.New("safe return directive is incomplete")
 	}
-	return SafeReturnDirective{visitSessionID: visitSessionID, visitorID: visitorID, reason: reason, preferred: SafeReturnDestinationOwnPersonalWorld, fallback: SafeReturnDestinationSafeEntry}, nil
+	return SafeReturnDirective{visitSessionID: visitSessionID, visitorID: visitorID, reason: reason, preferred: SafeReturnDestinationOwnPersonalWorld, fallback: SafeReturnDestinationSafeEntry, revision: revision}, nil
 }
 
 // VisitSessionID 返回产生结果的 aggregate identity。
@@ -136,9 +138,12 @@ func (directive SafeReturnDirective) FallbackDestination() SafeReturnDestination
 	return directive.fallback
 }
 
+// Revision 返回产生该指令的已提交 aggregate 版本。
+func (directive SafeReturnDirective) Revision() Revision { return directive.revision }
+
 // Valid 报告 directive 是否可以进入 store result。
 func (directive SafeReturnDirective) Valid() bool {
-	return directive.visitSessionID.Valid() && directive.visitorID.Valid() && directive.reason.Valid() && directive.preferred == SafeReturnDestinationOwnPersonalWorld && directive.fallback == SafeReturnDestinationSafeEntry
+	return directive.visitSessionID.Valid() && directive.visitorID.Valid() && directive.reason.Valid() && directive.preferred == SafeReturnDestinationOwnPersonalWorld && directive.fallback == SafeReturnDestinationSafeEntry && directive.revision.Valid()
 }
 
 // String 防止默认格式化扩散 aggregate 与 Visitor identity。
@@ -207,6 +212,8 @@ type AdmissionEligibility struct {
 	intent AdmissionIntent
 	// purpose 由 membership state 唯一决定，payload 不能选择。
 	purpose AdmissionPurpose
+	// revision 是签发判断读取的权威 VisitSession CAS 版本。
+	revision Revision
 }
 
 // Intent 返回非凭据 admission intent 值副本。
@@ -215,9 +222,12 @@ func (eligibility AdmissionEligibility) Intent() AdmissionIntent { return eligib
 // Purpose 返回领域 owner 根据 membership state 决定的用途。
 func (eligibility AdmissionEligibility) Purpose() AdmissionPurpose { return eligibility.purpose }
 
+// Revision 返回签发判断所依据的权威 VisitSession revision。
+func (eligibility AdmissionEligibility) Revision() Revision { return eligibility.revision }
+
 // Valid 报告结果是否包含完整 intent 与封闭 purpose。
 func (eligibility AdmissionEligibility) Valid() bool {
-	return eligibility.intent.Valid() && eligibility.purpose.Valid()
+	return eligibility.intent.Valid() && eligibility.purpose.Valid() && eligibility.revision.Valid()
 }
 
 // String 防止默认格式化展开 actor、lineage 与 assignment。

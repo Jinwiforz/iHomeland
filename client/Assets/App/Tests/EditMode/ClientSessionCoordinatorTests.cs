@@ -158,7 +158,7 @@ namespace IHomeland.Client.Tests.EditMode
             var second = coordinator.RefreshAsync(CancellationToken.None);
             Assert.That(second, Is.SameAs(first));
             Assert.That(api.RefreshCount, Is.EqualTo(1));
-            coordinator.Forget();
+            await coordinator.ForgetAsync(CancellationToken.None);
             refreshCompletion.SetResult(ClientHttpResult<ClientTokenPair>.Success(
                 new ClientTokenPair("new-access", "new-refresh", 3000, 4000)));
 
@@ -262,7 +262,7 @@ namespace IHomeland.Client.Tests.EditMode
 
             await coordinator.LogoutAsync(CancellationToken.None);
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
-            coordinator.Forget();
+            await coordinator.ForgetAsync(CancellationToken.None);
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unauthenticated));
         }
 
@@ -316,7 +316,7 @@ namespace IHomeland.Client.Tests.EditMode
                 LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "expired-access", "refresh"))),
                 RefreshHandler = (_, __) => Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
-                    new ClientTokenPair("fresh-access", "fresh-refresh", 5000, 6000))),
+                    new ClientTokenPair("fresh-access", "fresh-refresh", 4500, 5000))),
                 TicketHandler = (access, channel, _) =>
                 {
                     observedAccess = access;
@@ -418,6 +418,7 @@ namespace IHomeland.Client.Tests.EditMode
                 new ClientEndpoint(ClientEndpointChannel.TlsTcp, "game.example.invalid", 4433),
                 ClientWorldRole.Owner,
                 ClientWorldAdmissionPurpose.OwnWorld,
+                0,
                 2000);
             var api = new FakeHttpApi
             {
@@ -453,6 +454,7 @@ namespace IHomeland.Client.Tests.EditMode
                     new ClientEndpoint(ClientEndpointChannel.TlsTcp, "game.example.invalid", 4433),
                     ClientWorldRole.Owner,
                     ClientWorldAdmissionPurpose.Join,
+                    0,
                     2000),
                 login.Value.Generation);
             Assert.That(coordinator.TryTakeWorldAdmission(invalidBinding, out _), Is.False);
@@ -473,12 +475,23 @@ namespace IHomeland.Client.Tests.EditMode
             var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
             var login = await coordinator.LoginAsync("user", "password", CancellationToken.None);
             Assert.That(login.IsSuccess, Is.True);
+            var invalidationCount = 0;
+            var invalidatedGeneration = 0L;
+            coordinator.Invalidated += generation =>
+            {
+                invalidationCount++;
+                invalidatedGeneration = generation;
+            };
 
-            var invalidated = coordinator.TryInvalidateFromControl(login.Value.Generation, 2);
+            var invalidated = await coordinator.TryInvalidateFromControlAsync(
+                login.Value.Generation,
+                2);
 
             Assert.That(invalidated, Is.True);
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unauthenticated));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+            Assert.That(invalidationCount, Is.EqualTo(1));
+            Assert.That(invalidatedGeneration, Is.GreaterThan(login.Value.Generation));
         }
 
         /// <summary>
@@ -497,7 +510,9 @@ namespace IHomeland.Client.Tests.EditMode
             var login = await coordinator.LoginAsync("user", "password", CancellationToken.None);
             Assert.That(login.IsSuccess, Is.True);
 
-            var invalidated = coordinator.TryInvalidateFromControl(login.Value.Generation, 1);
+            var invalidated = await coordinator.TryInvalidateFromControlAsync(
+                login.Value.Generation,
+                1);
 
             Assert.That(invalidated, Is.False);
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Authenticated));
@@ -523,7 +538,9 @@ namespace IHomeland.Client.Tests.EditMode
             var first = await coordinator.LoginAsync("user-a", "password", CancellationToken.None);
             var second = await coordinator.LoginAsync("user-b", "password", CancellationToken.None);
 
-            var invalidated = coordinator.TryInvalidateFromControl(first.Value.Generation, 99);
+            var invalidated = await coordinator.TryInvalidateFromControlAsync(
+                first.Value.Generation,
+                99);
 
             Assert.That(invalidated, Is.False);
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Authenticated));
@@ -532,22 +549,265 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(current.Session.SessionID, Is.EqualTo("session-b"));
         }
 
+        /// <summary>验证login只有在secure replace完成后才发布Authenticated snapshot。</summary>
+        [Test]
+        public async Task Login_PersistsRefreshLineage_BeforePublishingSnapshot()
+        {
+            var replaceEntered = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var allowReplace = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var secureStore = new FakeClientSecureSessionStore
+            {
+                ReplaceHandler = async (_, __) =>
+                {
+                    replaceEntered.TrySetResult(true);
+                    await allowReplace.Task;
+                    return ClientSecureSessionStoreResult<ClientSecureSessionStoreEmpty>.Success(
+                        ClientSecureSessionStoreEmpty.Value);
+                },
+            };
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+
+            var login = coordinator.LoginAsync("user", "password", CancellationToken.None);
+            await replaceEntered.Task;
+
+            Assert.That(login.IsCompleted, Is.False);
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+            allowReplace.TrySetResult(true);
+            var result = await login;
+
+            Assert.That(result.IsSuccess, Is.True);
+            Assert.That(secureStore.GetRecord().RefreshToken, Is.EqualTo("refresh"));
+            Assert.That(coordinator.TryGetCurrent(out var current), Is.True);
+            Assert.That(current.Generation, Is.EqualTo(result.Value.Generation));
+        }
+
+        /// <summary>验证login安全存储失败时不发布credential，并尽力retire服务端候选。</summary>
+        [Test]
+        public async Task Login_ReplaceFailure_FailsClosed()
+        {
+            var logoutCount = 0;
+            var secureStore = new FakeClientSecureSessionStore
+            {
+                ReplaceOutcome = ClientSecureSessionStoreOutcome.StorageFailure,
+            };
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+                LogoutHandler = (_, __) =>
+                {
+                    logoutCount++;
+                    return Task.FromResult(ClientHttpResult<ClientHttpEmpty>.Success(
+                        new ClientHttpEmpty()));
+                },
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+
+            var result = await coordinator.LoginAsync(
+                "user",
+                "password",
+                CancellationToken.None);
+
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.SecureStorage));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+            Assert.That(secureStore.GetRecord(), Is.Null);
+            Assert.That(logoutCount, Is.EqualTo(1));
+        }
+
+        /// <summary>验证第二个production profile writer得到稳定ownership失败而非内部错误。</summary>
+        [Test]
+        public async Task Login_ProfileInUse_PreservesStableFailure()
+        {
+            var secureStore = new FakeClientSecureSessionStore
+            {
+                ReplaceOutcome = ClientSecureSessionStoreOutcome.ProfileInUse,
+            };
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+                LogoutHandler = (_, __) => Task.FromResult(
+                    ClientHttpResult<ClientHttpEmpty>.Success(new ClientHttpEmpty())),
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+
+            var result = await coordinator.LoginAsync(
+                "user",
+                "password",
+                CancellationToken.None);
+
+            Assert.That(
+                result.Failure.Kind,
+                Is.EqualTo(ClientHttpFailureKind.SecureStorageProfileInUse));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+        }
+
+        /// <summary>验证refresh replace失败会同时撤销内存与旧持久lineage。</summary>
+        [Test]
+        public async Task Refresh_ReplaceFailure_RetiresOldLineage()
+        {
+            var secureStore = new FakeClientSecureSessionStore();
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+                RefreshHandler = (_, __) => Task.FromResult(
+                    ClientHttpResult<ClientTokenPair>.Success(
+                        new ClientTokenPair("access-new", "refresh-new", 4500, 5000))),
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+            await coordinator.LoginAsync("user", "password", CancellationToken.None);
+            secureStore.ReplaceOutcome = ClientSecureSessionStoreOutcome.StorageFailure;
+
+            var result = await coordinator.RefreshAsync(CancellationToken.None);
+
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.SecureStorage));
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+            Assert.That(secureStore.GetRecord(), Is.Null);
+            Assert.That(secureStore.DeleteCount, Is.EqualTo(1));
+        }
+
+        /// <summary>验证logout删除失败仍撤销内存，并明确暴露secure storage终态。</summary>
+        [Test]
+        public async Task Logout_DeleteFailure_IsUnresolvedStorageFailure()
+        {
+            var secureStore = new FakeClientSecureSessionStore();
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+                LogoutHandler = (_, __) => Task.FromResult(
+                    ClientHttpResult<ClientHttpEmpty>.Success(new ClientHttpEmpty())),
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+            await coordinator.LoginAsync("user", "password", CancellationToken.None);
+            secureStore.DeleteOutcome = ClientSecureSessionStoreOutcome.StorageFailure;
+
+            var result = await coordinator.LogoutAsync(CancellationToken.None);
+
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.SecureStorage));
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+        }
+
+        /// <summary>验证更高epoch清理失败时不恢复旧credential，并进入可诊断Unresolved。</summary>
+        [Test]
+        public async Task ControlInvalidation_DeleteFailure_RemainsFailClosed()
+        {
+            var secureStore = new FakeClientSecureSessionStore();
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+            var login = await coordinator.LoginAsync("user", "password", CancellationToken.None);
+            secureStore.DeleteOutcome = ClientSecureSessionStoreOutcome.StorageFailure;
+
+            var invalidated = await coordinator.TryInvalidateFromControlAsync(
+                login.Value.Generation,
+                2);
+
+            Assert.That(invalidated, Is.True);
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+        }
+
+        /// <summary>验证旧refresh晚到不能覆盖后发login已经持久化的新lineage。</summary>
+        [Test]
+        public async Task NewLogin_WinsAgainstLateRefreshPersistence()
+        {
+            var refreshCompletion = new TaskCompletionSource<ClientHttpResult<ClientTokenPair>>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var authenticationQueue = new Queue<ClientAuthentication>();
+            authenticationQueue.Enqueue(
+                CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"));
+            authenticationQueue.Enqueue(
+                CreateAuthentication("account-b", "session-b", "access-b", "refresh-b"));
+            var secureStore = new FakeClientSecureSessionStore();
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientHttpResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
+                RefreshHandler = (_, __) => refreshCompletion.Task,
+            };
+            var coordinator = await CreateCoordinatorAsync(
+                api,
+                new FakeClock(1000),
+                secureStore);
+            await coordinator.LoginAsync("user-a", "password", CancellationToken.None);
+
+            var refresh = coordinator.RefreshAsync(CancellationToken.None);
+            var relogin = await coordinator.LoginAsync(
+                "user-b",
+                "password",
+                CancellationToken.None);
+            refreshCompletion.SetResult(ClientHttpResult<ClientTokenPair>.Success(
+                new ClientTokenPair("access-late", "refresh-late", 4500, 5000)));
+            var late = await refresh;
+
+            Assert.That(relogin.IsSuccess, Is.True);
+            Assert.That(late.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(coordinator.TryGetCurrent(out var current), Is.True);
+            Assert.That(current.Session.SessionID, Is.EqualTo("session-b"));
+            Assert.That(secureStore.GetRecord().RefreshToken, Is.EqualTo("refresh-b"));
+        }
+
         /// <summary>
         /// 创建初始化完成且配置 Ready 的 Session coordinator。
         /// </summary>
         /// <param name="api">受测试控制的强类型 HTTP API。</param>
         /// <param name="clock">受测试控制的 UTC 时钟。</param>
+        /// <param name="secureStore">可选的受控secure store；为空时创建默认fake。</param>
         /// <returns>允许认证调用的 coordinator。</returns>
         private static async Task<SessionCoordinator> CreateCoordinatorAsync(
             FakeHttpApi api,
-            IClientClock clock)
+            IClientClock clock,
+            FakeClientSecureSessionStore secureStore = null)
         {
             var store = new ClientConfigurationStore();
             await store.InitializeAsync(CancellationToken.None);
             store.Publish(new ClientConfigurationSnapshot(
                 new ClientVersionInfo(1, "0.1.0", "0.1.0"),
                 CreateConfiguration()));
-            var coordinator = new SessionCoordinator(store, api, clock);
+            var coordinator = new SessionCoordinator(
+                store,
+                api,
+                clock,
+                secureStore ?? new FakeClientSecureSessionStore(),
+                FakeClientSecureSessionStore.EnvironmentBinding);
             await coordinator.InitializeAsync(CancellationToken.None);
             return coordinator;
         }
@@ -735,7 +995,10 @@ namespace IHomeland.Client.Tests.EditMode
                 string accessToken,
                 CancellationToken cancellationToken)
             {
-                return LogoutHandler(accessToken, cancellationToken);
+                return LogoutHandler != null
+                    ? LogoutHandler(accessToken, cancellationToken)
+                    : Task.FromResult(ClientHttpResult<ClientHttpEmpty>.Success(
+                        new ClientHttpEmpty()));
             }
 
             /// <inheritdoc />

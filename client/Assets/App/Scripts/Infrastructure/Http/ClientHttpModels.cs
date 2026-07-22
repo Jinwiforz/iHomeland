@@ -696,18 +696,21 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="endpoint">Credential 绑定的 TLS/TCP endpoint。</param>
         /// <param name="role">服务端权威角色。</param>
         /// <param name="purpose">服务端权威连接用途。</param>
+        /// <param name="visitRevision">Visitor 首帧使用的权威 VisitSession revision；Owner 为零。</param>
         /// <param name="expiresAtMilliseconds">绝对 Unix expiry，单位为毫秒。</param>
         internal ClientWorldAdmission(
             string credential,
             ClientEndpoint endpoint,
             ClientWorldRole role,
             ClientWorldAdmissionPurpose purpose,
+            ulong visitRevision,
             long expiresAtMilliseconds)
         {
             Credential = credential ?? throw new ArgumentNullException(nameof(credential));
             Endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
             Role = role;
             Purpose = purpose;
+            VisitRevision = visitRevision;
             ExpiresAtMilliseconds = expiresAtMilliseconds;
         }
 
@@ -722,6 +725,9 @@ namespace IHomeland.Client.Infrastructure.Http
 
         /// <summary>获取 credential 绑定用途。</summary>
         internal ClientWorldAdmissionPurpose Purpose { get; }
+
+        /// <summary>获取 Visitor admission 签发时冻结的权威 VisitSession revision；Owner 为零。</summary>
+        internal ulong VisitRevision { get; }
 
         /// <summary>获取 admission 绝对 Unix expiry，单位为毫秒。</summary>
         internal long ExpiresAtMilliseconds { get; }

@@ -184,12 +184,16 @@ namespace IHomeland.Client.Application.Control
         /// </summary>
         private IClientWebSocket _activeSocket;
 
+        /// <summary>只取消current connection attempt且不终止整个显式run的owner。</summary>
+        private CancellationTokenSource _activeAttemptCancellation;
+
         /// <summary>
         /// 保存当前安全可观察状态。
         /// </summary>
         private ClientControlChannelSnapshot _snapshot = new ClientControlChannelSnapshot(
             ClientControlChannelState.Created,
             ClientControlCloseReason.None,
+            0,
             0);
 
         /// <summary>
@@ -252,6 +256,9 @@ namespace IHomeland.Client.Application.Control
         /// </summary>
         internal event Action<ClientControlPush> PushReceived;
 
+        /// <summary>在generation-bound生命周期快照提交后通知唯一恢复owner。</summary>
+        internal event Action<ClientControlChannelSnapshot> HealthChanged;
+
         /// <summary>
         /// 获取不包含 endpoint、ticket、session 或 payload 的当前状态快照。
         /// </summary>
@@ -266,6 +273,53 @@ namespace IHomeland.Client.Application.Control
             }
         }
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>获取资格运行可观察的current control run owner数量。</summary>
+        internal int QualificationRunOwnerCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _runTask != null && !_runTask.IsCompleted ? 1 : 0;
+                }
+            }
+        }
+
+        /// <summary>获取资格范围内control subscriber总数。</summary>
+        internal int QualificationSubscriptionCount
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return CountSubscribers(PushReceived) + CountSubscribers(HealthChanged);
+                }
+            }
+        }
+
+        /// <summary>为Development资格运行中断current socket，使既有receive/retry路径观察transport失败。</summary>
+        /// <returns>存在已连接current socket并已请求中断时返回true。</returns>
+        internal bool InjectQualificationTransportDisconnect()
+        {
+            CancellationTokenSource attempt;
+            lock (_sync)
+            {
+                if (_snapshot.State != ClientControlChannelState.Connected ||
+                    _activeSocket == null ||
+                    _activeAttemptCancellation == null)
+                {
+                    return false;
+                }
+
+                attempt = _activeAttemptCancellation;
+            }
+
+            attempt.Cancel();
+            return true;
+        }
+#endif
+
         /// <summary>
         /// 启用显式运行入口但不签发 ticket 或建立连接。
         /// </summary>
@@ -274,6 +328,7 @@ namespace IHomeland.Client.Application.Control
         /// <exception cref="InvalidOperationException">重复初始化或停止后重启时抛出。</exception>
         public Task InitializeAsync(CancellationToken cancellationToken)
         {
+            ClientControlChannelSnapshot committed;
             cancellationToken.ThrowIfCancellationRequested();
             lock (_sync)
             {
@@ -287,9 +342,12 @@ namespace IHomeland.Client.Application.Control
                 _snapshot = new ClientControlChannelSnapshot(
                     ClientControlChannelState.Idle,
                     ClientControlCloseReason.None,
+                    _runGeneration,
                     0);
+                committed = _snapshot;
             }
 
+            NotifyHealthChanged(committed);
             return Task.CompletedTask;
         }
 
@@ -301,6 +359,8 @@ namespace IHomeland.Client.Application.Control
         /// <exception cref="InvalidOperationException">未初始化、已停止或已有 active run 时抛出。</exception>
         internal Task RunAsync(CancellationToken cancellationToken)
         {
+            Task runTask;
+            ClientControlChannelSnapshot committed;
             lock (_sync)
             {
                 if (_lifetimeCancellation == null ||
@@ -309,7 +369,9 @@ namespace IHomeland.Client.Application.Control
                     throw new InvalidOperationException("ClientControlChannel 当前生命周期不允许运行。");
                 }
 
-                if (_runTask != null && !_runTask.IsCompleted)
+                if (_runTask != null &&
+                    !_runTask.IsCompleted &&
+                    !CanSupersedeTerminalRunLocked())
                 {
                     throw new InvalidOperationException("ClientControlChannel 已存在 active run。");
                 }
@@ -322,12 +384,30 @@ namespace IHomeland.Client.Application.Control
                 _snapshot = new ClientControlChannelSnapshot(
                     ClientControlChannelState.Connecting,
                     ClientControlCloseReason.None,
+                    ComposeHealthGeneration(runGeneration, 1),
                     1);
                 _connectionReadiness = new TaskCompletionSource<bool>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 _runTask = RunCoreAsync(runGeneration, linkedCancellation);
-                return _runTask;
+                runTask = _runTask;
+                committed = _snapshot;
             }
+
+            NotifyHealthChanged(committed);
+            return runTask;
+        }
+
+        /// <summary>判断旧run是否已经发布可由下一代安全接管的稳定网络终态。</summary>
+        /// <remarks>
+        /// RunCore会先发布Disconnected，再进入finally释放Task identity。该终态是socket已释放后的
+        /// 线性化点；允许下一代在这段极短清理窗口内接管，旧代际会因generation不匹配而无法清除
+        /// 新run。Requested关闭不属于玩家可重试的网络故障，必须等待旧run完整退出。
+        /// </remarks>
+        /// <returns>旧run只剩无网络副作用的清理尾声时返回true。</returns>
+        private bool CanSupersedeTerminalRunLocked()
+        {
+            return _snapshot.State == ClientControlChannelState.Disconnected &&
+                   _snapshot.CloseReason != ClientControlCloseReason.Requested;
         }
 
         /// <summary>等待当前显式 run 首次具备接收 control push 的能力。</summary>
@@ -374,6 +454,7 @@ namespace IHomeland.Client.Application.Control
             Task runTask;
             IClientWebSocket activeSocket;
             TaskCompletionSource<bool> connectionReadiness;
+            ClientControlChannelSnapshot committed;
             lock (_sync)
             {
                 if (_stopTask != null)
@@ -387,13 +468,16 @@ namespace IHomeland.Client.Application.Control
                 _snapshot = new ClientControlChannelSnapshot(
                     ClientControlChannelState.Stopped,
                     ClientControlCloseReason.Requested,
+                    ComposeHealthGeneration(_runGeneration, _snapshot.Attempt),
                     _snapshot.Attempt);
+                committed = _snapshot;
                 lifetimeCancellation = _lifetimeCancellation;
                 runTask = _runTask;
                 activeSocket = _activeSocket;
                 connectionReadiness = _connectionReadiness;
             }
 
+            NotifyHealthChanged(committed);
             connectionReadiness?.TrySetResult(false);
 
             _ = StopCoreAsync(
@@ -430,7 +514,10 @@ namespace IHomeland.Client.Application.Control
                         ClientControlCloseReason.None,
                         attempt);
 
-                    var outcome = await RunAttemptAsync(runGeneration, cancellationToken);
+                    var outcome = await RunAttemptAsync(
+                        runGeneration,
+                        attempt,
+                        cancellationToken);
                     if (outcome == AttemptOutcomeKind.Requested)
                     {
                         TransitionIfCurrent(
@@ -491,10 +578,12 @@ namespace IHomeland.Client.Application.Control
         /// 签发并单次交付 ticket，建立 socket，然后运行唯一 receive pump。
         /// </summary>
         /// <param name="runGeneration">阻止旧 attempt 注册 active socket 的 run 代际。</param>
+        /// <param name="attempt">当前run内从1递增的connection attempt。</param>
         /// <param name="cancellationToken">当前 run 的组合取消信号。</param>
         /// <returns>决定是否恢复的稳定 attempt outcome。</returns>
         private async Task<AttemptOutcomeKind> RunAttemptAsync(
             long runGeneration,
+            int attempt,
             CancellationToken cancellationToken)
         {
             if (!_configurationStore.TryGetCurrent(out var configuration) ||
@@ -529,72 +618,82 @@ namespace IHomeland.Client.Application.Control
                 return AttemptOutcomeKind.PolicyRejected;
             }
 
-            lock (_sync)
-            {
-                if (runGeneration != _runGeneration ||
-                    _snapshot.State == ClientControlChannelState.Stopped)
-                {
-                    socket.Dispose();
-                    return AttemptOutcomeKind.Requested;
-                }
-
-                _activeSocket = socket;
-            }
-
-            try
-            {
-                using (var connectCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    connectCancellation.CancelAfter(ConnectTimeout);
-                    try
-                    {
-                        await socket.ConnectAsync(request, connectCancellation.Token);
-                    }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                    {
-                        return AttemptOutcomeKind.TransportFailure;
-                    }
-                }
-
-                if (!string.Equals(
-                        socket.SubProtocol,
-                        ClientWebSocketConnectRequest.ControlSubprotocol,
-                        StringComparison.Ordinal))
-                {
-                    return AttemptOutcomeKind.ProtocolFailure;
-                }
-
-                TransitionIfCurrent(
-                    runGeneration,
-                    ClientControlChannelState.Connected,
-                    ClientControlCloseReason.None,
-                    Snapshot.Attempt);
-                return await ReceiveAsync(
-                    socket,
-                    runGeneration,
-                    ticketUse.SourceGeneration,
-                    configuration.Configuration.Limits.RealtimeFrameBytes,
-                    cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return AttemptOutcomeKind.Requested;
-            }
-            catch (ClientWebSocketTransportException)
-            {
-                return AttemptOutcomeKind.TransportFailure;
-            }
-            finally
+            using (var attemptCancellation =
+                   CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
                 lock (_sync)
                 {
-                    if (ReferenceEquals(_activeSocket, socket))
+                    if (runGeneration != _runGeneration ||
+                        _snapshot.State == ClientControlChannelState.Stopped)
                     {
-                        _activeSocket = null;
+                        socket.Dispose();
+                        return AttemptOutcomeKind.Requested;
                     }
+
+                    _activeSocket = socket;
+                    _activeAttemptCancellation = attemptCancellation;
                 }
 
-                socket.Dispose();
+                try
+                {
+                    using (var connectCancellation = CancellationTokenSource.CreateLinkedTokenSource(attemptCancellation.Token))
+                    {
+                        connectCancellation.CancelAfter(ConnectTimeout);
+                        try
+                        {
+                            await socket.ConnectAsync(request, connectCancellation.Token);
+                        }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            return AttemptOutcomeKind.TransportFailure;
+                        }
+                    }
+
+                    if (!string.Equals(
+                            socket.SubProtocol,
+                            ClientWebSocketConnectRequest.ControlSubprotocol,
+                            StringComparison.Ordinal))
+                    {
+                        return AttemptOutcomeKind.ProtocolFailure;
+                    }
+
+                    TransitionIfCurrent(
+                        runGeneration,
+                        ClientControlChannelState.Connected,
+                        ClientControlCloseReason.None,
+                        attempt);
+                    return await ReceiveAsync(
+                        socket,
+                        ComposeHealthGeneration(runGeneration, attempt),
+                        ticketUse.SourceGeneration,
+                        configuration.Configuration.Limits.RealtimeFrameBytes,
+                        attemptCancellation.Token);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return AttemptOutcomeKind.Requested;
+                }
+                catch (OperationCanceledException) when (attemptCancellation.IsCancellationRequested)
+                {
+                    return AttemptOutcomeKind.TransportFailure;
+                }
+                catch (ClientWebSocketTransportException)
+                {
+                    return AttemptOutcomeKind.TransportFailure;
+                }
+                finally
+                {
+                    lock (_sync)
+                    {
+                        if (ReferenceEquals(_activeSocket, socket))
+                        {
+                            _activeSocket = null;
+                            _activeAttemptCancellation = null;
+                        }
+                    }
+
+                    socket.Dispose();
+                }
             }
         }
 
@@ -602,14 +701,14 @@ namespace IHomeland.Client.Application.Control
         /// 运行单 connection receive pump，完成 fragment 重组、sequence 与主线程投递。
         /// </summary>
         /// <param name="socket">当前 attempt 独占且已协商 subprotocol 的 socket。</param>
-        /// <param name="runGeneration">阻止旧 run 排队或执行迟到主线程 callback 的代际。</param>
+        /// <param name="connectionGeneration">绑定具体run与attempt的健康代际。</param>
         /// <param name="sourceSessionGeneration">Ticket 取得时仍 current 的 session generation。</param>
         /// <param name="maximumFrameBytes">Bootstrap 公布的全局 frame 上限。</param>
         /// <param name="cancellationToken">当前 run 的组合取消信号。</param>
         /// <returns>Receive pump 的稳定结束分类。</returns>
         private async Task<AttemptOutcomeKind> ReceiveAsync(
             IClientWebSocket socket,
-            long runGeneration,
+            long connectionGeneration,
             long sourceSessionGeneration,
             int maximumFrameBytes,
             CancellationToken cancellationToken)
@@ -666,7 +765,7 @@ namespace IHomeland.Client.Application.Control
                 expectedSequence++;
                 if (TryGetInvalidatedEpoch(push, out var invalidatedEpoch))
                 {
-                    var invalidated = _sessionCoordinator.TryInvalidateFromControl(
+                    var invalidated = await _sessionCoordinator.TryInvalidateFromControlAsync(
                         sourceSessionGeneration,
                         invalidatedEpoch);
                     if (invalidated)
@@ -674,13 +773,13 @@ namespace IHomeland.Client.Application.Control
                         _gameplaySessionInvalidation?.Invoke(sourceSessionGeneration);
                     }
                     // Session authority transition 已经决定终态；通知投递失败不能把结果降级为背压。
-                    _ = TryPostPush(runGeneration, push);
+                    _ = TryPostPush(connectionGeneration, push);
                     return invalidated
                         ? AttemptOutcomeKind.SessionInvalidated
                         : AttemptOutcomeKind.SupersededConnection;
                 }
 
-                if (!TryPostPush(runGeneration, push))
+                if (!TryPostPush(connectionGeneration, push))
                 {
                     return AttemptOutcomeKind.MainThreadBackpressure;
                 }
@@ -690,36 +789,38 @@ namespace IHomeland.Client.Application.Control
         /// <summary>
         /// 把强类型 PUSH 转移到主线程，并在执行前再次拒绝旧 run 的 callback。
         /// </summary>
-        /// <param name="runGeneration">产生该 PUSH 的显式 run 代际。</param>
+        /// <param name="connectionGeneration">产生PUSH的具体run/attempt健康代际。</param>
         /// <param name="push">已通过完整 codec 校验的不可变消息。</param>
         /// <returns>Callback 已进入有界主线程队列时返回 true。</returns>
-        private bool TryPostPush(long runGeneration, ClientControlPush push)
+        private bool TryPostPush(long connectionGeneration, ClientControlPush push)
         {
             lock (_sync)
             {
-                if (runGeneration != _runGeneration ||
-                    _snapshot.State == ClientControlChannelState.Stopped)
+                if (_snapshot.Generation != connectionGeneration ||
+                    _snapshot.State != ClientControlChannelState.Connected)
                 {
                     return false;
                 }
             }
 
             return _dispatcher.TryPost(
-                () => DispatchPushIfCurrent(runGeneration, push)) == DispatchPostResult.Accepted;
+                () => DispatchPushIfCurrent(connectionGeneration, push)) ==
+                DispatchPostResult.Accepted;
         }
 
         /// <summary>
         /// 仅允许仍属于 current run 的已排队 PUSH 调用 subscriber。
         /// </summary>
-        /// <param name="runGeneration">排队时捕获的显式 run 代际。</param>
+        /// <param name="connectionGeneration">排队时捕获的具体run/attempt健康代际。</param>
         /// <param name="push">待通知的不可变 control PUSH。</param>
-        private void DispatchPushIfCurrent(long runGeneration, ClientControlPush push)
+        private void DispatchPushIfCurrent(
+            long connectionGeneration,
+            ClientControlPush push)
         {
             Action<ClientControlPush> subscriber;
             lock (_sync)
             {
-                if (runGeneration != _runGeneration ||
-                    _snapshot.State == ClientControlChannelState.Stopped)
+                if (_snapshot.Generation != connectionGeneration)
                 {
                     return;
                 }
@@ -900,12 +1001,18 @@ namespace IHomeland.Client.Application.Control
         {
             TaskCompletionSource<bool> readiness = null;
             bool? readinessResult = null;
+            ClientControlChannelSnapshot committed = null;
             lock (_sync)
             {
                 if (runGeneration == _runGeneration &&
                     _snapshot.State != ClientControlChannelState.Stopped)
                 {
-                    _snapshot = new ClientControlChannelSnapshot(state, closeReason, attempt);
+                    _snapshot = new ClientControlChannelSnapshot(
+                        state,
+                        closeReason,
+                        ComposeHealthGeneration(runGeneration, attempt),
+                        attempt);
+                    committed = _snapshot;
                     if (state == ClientControlChannelState.Connected)
                     {
                         readiness = _connectionReadiness;
@@ -920,10 +1027,42 @@ namespace IHomeland.Client.Application.Control
                 }
             }
 
+            NotifyHealthChanged(committed);
             if (readinessResult.HasValue)
             {
                 readiness?.TrySetResult(readinessResult.Value);
             }
+        }
+
+        /// <summary>在内部锁外发布低敏health snapshot。</summary>
+        /// <param name="snapshot">已提交的不可变快照；未提交时为空。</param>
+        private void NotifyHealthChanged(ClientControlChannelSnapshot snapshot)
+        {
+            if (snapshot != null)
+            {
+                HealthChanged?.Invoke(snapshot);
+            }
+        }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>计算单个event当前subscriber数量。</summary>
+        /// <param name="subscribers">可空multicast delegate。</param>
+        /// <returns>当前invocation list长度。</returns>
+        private static int CountSubscribers(Delegate subscribers)
+        {
+            return subscribers?.GetInvocationList().Length ?? 0;
+        }
+#endif
+
+        /// <summary>将run generation与attempt序号组合为单调递增的通道健康代际。</summary>
+        /// <param name="runGeneration">当前control run generation。</param>
+        /// <param name="attempt">当前run内从零开始递增的attempt序号。</param>
+        /// <returns>可用于拒绝旧回调的复合健康代际；run尚未建立时返回零。</returns>
+        private static long ComposeHealthGeneration(long runGeneration, int attempt)
+        {
+            return runGeneration <= 0
+                ? 0
+                : (runGeneration << 32) | unchecked((uint)Math.Max(attempt, 0));
         }
 
         /// <summary>

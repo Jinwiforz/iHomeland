@@ -298,7 +298,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
     }
 
     /// <summary>
-    /// 保存 control channel 状态、原因与当前尝试序号的不可变快照。
+    /// 保存 control channel 状态、原因、run generation 与当前尝试序号的不可变快照。
     /// </summary>
     internal sealed class ClientControlChannelSnapshot
     {
@@ -307,14 +307,17 @@ namespace IHomeland.Client.Infrastructure.WebSocket
         /// </summary>
         /// <param name="state">当前生命周期状态。</param>
         /// <param name="closeReason">最近稳定关闭原因。</param>
+        /// <param name="generation">每次显式run递增的本地generation。</param>
         /// <param name="attempt">当前显式运行内从 1 开始的尝试序号；未尝试时为 0。</param>
         internal ClientControlChannelSnapshot(
             ClientControlChannelState state,
             ClientControlCloseReason closeReason,
+            long generation,
             int attempt)
         {
             State = state;
             CloseReason = closeReason;
+            Generation = generation;
             Attempt = attempt;
         }
 
@@ -328,6 +331,9 @@ namespace IHomeland.Client.Infrastructure.WebSocket
         /// </summary>
         internal ClientControlCloseReason CloseReason { get; }
 
+        /// <summary>获取阻止旧run回写的本地generation。</summary>
+        internal long Generation { get; }
+
         /// <summary>
         /// 获取当前运行内的连接尝试序号。
         /// </summary>
@@ -339,7 +345,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
         /// <returns>状态、原因与尝试序号。</returns>
         public override string ToString()
         {
-            return $"ClientControlChannel state={State} reason={CloseReason} attempt={Attempt}";
+            return $"ClientControlChannel state={State} reason={CloseReason} generation={Generation} attempt={Attempt}";
         }
     }
 

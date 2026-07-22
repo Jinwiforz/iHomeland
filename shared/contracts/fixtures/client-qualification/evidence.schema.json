@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ihomeland/client-qualification/evidence.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "qualificationVersion", "contractDigest", "buildDigests", "records"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "client-v1" },
+    "contractDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "buildDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development", "release"],
+      "properties": {
+        "development": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "release": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scenarioId", "outcome", "evidenceType", "completedAt"],
+        "properties": {
+          "scenarioId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "outcome": { "enum": ["pass", "fail"] },
+          "evidenceType": { "enum": ["tool", "unity-test", "player-automatic", "operator"] },
+          "completedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

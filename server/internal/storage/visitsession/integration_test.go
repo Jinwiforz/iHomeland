@@ -126,8 +126,8 @@ func TestStoreIntegrationProbeAndDirectiveReplay(t *testing.T) {
 	}
 	visitorA, _ := account.NewPlayerID("ply_directivea")
 	visitorB, _ := account.NewPlayerID("ply_directiveb")
-	directiveA, _ := domain.NewSafeReturnDirective(fixture.snapshot.ID(), visitorA, domain.SafeReturnReasonOwnerClosed)
-	directiveB, _ := domain.NewSafeReturnDirective(fixture.snapshot.ID(), visitorB, domain.SafeReturnReasonOwnerClosed)
+	directiveA, _ := domain.NewSafeReturnDirective(fixture.snapshot.ID(), visitorA, domain.SafeReturnReasonOwnerClosed, target.Revision())
+	directiveB, _ := domain.NewSafeReturnDirective(fixture.snapshot.ID(), visitorB, domain.SafeReturnReasonOwnerClosed, target.Revision())
 	closeCommand, _ := domain.NewCommandID("vcmd_directiveClose")
 	closeFingerprint := testFingerprint(t, "directive-close")
 	closeResult, err := domain.NewMutationResult(domain.OperationClose, target, closeCommand, closeFingerprint, domain.InviteSnapshot{}, domain.AdmissionIntent{}, domain.MembershipSnapshot{}, []domain.SafeReturnDirective{directiveA, directiveB})
