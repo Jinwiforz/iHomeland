@@ -1,0 +1,579 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "config_version": "battle-config-v1",
+  "case_id": "bounded-capacity-and-tick-debt",
+  "category": "overload",
+  "requirements": [
+    "determinism",
+    "overload",
+    "pipeline-owner"
+  ],
+  "coverage": {
+    "positive": [
+      "continuous-intent-fold",
+      "evidence-oldest-eviction",
+      "fixed-dt-catch-up"
+    ],
+    "negative": [
+      "active-effect-capacity",
+      "actor-command-capacity",
+      "ai-capacity",
+      "deferred-capacity",
+      "evidence-capacity",
+      "history-capacity",
+      "navigation-query-capacity",
+      "physics-query-capacity",
+      "player-admission-capacity",
+      "projectile-capacity",
+      "tick-debt-drain",
+      "world-command-capacity"
+    ],
+    "determinism": [
+      "reject-new-before-existing",
+      "stable-overflow-order"
+    ]
+  },
+  "units": {
+    "distance": "mm",
+    "velocity": "mm_per_s",
+    "duration": "ns",
+    "angle": "millirad",
+    "fraction": "millionths",
+    "attribute": "milli_attribute"
+  },
+  "config": {
+    "content_hash": "abababababababababababababababababababababababababababababababab",
+    "simulation_step_ns": 16000000,
+    "input_step_ns": 16000000,
+    "scalar_scale": 1000,
+    "continuous_hold_ticks": 1,
+    "capacities": {
+      "players": 1,
+      "ai_actors": 1,
+      "projectiles": 1,
+      "active_effects": 1,
+      "commands_per_actor_tick": 2,
+      "commands_per_world_tick": 3,
+      "deferred_structural_commands": 1,
+      "physics_queries_per_tick": 1,
+      "navigation_queries_per_tick": 1,
+      "history_frames": 2,
+      "history_bytes": 1024,
+      "events_per_tick": 2,
+      "evidence_bytes": 128,
+      "catch_up_steps": 1,
+      "hard_tick_debt": 2
+    }
+  },
+  "initial_state": {
+    "server_tick": 0,
+    "assignment_generation": 1,
+    "assignment_fingerprint": "1515151515151515151515151515151515151515151515151515151515151515",
+    "simulation_instance_id": "instance-overload",
+    "mapping_epoch": {
+      "epoch_id": 1,
+      "base_input_tick": 1,
+      "base_simulation_tick": 1,
+      "input_step_ns": 16000000,
+      "simulation_step_ns": 16000000
+    },
+    "last_processed_input_tick": 0,
+    "actors": [
+      {
+        "actor_id": "actor-owner",
+        "kind": "owner",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          0,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 10000,
+        "defense_milli": 1000,
+        "weapon": "fan",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      }
+    ],
+    "entities": [
+      {
+        "entity_id": "entity-effect-existing",
+        "kind": "effect",
+        "generation": 1,
+        "source_actor_id": "actor-owner",
+        "target_actor_id": "actor-owner",
+        "position_mm": [
+          0,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "start_tick": 0,
+        "expiry_tick": 10,
+        "stack_key": "effect-existing",
+        "stack_count": 1
+      },
+      {
+        "entity_id": "entity-projectile-existing",
+        "kind": "projectile",
+        "generation": 1,
+        "source_actor_id": "actor-owner",
+        "target_actor_id": "",
+        "position_mm": [
+          1000,
+          1000,
+          0
+        ],
+        "velocity_mm_per_s": [
+          1000,
+          0,
+          0
+        ],
+        "start_tick": 0,
+        "expiry_tick": 10,
+        "stack_key": "",
+        "stack_count": 0
+      }
+    ]
+  },
+  "commands": [
+    {
+      "arrival_order": 4,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 1,
+      "expiry_tick": 2,
+      "kind": "continuous_intent",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 250,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 3,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 2,
+      "expiry_tick": 2,
+      "kind": "continuous_intent",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 1000,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 2,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 3,
+      "expiry_tick": 2,
+      "kind": "switch_weapon",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "sword",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 1,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 4,
+      "expiry_tick": 2,
+      "kind": "activate_ability",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "fan-primary",
+        "prediction_id": "prediction-overload",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 5,
+      "target_tick": 1,
+      "actor_id": "actor-visitor",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 1,
+      "expiry_tick": 2,
+      "kind": "lifecycle_directive",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "spawn"
+      }
+    }
+  ],
+  "adapter_traces": {
+    "physics_queries": [
+      {
+        "query_id": "query-overload-one",
+        "tick": 1,
+        "kind": "move_capsule",
+        "actor_id": "actor-owner",
+        "start_mm": [
+          0,
+          0,
+          0
+        ],
+        "end_mm": [
+          16,
+          0,
+          0
+        ],
+        "hits": []
+      }
+    ],
+    "navigation_results": [],
+    "random_streams": [],
+    "history_frames": [
+      {
+        "server_tick": 0,
+        "assignment_generation": 1,
+        "actors": [
+          {
+            "actor_id": "actor-owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "hit_volume_id": "volume-capsule",
+            "movement_mode": "grounded",
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ]
+      }
+    ],
+    "history_queries": [],
+    "canonical_query_output": "query-overload-one:move-capsule:-",
+    "canonical_query_sha256": "b86a61cffa84a74e190f718a5b34abf3ee8387c5607ace9663e865c0e95e47a9"
+  },
+  "expected": {
+    "query_sequence": [
+      {
+        "order": 1,
+        "query_id": "query-overload-one",
+        "tick": 1,
+        "kind": "move_capsule",
+        "actor_id": "actor-owner"
+      }
+    ],
+    "state_checkpoints": [
+      {
+        "order": 1,
+        "server_tick": 1,
+        "last_processed_input_tick": 1,
+        "actors": [
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              16,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              1000,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 100000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "fan",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": [
+          {
+            "entity_id": "entity-effect-existing",
+            "kind": "effect",
+            "generation": 1,
+            "source_actor_id": "actor-owner",
+            "target_actor_id": "actor-owner",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "start_tick": 0,
+            "expiry_tick": 10,
+            "stack_key": "effect-existing",
+            "stack_count": 1
+          },
+          {
+            "entity_id": "entity-projectile-existing",
+            "kind": "projectile",
+            "generation": 1,
+            "source_actor_id": "actor-owner",
+            "target_actor_id": "",
+            "position_mm": [
+              1000,
+              1000,
+              0
+            ],
+            "velocity_mm_per_s": [
+              1000,
+              0,
+              0
+            ],
+            "start_tick": 0,
+            "expiry_tick": 10,
+            "stack_key": "",
+            "stack_count": 0
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "order": 1,
+        "event_id": "event-evidence-truncated",
+        "tick": 1,
+        "kind": "evidence-truncated",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 2,
+        "detail": "evict-oldest"
+      },
+      {
+        "order": 2,
+        "event_id": "event-drain-requested",
+        "tick": 1,
+        "kind": "drain-requested",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 3,
+        "detail": "tick-debt"
+      }
+    ],
+    "rejections": [
+      {
+        "order": 1,
+        "tick": 1,
+        "actor_id": "actor-owner",
+        "input_tick": 1,
+        "sequence": 3,
+        "reason": "capacity"
+      },
+      {
+        "order": 2,
+        "tick": 1,
+        "actor_id": "actor-owner",
+        "input_tick": 1,
+        "sequence": 4,
+        "reason": "capacity"
+      },
+      {
+        "order": 3,
+        "tick": 1,
+        "actor_id": "actor-visitor",
+        "input_tick": 1,
+        "sequence": 1,
+        "reason": "capacity"
+      }
+    ],
+    "capacity_outcome": {
+      "outcome": "draining",
+      "kind": "tick-debt",
+      "limit": 2,
+      "observed": 3,
+      "action": "request-drain",
+      "truncated_count": 0
+    },
+    "capacity_trials": [
+      {
+        "outcome": "rejected",
+        "kind": "active-effects",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "actor-commands",
+        "limit": 2,
+        "observed": 4,
+        "action": "fold-continuous",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "ai-actors",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "deferred-structural",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "truncated",
+        "kind": "evidence-bytes",
+        "limit": 128,
+        "observed": 256,
+        "action": "evict-oldest",
+        "truncated_count": 2
+      },
+      {
+        "outcome": "truncated",
+        "kind": "history-frames",
+        "limit": 2,
+        "observed": 3,
+        "action": "evict-oldest",
+        "truncated_count": 1
+      },
+      {
+        "outcome": "rejected",
+        "kind": "navigation-queries",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "physics-queries",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "players",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "projectiles",
+        "limit": 1,
+        "observed": 2,
+        "action": "reject-new",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "draining",
+        "kind": "tick-debt",
+        "limit": 2,
+        "observed": 3,
+        "action": "request-drain",
+        "truncated_count": 0
+      },
+      {
+        "outcome": "rejected",
+        "kind": "world-commands",
+        "limit": 3,
+        "observed": 5,
+        "action": "reject-new",
+        "truncated_count": 0
+      }
+    ],
+    "canonical_output": "queries=move-one|states=t1:owner16,0,0:existing-preserved|events=evidence-truncated,drain-requested|rejections=switch,ability,admission|capacity=tick-debt-draining",
+    "canonical_sha256": "9b9e0f546d66fa651a1f53a2c66caecc8f5971949560d874b1665305912a329f"
+  }
+}

@@ -1,0 +1,477 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "config_version": "battle-config-v1",
+  "case_id": "fan-projectile-hit",
+  "category": "combat",
+  "requirements": [
+    "ability-state",
+    "authoritative-combat",
+    "pipeline-owner"
+  ],
+  "coverage": {
+    "positive": [
+      "fan-activation",
+      "first-blocking-hit",
+      "next-tick-projectile",
+      "projectile-deferred-destroy",
+      "projectile-expiry"
+    ],
+    "negative": [
+      "cue-has-no-authority"
+    ],
+    "determinism": [
+      "projectile-query-order"
+    ]
+  },
+  "units": {
+    "distance": "mm",
+    "velocity": "mm_per_s",
+    "duration": "ns",
+    "angle": "millirad",
+    "fraction": "millionths",
+    "attribute": "milli_attribute"
+  },
+  "config": {
+    "content_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+    "simulation_step_ns": 16000000,
+    "input_step_ns": 16000000,
+    "scalar_scale": 1000,
+    "continuous_hold_ticks": 2,
+    "capacities": {
+      "players": 5,
+      "ai_actors": 16,
+      "projectiles": 64,
+      "active_effects": 96,
+      "commands_per_actor_tick": 8,
+      "commands_per_world_tick": 64,
+      "deferred_structural_commands": 64,
+      "physics_queries_per_tick": 128,
+      "navigation_queries_per_tick": 24,
+      "history_frames": 32,
+      "history_bytes": 1048576,
+      "events_per_tick": 128,
+      "evidence_bytes": 1048576,
+      "catch_up_steps": 2,
+      "hard_tick_debt": 4
+    }
+  },
+  "initial_state": {
+    "server_tick": 0,
+    "assignment_generation": 1,
+    "assignment_fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "simulation_instance_id": "instance-fan",
+    "mapping_epoch": {
+      "epoch_id": 1,
+      "base_input_tick": 1,
+      "base_simulation_tick": 1,
+      "input_step_ns": 16000000,
+      "simulation_step_ns": 16000000
+    },
+    "last_processed_input_tick": 0,
+    "actors": [
+      {
+        "actor_id": "actor-monster",
+        "kind": "monster",
+        "generation": 1,
+        "alive": true,
+        "team": "team-enemy",
+        "position_mm": [
+          4000,
+          1000,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 3142,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 50000,
+        "resource_milli": 0,
+        "attack_milli": 5000,
+        "defense_milli": 1000,
+        "weapon": "none",
+        "ai_state": "idle",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      },
+      {
+        "actor_id": "actor-owner",
+        "kind": "owner",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          0,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 10000,
+        "defense_milli": 1000,
+        "weapon": "fan",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      }
+    ],
+    "entities": [
+      {
+        "entity_id": "entity-expiring-projectile",
+        "kind": "projectile",
+        "generation": 1,
+        "source_actor_id": "actor-owner",
+        "target_actor_id": "",
+        "position_mm": [
+          -5000,
+          1000,
+          0
+        ],
+        "velocity_mm_per_s": [
+          -1000,
+          0,
+          0
+        ],
+        "start_tick": 0,
+        "expiry_tick": 1,
+        "stack_key": "",
+        "stack_count": 0
+      }
+    ]
+  },
+  "commands": [
+    {
+      "arrival_order": 1,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 1,
+      "expiry_tick": 2,
+      "kind": "activate_ability",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "fan-primary",
+        "prediction_id": "prediction-fan-one",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    }
+  ],
+  "adapter_traces": {
+    "physics_queries": [
+      {
+        "query_id": "query-fan-projectile",
+        "tick": 2,
+        "kind": "projectile_sweep",
+        "actor_id": "actor-owner",
+        "start_mm": [
+          200,
+          1000,
+          0
+        ],
+        "end_mm": [
+          4200,
+          1000,
+          0
+        ],
+        "hits": [
+          {
+            "fraction_millionths": 900000,
+            "collider_id": "collider-monster",
+            "subshape_id": "subshape-body",
+            "target_actor_id": "actor-monster",
+            "blocking": true
+          }
+        ]
+      }
+    ],
+    "navigation_results": [],
+    "random_streams": [],
+    "canonical_query_output": "query-fan-projectile:projectile-sweep:actor-monster/subshape-body",
+    "canonical_query_sha256": "f6a44484c09be66d29489f11fb1887c9ca19631d9dba02d7c68585c2fe95fc23"
+  },
+  "expected": {
+    "query_sequence": [
+      {
+        "order": 1,
+        "query_id": "query-fan-projectile",
+        "tick": 2,
+        "kind": "projectile_sweep",
+        "actor_id": "actor-owner"
+      }
+    ],
+    "state_checkpoints": [
+      {
+        "order": 1,
+        "server_tick": 1,
+        "last_processed_input_tick": 1,
+        "actors": [
+          {
+            "actor_id": "actor-monster",
+            "kind": "monster",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              4000,
+              1000,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 50000,
+            "resource_milli": 0,
+            "attack_milli": 5000,
+            "defense_milli": 1000,
+            "weapon": "none",
+            "ai_state": "idle",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 92000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "fan",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": [
+          {
+            "entity_id": "entity-fan-projectile",
+            "kind": "projectile",
+            "generation": 1,
+            "source_actor_id": "actor-owner",
+            "target_actor_id": "",
+            "position_mm": [
+              200,
+              1000,
+              0
+            ],
+            "velocity_mm_per_s": [
+              250000,
+              0,
+              0
+            ],
+            "start_tick": 1,
+            "expiry_tick": 10,
+            "stack_key": "",
+            "stack_count": 0
+          }
+        ]
+      },
+      {
+        "order": 2,
+        "server_tick": 2,
+        "last_processed_input_tick": 1,
+        "actors": [
+          {
+            "actor_id": "actor-monster",
+            "kind": "monster",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              4000,
+              1000,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 35000,
+            "resource_milli": 0,
+            "attack_milli": 5000,
+            "defense_milli": 1000,
+            "weapon": "none",
+            "ai_state": "idle",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 92000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "fan",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": []
+      }
+    ],
+    "events": [
+      {
+        "order": 1,
+        "event_id": "event-projectile-expiry",
+        "tick": 1,
+        "kind": "projectile-destroyed",
+        "source_id": "actor-owner",
+        "target_id": "entity-expiring-projectile",
+        "activation_id": "",
+        "value_milli": 0,
+        "detail": "expiry"
+      },
+      {
+        "order": 2,
+        "event_id": "event-fan-active",
+        "tick": 1,
+        "kind": "ability-activated",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "activation-fan-one",
+        "value_milli": 8000,
+        "detail": "prediction-fan-one"
+      },
+      {
+        "order": 3,
+        "event_id": "event-projectile-spawn",
+        "tick": 1,
+        "kind": "projectile-spawned",
+        "source_id": "actor-owner",
+        "target_id": "entity-fan-projectile",
+        "activation_id": "activation-fan-one",
+        "value_milli": 0,
+        "detail": "deferred-commit"
+      },
+      {
+        "order": 4,
+        "event_id": "event-projectile-hit",
+        "tick": 2,
+        "kind": "hit",
+        "source_id": "actor-owner",
+        "target_id": "actor-monster",
+        "activation_id": "activation-fan-one",
+        "value_milli": 15000,
+        "detail": "query-fan-projectile"
+      },
+      {
+        "order": 5,
+        "event_id": "event-monster-health",
+        "tick": 2,
+        "kind": "attribute-changed",
+        "source_id": "actor-owner",
+        "target_id": "actor-monster",
+        "activation_id": "activation-fan-one",
+        "value_milli": -15000,
+        "detail": "health"
+      },
+      {
+        "order": 6,
+        "event_id": "event-fan-cue",
+        "tick": 2,
+        "kind": "gameplay-cue",
+        "source_id": "actor-owner",
+        "target_id": "actor-monster",
+        "activation_id": "activation-fan-one",
+        "value_milli": 0,
+        "detail": "fan-impact"
+      },
+      {
+        "order": 7,
+        "event_id": "event-projectile-destroy",
+        "tick": 2,
+        "kind": "projectile-destroyed",
+        "source_id": "actor-owner",
+        "target_id": "entity-fan-projectile",
+        "activation_id": "activation-fan-one",
+        "value_milli": 0,
+        "detail": "first-blocking-hit"
+      }
+    ],
+    "rejections": [],
+    "capacity_outcome": {
+      "outcome": "within-limit",
+      "kind": "none",
+      "limit": 0,
+      "observed": 0,
+      "action": "none",
+      "truncated_count": 0
+    },
+    "canonical_output": "queries=fan-projectile|states=t1:projectile-live:t2:projectile-destroyed:monster-health35000|events=expiry,activate,spawn,hit,attribute,cue,destroy|rejections=-|capacity=within-limit",
+    "canonical_sha256": "c57ac98d5876f73d3223bf8d3b1cdbe36a1bc6f279c7b921a7d8b23a269ff186"
+  }
+}

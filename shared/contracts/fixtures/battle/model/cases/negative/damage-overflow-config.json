@@ -1,0 +1,172 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "config_version": "battle-config-v1",
+  "case_id": "damage-overflow-config",
+  "category": "negative",
+  "requirements": [
+    "authoritative-combat",
+    "determinism"
+  ],
+  "coverage": {
+    "positive": [],
+    "negative": [
+      "checked-intermediate-overflow",
+      "world-start-fail-closed"
+    ],
+    "determinism": [
+      "no-language-wraparound"
+    ]
+  },
+  "units": {
+    "distance": "mm",
+    "velocity": "mm_per_s",
+    "duration": "ns",
+    "angle": "millirad",
+    "fraction": "millionths",
+    "attribute": "milli_attribute"
+  },
+  "config": {
+    "content_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+    "simulation_step_ns": 16000000,
+    "input_step_ns": 16000000,
+    "scalar_scale": 1000,
+    "continuous_hold_ticks": 2,
+    "capacities": {
+      "players": 5,
+      "ai_actors": 16,
+      "projectiles": 64,
+      "active_effects": 96,
+      "commands_per_actor_tick": 8,
+      "commands_per_world_tick": 64,
+      "deferred_structural_commands": 64,
+      "physics_queries_per_tick": 128,
+      "navigation_queries_per_tick": 24,
+      "history_frames": 32,
+      "history_bytes": 1048576,
+      "events_per_tick": 128,
+      "evidence_bytes": 1048576,
+      "catch_up_steps": 2,
+      "hard_tick_debt": 4
+    },
+    "damage_formula_probe": {
+      "flat_damage_milli": 0,
+      "attacker_power_milli": 9000000000000000,
+      "power_coefficient_milli": 9000000000000000,
+      "minimum_damage_milli": 0,
+      "defender_defense_milli": 0
+    }
+  },
+  "initial_state": {
+    "server_tick": 0,
+    "assignment_generation": 1,
+    "assignment_fingerprint": "1212121212121212121212121212121212121212121212121212121212121212",
+    "simulation_instance_id": "instance-overflow",
+    "mapping_epoch": {
+      "epoch_id": 1,
+      "base_input_tick": 1,
+      "base_simulation_tick": 1,
+      "input_step_ns": 16000000,
+      "simulation_step_ns": 16000000
+    },
+    "last_processed_input_tick": 0,
+    "actors": [
+      {
+        "actor_id": "actor-owner",
+        "kind": "owner",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          0,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 10000,
+        "defense_milli": 1000,
+        "weapon": "sword",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      }
+    ],
+    "entities": []
+  },
+  "commands": [],
+  "adapter_traces": {
+    "physics_queries": [],
+    "navigation_results": [],
+    "random_streams": []
+  },
+  "expected": {
+    "query_sequence": [],
+    "state_checkpoints": [
+      {
+        "order": 1,
+        "server_tick": 0,
+        "last_processed_input_tick": 0,
+        "actors": [
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 100000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "sword",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": []
+      }
+    ],
+    "events": [],
+    "rejections": [],
+    "capacity_outcome": {
+      "outcome": "within-limit",
+      "kind": "none",
+      "limit": 0,
+      "observed": 0,
+      "action": "none",
+      "truncated_count": 0
+    },
+    "config_outcome": {
+      "outcome": "rejected",
+      "reason": "overflow"
+    },
+    "canonical_output": "queries=-|states=s0:unchanged|events=-|rejections=config-overflow|capacity=within-limit",
+    "canonical_sha256": "831cd7724fe269a6bfd8e450d503d8be4175736c3c92f01f6a07efd4ddcd8192"
+  }
+}

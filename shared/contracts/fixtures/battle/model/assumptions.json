@@ -1,0 +1,184 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "ownership": {
+    "owner": "battle-simulation-model",
+    "consumer": "battle-network-profile",
+    "qualification_state": "unmeasured",
+    "source_facts": [
+      "visit-session-default-capacity",
+      "visit-session-supported-capacity",
+      "personal-world-first-gameplay-slice"
+    ]
+  },
+  "visit_capacity": {
+    "owner_count": {
+      "value": 1,
+      "unit": "actors",
+      "classification": "hard_contract"
+    },
+    "default_visitor_count": {
+      "value": 4,
+      "unit": "actors",
+      "classification": "hard_contract"
+    },
+    "maximum_configurable_visitor_count": {
+      "value": 32,
+      "unit": "actors",
+      "classification": "hard_contract"
+    },
+    "profile_capacity_gate_required": true
+  },
+  "workloads": [
+    {
+      "id": "solo-owner",
+      "classification": "assumption",
+      "players": 1,
+      "ordinary_monsters": 6,
+      "bosses": 1,
+      "peak_projectiles": 16,
+      "peak_active_effects": 24,
+      "peak_physics_queries_per_tick": 32,
+      "peak_navigation_queries_per_tick": 8,
+      "peak_events_per_tick": 32,
+      "phases": [
+        "idle",
+        "movement-heavy",
+        "combat-heavy",
+        "boss-burst",
+        "disconnect-drain"
+      ]
+    },
+    {
+      "id": "default-coop",
+      "classification": "assumption",
+      "players": 5,
+      "ordinary_monsters": 16,
+      "bosses": 1,
+      "peak_projectiles": 64,
+      "peak_active_effects": 96,
+      "peak_physics_queries_per_tick": 128,
+      "peak_navigation_queries_per_tick": 24,
+      "peak_events_per_tick": 128,
+      "phases": [
+        "idle",
+        "movement-heavy",
+        "combat-heavy",
+        "boss-burst",
+        "disconnect-drain"
+      ]
+    },
+    {
+      "id": "visit-capacity-compatibility",
+      "classification": "assumption",
+      "players": 33,
+      "ordinary_monsters": 32,
+      "bosses": 1,
+      "peak_projectiles": 256,
+      "peak_active_effects": 384,
+      "peak_physics_queries_per_tick": 640,
+      "peak_navigation_queries_per_tick": 64,
+      "peak_events_per_tick": 512,
+      "phases": [
+        "idle",
+        "movement-heavy",
+        "combat-heavy",
+        "boss-burst",
+        "disconnect-drain"
+      ]
+    }
+  ],
+  "profile_outputs": [
+    {
+      "id": "simulation-step",
+      "unit": "ns",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "input-step",
+      "unit": "ns",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "input-window",
+      "unit": "ticks",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "continuous-hold",
+      "unit": "ticks",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "history-window",
+      "unit": "ticks",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "instance-player-limit",
+      "unit": "actors",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "cpu-per-tick",
+      "unit": "microseconds",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "memory-per-instance",
+      "unit": "bytes",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "history-memory",
+      "unit": "bytes",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "state-change-volume",
+      "unit": "bytes_per_tick",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "event-volume",
+      "unit": "events_per_tick",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "queue-capacity",
+      "unit": "items",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "bandwidth-per-player",
+      "unit": "bytes_per_second",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    },
+    {
+      "id": "bandwidth-per-instance",
+      "unit": "bytes_per_second",
+      "classification": "profile_output",
+      "status": "unmeasured"
+    }
+  ],
+  "measurement_rules": [
+    "measure-every-workload-phase",
+    "report-default-and-compatibility-separately",
+    "preserve-fixed-dt-under-load",
+    "reject-unqualified-player-capacity",
+    "do-not-promote-assumption-to-qualified"
+  ]
+}

@@ -53,16 +53,51 @@ iHomeland 采用“服务器权威状态同步 + 帧编号输入/预测/校正/�
 
 ### Tick 语义
 
-- `SimulationTick`：某个 SimulationInstance 的单调固定步长。只有 simulation worker 可以推进。
+- `SimulationTick`：某个 SimulationInstance 的单调固定步长。初始化完成得到 `S0`，Tick `T` 只能从完整 `S(T-1)` 产生完整 `S(T)`；只有 simulation worker 可以推进。
 - `InputTick`：客户端为本地预测输入分配的单调 tick；必须与 session、actor、sequence 和 expiry 共同验证。
-- `ServerTick`：权威 snapshot/result 所对应的已完成 SimulationTick。
+- `ServerTick`：权威 snapshot/result 所对应的已完成 SimulationTick，始终标识该 Tick 提交后的状态。
 - `LastProcessedInputTick`：服务器在该 snapshot 中已经接受并处理的本地玩家最大连续 InputTick。
 - `BaselineTick`：delta snapshot 所依赖的完整或已确认 baseline；客户端没有该 baseline 时不得猜测应用。
 - `SnapshotSequence`：同一网络 session 内的单调序号，用于丢弃旧的 unreliable-sequenced snapshot。
 
 输入消息表达意图，例如移动轴、跳跃边沿、武器槽、瞄准方向和 ability activation；不得携带最终 transform、命中对象、伤害值、冷却完成或奖励。服务器在 tick boundary 对输入完成身份绑定、窗口验证、去重、排序和限量后进入模拟。
 
-确切的 client tick 映射、允许提前/迟到窗口、缺失输入政策、bundle 大小、冗余发送数量、snapshot cadence 和 error tolerance 由 network profile 冻结。没有 profile 时只能实现离线 simulation harness，不能开放 production UDP。
+当前 mapping generation 内使用 checked integer arithmetic：
+
+```text
+mapped_tick =
+  base_simulation_tick
+  + floor((input_tick - base_input_tick) * input_step_ns / simulation_step_ns)
+```
+
+`LastProcessedInputTick` 只推进到已接受且已处理的最大连续 `InputTick`；gap、expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。确切 tick cadence、允许提前/迟到窗口、缺失输入政策、bundle 大小、冗余发送数量、snapshot cadence 和 error tolerance 由 network profile 测量后冻结。没有 profile 时只能实现离线 simulation harness，不能开放 production UDP。
+
+### B0.1 冻结模型
+
+权威 command vocabulary 只表达 `move-intent`、`jump-edge`、`switch-weapon`、`activate-ability` 等玩家意图；AI 产生同构的内部 intent。命令按 `target_tick -> actor_id -> input_tick -> sequence -> kind` 规范排序，网络 arrival order 不能改变裁决。payload 中的 transform、命中、伤害、effect、死亡与奖励声明一律无效。
+
+每类 mutation 只有一个 pipeline owner：
+
+| 状态 | 唯一 mutation owner |
+|---|---|
+| transform、velocity、grounded | Movement/Physics |
+| ability grant、phase、cost、cooldown | AbilityActivation |
+| hit 与 projectile lifecycle | HitDetection 与 deferred structural barrier |
+| effect、attribute、damage、death cause | Effect、Attribute、Death |
+| AI target、state、Boss phase | AIIntent；phase change 下一 Tick 生效 |
+| snapshot、history、evidence projection | Replication/History，只读消费 gameplay 状态 |
+
+首版模型还冻结以下行为：
+
+- 移动采用整数单位、输入 clamp、显式 acceleration/deceleration/gravity，以及稳定 slope/step/collision 裁决；相同 hit fraction 再按 `ColliderID`、`SubshapeID` 排序。
+- 剑在 active Tick 做 sweep，并按 activation-target 去重；扇子延迟提交 projectile spawn，下一 Tick 才移动，首次阻挡后终止。Gameplay Cue 只拥有表现，不拥有伤害事实。
+- Attribute 使用 signed 64-bit scaled integer；乘法回到 scale 时 toward zero。Effect 的 modifier、stack、refresh、expiry、immunity 和同 Tick 多伤害使用固定顺序，溢出配置在实例启动前拒绝；Death 只提交一个稳定 cause。
+- 普通怪物与 Boss 的 idle/acquire/chase/attack/recover/dead、threat/distance/ActorID tie-break 和 entity-local PRNG stream 均由服务端驱动；一个实体的随机消费不能扰动另一个实体。
+- 历史只保存满足查询所需的最小有界投影；future tick 被 clamp，过期、缺帧或旧 generation 明确拒绝。补偿查询在当前 Tick 结算，不回写历史。
+- player、projectile、effect、command、query、history 与 deferred buffer 都有硬容量。超限命令稳定拒绝并保留截断证据；hard Tick debt 触发有界 drain 请求，不允许无限追帧。
+- 确定性比较基于规范化的 query/state/event/rejection/capacity token 与 SHA-256；不得依赖 hash-map、pointer、callback、线程调度或第三方类型迭代顺序。
+
+机器可读 source of truth 位于 [Battle Simulation Model Fixtures](../shared/contracts/fixtures/battle/model/README.md)。`schema.json`、`manifest.json`、`assumptions.json` 与 cases 由只读 validator 验证；它们供 B0.2 profile 和后续无网络 C++ harness 消费，不是 wire schema，也不分配 message ID、lane、listener 或第三方依赖。
 
 ### 输入 history 与预测 history
 

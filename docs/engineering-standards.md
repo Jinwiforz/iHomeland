@@ -163,6 +163,12 @@ Metrics label 必须来自稳定有限集合；禁止把 request URL、错误文
 - multi-client manual acceptance
 - Windows Development/Release build
 
+跨端模型 fixtures：
+
+- schema、manifest、case inventory、引用、稳定排序、单位、coverage 与 canonical digest 验证
+- 隔离临时副本上的 unknown field、duplicate ID、漂移、安全字段和缺失 coverage 失败回归
+- validator 连续运行输出一致且不修改 corpus；纯模型门不得启动网络、Docker 或 gameplay evaluator
+
 Bug 修复优先增加可复现测试。无法运行测试时必须说明原因与剩余风险。
 
 ## 质量门

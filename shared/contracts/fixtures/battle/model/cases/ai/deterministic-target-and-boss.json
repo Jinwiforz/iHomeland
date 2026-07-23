@@ -1,0 +1,660 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "config_version": "battle-config-v1",
+  "case_id": "deterministic-target-and-boss",
+  "category": "ai",
+  "requirements": [
+    "determinism",
+    "deterministic-ai",
+    "pipeline-owner"
+  ],
+  "coverage": {
+    "positive": [
+      "boss-next-tick-phase",
+      "finite-ai-lifecycle",
+      "navigation-intent",
+      "threat-distance-actor-tie"
+    ],
+    "negative": [
+      "ai-cannot-write-transform",
+      "same-tick-phase-reentry"
+    ],
+    "determinism": [
+      "entity-local-random-stream",
+      "stable-target-selection"
+    ]
+  },
+  "units": {
+    "distance": "mm",
+    "velocity": "mm_per_s",
+    "duration": "ns",
+    "angle": "millirad",
+    "fraction": "millionths",
+    "attribute": "milli_attribute"
+  },
+  "config": {
+    "content_hash": "8888888888888888888888888888888888888888888888888888888888888888",
+    "simulation_step_ns": 16000000,
+    "input_step_ns": 16000000,
+    "scalar_scale": 1000,
+    "continuous_hold_ticks": 2,
+    "capacities": {
+      "players": 5,
+      "ai_actors": 16,
+      "projectiles": 64,
+      "active_effects": 96,
+      "commands_per_actor_tick": 8,
+      "commands_per_world_tick": 64,
+      "deferred_structural_commands": 64,
+      "physics_queries_per_tick": 128,
+      "navigation_queries_per_tick": 24,
+      "history_frames": 32,
+      "history_bytes": 1048576,
+      "events_per_tick": 128,
+      "evidence_bytes": 1048576,
+      "catch_up_steps": 2,
+      "hard_tick_debt": 4
+    }
+  },
+  "initial_state": {
+    "server_tick": 10,
+    "assignment_generation": 1,
+    "assignment_fingerprint": "1313131313131313131313131313131313131313131313131313131313131313",
+    "simulation_instance_id": "instance-ai",
+    "mapping_epoch": {
+      "epoch_id": 1,
+      "base_input_tick": 1,
+      "base_simulation_tick": 11,
+      "input_step_ns": 16000000,
+      "simulation_step_ns": 16000000
+    },
+    "last_processed_input_tick": 0,
+    "actors": [
+      {
+        "actor_id": "actor-boss",
+        "kind": "boss",
+        "generation": 1,
+        "alive": true,
+        "team": "team-enemy",
+        "position_mm": [
+          10000,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 3142,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 51000,
+        "resource_milli": 100000,
+        "attack_milli": 15000,
+        "defense_milli": 3000,
+        "weapon": "none",
+        "ai_state": "attack",
+        "boss_phase": 1,
+        "tags": [
+          "boss-phase-one",
+          "state-alive"
+        ]
+      },
+      {
+        "actor_id": "actor-monster-extra",
+        "kind": "monster",
+        "generation": 1,
+        "alive": true,
+        "team": "team-enemy",
+        "position_mm": [
+          20000,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 3142,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 30000,
+        "resource_milli": 0,
+        "attack_milli": 4000,
+        "defense_milli": 500,
+        "weapon": "none",
+        "ai_state": "idle",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      },
+      {
+        "actor_id": "actor-owner",
+        "kind": "owner",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          6000,
+          0,
+          -1000
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 10000,
+        "defense_milli": 1000,
+        "weapon": "sword",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      },
+      {
+        "actor_id": "actor-visitor",
+        "kind": "visitor",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          6000,
+          0,
+          1000
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 9000,
+        "defense_milli": 900,
+        "weapon": "fan",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      }
+    ],
+    "entities": []
+  },
+  "commands": [
+    {
+      "arrival_order": 1,
+      "target_tick": 11,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 1,
+      "expiry_tick": 12,
+      "kind": "activate_ability",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "sword-primary",
+        "prediction_id": "prediction-boss-hit",
+        "observed_tick": 10,
+        "directive": "none"
+      }
+    }
+  ],
+  "adapter_traces": {
+    "physics_queries": [
+      {
+        "query_id": "query-boss-hit",
+        "tick": 11,
+        "kind": "shape_cast",
+        "actor_id": "actor-owner",
+        "start_mm": [
+          6000,
+          1000,
+          -1000
+        ],
+        "end_mm": [
+          10500,
+          1000,
+          0
+        ],
+        "hits": [
+          {
+            "fraction_millionths": 900000,
+            "collider_id": "collider-boss",
+            "subshape_id": "subshape-body",
+            "target_actor_id": "actor-boss",
+            "blocking": true
+          }
+        ]
+      }
+    ],
+    "navigation_results": [
+      {
+        "query_id": "query-nav-boss-owner",
+        "tick": 12,
+        "actor_id": "actor-boss",
+        "target_actor_id": "actor-owner",
+        "path_mm": [
+          [
+            10000,
+            0,
+            0
+          ],
+          [
+            8000,
+            0,
+            -500
+          ],
+          [
+            6000,
+            0,
+            -1000
+          ]
+        ]
+      }
+    ],
+    "random_streams": [
+      {
+        "system_id": "system-ai",
+        "entity_id": "actor-boss",
+        "stream_id": "stream-attack-choice",
+        "seed": 1101,
+        "draws": [
+          17,
+          3
+        ]
+      },
+      {
+        "system_id": "system-ai",
+        "entity_id": "actor-monster-extra",
+        "stream_id": "stream-attack-choice",
+        "seed": 2202,
+        "draws": [
+          9,
+          11
+        ]
+      }
+    ],
+    "ai_perceptions": [
+      {
+        "tick": 12,
+        "actor_id": "actor-boss",
+        "candidates": [
+          {
+            "target_actor_id": "actor-owner",
+            "threat_milli": 5000,
+            "distance_mm": 4123,
+            "alive": true,
+            "attackable": true
+          },
+          {
+            "target_actor_id": "actor-visitor",
+            "threat_milli": 5000,
+            "distance_mm": 4123,
+            "alive": true,
+            "attackable": true
+          }
+        ]
+      }
+    ],
+    "ai_lifecycle_traces": [
+      {
+        "actor_id": "actor-monster-extra",
+        "states": [
+          "idle",
+          "acquire",
+          "chase",
+          "attack",
+          "recover",
+          "dead"
+        ]
+      }
+    ],
+    "canonical_query_output": "query-boss-hit:shape-cast:actor-boss;query-nav-boss-owner:navigation:actor-owner",
+    "canonical_query_sha256": "468d93dd0a7ecbe5c1775daabca3db6215254fe4df2963d5557686bc07126a69"
+  },
+  "expected": {
+    "query_sequence": [
+      {
+        "order": 1,
+        "query_id": "query-boss-hit",
+        "tick": 11,
+        "kind": "shape_cast",
+        "actor_id": "actor-owner"
+      },
+      {
+        "order": 2,
+        "query_id": "query-nav-boss-owner",
+        "tick": 12,
+        "kind": "navigation",
+        "actor_id": "actor-boss"
+      }
+    ],
+    "state_checkpoints": [
+      {
+        "order": 1,
+        "server_tick": 11,
+        "last_processed_input_tick": 1,
+        "actors": [
+          {
+            "actor_id": "actor-boss",
+            "kind": "boss",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              10000,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 49000,
+            "resource_milli": 100000,
+            "attack_milli": 15000,
+            "defense_milli": 3000,
+            "weapon": "none",
+            "ai_state": "attack",
+            "boss_phase": 1,
+            "tags": [
+              "boss-phase-one",
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-monster-extra",
+            "kind": "monster",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              20000,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 30000,
+            "resource_milli": 0,
+            "attack_milli": 4000,
+            "defense_milli": 500,
+            "weapon": "none",
+            "ai_state": "idle",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              6000,
+              0,
+              -1000
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 90000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "sword",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-visitor",
+            "kind": "visitor",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              6000,
+              0,
+              1000
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 100000,
+            "attack_milli": 9000,
+            "defense_milli": 900,
+            "weapon": "fan",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": []
+      },
+      {
+        "order": 2,
+        "server_tick": 12,
+        "last_processed_input_tick": 1,
+        "actors": [
+          {
+            "actor_id": "actor-boss",
+            "kind": "boss",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              10000,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 49000,
+            "resource_milli": 100000,
+            "attack_milli": 15000,
+            "defense_milli": 3000,
+            "weapon": "none",
+            "ai_state": "chase",
+            "boss_phase": 2,
+            "tags": [
+              "boss-phase-two",
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-monster-extra",
+            "kind": "monster",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              20000,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 30000,
+            "resource_milli": 0,
+            "attack_milli": 4000,
+            "defense_milli": 500,
+            "weapon": "none",
+            "ai_state": "idle",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              6000,
+              0,
+              -1000
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 90000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "sword",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-visitor",
+            "kind": "visitor",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              6000,
+              0,
+              1000
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 100000,
+            "attack_milli": 9000,
+            "defense_milli": 900,
+            "weapon": "fan",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": []
+      }
+    ],
+    "events": [
+      {
+        "order": 1,
+        "event_id": "event-boss-damaged",
+        "tick": 11,
+        "kind": "attribute-changed",
+        "source_id": "actor-owner",
+        "target_id": "actor-boss",
+        "activation_id": "activation-boss-hit",
+        "value_milli": -2000,
+        "detail": "health"
+      },
+      {
+        "order": 2,
+        "event_id": "event-boss-phase-two",
+        "tick": 12,
+        "kind": "boss-phase-changed",
+        "source_id": "actor-boss",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 2,
+        "detail": "health-threshold"
+      },
+      {
+        "order": 3,
+        "event_id": "event-boss-target",
+        "tick": 12,
+        "kind": "ai-target-selected",
+        "source_id": "actor-boss",
+        "target_id": "actor-owner",
+        "activation_id": "",
+        "value_milli": 5000,
+        "detail": "actor-id-tie"
+      }
+    ],
+    "rejections": [],
+    "capacity_outcome": {
+      "outcome": "within-limit",
+      "kind": "none",
+      "limit": 0,
+      "observed": 0,
+      "action": "none",
+      "truncated_count": 0
+    },
+    "canonical_output": "queries=boss-hit,boss-navigation|states=t11:boss49000:phase1:t12:boss49000:phase2:target-owner|events=damage,phase-two,target-owner|rejections=-|capacity=within-limit",
+    "canonical_sha256": "4a8b133897d1f57fd2cc3130d021b1494d18d31935b053fcd4334d9d03ad43d5"
+  }
+}

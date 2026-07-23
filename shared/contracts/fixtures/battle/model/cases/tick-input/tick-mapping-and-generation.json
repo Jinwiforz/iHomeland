@@ -1,0 +1,378 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "config_version": "battle-config-v1",
+  "case_id": "tick-mapping-and-generation",
+  "category": "tick-input",
+  "requirements": [
+    "determinism",
+    "input-mapping",
+    "tick-timeline"
+  ],
+  "coverage": {
+    "positive": [
+      "gap-expiry-ack",
+      "s0-post-state",
+      "same-tick-continuous-fold"
+    ],
+    "negative": [
+      "duplicate-command",
+      "stale-assignment",
+      "stale-mapping"
+    ],
+    "determinism": [
+      "arrival-order-independent"
+    ]
+  },
+  "units": {
+    "distance": "mm",
+    "velocity": "mm_per_s",
+    "duration": "ns",
+    "angle": "millirad",
+    "fraction": "millionths",
+    "attribute": "milli_attribute"
+  },
+  "config": {
+    "content_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "simulation_step_ns": 16000000,
+    "input_step_ns": 8000000,
+    "scalar_scale": 1000,
+    "continuous_hold_ticks": 2,
+    "capacities": {
+      "players": 5,
+      "ai_actors": 16,
+      "projectiles": 64,
+      "active_effects": 96,
+      "commands_per_actor_tick": 8,
+      "commands_per_world_tick": 64,
+      "deferred_structural_commands": 64,
+      "physics_queries_per_tick": 128,
+      "navigation_queries_per_tick": 24,
+      "history_frames": 32,
+      "history_bytes": 1048576,
+      "events_per_tick": 128,
+      "evidence_bytes": 1048576,
+      "catch_up_steps": 2,
+      "hard_tick_debt": 4
+    }
+  },
+  "initial_state": {
+    "server_tick": 0,
+    "assignment_generation": 2,
+    "assignment_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "simulation_instance_id": "instance-tick",
+    "mapping_epoch": {
+      "epoch_id": 2,
+      "base_input_tick": 1,
+      "base_simulation_tick": 1,
+      "input_step_ns": 8000000,
+      "simulation_step_ns": 16000000
+    },
+    "last_processed_input_tick": 0,
+    "actors": [
+      {
+        "actor_id": "actor-owner",
+        "kind": "owner",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          0,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 10000,
+        "defense_milli": 1000,
+        "weapon": "sword",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      }
+    ],
+    "entities": []
+  },
+  "commands": [
+    {
+      "arrival_order": 4,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 2,
+      "session_generation": 1,
+      "mapping_epoch_id": 2,
+      "input_tick": 1,
+      "sequence": 1,
+      "expiry_tick": 3,
+      "kind": "continuous_intent",
+      "payload": {
+        "move_x_milli": 250,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 2,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 2,
+      "session_generation": 1,
+      "mapping_epoch_id": 2,
+      "input_tick": 2,
+      "sequence": 2,
+      "expiry_tick": 3,
+      "kind": "continuous_intent",
+      "payload": {
+        "move_x_milli": 1000,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 1,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 2,
+      "session_generation": 1,
+      "mapping_epoch_id": 2,
+      "input_tick": 2,
+      "sequence": 3,
+      "expiry_tick": 3,
+      "kind": "jump_pressed",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 3,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 2,
+      "session_generation": 1,
+      "mapping_epoch_id": 2,
+      "input_tick": 2,
+      "sequence": 3,
+      "expiry_tick": 3,
+      "kind": "jump_pressed",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 6,
+      "target_tick": 3,
+      "actor_id": "actor-owner",
+      "assignment_generation": 2,
+      "session_generation": 1,
+      "mapping_epoch_id": 2,
+      "input_tick": 5,
+      "sequence": 5,
+      "expiry_tick": 4,
+      "kind": "continuous_intent",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 1000,
+        "aim_millirad": 1571,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 7,
+      "target_tick": 4,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 2,
+      "input_tick": 6,
+      "sequence": 6,
+      "expiry_tick": 5,
+      "kind": "continuous_intent",
+      "payload": {
+        "move_x_milli": 1000,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 5,
+      "target_tick": 4,
+      "actor_id": "actor-owner",
+      "assignment_generation": 2,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 7,
+      "sequence": 7,
+      "expiry_tick": 5,
+      "kind": "continuous_intent",
+      "payload": {
+        "move_x_milli": 1000,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    }
+  ],
+  "adapter_traces": {
+    "physics_queries": [],
+    "navigation_results": [],
+    "random_streams": []
+  },
+  "expected": {
+    "query_sequence": [],
+    "state_checkpoints": [
+      {
+        "order": 1,
+        "server_tick": 4,
+        "last_processed_input_tick": 5,
+        "actors": [
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 1571,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 100000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "sword",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": []
+      }
+    ],
+    "events": [
+      {
+        "order": 1,
+        "event_id": "event-input-one",
+        "tick": 1,
+        "kind": "input-accepted",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 1,
+        "detail": "continuous-folded"
+      },
+      {
+        "order": 2,
+        "event_id": "event-jump-edge",
+        "tick": 1,
+        "kind": "input-accepted",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 1,
+        "detail": "jump-edge"
+      }
+    ],
+    "rejections": [
+      {
+        "order": 1,
+        "tick": 1,
+        "actor_id": "actor-owner",
+        "input_tick": 2,
+        "sequence": 3,
+        "reason": "duplicate"
+      },
+      {
+        "order": 2,
+        "tick": 3,
+        "actor_id": "actor-owner",
+        "input_tick": 4,
+        "sequence": 4,
+        "reason": "expired"
+      },
+      {
+        "order": 3,
+        "tick": 4,
+        "actor_id": "actor-owner",
+        "input_tick": 6,
+        "sequence": 6,
+        "reason": "stale-generation"
+      },
+      {
+        "order": 4,
+        "tick": 4,
+        "actor_id": "actor-owner",
+        "input_tick": 7,
+        "sequence": 7,
+        "reason": "stale-mapping"
+      }
+    ],
+    "capacity_outcome": {
+      "outcome": "within-limit",
+      "kind": "none",
+      "limit": 0,
+      "observed": 0,
+      "action": "none",
+      "truncated_count": 0
+    },
+    "canonical_output": "queries=-|states=t4:ack5:actor-owner:aim1571|events=input-fold,jump-edge|rejections=duplicate,expired,stale-generation,stale-mapping|capacity=within-limit",
+    "canonical_sha256": "c1931f72504caf01607c792e54e97e4b6a68f9074de40a0561995e908e1fa867"
+  }
+}

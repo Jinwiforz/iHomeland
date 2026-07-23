@@ -1,0 +1,330 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "schema_path": "schema.json",
+  "assumptions_path": "assumptions.json",
+  "required_requirements": [
+    "ability-state",
+    "authoritative-combat",
+    "determinism",
+    "deterministic-ai",
+    "fixture-governance",
+    "history",
+    "input-boundary",
+    "input-mapping",
+    "movement",
+    "overload",
+    "pipeline-owner",
+    "tick-timeline",
+    "workload-assumptions"
+  ],
+  "supplemental_coverage": [
+    {
+      "requirement": "fixture-governance",
+      "paths": [
+        "README.md",
+        "schema.json"
+      ]
+    },
+    {
+      "requirement": "workload-assumptions",
+      "paths": [
+        "assumptions.json"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "bounded-capacity-and-tick-debt",
+      "path": "cases/overload/bounded-capacity-and-tick-debt.json",
+      "category": "overload",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "130af443a942f313c0d144b5dba01f121a60fde0a5672051dae8beb739e05b72",
+      "requirements": [
+        "determinism",
+        "overload",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "continuous-intent-fold",
+          "evidence-oldest-eviction",
+          "fixed-dt-catch-up"
+        ],
+        "negative": [
+          "active-effect-capacity",
+          "actor-command-capacity",
+          "ai-capacity",
+          "deferred-capacity",
+          "evidence-capacity",
+          "history-capacity",
+          "navigation-query-capacity",
+          "physics-query-capacity",
+          "player-admission-capacity",
+          "projectile-capacity",
+          "tick-debt-drain",
+          "world-command-capacity"
+        ],
+        "determinism": [
+          "reject-new-before-existing",
+          "stable-overflow-order"
+        ]
+      }
+    },
+    {
+      "case_id": "bounded-lag-compensation",
+      "path": "cases/history/bounded-lag-compensation.json",
+      "category": "history",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "93a96ccd6193e4ccbc42d6a2b1aa86513d105ad5d3443f5be7dd31774ecdaab9",
+      "requirements": [
+        "determinism",
+        "history",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "current-tick-settlement",
+          "future-clamp",
+          "valid-history-query"
+        ],
+        "negative": [
+          "history-missing",
+          "history-stale",
+          "old-generation-history"
+        ],
+        "determinism": [
+          "minimal-history-projection",
+          "read-only-history"
+        ]
+      }
+    },
+    {
+      "case_id": "command-authority-and-order",
+      "path": "cases/negative/command-authority-and-order.json",
+      "category": "negative",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "2d59843a004cf645e17daa4e1b34cc31791ee4143d85b170e46b7ded295db491",
+      "requirements": [
+        "determinism",
+        "input-boundary",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [],
+        "negative": [
+          "client-damage-rejected",
+          "client-hit-rejected",
+          "client-transform-rejected",
+          "expired-command",
+          "invalid-actor",
+          "invalid-state",
+          "not-granted"
+        ],
+        "determinism": [
+          "canonical-command-order"
+        ]
+      }
+    },
+    {
+      "case_id": "damage-overflow-config",
+      "path": "cases/negative/damage-overflow-config.json",
+      "category": "negative",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "1b48a0edcd8dd9f499a53356baf636f41653aac4c4d08dca84ab645bde558192",
+      "requirements": [
+        "authoritative-combat",
+        "determinism"
+      ],
+      "coverage": {
+        "positive": [],
+        "negative": [
+          "checked-intermediate-overflow",
+          "world-start-fail-closed"
+        ],
+        "determinism": [
+          "no-language-wraparound"
+        ]
+      }
+    },
+    {
+      "case_id": "deterministic-target-and-boss",
+      "path": "cases/ai/deterministic-target-and-boss.json",
+      "category": "ai",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "20aed52c14e7e3980d62da34f044924572e814c2a542f3e31231d0787b42512d",
+      "requirements": [
+        "determinism",
+        "deterministic-ai",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "boss-next-tick-phase",
+          "finite-ai-lifecycle",
+          "navigation-intent",
+          "threat-distance-actor-tie"
+        ],
+        "negative": [
+          "ai-cannot-write-transform",
+          "same-tick-phase-reentry"
+        ],
+        "determinism": [
+          "entity-local-random-stream",
+          "stable-target-selection"
+        ]
+      }
+    },
+    {
+      "case_id": "effect-damage-death",
+      "path": "cases/combat/effect-damage-death.json",
+      "category": "combat",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "964242137e6ea4879bee08fea6576ce0fe09404d14673fb318171197df74c214",
+      "requirements": [
+        "ability-state",
+        "authoritative-combat",
+        "determinism",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "effect-expiry-before-apply",
+          "effect-refresh",
+          "immunity",
+          "same-tick-multi-damage",
+          "scaled-integer-rounding",
+          "unique-death-cause"
+        ],
+        "negative": [
+          "post-death-damage-ignored"
+        ],
+        "determinism": [
+          "damage-order",
+          "modifier-order"
+        ]
+      }
+    },
+    {
+      "case_id": "fan-projectile-hit",
+      "path": "cases/combat/fan-projectile-hit.json",
+      "category": "combat",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "3ea8cd2f0d51dbb80283c1b96f2cfe6a6bca9f44162c0ea25bd8474f7e04219b",
+      "requirements": [
+        "ability-state",
+        "authoritative-combat",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "fan-activation",
+          "first-blocking-hit",
+          "next-tick-projectile",
+          "projectile-deferred-destroy",
+          "projectile-expiry"
+        ],
+        "negative": [
+          "cue-has-no-authority"
+        ],
+        "determinism": [
+          "projectile-query-order"
+        ]
+      }
+    },
+    {
+      "case_id": "kinematic-jump-and-collision",
+      "path": "cases/movement/kinematic-jump-and-collision.json",
+      "category": "movement",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "385a1074ffad79091507527da32b0bb64a4319bd40b62750836a0ecc9838812b",
+      "requirements": [
+        "determinism",
+        "movement",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "diagonal-input-clamp",
+          "grounded-jump",
+          "kinematic-capsule",
+          "slope-step-contact"
+        ],
+        "negative": [
+          "airborne-repeat-jump"
+        ],
+        "determinism": [
+          "physics-hit-stable-order",
+          "recorded-query-trace"
+        ]
+      }
+    },
+    {
+      "case_id": "tick-mapping-and-generation",
+      "path": "cases/tick-input/tick-mapping-and-generation.json",
+      "category": "tick-input",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "8c360c5e8fcf40a812568fd3151061d68eb18e0ca3dbe4f2eaf642fba12dfcc2",
+      "requirements": [
+        "determinism",
+        "input-mapping",
+        "tick-timeline"
+      ],
+      "coverage": {
+        "positive": [
+          "gap-expiry-ack",
+          "s0-post-state",
+          "same-tick-continuous-fold"
+        ],
+        "negative": [
+          "duplicate-command",
+          "stale-assignment",
+          "stale-mapping"
+        ],
+        "determinism": [
+          "arrival-order-independent"
+        ]
+      }
+    },
+    {
+      "case_id": "weapon-ability-and-sword",
+      "path": "cases/combat/weapon-ability-and-sword.json",
+      "category": "combat",
+      "model_version": "battle-model-v1",
+      "config_version": "battle-config-v1",
+      "file_sha256": "293d6b60497c3f8d3698c7bd5ed6e38e71088345301752aebc208e4786a6c1c0",
+      "requirements": [
+        "ability-state",
+        "authoritative-combat",
+        "determinism",
+        "pipeline-owner"
+      ],
+      "coverage": {
+        "positive": [
+          "ability-phase",
+          "cost-commit",
+          "prediction-correlation",
+          "sword-sweep",
+          "weapon-grant-switch"
+        ],
+        "negative": [
+          "cooldown-rejection",
+          "not-granted-after-switch"
+        ],
+        "determinism": [
+          "activation-target-dedup",
+          "modifier-order"
+        ]
+      }
+    }
+  ]
+}

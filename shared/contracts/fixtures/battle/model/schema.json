@@ -1,0 +1,1401 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.invalid/contracts/battle/model/case.schema.json",
+  "title": "iHomeland Battle Simulation Model Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "model_version",
+    "config_version",
+    "case_id",
+    "category",
+    "requirements",
+    "coverage",
+    "units",
+    "config",
+    "initial_state",
+    "commands",
+    "adapter_traces",
+    "expected"
+  ],
+  "properties": {
+    "format_version": {
+      "const": "1"
+    },
+    "model_version": {
+      "const": "battle-model-v1"
+    },
+    "config_version": {
+      "const": "battle-config-v1"
+    },
+    "case_id": {
+      "$ref": "#/$defs/caseId"
+    },
+    "category": {
+      "enum": [
+        "tick-input",
+        "movement",
+        "combat",
+        "ai",
+        "history",
+        "overload",
+        "negative"
+      ]
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/requirementId"
+      }
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "units": {
+      "$ref": "#/$defs/units"
+    },
+    "config": {
+      "$ref": "#/$defs/config"
+    },
+    "initial_state": {
+      "$ref": "#/$defs/initialState"
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/command"
+      }
+    },
+    "adapter_traces": {
+      "$ref": "#/$defs/adapterTraces"
+    },
+    "expected": {
+      "$ref": "#/$defs/expected"
+    }
+  },
+  "$defs": {
+    "caseId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,95}$"
+    },
+    "requirementId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$"
+    },
+    "idOrEmpty": {
+      "type": "string",
+      "pattern": "^(|[a-z][a-z0-9-]{1,63})$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "scaledInteger": {
+      "type": "integer",
+      "minimum": -9000000000000000,
+      "maximum": 9000000000000000
+    },
+    "vector3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "integer",
+        "minimum": -1000000000,
+        "maximum": 1000000000
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "positive",
+        "negative",
+        "determinism"
+      ],
+      "properties": {
+        "positive": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "negative": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "determinism": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "units": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distance",
+        "velocity",
+        "duration",
+        "angle",
+        "fraction",
+        "attribute"
+      ],
+      "properties": {
+        "distance": {
+          "const": "mm"
+        },
+        "velocity": {
+          "const": "mm_per_s"
+        },
+        "duration": {
+          "const": "ns"
+        },
+        "angle": {
+          "const": "millirad"
+        },
+        "fraction": {
+          "const": "millionths"
+        },
+        "attribute": {
+          "const": "milli_attribute"
+        }
+      }
+    },
+    "capacities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "players",
+        "ai_actors",
+        "projectiles",
+        "active_effects",
+        "commands_per_actor_tick",
+        "commands_per_world_tick",
+        "deferred_structural_commands",
+        "physics_queries_per_tick",
+        "navigation_queries_per_tick",
+        "history_frames",
+        "history_bytes",
+        "events_per_tick",
+        "evidence_bytes",
+        "catch_up_steps",
+        "hard_tick_debt"
+      ],
+      "properties": {
+        "players": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ai_actors": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "projectiles": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "active_effects": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "commands_per_actor_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "commands_per_world_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "deferred_structural_commands": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "physics_queries_per_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "navigation_queries_per_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "history_frames": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "history_bytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "events_per_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "evidence_bytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "catch_up_steps": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "hard_tick_debt": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content_hash",
+        "simulation_step_ns",
+        "input_step_ns",
+        "scalar_scale",
+        "continuous_hold_ticks",
+        "capacities"
+      ],
+      "properties": {
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulation_step_ns": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "input_step_ns": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "scalar_scale": {
+          "const": 1000
+        },
+        "continuous_hold_ticks": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "capacities": {
+          "$ref": "#/$defs/capacities"
+        },
+        "damage_formula_probe": {
+          "$ref": "#/$defs/damageFormulaProbe"
+        }
+      }
+    },
+    "damageFormulaProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flat_damage_milli",
+        "attacker_power_milli",
+        "power_coefficient_milli",
+        "minimum_damage_milli",
+        "defender_defense_milli"
+      ],
+      "properties": {
+        "flat_damage_milli": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "attacker_power_milli": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "power_coefficient_milli": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "minimum_damage_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "defender_defense_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "mappingEpoch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "epoch_id",
+        "base_input_tick",
+        "base_simulation_tick",
+        "input_step_ns",
+        "simulation_step_ns"
+      ],
+      "properties": {
+        "epoch_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "base_input_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "base_simulation_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "input_step_ns": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "simulation_step_ns": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_id",
+        "kind",
+        "generation",
+        "alive",
+        "team",
+        "position_mm",
+        "velocity_mm_per_s",
+        "orientation_millirad",
+        "grounded",
+        "movement_mode",
+        "health_milli",
+        "resource_milli",
+        "attack_milli",
+        "defense_milli",
+        "weapon",
+        "ai_state",
+        "boss_phase",
+        "tags"
+      ],
+      "properties": {
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "owner",
+            "visitor",
+            "monster",
+            "boss"
+          ]
+        },
+        "generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "alive": {
+          "type": "boolean"
+        },
+        "team": {
+          "$ref": "#/$defs/id"
+        },
+        "position_mm": {
+          "$ref": "#/$defs/vector3"
+        },
+        "velocity_mm_per_s": {
+          "$ref": "#/$defs/vector3"
+        },
+        "orientation_millirad": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "grounded": {
+          "type": "boolean"
+        },
+        "movement_mode": {
+          "enum": [
+            "grounded",
+            "airborne",
+            "disabled"
+          ]
+        },
+        "health_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "resource_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "attack_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "defense_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "weapon": {
+          "enum": [
+            "none",
+            "sword",
+            "fan"
+          ]
+        },
+        "ai_state": {
+          "enum": [
+            "none",
+            "idle",
+            "acquire",
+            "chase",
+            "attack",
+            "recover",
+            "dead"
+          ]
+        },
+        "boss_phase": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_id",
+        "kind",
+        "generation",
+        "source_actor_id",
+        "target_actor_id",
+        "position_mm",
+        "velocity_mm_per_s",
+        "start_tick",
+        "expiry_tick",
+        "stack_key",
+        "stack_count"
+      ],
+      "properties": {
+        "entity_id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "projectile",
+            "effect"
+          ]
+        },
+        "generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "source_actor_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "target_actor_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "position_mm": {
+          "$ref": "#/$defs/vector3"
+        },
+        "velocity_mm_per_s": {
+          "$ref": "#/$defs/vector3"
+        },
+        "start_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "expiry_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "stack_key": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "stack_count": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "initialState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server_tick",
+        "assignment_generation",
+        "assignment_fingerprint",
+        "simulation_instance_id",
+        "mapping_epoch",
+        "last_processed_input_tick",
+        "actors",
+        "entities"
+      ],
+      "properties": {
+        "server_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "assignment_generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "assignment_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulation_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "mapping_epoch": {
+          "$ref": "#/$defs/mappingEpoch"
+        },
+        "last_processed_input_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/actor"
+          }
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entity"
+          }
+        }
+      }
+    },
+    "commandPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "move_x_milli",
+        "move_y_milli",
+        "aim_millirad",
+        "weapon",
+        "ability",
+        "prediction_id",
+        "observed_tick",
+        "directive"
+      ],
+      "properties": {
+        "move_x_milli": {
+          "type": "integer",
+          "minimum": -2000,
+          "maximum": 2000
+        },
+        "move_y_milli": {
+          "type": "integer",
+          "minimum": -2000,
+          "maximum": 2000
+        },
+        "aim_millirad": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "weapon": {
+          "enum": [
+            "none",
+            "sword",
+            "fan"
+          ]
+        },
+        "ability": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "prediction_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "observed_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "directive": {
+          "enum": [
+            "none",
+            "spawn",
+            "remove",
+            "invalidate"
+          ]
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arrival_order",
+        "target_tick",
+        "actor_id",
+        "assignment_generation",
+        "session_generation",
+        "mapping_epoch_id",
+        "input_tick",
+        "sequence",
+        "expiry_tick",
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "arrival_order": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "target_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "assignment_generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "session_generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "mapping_epoch_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "input_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sequence": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "expiry_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "kind": {
+          "enum": [
+            "continuous_intent",
+            "jump_pressed",
+            "switch_weapon",
+            "activate_ability",
+            "lifecycle_directive"
+          ]
+        },
+        "ingress_disposition": {
+          "enum": [
+            "accepted",
+            "reject-client-transform",
+            "reject-client-hit",
+            "reject-client-damage"
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/commandPayload"
+        }
+      }
+    },
+    "hit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fraction_millionths",
+        "collider_id",
+        "subshape_id",
+        "target_actor_id",
+        "blocking"
+      ],
+      "properties": {
+        "fraction_millionths": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "collider_id": {
+          "$ref": "#/$defs/id"
+        },
+        "subshape_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target_actor_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "blocking": {
+          "type": "boolean"
+        }
+      }
+    },
+    "physicsQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_id",
+        "tick",
+        "kind",
+        "actor_id",
+        "start_mm",
+        "end_mm",
+        "hits"
+      ],
+      "properties": {
+        "query_id": {
+          "$ref": "#/$defs/id"
+        },
+        "tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "kind": {
+          "enum": [
+            "ground_probe",
+            "move_capsule",
+            "shape_cast",
+            "ray_cast",
+            "overlap",
+            "projectile_sweep"
+          ]
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "start_mm": {
+          "$ref": "#/$defs/vector3"
+        },
+        "end_mm": {
+          "$ref": "#/$defs/vector3"
+        },
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hit"
+          }
+        }
+      }
+    },
+    "navigationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_id",
+        "tick",
+        "actor_id",
+        "target_actor_id",
+        "path_mm"
+      ],
+      "properties": {
+        "query_id": {
+          "$ref": "#/$defs/id"
+        },
+        "tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target_actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path_mm": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/vector3"
+          }
+        }
+      }
+    },
+    "randomStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system_id",
+        "entity_id",
+        "stream_id",
+        "seed",
+        "draws"
+      ],
+      "properties": {
+        "system_id": {
+          "$ref": "#/$defs/id"
+        },
+        "entity_id": {
+          "$ref": "#/$defs/id"
+        },
+        "stream_id": {
+          "$ref": "#/$defs/id"
+        },
+        "seed": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "draws": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonNegativeInteger"
+          }
+        }
+      }
+    },
+    "adapterTraces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "physics_queries",
+        "navigation_results",
+        "random_streams"
+      ],
+      "properties": {
+        "physics_queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/physicsQuery"
+          }
+        },
+        "navigation_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/navigationResult"
+          }
+        },
+        "random_streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/randomStream"
+          }
+        },
+        "ai_perceptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/aiPerception"
+          }
+        },
+        "ai_lifecycle_traces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/aiLifecycleTrace"
+          }
+        },
+        "history_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/historyFrame"
+          }
+        },
+        "history_queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/historyQuery"
+          }
+        },
+        "canonical_query_output": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9=,;:/|.-]+$"
+        },
+        "canonical_query_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "aiPerception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tick",
+        "actor_id",
+        "candidates"
+      ],
+      "properties": {
+        "tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/aiCandidate"
+          }
+        }
+      }
+    },
+    "aiCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_actor_id",
+        "threat_milli",
+        "distance_mm",
+        "alive",
+        "attackable"
+      ],
+      "properties": {
+        "target_actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "threat_milli": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "distance_mm": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "alive": {
+          "type": "boolean"
+        },
+        "attackable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "aiLifecycleTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_id",
+        "states"
+      ],
+      "properties": {
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "states": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "idle",
+              "acquire",
+              "chase",
+              "attack",
+              "recover",
+              "dead"
+            ]
+          }
+        }
+      }
+    },
+    "historyFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server_tick",
+        "assignment_generation",
+        "actors"
+      ],
+      "properties": {
+        "server_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "assignment_generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/historyActor"
+          }
+        }
+      }
+    },
+    "historyActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_id",
+        "generation",
+        "alive",
+        "team",
+        "position_mm",
+        "orientation_millirad",
+        "hit_volume_id",
+        "movement_mode",
+        "tags"
+      ],
+      "properties": {
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "generation": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "alive": {
+          "type": "boolean"
+        },
+        "team": {
+          "$ref": "#/$defs/id"
+        },
+        "position_mm": {
+          "$ref": "#/$defs/vector3"
+        },
+        "orientation_millirad": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "hit_volume_id": {
+          "$ref": "#/$defs/id"
+        },
+        "movement_mode": {
+          "enum": [
+            "grounded",
+            "airborne",
+            "disabled"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "historyQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_id",
+        "current_tick",
+        "actor_id",
+        "activation_id",
+        "observed_tick",
+        "mapped_tick",
+        "used_tick",
+        "outcome",
+        "reason"
+      ],
+      "properties": {
+        "query_id": {
+          "$ref": "#/$defs/id"
+        },
+        "current_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "activation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "observed_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "mapped_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "used_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "outcome": {
+          "enum": [
+            "used",
+            "clamped",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "future",
+            "history-stale",
+            "history-missing",
+            "stale-generation"
+          ]
+        }
+      }
+    },
+    "expectedQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "query_id",
+        "tick",
+        "kind",
+        "actor_id"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "query_id": {
+          "$ref": "#/$defs/id"
+        },
+        "tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "kind": {
+          "enum": [
+            "ground_probe",
+            "move_capsule",
+            "shape_cast",
+            "ray_cast",
+            "overlap",
+            "projectile_sweep",
+            "navigation"
+          ]
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "stateCheckpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "server_tick",
+        "last_processed_input_tick",
+        "actors",
+        "entities"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "server_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "last_processed_input_tick": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/actor"
+          }
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entity"
+          }
+        }
+      }
+    },
+    "expectedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "event_id",
+        "tick",
+        "kind",
+        "source_id",
+        "target_id",
+        "activation_id",
+        "value_milli",
+        "detail"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "event_id": {
+          "$ref": "#/$defs/id"
+        },
+        "tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "kind": {
+          "enum": [
+            "input-accepted",
+            "weapon-switched",
+            "ability-requested",
+            "ability-activated",
+            "ability-canceled",
+            "projectile-spawned",
+            "projectile-destroyed",
+            "hit",
+            "effect-applied",
+            "effect-expired",
+            "attribute-changed",
+            "death",
+            "gameplay-cue",
+            "ai-target-selected",
+            "boss-phase-changed",
+            "history-query",
+            "history-clamped",
+            "evidence-truncated",
+            "drain-requested"
+          ]
+        },
+        "source_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "target_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "activation_id": {
+          "$ref": "#/$defs/idOrEmpty"
+        },
+        "value_milli": {
+          "$ref": "#/$defs/scaledInteger"
+        },
+        "detail": {
+          "$ref": "#/$defs/idOrEmpty"
+        }
+      }
+    },
+    "expectedRejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "tick",
+        "actor_id",
+        "input_tick",
+        "sequence",
+        "reason"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/id"
+        },
+        "input_tick": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sequence": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "reason": {
+          "enum": [
+            "capacity",
+            "cooldown",
+            "duplicate",
+            "expired",
+            "history-missing",
+            "history-stale",
+            "invalid-command",
+            "invalid-state",
+            "not-granted",
+            "stale-generation",
+            "stale-mapping"
+          ]
+        }
+      }
+    },
+    "capacityOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "kind",
+        "limit",
+        "observed",
+        "action",
+        "truncated_count"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "within-limit",
+            "rejected",
+            "truncated",
+            "draining"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "none",
+            "players",
+            "ai-actors",
+            "projectiles",
+            "active-effects",
+            "actor-commands",
+            "world-commands",
+            "deferred-structural",
+            "physics-queries",
+            "navigation-queries",
+            "history-frames",
+            "history-bytes",
+            "events",
+            "evidence-bytes",
+            "tick-debt"
+          ]
+        },
+        "limit": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "observed": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "action": {
+          "enum": [
+            "none",
+            "reject-new",
+            "fold-continuous",
+            "evict-oldest",
+            "request-drain"
+          ]
+        },
+        "truncated_count": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_sequence",
+        "state_checkpoints",
+        "events",
+        "rejections",
+        "capacity_outcome",
+        "canonical_output",
+        "canonical_sha256"
+      ],
+      "properties": {
+        "query_sequence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expectedQuery"
+          }
+        },
+        "state_checkpoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/stateCheckpoint"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expectedEvent"
+          }
+        },
+        "rejections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expectedRejection"
+          }
+        },
+        "capacity_outcome": {
+          "$ref": "#/$defs/capacityOutcome"
+        },
+        "capacity_trials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capacityOutcome"
+          }
+        },
+        "config_outcome": {
+          "$ref": "#/$defs/configOutcome"
+        },
+        "canonical_output": {
+          "type": "string",
+          "minLength": 9,
+          "pattern": "^[a-z0-9=,;:/|.-]+$"
+        },
+        "canonical_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "configOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "reason"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "accepted",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "overflow",
+            "out-of-range"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -371,19 +371,25 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 ### B0.1 `define-battle-simulation-model`
 
+**状态：**已完成实现，等待 change 归档。
+
 **进入条件：**权威 owner、首个 PersonalWorld gameplay 范围和 Go/C++/Unity 边界已由本架构 change strict 验证。
 
 **产出：**冻结 SimulationTick/InputTick 映射、输入命令、系统顺序、角色运动/跳跃、物理查询、ability/effect/damage/death、AI、历史帧、过载与可测试确定性边界；给出纯模型 fixtures 和预算假设，不开放 listener。
 
 **完成条件：**剑、扇子、普通怪物与 Boss 所需的全部权威行为可由无网络 simulation harness 验收；没有客户端权威命中/伤害，没有未定义 tick/expiry/rollback 语义。
 
+**完成 evidence：**`shared/contracts/fixtures/battle/model/` 提供闭合 schema、manifest、预算假设与 10 个 deterministic cases；`tools/battle-model/` 的只读 validator 和 12 项隔离失败回归验证双向登记、引用/排序/单位、coverage、canonical digest、安全字段拒绝及连续运行不改写 corpus。该 evidence 不包含 C++ core、wire、listener、端口或第三方依赖。
+
 ### B0.2 `define-battle-network-profile`
 
-**进入条件：**simulation model 已冻结消息类别、状态量、最大 actor 数、tick 消费和历史需求。
+**进入条件：**B0.1 delta 已同步主 specs 且 OpenSpec strict 通过；模型 validator 与失败回归通过；`manifest.json`、`assumptions.json` 和全部 cases 的 digest 无漂移。B0.2 只能消费已冻结的 command/state/query/event 维度、VisitSession 容量兼容 workload、Tick 消费与历史/容量需求，不得为迎合网络参数改写模型语义。
 
 **产出：**基于可重复网络模拟冻结 tick/snapshot cadence、full/delta baseline、MTU、InputBundle 冗余、raw/KCP lane registry、KCP 参数、插值/外推窗口、correction tolerance、历史窗口及 per-player/per-instance 带宽/CPU/queue 预算。
 
 **完成条件：**目标 latency、jitter、loss、reorder、duplicate 和 burst 矩阵有测量报告；每个 battle message 只有一个 channel，snapshot 不走 KCP，production UDP 端口仍未启用。
+
+在 B0.2 完成前，C++ core、Go/C++ control、UDP/KCP wire/listener 和 Unity gameplay runtime 的进入门继续关闭。
 
 ### B0.3 `implement-game-simulation-core`
 

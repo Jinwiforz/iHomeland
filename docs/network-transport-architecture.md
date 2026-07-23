@@ -162,9 +162,15 @@ Active gameplay connection 使用 registry 登记的 common heartbeat `1/2` 保�
 
 服务端和当前 Unity 客户端均已支持 heartbeat `1/2`。服务端仍保留 30 分钟 idle safety 上限，用于回收旧/异常客户端、进程挂起或应用 heartbeat 未能运行的连接；OS TCP keepalive 不替代该应用层活性证明。未来改变 heartbeat cadence、deadline 或消息语义仍必须先保证服务端向后兼容，再发布客户端。
 
+### Battle model 与 network profile 边界
+
+`shared/contracts/fixtures/battle/model/` 是 B0.1 的纯 gameplay 模型 source of truth。B0.2 读取其 `manifest.json`、`assumptions.json` 与 cases 中的 command/state/query/event、容量和 workload 维度，测量 tick/snapshot cadence、窗口、MTU、lane、KCP、CPU、memory、queue 与 bandwidth 参数。Profile 可以追加测量 evidence，但不得改写模型状态迁移来迎合网络结果。
+
+模型 fixture 不是 wire contract：其中没有 message ID、route、lane、framing、endpoint、ticket 或 packet layout。B0.1 也不创建 UDP/KCP listener、推荐端口、第三方 C++ 依赖或 generated code。所有 wire 与 listener 决策继续等待 B0.2 profile、route registry、安全设计及其各自 OpenSpec change。
+
 ### 裸 UDP 不可靠时序面
 
-初始 lane 分类如下；最终 message id、频率与大小由 battle network profile 和 registry 冻结：
+以下只是假设供 B0.2 测量的初始类别，不是 B0.1 fixture 的路由承诺；最终 message id、频率、大小和 allowed lane 由 battle network profile 与 registry 冻结：
 
 | 方向 | 初始消息类别 | 交付语义 |
 |---|---|---|

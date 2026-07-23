@@ -1,0 +1,473 @@
+{
+  "format_version": "1",
+  "model_version": "battle-model-v1",
+  "config_version": "battle-config-v1",
+  "case_id": "weapon-ability-and-sword",
+  "category": "combat",
+  "requirements": [
+    "ability-state",
+    "authoritative-combat",
+    "determinism",
+    "pipeline-owner"
+  ],
+  "coverage": {
+    "positive": [
+      "ability-phase",
+      "cost-commit",
+      "prediction-correlation",
+      "sword-sweep",
+      "weapon-grant-switch"
+    ],
+    "negative": [
+      "cooldown-rejection",
+      "not-granted-after-switch"
+    ],
+    "determinism": [
+      "activation-target-dedup",
+      "modifier-order"
+    ]
+  },
+  "units": {
+    "distance": "mm",
+    "velocity": "mm_per_s",
+    "duration": "ns",
+    "angle": "millirad",
+    "fraction": "millionths",
+    "attribute": "milli_attribute"
+  },
+  "config": {
+    "content_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+    "simulation_step_ns": 16000000,
+    "input_step_ns": 16000000,
+    "scalar_scale": 1000,
+    "continuous_hold_ticks": 2,
+    "capacities": {
+      "players": 5,
+      "ai_actors": 16,
+      "projectiles": 64,
+      "active_effects": 96,
+      "commands_per_actor_tick": 8,
+      "commands_per_world_tick": 64,
+      "deferred_structural_commands": 64,
+      "physics_queries_per_tick": 128,
+      "navigation_queries_per_tick": 24,
+      "history_frames": 32,
+      "history_bytes": 1048576,
+      "events_per_tick": 128,
+      "evidence_bytes": 1048576,
+      "catch_up_steps": 2,
+      "hard_tick_debt": 4
+    }
+  },
+  "initial_state": {
+    "server_tick": 0,
+    "assignment_generation": 1,
+    "assignment_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "simulation_instance_id": "instance-sword",
+    "mapping_epoch": {
+      "epoch_id": 1,
+      "base_input_tick": 1,
+      "base_simulation_tick": 1,
+      "input_step_ns": 16000000,
+      "simulation_step_ns": 16000000
+    },
+    "last_processed_input_tick": 0,
+    "actors": [
+      {
+        "actor_id": "actor-monster",
+        "kind": "monster",
+        "generation": 1,
+        "alive": true,
+        "team": "team-enemy",
+        "position_mm": [
+          1500,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 3142,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 0,
+        "attack_milli": 5000,
+        "defense_milli": 1000,
+        "weapon": "none",
+        "ai_state": "idle",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      },
+      {
+        "actor_id": "actor-owner",
+        "kind": "owner",
+        "generation": 1,
+        "alive": true,
+        "team": "team-player",
+        "position_mm": [
+          0,
+          0,
+          0
+        ],
+        "velocity_mm_per_s": [
+          0,
+          0,
+          0
+        ],
+        "orientation_millirad": 0,
+        "grounded": true,
+        "movement_mode": "grounded",
+        "health_milli": 100000,
+        "resource_milli": 100000,
+        "attack_milli": 10000,
+        "defense_milli": 1000,
+        "weapon": "fan",
+        "ai_state": "none",
+        "boss_phase": 0,
+        "tags": [
+          "state-alive"
+        ]
+      }
+    ],
+    "entities": []
+  },
+  "commands": [
+    {
+      "arrival_order": 1,
+      "target_tick": 1,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 1,
+      "sequence": 1,
+      "expiry_tick": 2,
+      "kind": "switch_weapon",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "sword",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 2,
+      "target_tick": 2,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 2,
+      "sequence": 2,
+      "expiry_tick": 3,
+      "kind": "activate_ability",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "sword-primary",
+        "prediction_id": "prediction-sword-one",
+        "observed_tick": 1,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 4,
+      "target_tick": 3,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 3,
+      "sequence": 3,
+      "expiry_tick": 4,
+      "kind": "activate_ability",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "sword-primary",
+        "prediction_id": "prediction-sword-two",
+        "observed_tick": 2,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 3,
+      "target_tick": 4,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 4,
+      "sequence": 4,
+      "expiry_tick": 5,
+      "kind": "switch_weapon",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "fan",
+        "ability": "",
+        "prediction_id": "",
+        "observed_tick": 0,
+        "directive": "none"
+      }
+    },
+    {
+      "arrival_order": 5,
+      "target_tick": 4,
+      "actor_id": "actor-owner",
+      "assignment_generation": 1,
+      "session_generation": 1,
+      "mapping_epoch_id": 1,
+      "input_tick": 4,
+      "sequence": 5,
+      "expiry_tick": 5,
+      "kind": "activate_ability",
+      "ingress_disposition": "accepted",
+      "payload": {
+        "move_x_milli": 0,
+        "move_y_milli": 0,
+        "aim_millirad": 0,
+        "weapon": "none",
+        "ability": "sword-primary",
+        "prediction_id": "prediction-sword-three",
+        "observed_tick": 3,
+        "directive": "none"
+      }
+    }
+  ],
+  "adapter_traces": {
+    "physics_queries": [
+      {
+        "query_id": "query-sword-sweep",
+        "tick": 3,
+        "kind": "shape_cast",
+        "actor_id": "actor-owner",
+        "start_mm": [
+          200,
+          1000,
+          0
+        ],
+        "end_mm": [
+          1800,
+          1000,
+          0
+        ],
+        "hits": [
+          {
+            "fraction_millionths": 500000,
+            "collider_id": "collider-monster-body",
+            "subshape_id": "subshape-body",
+            "target_actor_id": "actor-monster",
+            "blocking": true
+          },
+          {
+            "fraction_millionths": 500000,
+            "collider_id": "collider-monster-body",
+            "subshape_id": "subshape-weapon",
+            "target_actor_id": "actor-monster",
+            "blocking": true
+          }
+        ]
+      }
+    ],
+    "navigation_results": [],
+    "random_streams": [],
+    "canonical_query_output": "query-sword-sweep:shape-cast:actor-monster/subshape-body,actor-monster/subshape-weapon",
+    "canonical_query_sha256": "aefbd6caadc99936105cac44cef60851c58d2926bf1899a966798c5ab7c4e56e"
+  },
+  "expected": {
+    "query_sequence": [
+      {
+        "order": 1,
+        "query_id": "query-sword-sweep",
+        "tick": 3,
+        "kind": "shape_cast",
+        "actor_id": "actor-owner"
+      }
+    ],
+    "state_checkpoints": [
+      {
+        "order": 1,
+        "server_tick": 4,
+        "last_processed_input_tick": 4,
+        "actors": [
+          {
+            "actor_id": "actor-monster",
+            "kind": "monster",
+            "generation": 1,
+            "alive": true,
+            "team": "team-enemy",
+            "position_mm": [
+              1500,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 3142,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 82000,
+            "resource_milli": 0,
+            "attack_milli": 5000,
+            "defense_milli": 1000,
+            "weapon": "none",
+            "ai_state": "idle",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          },
+          {
+            "actor_id": "actor-owner",
+            "kind": "owner",
+            "generation": 1,
+            "alive": true,
+            "team": "team-player",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "velocity_mm_per_s": [
+              0,
+              0,
+              0
+            ],
+            "orientation_millirad": 0,
+            "grounded": true,
+            "movement_mode": "grounded",
+            "health_milli": 100000,
+            "resource_milli": 90000,
+            "attack_milli": 10000,
+            "defense_milli": 1000,
+            "weapon": "fan",
+            "ai_state": "none",
+            "boss_phase": 0,
+            "tags": [
+              "state-alive"
+            ]
+          }
+        ],
+        "entities": []
+      }
+    ],
+    "events": [
+      {
+        "order": 1,
+        "event_id": "event-switch-sword",
+        "tick": 1,
+        "kind": "weapon-switched",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 0,
+        "detail": "sword"
+      },
+      {
+        "order": 2,
+        "event_id": "event-sword-requested",
+        "tick": 2,
+        "kind": "ability-requested",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "activation-sword-one",
+        "value_milli": 10000,
+        "detail": "prediction-sword-one"
+      },
+      {
+        "order": 3,
+        "event_id": "event-sword-active",
+        "tick": 3,
+        "kind": "ability-activated",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "activation-sword-one",
+        "value_milli": 10000,
+        "detail": "sword-primary"
+      },
+      {
+        "order": 4,
+        "event_id": "event-sword-hit",
+        "tick": 3,
+        "kind": "hit",
+        "source_id": "actor-owner",
+        "target_id": "actor-monster",
+        "activation_id": "activation-sword-one",
+        "value_milli": 18000,
+        "detail": "query-sword-sweep"
+      },
+      {
+        "order": 5,
+        "event_id": "event-switch-fan",
+        "tick": 4,
+        "kind": "weapon-switched",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "",
+        "value_milli": 0,
+        "detail": "fan"
+      },
+      {
+        "order": 6,
+        "event_id": "event-sword-canceled",
+        "tick": 4,
+        "kind": "ability-canceled",
+        "source_id": "actor-owner",
+        "target_id": "",
+        "activation_id": "activation-sword-one",
+        "value_milli": 0,
+        "detail": "weapon-revoked"
+      }
+    ],
+    "rejections": [
+      {
+        "order": 1,
+        "tick": 3,
+        "actor_id": "actor-owner",
+        "input_tick": 3,
+        "sequence": 3,
+        "reason": "cooldown"
+      },
+      {
+        "order": 2,
+        "tick": 4,
+        "actor_id": "actor-owner",
+        "input_tick": 4,
+        "sequence": 5,
+        "reason": "not-granted"
+      }
+    ],
+    "capacity_outcome": {
+      "outcome": "within-limit",
+      "kind": "none",
+      "limit": 0,
+      "observed": 0,
+      "action": "none",
+      "truncated_count": 0
+    },
+    "canonical_output": "queries=sword-sweep|states=t4:monster-health82000:owner-resource90000:weapon-fan|events=switch-sword,request,active,hit,switch-fan,cancel|rejections=cooldown,not-granted|capacity=within-limit",
+    "canonical_sha256": "e3af678a93f3d5edf4324fd56e3d71a768d228a28ba5fda8a584d0a2bc74f63d"
+  }
+}
