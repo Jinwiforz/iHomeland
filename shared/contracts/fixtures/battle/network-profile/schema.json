@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-profile-v1.json",
+  "title": "iHomeland Battle Network Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "profile_version",
+    "document_kind"
+  ],
+  "properties": {
+    "format_version": {
+      "const": "1"
+    },
+    "profile_version": {
+      "const": "battle-network-profile-v1"
+    },
+    "document_kind": {
+      "enum": [
+        "case",
+        "fault-matrix",
+        "manifest",
+        "message-inventory",
+        "model-binding",
+        "profile",
+        "qualification-report"
+      ]
+    }
+  },
+  "$defs": {
+    "canonical_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "relative_json_path": {
+      "type": "string",
+      "minLength": 6,
+      "pattern": "^(?:cases|reports)/[a-z0-9./-]+\\.json$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "non_negative_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positive_integer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "qualification": {
+      "enum": [
+        "implementation_required",
+        "profile_qualified",
+        "target_budget"
+      ]
+    },
+    "lane": {
+      "enum": [
+        "kcp",
+        "raw"
+      ]
+    },
+    "direction": {
+      "enum": [
+        "c2s",
+        "s2c"
+      ]
+    },
+    "workload_id": {
+      "enum": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "boss-burst",
+        "combat-heavy",
+        "disconnect-drain",
+        "idle",
+        "movement-heavy"
+      ]
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "value",
+        "unit",
+        "classification",
+        "workloads",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/canonical_id"
+        },
+        "value": {
+          "$ref": "#/$defs/non_negative_integer"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "$ref": "#/$defs/qualification"
+        },
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/workload_id"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "profile_version",
+        "document_kind",
+        "case_id",
+        "category",
+        "requirements",
+        "scenarios",
+        "workloads",
+        "phases",
+        "assertions"
+      ]
+    },
+    "fault_scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_id",
+        "workloads",
+        "phases",
+        "impairments",
+        "duration_ticks",
+        "base_latency_us",
+        "jitter_us",
+        "loss_percent",
+        "duplicate_percent",
+        "reorder_percent",
+        "burst_interval",
+        "burst_length",
+        "queue_limit",
+        "expected_outcome"
+      ]
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "owner",
+        "direction",
+        "lane",
+        "qos",
+        "max_logical_payload_bytes",
+        "maximum_rate_per_second",
+        "expiry_us",
+        "sequence_policy",
+        "tick_policy",
+        "idempotency",
+        "baseline_policy",
+        "recovery_policy",
+        "split_policy"
+      ]
+    }
+  }
+}

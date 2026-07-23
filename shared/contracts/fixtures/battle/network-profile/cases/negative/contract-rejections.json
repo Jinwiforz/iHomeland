@@ -1,0 +1,31 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "case",
+  "case_id": "case-negative-contract",
+  "category": "negative",
+  "requirements": [
+    "corpus-governance",
+    "lane",
+    "parameter-classification"
+  ],
+  "scenarios": [
+    "baseline-gap",
+    "compatibility-combined",
+    "mtu-boundary"
+  ],
+  "workloads": [
+    "default-coop",
+    "visit-capacity-compatibility"
+  ],
+  "phases": [
+    "boss-burst",
+    "combat-heavy"
+  ],
+  "assertions": [
+    "absolute-path-rejected",
+    "implementation-qualification-rejected",
+    "numeric-wire-identity-rejected",
+    "snapshot-kcp-rejected"
+  ]
+}

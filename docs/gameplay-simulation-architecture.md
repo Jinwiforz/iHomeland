@@ -10,7 +10,7 @@
 - 少量普通怪物与一只 Boss；
 - 服务器权威伤害、死亡和协作结果。
 
-本文不冻结具体 tick rate、snapshot rate、MTU、插值延迟、历史窗口、KCP 参数或带宽值。这些数值必须由 `define-battle-network-profile` 在网络模拟和 profile 测量后确定。本阶段不要求组队副本、匹配、战场、跨服、观战、完整录像或完整经济结算。
+`define-battle-network-profile` 已基于冻结模型和可重复 fault matrix 冻结 tick/snapshot cadence、MTU、插值/外推、历史、逻辑 raw/KCP lane 与预算；具体值见本文 B0.2 小节及机器可读 profile。本阶段仍不要求组队副本、匹配、战场、跨服、观战、完整录像或完整经济结算。
 
 ## 进程与实例身份
 
@@ -70,7 +70,7 @@ mapped_tick =
   + floor((input_tick - base_input_tick) * input_step_ns / simulation_step_ns)
 ```
 
-`LastProcessedInputTick` 只推进到已接受且已处理的最大连续 `InputTick`；gap、expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。确切 tick cadence、允许提前/迟到窗口、缺失输入政策、bundle 大小、冗余发送数量、snapshot cadence 和 error tolerance 由 network profile 测量后冻结。没有 profile 时只能实现离线 simulation harness，不能开放 production UDP。
+`LastProcessedInputTick` 只推进到已接受且已处理的最大连续 `InputTick`；gap、expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。B0.2 已冻结这些参数；C++、wire 与 Unity consumer 必须读取同一 profile，不得使用隐藏默认值。即使 profile 已完成，production UDP 仍必须等待 Go/C++ control、安全 transport 与真实网络资格。
 
 ### B0.1 冻结模型
 
@@ -98,6 +98,26 @@ mapped_tick =
 - 确定性比较基于规范化的 query/state/event/rejection/capacity token 与 SHA-256；不得依赖 hash-map、pointer、callback、线程调度或第三方类型迭代顺序。
 
 机器可读 source of truth 位于 [Battle Simulation Model Fixtures](../shared/contracts/fixtures/battle/model/README.md)。`schema.json`、`manifest.json`、`assumptions.json` 与 cases 由只读 validator 验证；它们供 B0.2 profile 和后续无网络 C++ harness 消费，不是 wire schema，也不分配 message ID、lane、listener 或第三方依赖。
+
+### B0.2 冻结 network profile
+
+机器可读 source of truth 位于 [Battle Network Profile](../shared/contracts/fixtures/battle/network-profile/README.md)。Profile 绑定完整 `battle-model-v1` manifest、assumptions 和 10 个 case digest；任何 model 漂移都会使资格 fail closed。当前冻结参数如下：
+
+| 类别 | 冻结值 |
+|---|---|
+| Tick | `SimulationTick=50 ms`（20 Hz），`InputTick=25 ms`（40 Hz），整数比例 2:1 |
+| 输入窗口 | early 2 Tick、late/gap expiry 6 Tick、continuous hold 4 Tick、bundle depth 3、redundancy 2 |
+| Snapshot | 每 2 SimulationTick（10 Hz）；每 10 个 snapshot 建立 full baseline |
+| 历史与 baseline | history 16 Tick（800 ms）；baseline 最大 40 Tick（2 s），fan-out 10 |
+| 客户端表现 | interpolation 100 ms、maximum extrapolation 150 ms、position correction 80 mm、angle correction 2° |
+| Datagram | 最大 1200 bytes；保守预留 IPv6/UDP 48、secure session 48、AEAD tag 16、raw/KCP header 16/24 bytes，logical payload 上限分别为 1072/1064 bytes |
+| 默认容量 | 1 Owner + 4 Visitor 必须通过；当前 profile qualified maximum 为 8 actors |
+| 兼容容量 | 33 actors 已评估但标记 `capacity-gated`；后续 battle admission owner 为 `go-simulation-control-admission` |
+| 预算 | 上行 16 KiB/s/player、下行 64 KiB/s/player、下行 512 KiB/s/instance、CPU 2.5 ms/Tick target、instance memory 64 MiB target、history 8 MiB target、queue 256 items |
+
+CPU、allocator/memory、真实 codec size、真实 socket、AEAD 和 KCP adapter parity 仍是 `implementation_required`；上述 target budget 不是伪造的实现测量。Profile 用 6 个 cases、12 个 fault scenarios 和 24 个结果覆盖 latency、jitter、loss/burst、reorder、duplicate、baseline gap、MTU、KCP retransmit、queue、slow consumer 与 disconnect/drain；28 项隔离失败回归证明摘要、coverage、lane、预算、安全字段和连续只读重放门。
+
+`message-inventory.json` 只冻结 `battle.input.bundle`、full/delta snapshot、probe、entity lifecycle、reliable ability event 与 resync 的 logical kind、direction、唯一 raw/KCP lane、expiry、size/rate 和恢复语义。它不是 production registry，不分配 numeric message ID、`.proto`、wire header、listener 或端口；这些仍由安全 transport change 一次性交付并做 parity。
 
 ### 输入 history 与预测 history
 

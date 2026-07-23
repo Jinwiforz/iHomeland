@@ -1,0 +1,29 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "case",
+  "case_id": "case-reliable-kcp",
+  "category": "reliable",
+  "requirements": [
+    "determinism",
+    "fault-matrix",
+    "kcp"
+  ],
+  "scenarios": [
+    "disconnect-drain",
+    "kcp-retransmit"
+  ],
+  "workloads": [
+    "default-coop"
+  ],
+  "phases": [
+    "combat-heavy",
+    "disconnect-drain"
+  ],
+  "assertions": [
+    "application-expiry-enforced",
+    "ordered-delivery-bounded",
+    "retransmit-amplification-reported",
+    "runtime-adapter-parity-required"
+  ]
+}

@@ -12,6 +12,7 @@
 - Go 与 C# 代码只通过统一工具生成。
 - 服务端 `generated` 与客户端 `Generated` 目录由 Git 忽略，不手工修改，也不承载 Unity 序列化引用。
 - Contract fixtures 与 golden packets 必须版本化。
+- `shared/contracts/fixtures/battle/network-profile/` 在 wire 创建前冻结 battle logical kind、唯一 lane、size/rate/expiry 和预算；它不是 numeric message registry。
 - 规范、编译器与插件版本统一来自根目录 `versions.yaml`，规则见 `docs/technology-versions.md`。
 
 ## 包划分
@@ -167,6 +168,12 @@ Visit message 2100 继续是邀请创建与退役的唯一 WSS route。`VisitInv
 `SafeReturnDirective.revision` 是产生该指令的权威 VisitSession revision。客户端已提交同一 VisitSession 的更高 revision 时必须拒绝迟到指令，避免旧 generation 在重新加入后撤销新 membership；缺失或为 `0` 的 revision 属于无效 projection。
 
 TLS/TCP gameplay 在 `ReliableEnvelope` stream 前使用版本化 `IHTP` authentication preface。preface 使用独立 4-byte big-endian frame、固定 ticket/admission 语法和封闭 purpose，不登记业务 message ID；格式基线由 `shared/contracts/fixtures/realtime/tcp-preface.json` 持有。后续 stream 只接受 registry 中 common heartbeat `1-2` 与 world/visit `2000-2002`、`2103-2122` 的精确 TLS_TCP route：C2S REQUEST/COMMAND 与 S2C RESPONSE/ERROR/PUSH 不能调换方向、kind、correlation 或 generated payload type。response/error 必须回显原 request/command identity，push 不携带 correlation。heartbeat `1/2` 只证明 active connection 存活，不能承载或修改业务事实。
+
+## Battle logical kind 与未来 wire
+
+B0.2 的 `message-inventory.json` 使用 `battle.input.bundle`、`battle.snapshot.full`、`battle.snapshot.delta`、`battle.probe`、`battle.entity.lifecycle`、`battle.ability.reliable-event`、`battle.resync.request` 和 `battle.resync.response` 等 logical kind 冻结 direction、raw/KCP lane、QoS、最大 logical payload、rate、expiry、Tick/sequence、idempotency、baseline 和 recovery。Logical kind 不占用 Message ID 范围，不创建 `ihomeland/battle/v1` schema，也不能进入现有 WSS/TLS-TCP registry。
+
+安全 battle transport change 必须为每个 logical kind 分配唯一 numeric message ID 和 generated payload，登记唯一 UDP/KCP route，并证明真实 encoded datagram 加 future secure session header、AEAD tag 与 lane header 后不超过 1200 bytes。拆分、合并、lane 变化或超出 profile budget 必须先更新 OpenSpec/profile；禁止临时编号、同一 command 跨 transport 双写、移除安全字段或依赖 IP 分片。
 
 ## World/Visit 公开投影与 credential 分层
 

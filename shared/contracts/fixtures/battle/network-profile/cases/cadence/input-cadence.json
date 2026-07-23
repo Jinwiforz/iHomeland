@@ -1,0 +1,35 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "case",
+  "case_id": "case-cadence-input",
+  "category": "cadence",
+  "requirements": [
+    "cadence",
+    "determinism",
+    "fault-matrix"
+  ],
+  "scenarios": [
+    "clean-default",
+    "clean-solo",
+    "raw-loss-burst",
+    "uplink-latency-jitter"
+  ],
+  "workloads": [
+    "default-coop",
+    "solo-owner"
+  ],
+  "phases": [
+    "boss-burst",
+    "combat-heavy",
+    "disconnect-drain",
+    "idle",
+    "movement-heavy"
+  ],
+  "assertions": [
+    "fixed-dt-preserved",
+    "gap-does-not-over-ack",
+    "input-redundancy-bounded",
+    "integer-mapping-selected"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "case",
+  "case_id": "case-mtu-budget",
+  "category": "mtu",
+  "requirements": [
+    "corpus-governance",
+    "lane",
+    "mtu"
+  ],
+  "scenarios": [
+    "mtu-boundary"
+  ],
+  "workloads": [
+    "default-coop"
+  ],
+  "phases": [
+    "boss-burst"
+  ],
+  "assertions": [
+    "checked-overhead-sum",
+    "ip-fragmentation-forbidden",
+    "logical-payload-bounded",
+    "security-budget-preserved"
+  ]
+}

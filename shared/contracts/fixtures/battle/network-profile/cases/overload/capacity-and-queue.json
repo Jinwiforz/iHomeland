@@ -1,0 +1,33 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "case",
+  "case_id": "case-overload-capacity",
+  "category": "overload",
+  "requirements": [
+    "capacity",
+    "fault-matrix",
+    "parameter-classification"
+  ],
+  "scenarios": [
+    "compatibility-combined",
+    "queue-saturation"
+  ],
+  "workloads": [
+    "default-coop",
+    "visit-capacity-compatibility"
+  ],
+  "phases": [
+    "boss-burst",
+    "combat-heavy",
+    "disconnect-drain",
+    "idle",
+    "movement-heavy"
+  ],
+  "assertions": [
+    "compatibility-capacity-gated",
+    "default-five-qualified",
+    "queue-high-watermark-bounded",
+    "target-budget-not-implementation-result"
+  ]
+}

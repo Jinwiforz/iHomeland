@@ -1,0 +1,327 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "fault-matrix",
+  "prng": "lcg32-numerical-recipes",
+  "seed": 20260723,
+  "required_impairments": [
+    "baseline-gap",
+    "burst",
+    "clean",
+    "disconnect-drain",
+    "duplicate",
+    "jitter",
+    "kcp-retransmit",
+    "latency",
+    "loss",
+    "mtu",
+    "queue-saturation",
+    "reorder",
+    "slow-consumer"
+  ],
+  "required_workloads": [
+    "default-coop",
+    "solo-owner",
+    "visit-capacity-compatibility"
+  ],
+  "required_phases": [
+    "boss-burst",
+    "combat-heavy",
+    "disconnect-drain",
+    "idle",
+    "movement-heavy"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "baseline-gap",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "combat-heavy"
+      ],
+      "impairments": [
+        "baseline-gap",
+        "burst",
+        "loss"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 60000,
+      "jitter_us": 20000,
+      "loss_percent": 15,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 20,
+      "burst_length": 3,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "clean-default",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "boss-burst",
+        "combat-heavy",
+        "disconnect-drain",
+        "idle",
+        "movement-heavy"
+      ],
+      "impairments": [
+        "clean"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 20000,
+      "jitter_us": 0,
+      "loss_percent": 0,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 64,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "clean-solo",
+      "workloads": [
+        "solo-owner"
+      ],
+      "phases": [
+        "boss-burst",
+        "combat-heavy",
+        "disconnect-drain",
+        "idle",
+        "movement-heavy"
+      ],
+      "impairments": [
+        "clean"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 20000,
+      "jitter_us": 0,
+      "loss_percent": 0,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "compatibility-combined",
+      "workloads": [
+        "visit-capacity-compatibility"
+      ],
+      "phases": [
+        "boss-burst",
+        "combat-heavy",
+        "disconnect-drain",
+        "idle",
+        "movement-heavy"
+      ],
+      "impairments": [
+        "burst",
+        "jitter",
+        "latency",
+        "loss",
+        "queue-saturation"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 80000,
+      "jitter_us": 40000,
+      "loss_percent": 10,
+      "duplicate_percent": 5,
+      "reorder_percent": 10,
+      "burst_interval": 20,
+      "burst_length": 3,
+      "queue_limit": 64,
+      "expected_outcome": "capacity-gated"
+    },
+    {
+      "scenario_id": "disconnect-drain",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "disconnect-drain"
+      ],
+      "impairments": [
+        "disconnect-drain",
+        "loss"
+      ],
+      "duration_ticks": 24,
+      "base_latency_us": 50000,
+      "jitter_us": 10000,
+      "loss_percent": 20,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "downlink-latency-jitter",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "movement-heavy"
+      ],
+      "impairments": [
+        "jitter",
+        "latency"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 90000,
+      "jitter_us": 30000,
+      "loss_percent": 0,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "kcp-retransmit",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "combat-heavy"
+      ],
+      "impairments": [
+        "burst",
+        "kcp-retransmit",
+        "loss",
+        "reorder"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 70000,
+      "jitter_us": 20000,
+      "loss_percent": 20,
+      "duplicate_percent": 0,
+      "reorder_percent": 10,
+      "burst_interval": 16,
+      "burst_length": 2,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "mtu-boundary",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "boss-burst"
+      ],
+      "impairments": [
+        "mtu"
+      ],
+      "duration_ticks": 20,
+      "base_latency_us": 30000,
+      "jitter_us": 0,
+      "loss_percent": 0,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "queue-saturation",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "boss-burst"
+      ],
+      "impairments": [
+        "queue-saturation",
+        "slow-consumer"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 50000,
+      "jitter_us": 10000,
+      "loss_percent": 0,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 12,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "raw-loss-burst",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "movement-heavy"
+      ],
+      "impairments": [
+        "burst",
+        "loss"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 60000,
+      "jitter_us": 10000,
+      "loss_percent": 20,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 20,
+      "burst_length": 3,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "reorder-duplicate",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "combat-heavy"
+      ],
+      "impairments": [
+        "duplicate",
+        "reorder"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 50000,
+      "jitter_us": 10000,
+      "loss_percent": 0,
+      "duplicate_percent": 15,
+      "reorder_percent": 20,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    },
+    {
+      "scenario_id": "uplink-latency-jitter",
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "movement-heavy"
+      ],
+      "impairments": [
+        "jitter",
+        "latency"
+      ],
+      "duration_ticks": 40,
+      "base_latency_us": 100000,
+      "jitter_us": 30000,
+      "loss_percent": 0,
+      "duplicate_percent": 0,
+      "reorder_percent": 0,
+      "burst_interval": 0,
+      "burst_length": 0,
+      "queue_limit": 32,
+      "expected_outcome": "qualified"
+    }
+  ]
+}

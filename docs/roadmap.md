@@ -371,7 +371,7 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 ### B0.1 `define-battle-simulation-model`
 
-**状态：**已完成实现，等待 change 归档。
+**状态：**已完成并归档。
 
 **进入条件：**权威 owner、首个 PersonalWorld gameplay 范围和 Go/C++/Unity 边界已由本架构 change strict 验证。
 
@@ -383,17 +383,21 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 ### B0.2 `define-battle-network-profile`
 
+**状态：**已完成实现，等待 change 归档。
+
 **进入条件：**B0.1 delta 已同步主 specs 且 OpenSpec strict 通过；模型 validator 与失败回归通过；`manifest.json`、`assumptions.json` 和全部 cases 的 digest 无漂移。B0.2 只能消费已冻结的 command/state/query/event 维度、VisitSession 容量兼容 workload、Tick 消费与历史/容量需求，不得为迎合网络参数改写模型语义。
 
 **产出：**基于可重复网络模拟冻结 tick/snapshot cadence、full/delta baseline、MTU、InputBundle 冗余、raw/KCP lane registry、KCP 参数、插值/外推窗口、correction tolerance、历史窗口及 per-player/per-instance 带宽/CPU/queue 预算。
 
 **完成条件：**目标 latency、jitter、loss、reorder、duplicate 和 burst 矩阵有测量报告；每个 battle message 只有一个 channel，snapshot 不走 KCP，production UDP 端口仍未启用。
 
-在 B0.2 完成前，C++ core、Go/C++ control、UDP/KCP wire/listener 和 Unity gameplay runtime 的进入门继续关闭。
+**完成 evidence：**`shared/contracts/fixtures/battle/network-profile/` 完整绑定 `battle-model-v1` digest，提供闭合 schema/manifest、profile、logical message inventory、fault matrix、6 个 cases 和 24-result canonical report；`tools/battle-network-profile/` 用固定 LCG、整数离散事件和稳定排序重放 12 个场景，28 项隔离回归验证 model/case 漂移、coverage、lane/MTU/KCP、资格分类、安全字段及连续运行不改写 corpus。Profile 冻结 20 Hz simulation、40 Hz input、10 Hz snapshot、1200-byte datagram、16-Tick history、默认 5 actors 与 8-actor qualified maximum；33 actors compatibility 要求后续 capacity gate。真实 C++/codec/socket/KCP/AEAD 性能仍标记 `implementation_required`。
+
+B0.2 完成只解锁 B0.3 的离线/loopback C++ core 提案；Go/C++ control、UDP/KCP wire/listener、production 端口、安全 transport 和 Unity gameplay runtime 的后续门仍关闭。
 
 ### B0.3 `implement-game-simulation-core`
 
-**进入条件：**simulation model 与 network profile strict 通过，C++ compiler/CMake 和每个第三方依赖的精确版本、来源、checksum、许可证、adapter 与回滚方案获批。
+**进入条件：**simulation model 与 network profile delta 已同步主 specs且 strict 通过；model/profile validator、失败回归和 canonical report 无漂移；C++ compiler/CMake 和每个第三方依赖的精确版本、来源、checksum、许可证、adapter 与回滚方案获批。C++ core 必须消费 50 ms SimulationTick、16-Tick history、8-actor profile cap 与 CPU/memory target budget，并保持所有 `implementation_required` 指标为待补证门。
 
 **产出：**`simulation/`、`ihomeland-sim-server` 离线/loopback harness、自研最小 ECS、固定单写 pipeline、GAS-like、Jolt physics adapter、Detour navigation adapter、有界 history/evidence 和 CMake Presets。
 

@@ -22,7 +22,7 @@
 | Realtime | 本地 TLS/TCP | TCP | `8444` | 本机或开发网 | 仓库 local 配置的可覆盖推荐值，客户端仍以 endpoint/ticket 为准 |
 | Server Runtime | 健康、就绪、版本与 metrics | TCP | `8081` | 默认仅 loopback | 不承载公开业务；生产环境限制在管理网络 |
 | Realtime | 部署 TLS/TCP | TCP | 不预留固定值 | 按部署配置 | 由 endpoint/ticket 下发，客户端不得硬编码 |
-| Game Simulation | raw UDP + KCP lanes | UDP | 尚未分配 | 按部署配置 | 默认复用一个 listener/安全 session；simulation model、network profile 与安全资格全部完成前不得分配 |
+| Game Simulation | raw UDP + KCP lanes | UDP | 尚未分配 | 按部署配置 | model/profile 已完成；Go/C++ control、安全 transport 与真实网络资格完成前仍不得分配 |
 | MySQL | 持久化数据库 | TCP | `3306` | 内网 | 实际连接端口可由环境配置或端口映射覆盖 |
 | Redis | 可恢复运行态 | TCP | `6379` | 内网 | 不得暴露公网 |
 | OpenTelemetry Collector | OTLP/gRPC | TCP | `4317` | 内网 | Collector 产品默认端口 |
@@ -42,7 +42,7 @@ Gameplay TLS/TCP 使用 `publicApi.gameplayTcp.address` 独立 bind，客户端�
 Game Simulation UDP production 端口、推荐本地端口和可部署 listener 配置必须保持“尚未分配”，直到 roadmap 中有序交付的一组 changes 提供以下证据，并由实际启用 listener 的 change 汇总验证：
 
 - 已批准的 battle simulation model，冻结 SimulationTick、input consumption、历史帧和过载语义，并由 `shared/contracts/fixtures/battle/model/` 与只读 validator 提供 completion evidence；该 evidence 本身不分配 wire、lane、listener 或端口；
-- 基于实测的 network profile，冻结 MTU、tick/snapshot cadence、lane registry、KCP 参数、插值窗口和 per-player/per-instance 带宽预算；
+- 已完成的 `shared/contracts/fixtures/battle/network-profile/`，绑定 model digest并冻结 1200-byte MTU、20/40 Hz simulation/input、10 Hz snapshot、logical lane inventory、KCP 参数、插值窗口和 per-player/per-instance target budget；其中真实 wire/KCP/socket/CPU/memory 仍须 implementation qualification；
 - HTTPS 签发的短期一次性 ticket，绑定 session epoch、PlayerID、完整 AssignmentStamp、SimulationInstanceID、audience/channel、受信 advertised endpoint 与绝对 expiry；
 - cookie challenge 与抗放大预算，在地址未验证前 response bytes/requests 严格受限；
 - AEAD algorithm/key derivation/key epoch/nonce discipline、replay window 与 endpoint binding/rebinding 验证；

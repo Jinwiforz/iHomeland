@@ -1,0 +1,78 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "model-binding",
+  "model_format_version": "1",
+  "model_version": "battle-model-v1",
+  "manifest_path": "../model/manifest.json",
+  "manifest_sha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+  "assumptions_path": "../model/assumptions.json",
+  "assumptions_sha256": "347f219a74b04a89f66cc0943157aa8f4f69df9568f2e4564ab17a5c3d296339",
+  "required_requirements": [
+    "ability-state",
+    "authoritative-combat",
+    "determinism",
+    "deterministic-ai",
+    "fixture-governance",
+    "history",
+    "input-boundary",
+    "input-mapping",
+    "movement",
+    "overload",
+    "pipeline-owner",
+    "tick-timeline",
+    "workload-assumptions"
+  ],
+  "cases": [
+    {
+      "case_id": "bounded-capacity-and-tick-debt",
+      "path": "cases/overload/bounded-capacity-and-tick-debt.json",
+      "file_sha256": "130af443a942f313c0d144b5dba01f121a60fde0a5672051dae8beb739e05b72"
+    },
+    {
+      "case_id": "bounded-lag-compensation",
+      "path": "cases/history/bounded-lag-compensation.json",
+      "file_sha256": "93a96ccd6193e4ccbc42d6a2b1aa86513d105ad5d3443f5be7dd31774ecdaab9"
+    },
+    {
+      "case_id": "command-authority-and-order",
+      "path": "cases/negative/command-authority-and-order.json",
+      "file_sha256": "2d59843a004cf645e17daa4e1b34cc31791ee4143d85b170e46b7ded295db491"
+    },
+    {
+      "case_id": "damage-overflow-config",
+      "path": "cases/negative/damage-overflow-config.json",
+      "file_sha256": "1b48a0edcd8dd9f499a53356baf636f41653aac4c4d08dca84ab645bde558192"
+    },
+    {
+      "case_id": "deterministic-target-and-boss",
+      "path": "cases/ai/deterministic-target-and-boss.json",
+      "file_sha256": "20aed52c14e7e3980d62da34f044924572e814c2a542f3e31231d0787b42512d"
+    },
+    {
+      "case_id": "effect-damage-death",
+      "path": "cases/combat/effect-damage-death.json",
+      "file_sha256": "964242137e6ea4879bee08fea6576ce0fe09404d14673fb318171197df74c214"
+    },
+    {
+      "case_id": "fan-projectile-hit",
+      "path": "cases/combat/fan-projectile-hit.json",
+      "file_sha256": "3ea8cd2f0d51dbb80283c1b96f2cfe6a6bca9f44162c0ea25bd8474f7e04219b"
+    },
+    {
+      "case_id": "kinematic-jump-and-collision",
+      "path": "cases/movement/kinematic-jump-and-collision.json",
+      "file_sha256": "385a1074ffad79091507527da32b0bb64a4319bd40b62750836a0ecc9838812b"
+    },
+    {
+      "case_id": "tick-mapping-and-generation",
+      "path": "cases/tick-input/tick-mapping-and-generation.json",
+      "file_sha256": "8c360c5e8fcf40a812568fd3151061d68eb18e0ca3dbe4f2eaf642fba12dfcc2"
+    },
+    {
+      "case_id": "weapon-ability-and-sword",
+      "path": "cases/combat/weapon-ability-and-sword.json",
+      "file_sha256": "293d6b60497c3f8d3698c7bd5ed6e38e71088345301752aebc208e4786a6c1c0"
+    }
+  ]
+}

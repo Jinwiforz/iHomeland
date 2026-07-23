@@ -26,7 +26,7 @@ iHomeland/
   versions.yaml
 ```
 
-`simulation/` 是未来 `ihomeland-sim-server` 的唯一工程根，不属于现有 Go `server/` 子目录，也不把第三方源码复制成业务代码。B0.1 只交付共享模型数据与 validator；在 network profile 和首个 C++ core implementation change 获批前不得创建空目录、CMake target、vendor 副本或 UDP listener。
+`simulation/` 是未来 `ihomeland-sim-server` 的唯一工程根，不属于现有 Go `server/` 子目录，也不把第三方源码复制成业务代码。B0.1/B0.2 已交付共享 model/profile 数据与只读工具；只有首个 C++ core implementation change 的 dependency、compiler/CMake、adapter 和回滚方案获批后才能创建真实工程目录与 target，UDP listener 仍等待后续安全 transport。
 
 ## C++ Game Simulation Server 目标结构
 
@@ -246,6 +246,7 @@ shared/
       admission/           # issuer/verifier 的抽象语义 corpus，不含 claims
       battle/
         model/             # B0.1 纯模型 schema、manifest、assumptions 与 cases
+        network-profile/   # B0.2 cadence、lane、MTU、fault matrix、budget 与 canonical report
         wire/              # 后续安全 transport change 才创建的跨端 wire golden
       http/
       realtime/
@@ -256,6 +257,7 @@ shared/
 - route/error catalog 是协议源的一部分。
 - HTTP fixtures、realtime golden packets、negative coverage manifest 与 admission semantic corpus 是兼容性基线，必须版本化并由统一工具重复生成和验证。
 - `contracts/fixtures/battle/model/` 是权威 gameplay 模型数据的唯一 owner；B0.2 profile 和后续 C++ harness 只消费其版本化数据，不在网络、C++ 或 Unity 目录复制规则。
+- `contracts/fixtures/battle/network-profile/` 是网络 profile 的唯一 owner；它绑定完整 model digest，冻结 logical kind/lane 和 target budget，但不分配 numeric message ID、wire、listener 或端口。
 - `descriptor.bin` 与 registry projection 不落盘；validator 使用刚生成的 Go descriptor registry，并在内存构建路由投影。
 - 不放服务端 domain model 或 Unity 类型。
 
@@ -422,11 +424,13 @@ docs/
 ```text
 shared/contracts/fixtures/battle/model/  # B0.1 无网络模型 source of truth
 tools/battle-model/                      # 只读格式/引用/coverage/digest validator
+shared/contracts/fixtures/battle/network-profile/ # B0.2 profile、fault matrix 与低敏 report
+tools/battle-network-profile/            # 只读 validator、整数离散事件 simulator 与失败回归
 shared/contracts/fixtures/battle/wire/   # 安全 transport change 才创建
-tools/battle-qualification/          # 网络模拟、带宽、丢包、乱序、重连与安全验收
+tools/battle-qualification/               # 后续真实进程、故障注入、重连与安全验收
 ```
 
-`battle-model` validator 只验证纯 JSON 数据，不实现 gameplay evaluator，不启动进程、网络或 Docker，也不依赖 C++ 第三方库、generated code、本机绝对路径。B0.1 不创建 `battle/wire/`、message ID、lane、listener 或端口。资格工具只经公开或受控测试契约驱动真实进程，不导入 C++/Go 内部 gameplay 类型；运行日志、抓包和报告进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence。
+`battle-model` validator 只验证纯 gameplay JSON；`battle-network-profile` 在此基础上只重放 logical byte/event、fault、queue 与 deadline，不实现 gameplay evaluator、真实 KCP、socket 或 listener。两个工具都不启动 Docker/Go/Unity/C++、不安装第三方依赖、不写 source corpus，也不依赖 generated code或本机绝对路径。B0.2 仍不创建 `battle/wire/`、numeric message ID、listener 或端口。后续资格工具只经公开或受控测试契约驱动真实进程，不导入 C++/Go 内部 gameplay 类型；运行日志、抓包和报告进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence。
 
 ## OpenSpec 结构
 

@@ -1,0 +1,510 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "profile",
+  "tool_version": "battle-network-profile-tool-v1",
+  "profile_status": "qualified",
+  "selected_candidate_id": "candidate-20hz",
+  "candidates": [
+    {
+      "candidate_id": "candidate-15hz",
+      "simulation_step_ns": 66666666,
+      "input_step_ns": 33333333,
+      "snapshot_interval_ticks": 1,
+      "history_window_ticks": 12,
+      "expected_disposition": "rejected",
+      "expected_reason": "simulation-step-budget"
+    },
+    {
+      "candidate_id": "candidate-20hz",
+      "simulation_step_ns": 50000000,
+      "input_step_ns": 25000000,
+      "snapshot_interval_ticks": 2,
+      "history_window_ticks": 16,
+      "expected_disposition": "selected",
+      "expected_reason": "lowest-qualified-score"
+    },
+    {
+      "candidate_id": "candidate-30hz",
+      "simulation_step_ns": 33333333,
+      "input_step_ns": 16666667,
+      "snapshot_interval_ticks": 3,
+      "history_window_ticks": 20,
+      "expected_disposition": "rejected",
+      "expected_reason": "non-integral-input-ratio"
+    }
+  ],
+  "parameters": [
+    {
+      "id": "bandwidth-down-per-instance-target",
+      "value": 524288,
+      "unit": "bytes_per_second",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-overload-capacity"
+      ]
+    },
+    {
+      "id": "bandwidth-down-per-player-target",
+      "value": 65536,
+      "unit": "bytes_per_second",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "bandwidth-up-per-player-target",
+      "value": 16384,
+      "unit": "bytes_per_second",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "continuous-hold-ticks",
+      "value": 4,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "correction-angle-millidegrees",
+      "value": 2000,
+      "unit": "millidegrees",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "correction-position-millimeters",
+      "value": 80,
+      "unit": "millimeters",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "cpu-per-tick-measurement",
+      "value": 0,
+      "unit": "microseconds",
+      "classification": "implementation_required",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "future-b0.3-core-benchmark"
+      ]
+    },
+    {
+      "id": "cpu-per-tick-target",
+      "value": 2500,
+      "unit": "microseconds",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-overload-capacity"
+      ]
+    },
+    {
+      "id": "full-baseline-interval-snapshots",
+      "value": 10,
+      "unit": "snapshots",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "history-memory-measurement",
+      "value": 0,
+      "unit": "bytes",
+      "classification": "implementation_required",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "future-b0.3-core-benchmark"
+      ]
+    },
+    {
+      "id": "history-memory-target",
+      "value": 8388608,
+      "unit": "bytes",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-overload-capacity"
+      ]
+    },
+    {
+      "id": "history-window-ticks",
+      "value": 16,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "input-bundle-depth",
+      "value": 3,
+      "unit": "input_ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "input-bundle-redundancy",
+      "value": 2,
+      "unit": "copies",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "input-early-window-ticks",
+      "value": 2,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "input-gap-expiry-ticks",
+      "value": 6,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "input-late-window-ticks",
+      "value": 6,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "input-step-ns",
+      "value": 25000000,
+      "unit": "nanoseconds",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "interpolation-delay-us",
+      "value": 100000,
+      "unit": "microseconds",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "kcp-adapter-parity",
+      "value": 0,
+      "unit": "status",
+      "classification": "implementation_required",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "future-b0.5-kcp-adapter"
+      ]
+    },
+    {
+      "id": "mapping-drift-reset-us",
+      "value": 5000,
+      "unit": "microseconds",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "maximum-baseline-age-ticks",
+      "value": 40,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "maximum-baseline-fanout",
+      "value": 10,
+      "unit": "snapshots",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "maximum-extrapolation-us",
+      "value": 150000,
+      "unit": "microseconds",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "memory-per-instance-measurement",
+      "value": 0,
+      "unit": "bytes",
+      "classification": "implementation_required",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "future-b0.3-core-benchmark"
+      ]
+    },
+    {
+      "id": "memory-per-instance-target",
+      "value": 67108864,
+      "unit": "bytes",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-overload-capacity"
+      ]
+    },
+    {
+      "id": "queue-capacity-items",
+      "value": 256,
+      "unit": "items",
+      "classification": "target_budget",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-overload-capacity"
+      ]
+    },
+    {
+      "id": "simulation-step-ns",
+      "value": 50000000,
+      "unit": "nanoseconds",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-cadence-input"
+      ]
+    },
+    {
+      "id": "snapshot-interval-ticks",
+      "value": 2,
+      "unit": "ticks",
+      "classification": "profile_qualified",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "case-baseline-recovery"
+      ]
+    },
+    {
+      "id": "wire-encoded-size-parity",
+      "value": 0,
+      "unit": "status",
+      "classification": "implementation_required",
+      "workloads": [
+        "default-coop",
+        "solo-owner",
+        "visit-capacity-compatibility"
+      ],
+      "evidence": [
+        "future-b0.5-wire-parity"
+      ]
+    }
+  ],
+  "mtu_budget": {
+    "max_datagram_bytes": 1200,
+    "ip_udp_overhead_bytes": 48,
+    "secure_session_header_bytes": 48,
+    "aead_tag_bytes": 16,
+    "raw_lane_header_bytes": 16,
+    "kcp_lane_header_bytes": 24,
+    "raw_max_logical_payload_bytes": 1072,
+    "kcp_max_logical_payload_bytes": 1064,
+    "fragmentation_policy": "forbidden",
+    "wire_parity_status": "implementation-required"
+  },
+  "kcp_profile": {
+    "conversation_scope": "battle-session-generation",
+    "update_interval_us": 10000,
+    "no_delay": true,
+    "send_window_segments": 64,
+    "receive_window_segments": 64,
+    "fast_resend": 2,
+    "rto_min_us": 30000,
+    "rto_max_us": 200000,
+    "dead_link_retries": 10,
+    "segment_ceiling_bytes": 1000,
+    "message_ceiling_bytes": 1000,
+    "queue_limit_messages": 64,
+    "application_expiry_us": 500000,
+    "adapter_parity_status": "implementation-required"
+  },
+  "capacity": {
+    "qualified_default_players": 5,
+    "qualified_max_players": 8,
+    "evaluated_max_players": 33,
+    "visit_configured_max_players": 33,
+    "capacity_gate_required": true,
+    "capacity_gate_owner": "go-simulation-control-admission",
+    "capacity_gate_status": "required-not-implemented"
+  },
+  "workloads": [
+    {
+      "workload_id": "default-coop",
+      "players": 5,
+      "qualification": "qualified"
+    },
+    {
+      "workload_id": "solo-owner",
+      "players": 1,
+      "qualification": "qualified"
+    },
+    {
+      "workload_id": "visit-capacity-compatibility",
+      "players": 33,
+      "qualification": "capacity-gated"
+    }
+  ],
+  "report_path": "reports/qualification.json"
+}

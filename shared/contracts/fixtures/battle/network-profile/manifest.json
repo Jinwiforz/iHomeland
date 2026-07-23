@@ -1,0 +1,164 @@
+{
+  "format_version": "1",
+  "profile_version": "battle-network-profile-v1",
+  "document_kind": "manifest",
+  "schema_path": "schema.json",
+  "schema_sha256": "0e286f57eceb2b12916bbbfa20dc671f88cf08f26bee068d5bb5e4df11b8d10d",
+  "required_requirements": [
+    "cadence",
+    "capacity",
+    "corpus-governance",
+    "determinism",
+    "fault-matrix",
+    "kcp",
+    "lane",
+    "mtu",
+    "parameter-classification",
+    "snapshot"
+  ],
+  "files": [
+    {
+      "path": "fault-matrix.json",
+      "document_kind": "fault-matrix",
+      "file_sha256": "1212139bfc09a6c929b387e7efa97642f93f8d8872445272b484ea770cc3a1cb"
+    },
+    {
+      "path": "message-inventory.json",
+      "document_kind": "message-inventory",
+      "file_sha256": "d170de2c33b5ce10944d5dd667d5606f5bf6be37be93bf0e14232966d72bf89a"
+    },
+    {
+      "path": "model-binding.json",
+      "document_kind": "model-binding",
+      "file_sha256": "7441b49706bbcbaa04288c672a52ca01d6b377879cd0dcfa91a3f09f32e36cbc"
+    },
+    {
+      "path": "profile.json",
+      "document_kind": "profile",
+      "file_sha256": "ca7b251509a9ec37b97615c5dfdc25444f5e5d9c747c6f72a90db1b4bfbbcc4c"
+    },
+    {
+      "path": "reports/qualification.json",
+      "document_kind": "qualification-report",
+      "file_sha256": "010c1e840f4021047e4d9c32f9e3e44f923b73667e1c3021f69fee66406767a8"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "case-baseline-recovery",
+      "path": "cases/baseline/baseline-recovery.json",
+      "category": "baseline",
+      "requirements": [
+        "determinism",
+        "fault-matrix",
+        "snapshot"
+      ],
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "combat-heavy",
+        "movement-heavy"
+      ],
+      "file_sha256": "7b2236449606dda30b5bfba5af97f8ac519df52a897f90f83990e6a6ee3686db"
+    },
+    {
+      "case_id": "case-cadence-input",
+      "path": "cases/cadence/input-cadence.json",
+      "category": "cadence",
+      "requirements": [
+        "cadence",
+        "determinism",
+        "fault-matrix"
+      ],
+      "workloads": [
+        "default-coop",
+        "solo-owner"
+      ],
+      "phases": [
+        "boss-burst",
+        "combat-heavy",
+        "disconnect-drain",
+        "idle",
+        "movement-heavy"
+      ],
+      "file_sha256": "53ddd360e06d6bc092436253d6139281089e3df9fc420bbd719620f907796a9c"
+    },
+    {
+      "case_id": "case-mtu-budget",
+      "path": "cases/mtu/datagram-budget.json",
+      "category": "mtu",
+      "requirements": [
+        "corpus-governance",
+        "lane",
+        "mtu"
+      ],
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "boss-burst"
+      ],
+      "file_sha256": "55b1ffd1721b55f906b389aecf4721b3bcb2c1d7c4b3afb1d13fea2c7a79d902"
+    },
+    {
+      "case_id": "case-negative-contract",
+      "path": "cases/negative/contract-rejections.json",
+      "category": "negative",
+      "requirements": [
+        "corpus-governance",
+        "lane",
+        "parameter-classification"
+      ],
+      "workloads": [
+        "default-coop",
+        "visit-capacity-compatibility"
+      ],
+      "phases": [
+        "boss-burst",
+        "combat-heavy"
+      ],
+      "file_sha256": "888028649b5fcab75b1d00a46e913aed163359f45b395af89d2bea1af5e9df09"
+    },
+    {
+      "case_id": "case-overload-capacity",
+      "path": "cases/overload/capacity-and-queue.json",
+      "category": "overload",
+      "requirements": [
+        "capacity",
+        "fault-matrix",
+        "parameter-classification"
+      ],
+      "workloads": [
+        "default-coop",
+        "visit-capacity-compatibility"
+      ],
+      "phases": [
+        "boss-burst",
+        "combat-heavy",
+        "disconnect-drain",
+        "idle",
+        "movement-heavy"
+      ],
+      "file_sha256": "7b364586fec70819b0f36486a57eb88d3331fdcd3b92466d32ef118304998787"
+    },
+    {
+      "case_id": "case-reliable-kcp",
+      "path": "cases/reliable/kcp-deadline.json",
+      "category": "reliable",
+      "requirements": [
+        "determinism",
+        "fault-matrix",
+        "kcp"
+      ],
+      "workloads": [
+        "default-coop"
+      ],
+      "phases": [
+        "combat-heavy",
+        "disconnect-drain"
+      ],
+      "file_sha256": "c4e58e4049444f787aa6784ee10de98ddfb0649fc4c50a33d4f905b254a252c7"
+    }
+  ]
+}

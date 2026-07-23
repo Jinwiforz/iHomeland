@@ -164,38 +164,44 @@ Active gameplay connection 使用 registry 登记的 common heartbeat `1/2` 保�
 
 ### Battle model 与 network profile 边界
 
-`shared/contracts/fixtures/battle/model/` 是 B0.1 的纯 gameplay 模型 source of truth。B0.2 读取其 `manifest.json`、`assumptions.json` 与 cases 中的 command/state/query/event、容量和 workload 维度，测量 tick/snapshot cadence、窗口、MTU、lane、KCP、CPU、memory、queue 与 bandwidth 参数。Profile 可以追加测量 evidence，但不得改写模型状态迁移来迎合网络结果。
+`shared/contracts/fixtures/battle/model/` 是 B0.1 的纯 gameplay 模型 source of truth。B0.2 的 `shared/contracts/fixtures/battle/network-profile/` 已绑定其 `manifest.json`、`assumptions.json`、全部 cases 与 required coverage digest，并在不改写模型状态迁移的前提下冻结 cadence、窗口、MTU、逻辑 lane、KCP、capacity 与 budget。
 
-模型 fixture 不是 wire contract：其中没有 message ID、route、lane、framing、endpoint、ticket 或 packet layout。B0.1 也不创建 UDP/KCP listener、推荐端口、第三方 C++ 依赖或 generated code。所有 wire 与 listener 决策继续等待 B0.2 profile、route registry、安全设计及其各自 OpenSpec change。
+Profile 的 6 个 cases、12 个场景和 24 个 canonical 结果由 `tools/battle-network-profile/` 只读重放；默认 5 actors 通过，33 actors compatibility 明确要求后续 capacity gate。Profile-qualified 只覆盖逻辑网络模型；真实 C++ CPU/memory、codec、socket、AEAD 和 KCP adapter 仍需后续实现与 B0.6 补证。
+
+模型与 profile fixture 都不是 wire contract：B0.2 的 logical kind 不等于 numeric message ID，也不创建 `.proto`、framing、endpoint、ticket、packet layout、listener、推荐端口、第三方 C++ dependency 或 generated code。所有 production wire、安全和 listener 决策继续等待对应 OpenSpec change。
 
 ### 裸 UDP 不可靠时序面
 
-以下只是假设供 B0.2 测量的初始类别，不是 B0.1 fixture 的路由承诺；最终 message id、频率、大小和 allowed lane 由 battle network profile 与 registry 冻结：
+B0.2 已对以下 logical kind 冻结 raw lane、频率、大小、expiry 与恢复语义；numeric message ID 和最终 wire route 仍等待安全 transport registry：
 
 | 方向 | 初始消息类别 | 交付语义 |
 |---|---|---|
-| C2S/S2C | latency、NAT、path、cookie probe | 可丢失、严格限量，不进入 gameplay state |
-| C2S | 连续移动/视角等 `BattleInputBundle` | unreliable-sequenced；可冗余携带少量尚未确认 InputTick，过期即丢弃 |
-| S2C | full/delta `BattleSnapshot`、transform/presentation state | unreliable-sequenced；新 snapshot 覆盖旧 snapshot |
-| S2C | 允许丢失的 telemetry/presentation hint | unreliable-sequenced；不得成为伤害或结算事实 |
+| C2S | `battle.probe` | 最大 96 bytes、4/s、250 ms expiry；可丢失且不进入 gameplay state |
+| C2S | `battle.input.bundle` | 最大 384 bytes、40/s、300 ms expiry；depth 3、redundancy 2，gap 到期后明确终结 |
+| S2C | `battle.snapshot.delta` | 最大 900 bytes、10/s、300 ms expiry；必须引用已确认 baseline |
+| S2C | `battle.snapshot.full` | 最大 1040 bytes、2/s、500 ms expiry；建立新 baseline identity |
 
-设计思想是“丢失后等待更新包”，不能通过重试把旧数据变成可靠业务。数据包以不触发 IP 分片为目标，`1200 bytes` 只作为初始预算，最终值必须通过 MTU 测试确认。
+设计思想是“丢失后等待更新包”，不能通过重试把旧数据变成可靠业务。Profile-qualified datagram 上限是 1200 bytes；保守扣除 IPv6/UDP、future secure session、AEAD tag 和 lane header 后，raw/KCP logical payload 上限分别是 1072/1064 bytes。B0.5 必须用真实 wire 验证预留开销；超限时 fail closed，不能缩减安全字段或依赖 IP 分片。
 
 权威 full/delta snapshot 禁止进入 KCP。若客户端丢失 delta baseline，只能等待/请求按 profile 允许的后续 full baseline，不能可靠重传整条连续 snapshot 流。
 
 ### KCP 低延迟可靠战斗面
 
-初始只允许承载：
+B0.2 logical inventory 只允许承载：
 
 | 方向 | 初始消息类别 | 交付语义 |
 |---|---|---|
-| C2S | 经玩法模型确认“丢失不可接受且晚到仍有意义”的离散 ability/weapon command | reliable-ordered；必须含 InputTick、command sequence 与 expiry |
-| S2C | 必须可靠观察的实例内离散 lifecycle/ability result | reliable-ordered；必须可去重且不能替代 Go 结算事实 |
-| C2S/S2C | profile 明确登记的 resync/control message | reliable-ordered；有独立大小、频率与超时预算 |
+| S2C | `battle.entity.lifecycle`、`battle.ability.reliable-event` | 分别最大 512 bytes、20/s、500 ms expiry；可去重且不能替代 Go 结算事实 |
+| C2S | `battle.resync.request` | 最大 128 bytes、2/s、500 ms expiry；携带缺失 baseline identity |
+| S2C | `battle.resync.response` | 最大 768 bytes、2/s、500 ms expiry；只授权有界 full baseline 恢复 |
 
 KCP 只提供 ARQ。握手、身份、加密、重放保护、拥塞预算、限流和 endpoint rebinding 仍由项目负责。应用层必须继续校验 tick、sequence、过期与合法性。
 
+冻结 profile 使用 10 ms update、send/receive window 64、fast resend 2、RTO 30–200 ms、dead link 10、segment/message ceiling 1000 bytes、queue 64 和 application expiry 500 ms。它只证明有限 ARQ 模型；真实 KCP core 的时钟、segment、重传放大和 adapter parity 必须由 B0.5/B0.6 补证。
+
 同一 message id 只能登记 raw UDP 或 KCP 其中一个 lane，禁止为了“保险”双写。调用方不得运行时选择 lane，也不得在 raw 超时后把相同消息静默转入 KCP/TCP；改变 QoS 必须变更 registry、兼容性和网络资格基线。
+
+B0.2 logical kind 是未来 registry 的强制输入，但尚未占用任何编号。B0.5 必须建立 logical kind 到 numeric message ID 的一一映射；未映射、拆分、合并或 lane 漂移都必须先更新 profile，不能用占位编号绕过协议治理。
 
 ## Message Route Registry
 
