@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Threading;
@@ -6,8 +6,11 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Protocol.Common.V1;
@@ -28,7 +31,7 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public async Task Run_FragmentedPush_DispatchesOnceOnMainThread()
         {
-            var frame = EnvelopeBytes(500, 1, new MaintenancePush { MessageKey = "fixture" });
+            var frame = EnvelopeBytes(500, 1, Maintenance());
             var first = new byte[frame.Length / 2];
             var second = new byte[frame.Length - first.Length];
             Array.Copy(frame, 0, first, 0, first.Length);
@@ -41,7 +44,7 @@ namespace IHomeland.Client.Tests.EditMode
                 ReceiveStep.Close(WebSocketCloseStatus.PolicyViolation));
             var factory = new FakeSocketFactory(socket);
             var harness = await CreateHarnessAsync(factory, Array.Empty<TimeSpan>());
-            var received = new List<ClientControlPush>();
+            var received = new List<ClientControlNotification>();
             harness.Channel.PushReceived += received.Add;
 
             await harness.Channel.RunAsync(CancellationToken.None);
@@ -50,7 +53,7 @@ namespace IHomeland.Client.Tests.EditMode
             var drain = harness.Dispatcher.Drain(8);
             Assert.That(drain.Errors, Is.Empty);
             Assert.That(received.Count, Is.EqualTo(1));
-            Assert.That(received[0].Route.MessageID, Is.EqualTo(500));
+            Assert.That(received[0].Kind, Is.EqualTo(ClientControlPushKind.Maintenance));
             Assert.That(harness.Channel.Snapshot.CloseReason, Is.EqualTo(ClientControlCloseReason.ProtocolFailure));
             Assert.That(socket.ConnectRequest.Endpoint.AbsoluteUri, Is.EqualTo("ws://127.0.0.1:8443/v1/control"));
             Assert.That(socket.ConnectRequest.ToString(), Does.Not.Contain(socket.ConnectRequest.TicketCredential));
@@ -66,7 +69,7 @@ namespace IHomeland.Client.Tests.EditMode
             var socket = new FakeSocket(
                 false,
                 ClientWebSocketConnectRequest.ControlSubprotocol,
-                ReceiveStep.Binary(EnvelopeBytes(500, 1, new MaintenancePush()), true));
+                ReceiveStep.Binary(EnvelopeBytes(500, 1, Maintenance()), true));
             var harness = await CreateHarnessAsync(
                 new FakeSocketFactory(socket),
                 Array.Empty<TimeSpan>(),
@@ -294,6 +297,30 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(socket.DisposeCount, Is.EqualTo(1));
         }
 
+        /// <summary>确认active run期间拒绝第二个run，并保持唯一run与socket owner。</summary>
+        [Test]
+        public async Task Run_ConcurrentStartRejectsSecondOwner()
+        {
+            var socket = new FakeSocket(
+                false,
+                ClientWebSocketConnectRequest.ControlSubprotocol);
+            var harness = await CreateHarnessAsync(
+                new FakeSocketFactory(socket),
+                Array.Empty<TimeSpan>());
+
+            var run = harness.Channel.RunAsync(CancellationToken.None);
+            await WaitForStateAsync(harness.Channel, ClientControlChannelState.Connected);
+
+            Assert.Throws<InvalidOperationException>(
+                () => harness.Channel.RunAsync(CancellationToken.None));
+            Assert.That(harness.Channel.QualificationRunOwnerCount, Is.EqualTo(1));
+
+            await harness.Channel.StopAsync(CancellationToken.None);
+            await run;
+            Assert.That(harness.Channel.QualificationRunOwnerCount, Is.EqualTo(0));
+            Assert.That(socket.DisposeCount, Is.EqualTo(1));
+        }
+
         /// <summary>确认Development资格故障只取消current attempt并使用新ticket恢复同一run。</summary>
         [Test]
         public async Task QualificationFault_CancelsAttemptAndRecoversSameRun()
@@ -326,12 +353,12 @@ namespace IHomeland.Client.Tests.EditMode
             var socket = new FakeSocket(
                 false,
                 ClientWebSocketConnectRequest.ControlSubprotocol,
-                ReceiveStep.Binary(EnvelopeBytes(500, 1, new MaintenancePush()), true),
+                ReceiveStep.Binary(EnvelopeBytes(500, 1, Maintenance()), true),
                 ReceiveStep.Close(WebSocketCloseStatus.PolicyViolation));
             var harness = await CreateHarnessAsync(
                 new FakeSocketFactory(socket),
                 Array.Empty<TimeSpan>());
-            var received = new List<ClientControlPush>();
+            var received = new List<ClientControlNotification>();
             harness.Channel.PushReceived += received.Add;
 
             await harness.Channel.RunAsync(CancellationToken.None);
@@ -351,7 +378,7 @@ namespace IHomeland.Client.Tests.EditMode
             var first = new FakeSocket(
                 false,
                 ClientWebSocketConnectRequest.ControlSubprotocol,
-                ReceiveStep.Binary(EnvelopeBytes(500, 1, new MaintenancePush()), true),
+                ReceiveStep.Binary(EnvelopeBytes(500, 1, Maintenance()), true),
                 ReceiveStep.Close(WebSocketCloseStatus.NormalClosure));
             var second = new FakeSocket(
                 false,
@@ -359,7 +386,7 @@ namespace IHomeland.Client.Tests.EditMode
             var harness = await CreateHarnessAsync(
                 new FakeSocketFactory(first, second),
                 new[] { TimeSpan.FromMilliseconds(1) });
-            var received = new List<ClientControlPush>();
+            var received = new List<ClientControlNotification>();
             harness.Channel.PushReceived += received.Add;
 
             var run = harness.Channel.RunAsync(CancellationToken.None);
@@ -419,6 +446,7 @@ namespace IHomeland.Client.Tests.EditMode
                 session,
                 factory,
                 new ClientControlCodec(new ClientControlCatalog()),
+                new ClientControlProtocolAdapter(),
                 dispatcher,
                 delay ?? new FakeDelay(),
                 retryDelays);
@@ -511,6 +539,18 @@ namespace IHomeland.Client.Tests.EditMode
                 TimestampMs = 1700000000000,
                 Payload = payload.ToByteString(),
             }.ToByteArray();
+        }
+
+        /// <summary>创建满足 Application adapter 字段合同的维护通知。</summary>
+        /// <returns>可用于 channel receive fixture 的 generated payload。</returns>
+        private static MaintenancePush Maintenance()
+        {
+            return new MaintenancePush
+            {
+                StartsAtMs = 1000,
+                ExpectedEndAtMs = 2000,
+                MessageKey = "maintenance.fixture",
+            };
         }
 
         /// <summary>
@@ -804,7 +844,7 @@ namespace IHomeland.Client.Tests.EditMode
         /// <summary>
         /// 记录 backoff 而不让 EditMode test 真实等待。
         /// </summary>
-        private sealed class FakeDelay : IClientControlDelay
+        private sealed class FakeDelay : IClientDelay
         {
             /// <summary>
             /// 获取按发生顺序记录的 delay。
@@ -848,7 +888,7 @@ namespace IHomeland.Client.Tests.EditMode
         /// <summary>
         /// 提供认证与每次 attempt 新 ticket 的强类型 HTTP fake。
         /// </summary>
-        private sealed class FakeHttpApi : IClientHttpApi
+        private sealed class FakeHttpApi : IClientBootstrapGateway, IClientSessionGateway
         {
             /// <summary>
             /// 获取已签发 ticket 次数。
@@ -856,35 +896,28 @@ namespace IHomeland.Client.Tests.EditMode
             internal int TicketCount { get; private set; }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
+            public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
                 CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(
-                string username,
-                string password,
-                string displayName,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(
-                string username,
-                string password,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken cancellationToken)
             {
-                return Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                return Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     new ClientAuthentication(
                         new ClientAccountSummary("account-fixture", "Fixture", 1),
                         new ClientSessionSummary("session-fixture", 1, 9000),
@@ -893,30 +926,23 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
-                string refreshToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(
-                string accessToken,
-                ClientEndpointChannel channel,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 TicketCount++;
-                return Task.FromResult(ClientHttpResult<ClientConnectionTicket>.Success(
+                return Task.FromResult(ClientGatewayResult<ClientConnectionTicket>.Success(
                     new ClientConnectionTicket(
                         TicketCount.ToString("x32"),
                         new ClientEndpoint(ClientEndpointChannel.Wss, "127.0.0.1", 8443),
@@ -925,29 +951,19 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
-                string accessToken,
-                ClientVisitInviteAcceptRequest request,
-                string idempotencyKey,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
-                string accessToken,
-                ClientWorldAdmissionTarget target,
-                string idempotencyKey,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken cancellationToken)
             {
                 throw new NotSupportedException();
             }

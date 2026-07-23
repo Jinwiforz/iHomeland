@@ -279,12 +279,51 @@ client/
   ProjectSettings/
 ```
 
+### 客户端程序集归属
+
+```text
+client/Assets/App/Scripts/
+  Foundation/                 # IHomeland.Client.Foundation
+  Application/
+    Configuration/
+    Contracts/
+    Ports/
+    Session/
+    Control/                  # 仅 Application control contracts
+    Gameplay/                 # 仅 Application gameplay contracts/models
+    World/
+  Infrastructure/
+    Http/
+    Security/
+    Time/
+    WebSocket/                # ClientControlChannel 与 WSS components
+    Tcp/                      # ClientGameplayChannel 与 TLS/TCP components
+  Presentation/
+    Pure/
+      Navigation/
+      PersonalWorld/
+    Hosts/                    # Runtime assembly 的 Unity Hosts
+    PersonalWorld/            # Runtime assembly 的 Unity Views/adapters
+  Core/
+    Bootstrap/
+    Composition/
+    Qualification/
+  Scenes/
+```
+
+`Foundation`、`Application`、`Presentation/Pure` 分别由独立 `noEngineReferences` asmdef 封闭；`Infrastructure` 只能指向 Foundation、Application 与 generated protocol；Runtime 是唯一可同时装配 Infrastructure、Presentation 与 Unity 类型的顶层程序集。
+
+`Core/Composition` 固定包含 Foundation、Infrastructure、Session、Channel、World、Presentation、Runtime/Qualification 七个子 Composition。它们返回私有封闭 bundle，不形成公共容器。旧 `Core/Lifetime`、Application 内的 concrete channel、跨层 mapper 与过渡 namespace 不得恢复。
+
+`client/Architecture/owner-registry.json` 声明每种状态的唯一 owner、commands、snapshot、module、collaborators 与测试入口；`tools/client-architecture/client-architecture.ps1 -Action verify` 是程序集 DAG、禁止依赖、owner 唯一性、旧路径与 Unity 序列化脚本完整性的 hard gate，并输出 flows、ports、adapters 和提示性复杂度清单。
+
 ### `Core`
 
 - Bootstrap：唯一启动入口。
 - Composition：对象创建和依赖连接。
-- Lifetime：App Scope 状态、tick、回滚和关闭。
-- Configuration：环境、endpoint、build 配置。
+- Qualification：仅 Editor/Development 的低敏诊断与产品 action 驱动。
+
+Lifetime 已归属 `Foundation/Lifetime`；运行配置 model/owner 已归属 `Application/Configuration`，Unity 序列化环境资产仍留在 Runtime。
 
 ### `Generated`
 
@@ -292,9 +331,9 @@ client/
 
 ### `Application`
 
-纯 C# session/account/personal-world/visit-session 状态与命令，不依赖具体 UI、Unity Host 或平台 socket/WebSocket 对象。Channel owner 可以依赖窄 transport interface 与冻结 codec，但不得直接持有平台网络实现或第二份业务事实。
+纯 C# configuration、session、personal-world、visit-session 状态与命令，不依赖具体 UI、Unity Host、generated protocol 或平台 socket/WebSocket 对象。Application 只定义 channel ports 与强类型 contracts；concrete channel owner 位于 Infrastructure。
 
-当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session/credential owner、`Application/Control` 的只接收 WSS control 状态机、`Application/Gameplay` 的独立 TLS/TCP channel owner，以及 `Application/World` 的 C2 访问 feature slice；具体行为由[客户端接入规范](client-integration.md)统一说明。
+当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session/credential owner、`Application/Control` 与 `Application/Gameplay` 的窄 contracts/ports，以及 `Application/World` 的访问、恢复与 projection feature slice；具体行为由[客户端接入规范](client-integration.md)统一说明。
 
 `Application/World` 只共置紧密协作的不可变 model/mapper、`PersonalWorldService`、`VisitSessionService` 与 `WorldAdmissionCoordinator`；三类 owner 的事实和转换职责仍然分离，该目录不得演变为统一 `WorldManager` 或第二套网络 router。尚未出现独立业务需求的 `Account` 及其他 application 目录不得为了目标树完整而创建空壳。
 

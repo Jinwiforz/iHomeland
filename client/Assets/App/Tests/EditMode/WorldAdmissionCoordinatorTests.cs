@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6,10 +6,14 @@ using Google.Protobuf;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.Tcp;
+using IHomeland.Client.Infrastructure.Time;
 using IHomeland.Protocol.Common.V1;
 using IHomeland.Protocol.Session.V1;
 using IHomeland.Protocol.Visit.V1;
@@ -690,6 +694,7 @@ namespace IHomeland.Client.Tests.EditMode
                 SessionCoordinator session,
                 MainThreadDispatcher dispatcher,
                 ClientGameplayChannel gameplay,
+                ClientGameplayChannelPortAdapter gameplayPort,
                 PersonalWorldService worldService,
                 VisitSessionService visitService,
                 WorldAdmissionCoordinator coordinator,
@@ -701,6 +706,7 @@ namespace IHomeland.Client.Tests.EditMode
                 Session = session;
                 Dispatcher = dispatcher;
                 Gameplay = gameplay;
+                GameplayPort = gameplayPort;
                 WorldService = worldService;
                 VisitService = visitService;
                 Coordinator = coordinator;
@@ -720,6 +726,9 @@ namespace IHomeland.Client.Tests.EditMode
 
             /// <summary>获取 gameplay owner。</summary>
             internal ClientGameplayChannel Gameplay { get; }
+
+            /// <summary>获取 Application 使用的 typed gameplay port。</summary>
+            internal ClientGameplayChannelPortAdapter GameplayPort { get; }
 
             /// <summary>获取 PersonalWorld Service。</summary>
             internal PersonalWorldService WorldService { get; }
@@ -784,11 +793,19 @@ namespace IHomeland.Client.Tests.EditMode
                     factory,
                     new ClientGameplayCodec(),
                     dispatcher,
-                    new SystemClientGameplayDelay());
-                await gameplay.InitializeAsync(CancellationToken.None);
-                var world = new PersonalWorldService(null, gameplay);
-                var visit = new VisitSessionService(null, gameplay, clock);
-                var coordinator = new WorldAdmissionCoordinator(session, clock, gameplay, world, visit);
+                    new SystemClientDelay());
+                var gameplayPort = new ClientGameplayChannelPortAdapter(
+                    gameplay,
+                    new ClientGameplayProtocolAdapter());
+                await gameplayPort.InitializeAsync(CancellationToken.None);
+                var world = new PersonalWorldService(null, gameplayPort);
+                var visit = new VisitSessionService(null, gameplayPort, clock);
+                var coordinator = new WorldAdmissionCoordinator(
+                    session,
+                    clock,
+                    gameplayPort,
+                    world,
+                    visit);
                 await world.InitializeAsync(CancellationToken.None);
                 await visit.InitializeAsync(CancellationToken.None);
                 await coordinator.InitializeAsync(CancellationToken.None);
@@ -797,6 +814,7 @@ namespace IHomeland.Client.Tests.EditMode
                     session,
                     dispatcher,
                     gameplay,
+                    gameplayPort,
                     world,
                     visit,
                     coordinator,
@@ -847,14 +865,14 @@ namespace IHomeland.Client.Tests.EditMode
                 _coordinatorStopped = true;
                 await VisitService.StopAsync(CancellationToken.None);
                 await WorldService.StopAsync(CancellationToken.None);
-                await Gameplay.StopAsync(CancellationToken.None);
+                await GameplayPort.StopAsync(CancellationToken.None);
                 await Session.StopAsync(CancellationToken.None);
                 await Configuration.StopAsync(CancellationToken.None);
                 await Dispatcher.StopAsync(CancellationToken.None);
             }
 
             /// <summary>提供 bootstrap/accept/admission/ticket 的确定性 HTTP fake。</summary>
-            internal sealed class ScriptedHttpApi : IClientHttpApi
+            internal sealed class ScriptedHttpApi : IClientBootstrapGateway, IClientSessionGateway
             {
                 /// <summary>保存统一 TLS/TCP endpoint。</summary>
                 private readonly ClientEndpoint _endpoint;
@@ -864,7 +882,7 @@ namespace IHomeland.Client.Tests.EditMode
                     new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                 /// <summary>可选阻塞 bootstrap completion。</summary>
-                private readonly TaskCompletionSource<ClientHttpResult<ClientWorldBootstrap>> _bootstrapGate;
+                private readonly TaskCompletionSource<ClientGatewayResult<ClientWorldBootstrap>> _bootstrapGate;
 
                 /// <summary>保存最近一次 accept 或显式恢复推进后的权威 VisitSession revision。</summary>
                 private long _visitAdmissionRevision;
@@ -878,7 +896,7 @@ namespace IHomeland.Client.Tests.EditMode
                     _endpoint = endpoint;
                     if (blockBootstrap)
                     {
-                        _bootstrapGate = new TaskCompletionSource<ClientHttpResult<ClientWorldBootstrap>>(
+                        _bootstrapGate = new TaskCompletionSource<ClientGatewayResult<ClientWorldBootstrap>>(
                             TaskCreationOptions.RunContinuationsAsynchronously);
                     }
                 }
@@ -918,25 +936,25 @@ namespace IHomeland.Client.Tests.EditMode
                 /// <summary>释放被阻塞的 bootstrap 成功结果。</summary>
                 internal void CompleteBootstrap()
                 {
-                    _bootstrapGate?.TrySetResult(ClientHttpResult<ClientWorldBootstrap>.Success(Bootstrap()));
+                    _bootstrapGate?.TrySetResult(ClientGatewayResult<ClientWorldBootstrap>.Success(Bootstrap()));
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken) =>
+                public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken) =>
                     throw new NotSupportedException();
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken cancellationToken) =>
+                public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken cancellationToken) =>
                     throw new NotSupportedException();
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(string username, string password, string displayName, CancellationToken cancellationToken) =>
+                public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken cancellationToken) =>
                     throw new NotSupportedException();
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(string username, string password, CancellationToken cancellationToken)
+                public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken cancellationToken)
                 {
-                    return Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                    return Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                         new ClientAuthentication(
                             new ClientAccountSummary("account_fixture", "Fixture", 1),
                             new ClientSessionSummary("session_fixture", 1, 100_000),
@@ -945,11 +963,9 @@ namespace IHomeland.Client.Tests.EditMode
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
-                    string refreshToken,
-                    CancellationToken cancellationToken)
+                public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
                 {
-                    return Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
+                    return Task.FromResult(ClientGatewayResult<ClientTokenPair>.Success(
                         new ClientTokenPair(
                             "access_refreshed",
                             "refresh_rotated",
@@ -958,13 +974,13 @@ namespace IHomeland.Client.Tests.EditMode
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(string accessToken, CancellationToken cancellationToken) =>
+                public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken) =>
                     throw new NotSupportedException();
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(string accessToken, ClientEndpointChannel channel, CancellationToken cancellationToken)
+                public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken cancellationToken)
                 {
-                    return Task.FromResult(ClientHttpResult<ClientConnectionTicket>.Success(
+                    return Task.FromResult(ClientGatewayResult<ClientConnectionTicket>.Success(
                         new ClientConnectionTicket(
                             "0102030405060708090a0b0c0d0e0f10",
                             _endpoint,
@@ -973,7 +989,7 @@ namespace IHomeland.Client.Tests.EditMode
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(string accessToken, CancellationToken cancellationToken)
+                public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
                 {
                     BootstrapCalls++;
                     _bootstrapCalled.TrySetResult(true);
@@ -984,15 +1000,15 @@ namespace IHomeland.Client.Tests.EditMode
 
                     if (FailBootstrap)
                     {
-                        return Task.FromResult(ClientHttpResult<ClientWorldBootstrap>.Failed(
-                            new ClientHttpFailure(ClientHttpFailureKind.Transport, "getWorldBootstrap")));
+                        return Task.FromResult(ClientGatewayResult<ClientWorldBootstrap>.Failed(
+                            new ClientGatewayFailure(ClientGatewayFailureKind.Transport, "getWorldBootstrap")));
                     }
 
-                    return Task.FromResult(ClientHttpResult<ClientWorldBootstrap>.Success(Bootstrap()));
+                    return Task.FromResult(ClientGatewayResult<ClientWorldBootstrap>.Success(Bootstrap()));
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(string accessToken, ClientVisitInviteAcceptRequest request, string idempotencyKey, CancellationToken cancellationToken)
+                public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken cancellationToken)
                 {
                     AcceptInviteCalls++;
                     if (AcceptInviteErrorCode != 0)
@@ -1000,7 +1016,7 @@ namespace IHomeland.Client.Tests.EditMode
                         Assert.That(
                             ClientErrorRegistry.TryGet(AcceptInviteErrorCode, out var knownError),
                             Is.True);
-                        return Task.FromResult(ClientHttpResult<ClientVisitReservation>.Rejected(
+                        return Task.FromResult(ClientGatewayResult<ClientVisitReservation>.Rejected(
                             new ClientServerError(
                                 knownError.Code,
                                 knownError.Category,
@@ -1011,21 +1027,21 @@ namespace IHomeland.Client.Tests.EditMode
                                 Array.Empty<ClientErrorDetail>())));
                     }
 
-                    _visitAdmissionRevision = checked(request.ExpectedRevision + 1);
+                    _visitAdmissionRevision = checked(request.Invite.ExpectedRevision + 1);
                     _visitAdmissionPurpose = ClientWorldAdmissionPurpose.Join;
-                    return Task.FromResult(ClientHttpResult<ClientVisitReservation>.Success(
+                    return Task.FromResult(ClientGatewayResult<ClientVisitReservation>.Success(
                         new ClientVisitReservation(
-                            request.VisitSessionID,
+                            request.Invite.VisitSessionID,
                             _visitAdmissionRevision,
                             80_000)));
                 }
 
                 /// <inheritdoc />
-                public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(string accessToken, ClientWorldAdmissionTarget target, string idempotencyKey, CancellationToken cancellationToken)
+                public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken cancellationToken)
                 {
                     AdmissionCalls++;
-                    var visit = target.Kind == ClientWorldAdmissionTargetKind.VisitWorld;
-                    return Task.FromResult(ClientHttpResult<ClientWorldAdmission>.Success(
+                    var visit = request.Target.Kind == ClientWorldAdmissionTargetKind.VisitWorld;
+                    return Task.FromResult(ClientGatewayResult<ClientWorldAdmission>.Success(
                         new ClientWorldAdmission(
                             "wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                             _endpoint,

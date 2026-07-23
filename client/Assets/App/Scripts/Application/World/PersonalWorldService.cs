@@ -4,10 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.Http;
-using IHomeland.Client.Infrastructure.WebSocket;
-using IHomeland.Protocol.World.V1;
+using IHomeland.Client.Application.Ports;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Application.World
 {
@@ -24,10 +23,14 @@ namespace IHomeland.Client.Application.World
         private readonly object _sync = new object();
 
         /// <summary>提供 assignment control hint；测试可不连接 channel。</summary>
-        private readonly ClientControlChannel _controlChannel;
+        private readonly IClientControlChannelPort _controlChannel;
 
         /// <summary>提供完整 world replacement；测试可不连接 channel。</summary>
-        private readonly ClientGameplayChannel _gameplayChannel;
+        private readonly IClientGameplayChannelPort _gameplayChannel;
+
+        /// <summary>纯计算 world revision 与 assignment generation 决议。</summary>
+        private readonly PersonalWorldProjectionReducer _reducer =
+            new PersonalWorldProjectionReducer();
 
         /// <summary>为 primary、current 与最近 retired world 保留已见最高 assignment generation。</summary>
         private readonly Dictionary<string, ClientWorldAssignmentProjection> _highestAssignments =
@@ -60,8 +63,8 @@ namespace IHomeland.Client.Application.World
         /// <param name="controlChannel">WSS control owner。</param>
         /// <param name="gameplayChannel">TLS/TCP gameplay owner。</param>
         internal PersonalWorldService(
-            ClientControlChannel controlChannel,
-            ClientGameplayChannel gameplayChannel)
+            IClientControlChannelPort controlChannel,
+            IClientGameplayChannelPort gameplayChannel)
         {
             _controlChannel = controlChannel;
             _gameplayChannel = gameplayChannel;
@@ -122,7 +125,7 @@ namespace IHomeland.Client.Application.World
             ClientPersonalWorldProjection incoming;
             try
             {
-                incoming = ClientWorldProjectionMapper.FromBootstrap(bootstrap);
+                incoming = ClientWorldProjectionPolicy.FromBootstrap(bootstrap);
             }
             catch (ClientWorldProjectionException)
             {
@@ -132,17 +135,13 @@ namespace IHomeland.Client.Application.World
             return ApplyPrimary(incoming);
         }
 
-        /// <summary>提交 TLS/TCP 完整 world replacement。</summary>
-        /// <param name="snapshot">Generated world snapshot。</param>
-        /// <returns>稳定 revision gate 结果。</returns>
-        internal ClientProjectionApplyResult ApplyWorldSnapshot(WorldSnapshot snapshot)
+        /// <summary>提交 gameplay port 已映射的完整 world replacement。</summary>
+        /// <param name="incoming">无 generated message 的不可变 projection。</param>
+        /// <returns>稳定 revision/generation gate 结果。</returns>
+        internal ClientProjectionApplyResult ApplyWorldSnapshot(
+            ClientPersonalWorldProjection incoming)
         {
-            ClientPersonalWorldProjection incoming;
-            try
-            {
-                incoming = ClientWorldProjectionMapper.FromWorldSnapshot(snapshot);
-            }
-            catch (ClientWorldProjectionException)
+            if (incoming == null)
             {
                 return ClientProjectionApplyResult.Rejected;
             }
@@ -156,7 +155,7 @@ namespace IHomeland.Client.Application.World
                     return ClientProjectionApplyResult.Rejected;
                 }
 
-                result = Compare(_snapshot.CurrentWorld, incoming);
+                result = _reducer.Compare(_snapshot.CurrentWorld, incoming);
                 if (result == ClientProjectionApplyResult.Applied)
                 {
                     result = ValidateAssignmentGenerationLocked(incoming.Assignment);
@@ -167,7 +166,7 @@ namespace IHomeland.Client.Application.World
                     var primary = _snapshot.PrimaryWorld;
                     if (primary != null &&
                         string.Equals(primary.PersonalWorldID, incoming.PersonalWorldID, StringComparison.Ordinal) &&
-                        Compare(primary, incoming) == ClientProjectionApplyResult.Applied)
+                        _reducer.Compare(primary, incoming) == ClientProjectionApplyResult.Applied)
                     {
                         primary = incoming;
                     }
@@ -202,22 +201,14 @@ namespace IHomeland.Client.Application.World
             return result;
         }
 
-        /// <summary>应用 WSS assignment control hint，但不替代完整 gameplay snapshot。</summary>
-        /// <param name="push">Generated assignment changed PUSH。</param>
+        /// <summary>应用 Infrastructure 已映射的 assignment control hint。</summary>
+        /// <param name="worldID">受提示影响的 PersonalWorld identity。</param>
+        /// <param name="incoming">可选 assignment；为空表示撤销。</param>
         /// <returns>稳定 generation gate 结果。</returns>
-        internal ClientProjectionApplyResult ApplyAssignmentHint(WorldAssignmentChangedPush push)
+        internal ClientProjectionApplyResult ApplyAssignmentHint(
+            string worldID,
+            ClientWorldAssignmentProjection incoming)
         {
-            ClientWorldAssignmentProjection incoming;
-            string worldID;
-            try
-            {
-                incoming = ClientWorldProjectionMapper.FromAssignmentHint(push, out worldID);
-            }
-            catch (ClientWorldProjectionException)
-            {
-                return ClientProjectionApplyResult.Rejected;
-            }
-
             ClientPersonalWorldServiceSnapshot committed = null;
             var conflict = false;
             ClientProjectionApplyResult result;
@@ -229,7 +220,7 @@ namespace IHomeland.Client.Application.World
                 }
 
                 var current = _snapshot.AssignmentHint ?? FindKnownAssignmentLocked(worldID);
-                result = CompareAssignment(current, incoming);
+                result = _reducer.CompareAssignment(current, incoming);
                 if (result == ClientProjectionApplyResult.Applied)
                 {
                     committed = new ClientPersonalWorldServiceSnapshot(
@@ -349,7 +340,7 @@ namespace IHomeland.Client.Application.World
                     return ClientProjectionApplyResult.Rejected;
                 }
 
-                result = Compare(_snapshot.PrimaryWorld, incoming);
+                result = _reducer.Compare(_snapshot.PrimaryWorld, incoming);
                 if (result == ClientProjectionApplyResult.Applied)
                 {
                     result = ValidateAssignmentGenerationLocked(incoming.Assignment);
@@ -374,95 +365,6 @@ namespace IHomeland.Client.Application.World
 
             Notify(committed, result == ClientProjectionApplyResult.Conflict);
             return result;
-        }
-
-        /// <summary>比较同一 PersonalWorld 的 revision 与完整语义。</summary>
-        /// <param name="current">当前投影。</param>
-        /// <param name="incoming">新投影。</param>
-        /// <returns>稳定 gate 结果。</returns>
-        private static ClientProjectionApplyResult Compare(
-            ClientPersonalWorldProjection current,
-            ClientPersonalWorldProjection incoming)
-        {
-            if (current == null)
-            {
-                return ClientProjectionApplyResult.Applied;
-            }
-
-            if (!string.Equals(current.PersonalWorldID, incoming.PersonalWorldID, StringComparison.Ordinal))
-            {
-                return ClientProjectionApplyResult.Conflict;
-            }
-
-            if (incoming.Revision < current.Revision)
-            {
-                return ClientProjectionApplyResult.Stale;
-            }
-
-            if (incoming.Revision == current.Revision)
-            {
-                if (!current.HasSameWorldFacts(incoming))
-                {
-                    return ClientProjectionApplyResult.Conflict;
-                }
-
-                // PersonalWorld revision 与 runtime assignment generation 是两个独立单调门；服务端
-                // 重启可以在 world revision 不变时发布更高 generation 的新 WorldInstance。
-                return CompareAssignment(current.Assignment, incoming.Assignment);
-            }
-
-            if (!string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
-                current.CreatedAtMilliseconds != incoming.CreatedAtMilliseconds)
-            {
-                return ClientProjectionApplyResult.Conflict;
-            }
-
-            return ClientProjectionApplyResult.Applied;
-        }
-
-        /// <summary>比较 assignment generation，并正确处理完整撤销。</summary>
-        /// <param name="current">当前已知 assignment。</param>
-        /// <param name="incoming">可选新 assignment；为空表示撤销。</param>
-        /// <returns>稳定 generation gate 结果。</returns>
-        private static ClientProjectionApplyResult CompareAssignment(
-            ClientWorldAssignmentProjection current,
-            ClientWorldAssignmentProjection incoming)
-        {
-            if (incoming == null)
-            {
-                return current == null
-                    ? ClientProjectionApplyResult.Duplicate
-                    : ClientProjectionApplyResult.Applied;
-            }
-
-            if (current == null)
-            {
-                return ClientProjectionApplyResult.Applied;
-            }
-
-            if (incoming.Generation < current.Generation)
-            {
-                return ClientProjectionApplyResult.Stale;
-            }
-
-            if (incoming.Generation == current.Generation)
-            {
-                if (!current.HasSameIdentity(incoming))
-                {
-                    return ClientProjectionApplyResult.Conflict;
-                }
-
-                if (incoming.LeaseExpiresAtMilliseconds < current.LeaseExpiresAtMilliseconds)
-                {
-                    return ClientProjectionApplyResult.Stale;
-                }
-
-                return incoming.LeaseExpiresAtMilliseconds == current.LeaseExpiresAtMilliseconds
-                    ? ClientProjectionApplyResult.Duplicate
-                    : ClientProjectionApplyResult.Applied;
-            }
-
-            return ClientProjectionApplyResult.Applied;
         }
 
         /// <summary>判断 control hint 是否属于任一已知 world。</summary>
@@ -608,22 +510,21 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>处理 WSS typed PUSH。</summary>
         /// <param name="push">Control channel 已验证 payload。</param>
-        private void OnControlPush(ClientControlPush push)
+        private void OnControlPush(ClientControlNotification push)
         {
-            if (push?.Payload is WorldAssignmentChangedPush assignment)
+            if (push is ClientWorldAssignmentChangedPush assignment)
             {
-                ApplyAssignmentHint(assignment);
+                ApplyAssignmentHint(
+                    assignment.PersonalWorldID,
+                    assignment.Assignment);
             }
         }
 
         /// <summary>处理 TLS/TCP 完整 world replacement PUSH。</summary>
         /// <param name="push">Gameplay channel 已验证 PUSH。</param>
-        private void OnWorldSnapshotPush(WorldSnapshotPush push)
+        private void OnWorldSnapshotPush(ClientPersonalWorldProjection push)
         {
-            if (push != null)
-            {
-                ApplyWorldSnapshot(push.Snapshot);
-            }
+            ApplyWorldSnapshot(push);
         }
 
         /// <summary>在锁外通知全部 subscriber；异常不会回滚已经提交的事实。</summary>

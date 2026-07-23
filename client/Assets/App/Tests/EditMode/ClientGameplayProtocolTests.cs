@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Protocol.Common.V1;

@@ -52,14 +52,22 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         /// <summary>保存 WorldVisit 目标玩家输入变化的对称解绑 callback。</summary>
         private EventCallback<ChangeEvent<string>> _targetPlayerChanged;
 
-        /// <summary>保存仅在当前 invite replacement 中有效的页面局部选择。</summary>
-        private string _selectedInviteVisitSessionID = string.Empty;
+        /// <summary>Login 页面 adapter。</summary>
+        private readonly ClientLoginUiToolkitPageAdapter _loginPage =
+            new ClientLoginUiToolkitPageAdapter();
 
-        /// <summary>保存仅在当前 invite replacement 中有效的 InviteID 选择。</summary>
-        private string _selectedInviteID = string.Empty;
+        /// <summary>Shell 页面 adapter。</summary>
+        private readonly ClientShellUiToolkitPageAdapter _shellPage =
+            new ClientShellUiToolkitPageAdapter();
 
-        /// <summary>保存仅在当前 member replacement 中有效的 Visitor 选择。</summary>
-        private string _selectedVisitorPlayerID = string.Empty;
+        /// <summary>WorldVisit 页面 adapter 与局部 selection owner。</summary>
+        private readonly ClientWorldVisitUiToolkitPageAdapter _worldVisitPage =
+            new ClientWorldVisitUiToolkitPageAdapter();
+
+        /// <summary>ConnectionLost 页面 adapter。</summary>
+        private readonly ClientConnectionLostUiToolkitPageAdapter
+            _connectionLostPage =
+                new ClientConnectionLostUiToolkitPageAdapter();
 
         /// <summary>为程序化 fixture 在激活前配置与 Inspector 等价的 route 与 PanelRenderer。</summary>
         /// <param name="routeId">Login、Shell、WorldVisit 或 ConnectionLost。</param>
@@ -221,43 +229,16 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             switch (_routeId)
             {
                 case ClientUiRouteId.Login:
-                    Require<TextField>("username-input");
-                    Require<TextField>("password-input");
-                    Require<TextField>("display-name-input");
-                    Require<Toggle>("register-toggle");
-                    Require<Button>("submit-button");
-                    Require<Label>("error-label");
+                    _loginPage.Validate(_rootVisualElement);
                     break;
                 case ClientUiRouteId.Shell:
-                    Require<Label>("player-id-label");
-                    Require<Label>("display-name-label");
-                    Require<Label>("phase-label");
-                    Require<Button>("retry-button");
-                    Require<Button>("logout-button");
-                    Require<Label>("error-label");
+                    _shellPage.Validate(_rootVisualElement);
                     break;
                 case ClientUiRouteId.WorldVisit:
-                    Require<Label>("role-label");
-                    Require<Label>("visit-session-label");
-                    Require<Label>("revision-label");
-                    Require<VisualElement>("visitor-list");
-                    Require<VisualElement>("invite-list");
-                    Require<TextField>("target-player-input");
-                    Require<Button>("open-visit-button");
-                    Require<Button>("create-invite-button");
-                    Require<Button>("revoke-invite-button");
-                    Require<Button>("accept-invite-button");
-                    Require<Button>("kick-visitor-button");
-                    Require<Button>("close-visit-button");
-                    Require<Button>("leave-visit-button");
-                    Require<Label>("error-label");
+                    _worldVisitPage.Validate(_rootVisualElement);
                     break;
                 case ClientUiRouteId.ConnectionLost:
-                    Require<Label>("connection-lost-title");
-                    Require<Label>("connection-lost-description");
-                    Require<Button>("retry-button");
-                    Require<Button>("logout-button");
-                    Require<Label>("error-label");
+                    _connectionLostPage.Validate(_rootVisualElement);
                     break;
                 default:
                     throw new InvalidOperationException("产品 UI Toolkit View route 未登记或应由 uGUI 承载。");
@@ -413,7 +394,7 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         private Task<ClientPersonalWorldActionResult> RevokeInviteAsync(CancellationToken cancellationToken)
         {
             return _experience.RevokeInviteAsync(
-                _selectedInviteID,
+                _worldVisitPage.SelectedInviteID,
                 cancellationToken);
         }
 
@@ -423,8 +404,8 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         private Task<ClientPersonalWorldActionResult> AcceptInviteAsync(CancellationToken cancellationToken)
         {
             return _experience.AcceptInviteAsync(
-                _selectedInviteVisitSessionID,
-                _selectedInviteID,
+                _worldVisitPage.SelectedInviteVisitSessionID,
+                _worldVisitPage.SelectedInviteID,
                 cancellationToken);
         }
 
@@ -434,7 +415,7 @@ namespace IHomeland.Client.Presentation.PersonalWorld
         private Task<ClientPersonalWorldActionResult> KickVisitorAsync(CancellationToken cancellationToken)
         {
             return _experience.KickVisitorAsync(
-                _selectedVisitorPlayerID,
+                _worldVisitPage.SelectedVisitorPlayerID,
                 cancellationToken);
         }
 
@@ -465,57 +446,27 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             switch (_routeId)
             {
                 case ClientUiRouteId.Login:
-                    RenderLogin(state);
+                    _loginPage.Render(_rootVisualElement, state, FailureText);
                     break;
                 case ClientUiRouteId.Shell:
+                    _shellPage.Render(_rootVisualElement, state, FailureText);
+                    break;
                 case ClientUiRouteId.ConnectionLost:
-                    RenderShell(state);
+                    _connectionLostPage.Render(
+                        _rootVisualElement,
+                        state,
+                        RecoveryTitle,
+                        RecoveryDescription,
+                        FailureText);
                     break;
                 case ClientUiRouteId.WorldVisit:
-                    RenderWorldVisit(state);
+                    _worldVisitPage.Render(
+                        _rootVisualElement,
+                        state,
+                        () => Render(_experience.ViewState),
+                        FailureText);
                     break;
             }
-        }
-
-        /// <summary>呈现 Login loading、disabled、register mode 与低敏错误。</summary>
-        /// <param name="state">完整不可变页面状态。</param>
-        private void RenderLogin(ClientPersonalWorldViewState state)
-        {
-            var login = state.Login;
-            Require<Button>("submit-button").SetEnabled(!login.Busy);
-            Require<TextField>("username-input").SetEnabled(!login.Busy);
-            Require<TextField>("password-input").SetEnabled(!login.Busy);
-            Require<TextField>("display-name-input").SetEnabled(!login.Busy);
-            Require<Toggle>("register-toggle").SetEnabled(!login.Busy);
-            Require<Label>("error-label").text = FailureText(login.Failure);
-        }
-
-        /// <summary>呈现 Shell 账号摘要、阶段、重试策略与低敏错误。</summary>
-        /// <param name="state">完整不可变页面状态。</param>
-        private void RenderShell(ClientPersonalWorldViewState state)
-        {
-            if (_routeId == ClientUiRouteId.Shell)
-            {
-                Require<Label>("player-id-label").text = state.Shell.PlayerID;
-                Require<Label>("display-name-label").text = state.Shell.DisplayName;
-                Require<Label>("phase-label").text = state.Shell.Phase.ToString();
-            }
-
-            var busy = state.ActiveIntent != ClientPersonalWorldIntent.None;
-            if (_routeId == ClientUiRouteId.ConnectionLost)
-            {
-                Require<Label>("connection-lost-title").text = RecoveryTitle(state.Phase);
-                Require<Label>("connection-lost-description").text = RecoveryDescription(state.Phase);
-                Require<Button>("retry-button").SetEnabled(
-                    !busy && state.Phase == ClientPersonalWorldPhase.ConnectionLost);
-            }
-            else
-            {
-                Require<Button>("retry-button").SetEnabled(!busy);
-            }
-
-            Require<Button>("logout-button").SetEnabled(!busy);
-            Require<Label>("error-label").text = FailureText(state.Shell.Failure);
         }
 
         /// <summary>把恢复阶段映射为ConnectionLost modal标题。</summary>
@@ -550,109 +501,6 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             }
         }
 
-        /// <summary>呈现 VisitSession 权威角色、revision、成员、邀请和动作权限。</summary>
-        /// <param name="state">完整不可变页面状态。</param>
-        private void RenderWorldVisit(ClientPersonalWorldViewState state)
-        {
-            var visit = state.WorldVisit;
-            Require<Label>("role-label").text = visit.IsOwner ? "Owner" : visit.IsVisitor ? "Visitor" : "None";
-            Require<Label>("visit-session-label").text = visit.VisitSessionID;
-            Require<Label>("revision-label").text = visit.Revision.ToString();
-            ReconcileSelections(visit);
-            RenderVisitorSelections(visit);
-            RenderInviteSelections(visit);
-
-            var targetPlayerID = NormalizeIdentityInput(Require<TextField>("target-player-input").value);
-            var createTargetAvailable = !string.IsNullOrEmpty(targetPlayerID) &&
-                                        !ContainsInviteTarget(visit.Invites, targetPlayerID);
-            Require<Button>("open-visit-button").SetEnabled(visit.Actions.CanOpenVisit);
-            Require<Button>("create-invite-button").SetEnabled(
-                visit.Actions.CanCreateInvite && createTargetAvailable);
-            Require<Button>("revoke-invite-button").SetEnabled(
-                visit.Actions.CanRevokeInvite && HasSelectedInvite(visit));
-            Require<Button>("kick-visitor-button").SetEnabled(
-                visit.Actions.CanKickVisitor && HasSelectedVisitor(visit));
-            Require<Button>("close-visit-button").SetEnabled(visit.Actions.CanCloseVisit);
-            Require<Button>("accept-invite-button").SetEnabled(
-                visit.Actions.CanAcceptInvite && HasSelectedInvite(visit));
-            Require<Button>("leave-visit-button").SetEnabled(visit.Actions.CanLeaveVisit);
-            Require<Label>("error-label").text = FailureText(state.Shell.Failure);
-        }
-
-        /// <summary>按当前不可变 replacement 校验 invite/member 页面局部选择。</summary>
-        /// <param name="visit">当前 WorldVisit View State。</param>
-        private void ReconcileSelections(ClientWorldVisitViewState visit)
-        {
-            ReconcileInviteSelection(
-                visit.Invites,
-                _selectedInviteVisitSessionID,
-                _selectedInviteID,
-                out _selectedInviteVisitSessionID,
-                out _selectedInviteID);
-            _selectedVisitorPlayerID = ReconcileVisitorSelection(
-                visit.VisitorPlayerIDs,
-                _selectedVisitorPlayerID);
-        }
-
-        /// <summary>呈现可显式选择的 current Visitor 集合。</summary>
-        /// <param name="visit">当前 WorldVisit View State。</param>
-        private void RenderVisitorSelections(ClientWorldVisitViewState visit)
-        {
-            var container = Require<VisualElement>("visitor-list");
-            container.Clear();
-            foreach (var visitorPlayerID in visit.VisitorPlayerIDs)
-            {
-                var captured = visitorPlayerID;
-                var selected = string.Equals(
-                    _selectedVisitorPlayerID,
-                    captured,
-                    StringComparison.Ordinal);
-                var button = new Button(() =>
-                {
-                    _selectedVisitorPlayerID = captured;
-                    Render(_experience.ViewState);
-                })
-                {
-                    text = selected ? $"✓ {captured}" : captured,
-                };
-                button.SetEnabled(visit.Actions.CanKickVisitor);
-                container.Add(button);
-            }
-        }
-
-        /// <summary>呈现可显式选择的 current inbox 或 outgoing invite 集合。</summary>
-        /// <param name="visit">当前 WorldVisit View State。</param>
-        private void RenderInviteSelections(ClientWorldVisitViewState visit)
-        {
-            var container = Require<VisualElement>("invite-list");
-            container.Clear();
-            foreach (var invite in visit.Invites)
-            {
-                var captured = invite;
-                var selected = string.Equals(
-                                       _selectedInviteVisitSessionID,
-                                       captured.VisitSessionID,
-                                       StringComparison.Ordinal) &&
-                               string.Equals(
-                                   _selectedInviteID,
-                                   captured.InviteID,
-                                   StringComparison.Ordinal);
-                var button = new Button(() =>
-                {
-                    _selectedInviteVisitSessionID = captured.VisitSessionID;
-                    _selectedInviteID = captured.InviteID;
-                    Render(_experience.ViewState);
-                })
-                {
-                    text = selected
-                        ? $"✓ {FormatInviteSummary(captured)}"
-                        : FormatInviteSummary(captured),
-                };
-                button.SetEnabled(
-                    visit.Actions.CanAcceptInvite || visit.Actions.CanRevokeInvite);
-                container.Add(button);
-            }
-        }
 
         /// <summary>生成包含接受邀请所需标识的稳定摘要。</summary>
         /// <param name="invite">由权威 inbox snapshot 派生的邀请状态。</param>
@@ -745,60 +593,6 @@ namespace IHomeland.Client.Presentation.PersonalWorld
             return visitors.Count == 1 ? visitors[0] : string.Empty;
         }
 
-        /// <summary>判断 current invite replacement 是否仍包含页面选择。</summary>
-        /// <param name="visit">当前 WorldVisit View State。</param>
-        /// <returns>完整 VisitSessionID/InviteID 仍存在时返回 true。</returns>
-        private bool HasSelectedInvite(ClientWorldVisitViewState visit)
-        {
-            foreach (var invite in visit.Invites)
-            {
-                if (string.Equals(
-                        invite.VisitSessionID,
-                        _selectedInviteVisitSessionID,
-                        StringComparison.Ordinal) &&
-                    string.Equals(invite.InviteID, _selectedInviteID, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>判断 current member replacement 是否仍包含页面选择。</summary>
-        /// <param name="visit">当前 WorldVisit View State。</param>
-        /// <returns>选择仍是 current member 时返回 true。</returns>
-        private bool HasSelectedVisitor(ClientWorldVisitViewState visit)
-        {
-            foreach (var visitor in visit.VisitorPlayerIDs)
-            {
-                if (string.Equals(visitor, _selectedVisitorPlayerID, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>判断 Owner 是否已有同 target 的 current pending invite。</summary>
-        /// <param name="invites">当前 Owner outgoing invite replacement。</param>
-        /// <param name="targetPlayerID">创建邀请输入。</param>
-        /// <returns>存在相同 target 时返回 true。</returns>
-        private static bool ContainsInviteTarget(
-            IReadOnlyList<ClientVisitInviteViewState> invites,
-            string targetPlayerID)
-        {
-            foreach (var invite in invites)
-            {
-                if (string.Equals(invite.TargetVisitorID, targetPlayerID, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
 
         /// <summary>用稳定顺序的纯文本 Label 替换列表内容。</summary>
         /// <param name="container">UXML 直接提供的列表容器。</param>

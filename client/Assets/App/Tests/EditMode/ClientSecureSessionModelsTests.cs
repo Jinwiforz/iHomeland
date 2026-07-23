@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 using NUnit.Framework;
 

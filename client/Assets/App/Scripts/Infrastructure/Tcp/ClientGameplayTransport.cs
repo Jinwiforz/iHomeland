@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net;
 using System.Net.Security;
@@ -6,35 +6,12 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 
 namespace IHomeland.Client.Infrastructure.Tcp
 {
-    /// <summary>
-    /// 提供不依赖 Unity frame tick 的 gameplay heartbeat scheduler。
-    /// </summary>
-    internal interface IClientGameplayDelay
-    {
-        /// <summary>等待指定 interval，connection generation 撤销时立即结束。</summary>
-        /// <param name="delay">冻结 heartbeat interval。</param>
-        /// <param name="cancellationToken">Current generation 取消信号。</param>
-        /// <returns>Interval 到期或取消时完成。</returns>
-        Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken);
-    }
-
-    /// <summary>
-    /// 使用系统异步 timer 实现 gameplay heartbeat scheduler。
-    /// </summary>
-    internal sealed class SystemClientGameplayDelay : IClientGameplayDelay
-    {
-        /// <inheritdoc />
-        public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
-        {
-            return Task.Delay(delay, cancellationToken);
-        }
-    }
-
     /// <summary>
     /// 定义 gameplay channel 独占的 exact stream 连接边界。
     /// </summary>

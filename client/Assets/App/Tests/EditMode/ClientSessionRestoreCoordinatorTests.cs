@@ -1,10 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using NUnit.Framework;
 
@@ -88,7 +91,7 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var fixture = await CreateFixtureAsync(seedRecord: true);
             fixture.Api.RefreshHandler = (_, __) => Task.FromResult(
-                ClientHttpResult<ClientTokenPair>.Rejected(new ClientServerError(
+                ClientGatewayResult<ClientTokenPair>.Rejected(new ClientServerError(
                     100,
                     ClientServerErrorCategory.Authentication,
                     "session.unauthenticated",
@@ -113,7 +116,7 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var fixture = await CreateFixtureAsync(seedRecord: true);
             fixture.Api.RefreshHandler = (_, __) => Task.FromResult(
-                ClientHttpResult<ClientTokenPair>.Rejected(new ClientServerError(
+                ClientGatewayResult<ClientTokenPair>.Rejected(new ClientServerError(
                     500,
                     ClientServerErrorCategory.Dependency,
                     "dependency.unavailable",
@@ -138,8 +141,8 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var fixture = await CreateFixtureAsync(seedRecord: true);
             fixture.Api.RefreshHandler = (_, __) => Task.FromResult(
-                ClientHttpResult<ClientTokenPair>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.LocalPolicy,
+                ClientGatewayResult<ClientTokenPair>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.LocalPolicy,
                     ClientHttpOperationCatalog.RefreshSession.OperationID)));
 
             await fixture.Restore.InitializeAsync(CancellationToken.None);
@@ -158,8 +161,8 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var fixture = await CreateFixtureAsync(seedRecord: true);
             fixture.Api.RefreshHandler = (_, __) => Task.FromResult(
-                ClientHttpResult<ClientTokenPair>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.Transport,
+                ClientGatewayResult<ClientTokenPair>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.Transport,
                     ClientHttpOperationCatalog.RefreshSession.OperationID)));
 
             await fixture.Restore.InitializeAsync(CancellationToken.None);
@@ -177,8 +180,8 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var fixture = await CreateFixtureAsync(seedRecord: true);
             fixture.Api.VersionHandler = _ => Task.FromResult(
-                ClientHttpResult<ClientVersionInfo>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.Transport,
+                ClientGatewayResult<ClientVersionInfo>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.Transport,
                     ClientHttpOperationCatalog.GetVersion.OperationID)));
 
             await fixture.Restore.InitializeAsync(CancellationToken.None);
@@ -290,28 +293,28 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>只为启动restore登记version/config/refresh的HTTP fake。</summary>
-        private sealed class FakeRestoreHttpApi : IClientHttpApi
+        private sealed class FakeRestoreHttpApi : IClientBootstrapGateway, IClientSessionGateway
         {
             /// <summary>按发生顺序保存operation名称。</summary>
             internal List<string> Calls { get; } = new List<string>();
 
             /// <summary>获取或设置version handler。</summary>
-            internal Func<CancellationToken, Task<ClientHttpResult<ClientVersionInfo>>> VersionHandler { get; set; }
+            internal Func<CancellationToken, Task<ClientGatewayResult<ClientVersionInfo>>> VersionHandler { get; set; }
 
             /// <summary>获取或设置refresh handler。</summary>
-            internal Func<string, CancellationToken, Task<ClientHttpResult<ClientTokenPair>>> RefreshHandler { get; set; }
+            internal Func<string, CancellationToken, Task<ClientGatewayResult<ClientTokenPair>>> RefreshHandler { get; set; }
 
             /// <summary>创建默认成功fake。</summary>
             internal FakeRestoreHttpApi()
             {
-                VersionHandler = _ => Task.FromResult(ClientHttpResult<ClientVersionInfo>.Success(
+                VersionHandler = _ => Task.FromResult(ClientGatewayResult<ClientVersionInfo>.Success(
                     new ClientVersionInfo(1, "0.1.0", "0.1.0")));
-                RefreshHandler = (_, __) => Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
+                RefreshHandler = (_, __) => Task.FromResult(ClientGatewayResult<ClientTokenPair>.Success(
                     new ClientTokenPair("access-rotated", "refresh-rotated", 3000, 4000)));
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(
+            public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(
                 CancellationToken cancellationToken)
             {
                 Calls.Add("version");
@@ -319,11 +322,11 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
+            public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
                 CancellationToken cancellationToken)
             {
                 Calls.Add("config");
-                return Task.FromResult(ClientHttpResult<ClientBootstrapConfiguration>.Success(
+                return Task.FromResult(ClientGatewayResult<ClientBootstrapConfiguration>.Success(
                     new ClientBootstrapConfiguration(
                         new[]
                         {
@@ -334,80 +337,61 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
-                string refreshToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 Calls.Add("refresh");
+                Assert.That(
+                    request.Credential.TryTake(
+                        ClientCredentialPurpose.RefreshSession,
+                        out var refreshToken),
+                    Is.True);
                 return RefreshHandler(refreshToken, cancellationToken);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(
-                string username,
-                string password,
-                string displayName,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LocalFailure<ClientAuthentication>(
                     ClientHttpOperationCatalog.RegisterAccount.OperationID);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(
-                string username,
-                string password,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LocalFailure<ClientAuthentication>(
                     ClientHttpOperationCatalog.LoginAccount.OperationID);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
-                return LocalFailure<ClientHttpEmpty>(
+                return LocalFailure<ClientGatewayEmpty>(
                     ClientHttpOperationCatalog.LogoutSession.OperationID);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(
-                string accessToken,
-                ClientEndpointChannel channel,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LocalFailure<ClientConnectionTicket>(
                     ClientHttpOperationCatalog.IssueConnectionTicket.OperationID);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LocalFailure<ClientWorldBootstrap>(
                     ClientHttpOperationCatalog.GetWorldBootstrap.OperationID);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
-                string accessToken,
-                ClientVisitInviteAcceptRequest request,
-                string idempotencyKey,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LocalFailure<ClientVisitReservation>(
                     ClientHttpOperationCatalog.AcceptVisitInvite.OperationID);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
-                string accessToken,
-                ClientWorldAdmissionTarget target,
-                string idempotencyKey,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LocalFailure<ClientWorldAdmission>(
                     ClientHttpOperationCatalog.IssueWorldAdmission.OperationID);
@@ -417,10 +401,10 @@ namespace IHomeland.Client.Tests.EditMode
             /// <typeparam name="T">成功投影类型。</typeparam>
             /// <param name="operationID">冻结operationId。</param>
             /// <returns>已完成失败task。</returns>
-            private static Task<ClientHttpResult<T>> LocalFailure<T>(string operationID)
+            private static Task<ClientGatewayResult<T>> LocalFailure<T>(string operationID)
             {
-                return Task.FromResult(ClientHttpResult<T>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.LocalPolicy,
+                return Task.FromResult(ClientGatewayResult<T>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.LocalPolicy,
                     operationID)));
             }
         }

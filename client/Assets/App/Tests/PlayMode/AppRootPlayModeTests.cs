@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -6,8 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Bootstrap;
 using IHomeland.Client.Core.Composition;
+using IHomeland.Client.Application.Configuration;
 using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Foundation.Lifetime;
 using IHomeland.Client.Scenes.Contexts;
 using IHomeland.Client.Scenes.PersonalWorld;
 using IHomeland.Client.Presentation.Hosts;

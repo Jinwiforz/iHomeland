@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Application.Session
 {

@@ -6,7 +6,9 @@ using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Infrastructure.Tcp;
+using IHomeland.Client.Infrastructure.WebSocket;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
 using IHomeland.Client.Core.Qualification;
 #endif

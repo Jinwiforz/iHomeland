@@ -503,7 +503,11 @@ function Assert-PlayerLogRedaction {
 # Invoke-DocumentationGovernance验证OpenSpec、diff whitespace、必需文档和禁止tracked输出。
 function Invoke-DocumentationGovernance {
     Invoke-OwnedProcess "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepositoryRoot "tools\client-qualification\client-qualification.tests.ps1")) 120000 "qualification-tool-tests"
-    Invoke-OwnedProcess "cmd.exe" @("/d", "/c", "openspec.cmd validate qualify-client-v1 --strict") 120000 "openspec-strict"
+    Invoke-OwnedProcess "cmd.exe" @(
+        "/d",
+        "/c",
+        "openspec.cmd validate --all --strict --no-interactive"
+    ) 120000 "openspec-strict"
     Invoke-OwnedProcess "git.exe" @("-C", $RepositoryRoot, "diff", "--check") 60000 "git-diff-check"
     Invoke-OwnedProcess "git.exe" @("-C", $RepositoryRoot, "diff", "--cached", "--check") 60000 "git-cached-diff-check"
     $requiredDocuments = @(

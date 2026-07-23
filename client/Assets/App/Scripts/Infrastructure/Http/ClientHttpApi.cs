@@ -1,14 +1,18 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 
 namespace IHomeland.Client.Infrastructure.Http
 {
     /// <summary>
-    /// 把冻结的强类型 application 调用映射到 operation catalog、显式 codec 与有界 transport。
+    /// 把冻结的强类型 Application 调用映射到 operation catalog、contract mapper 与有界 transport。
     /// </summary>
-    internal sealed class ClientHttpApi : IClientHttpApi
+    internal sealed class ClientHttpApi :
+        IClientBootstrapGateway,
+        IClientSessionGateway
     {
         /// <summary>
         /// 保存唯一 transport；所有 operation 复用同一连接池和 AppLifetime cancellation。
@@ -16,93 +20,126 @@ namespace IHomeland.Client.Infrastructure.Http
         private readonly ClientHttpTransport _transport;
 
         /// <summary>
-        /// 保存不依赖 reflection 的显式 JSON codec。
+        /// 保存不依赖 reflection 的显式 JSON/Application contract mapper。
         /// </summary>
-        private readonly ClientHttpCodec _codec;
+        private readonly ClientHttpContractMapper _mapper;
 
         /// <summary>
         /// 创建不暴露通用发送入口的强类型 API。
         /// </summary>
         /// <param name="transport">AppLifetime 拥有的有界 transport。</param>
-        /// <param name="codec">显式 request/response codec。</param>
+        /// <param name="mapper">显式 request/response contract mapper。</param>
         /// <exception cref="ArgumentNullException">任一依赖为空时抛出。</exception>
-        internal ClientHttpApi(ClientHttpTransport transport, ClientHttpCodec codec)
+        internal ClientHttpApi(ClientHttpTransport transport, ClientHttpContractMapper mapper)
         {
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
-            _codec = codec ?? throw new ArgumentNullException(nameof(codec));
+            _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(
+        public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(
             CancellationToken cancellationToken)
         {
             return ExecuteAsync(
                 ClientHttpOperationCatalog.GetVersion,
                 requestBody: null,
                 bearerToken: null,
-                _codec.DecodeVersion,
+                _mapper.DecodeVersion,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
+        public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
             CancellationToken cancellationToken)
         {
             return ExecuteAsync(
                 ClientHttpOperationCatalog.GetBootstrapConfig,
                 requestBody: null,
                 bearerToken: null,
-                _codec.DecodeBootstrapConfiguration,
+                _mapper.DecodeBootstrapConfiguration,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(
-            string username,
-            string password,
-            string displayName,
+        public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(
+            ClientRegisterGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (request == null ||
+                !request.Password.TryTake(
+                    ClientCredentialPurpose.RegisterPassword,
+                    out var password))
+            {
+                return LocalPolicyFailure<ClientAuthentication>(
+                    ClientHttpOperationCatalog.RegisterAccount);
+            }
+
             return ExecuteAsync(
                 ClientHttpOperationCatalog.RegisterAccount,
-                _codec.EncodeRegister(username, password, displayName),
+                _mapper.EncodeRegister(request.Username, password, request.DisplayName),
                 bearerToken: null,
-                _codec.DecodeAuthentication,
+                _mapper.DecodeAuthentication,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(
-            string username,
-            string password,
+        public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(
+            ClientLoginGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (request == null ||
+                !request.Password.TryTake(
+                    ClientCredentialPurpose.LoginPassword,
+                    out var password))
+            {
+                return LocalPolicyFailure<ClientAuthentication>(
+                    ClientHttpOperationCatalog.LoginAccount);
+            }
+
             return ExecuteAsync(
                 ClientHttpOperationCatalog.LoginAccount,
-                _codec.EncodeLogin(username, password),
+                _mapper.EncodeLogin(request.Username, password),
                 bearerToken: null,
-                _codec.DecodeAuthentication,
+                _mapper.DecodeAuthentication,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
-            string refreshToken,
+        public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(
+            ClientCredentialGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (!TryTakeCredential(
+                    request,
+                    ClientCredentialPurpose.RefreshSession,
+                    out var refreshToken))
+            {
+                return LocalPolicyFailure<ClientTokenPair>(
+                    ClientHttpOperationCatalog.RefreshSession);
+            }
+
             return ExecuteAsync(
                 ClientHttpOperationCatalog.RefreshSession,
-                _codec.EncodeRefresh(refreshToken),
+                _mapper.EncodeRefresh(refreshToken),
                 bearerToken: null,
-                _codec.DecodeTokenPair,
+                _mapper.DecodeTokenPair,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
-            string accessToken,
+        public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(
+            ClientCredentialGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (!TryTakeCredential(
+                    request,
+                    ClientCredentialPurpose.HttpAuthorization,
+                    out var accessToken))
+            {
+                return LocalPolicyFailure<ClientGatewayEmpty>(
+                    ClientHttpOperationCatalog.LogoutSession);
+            }
+
             return ExecuteEmptyAsync(
                 ClientHttpOperationCatalog.LogoutSession,
                 requestBody: null,
@@ -111,51 +148,75 @@ namespace IHomeland.Client.Infrastructure.Http
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(
-            string accessToken,
-            ClientEndpointChannel channel,
+        public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(
+            ClientConnectionTicketGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (request == null ||
+                !request.Authorization.TryTake(
+                    ClientCredentialPurpose.HttpAuthorization,
+                    out var accessToken))
+            {
+                return LocalPolicyFailure<ClientConnectionTicket>(
+                    ClientHttpOperationCatalog.IssueConnectionTicket);
+            }
+
             return ExecuteAsync(
                 ClientHttpOperationCatalog.IssueConnectionTicket,
-                _codec.EncodeTicket(channel),
+                _mapper.EncodeTicket(request.Channel),
                 accessToken,
-                _codec.DecodeConnectionTicket,
+                _mapper.DecodeConnectionTicket,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
-            string accessToken,
+        public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
+            ClientCredentialGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (!TryTakeCredential(
+                    request,
+                    ClientCredentialPurpose.HttpAuthorization,
+                    out var accessToken))
+            {
+                return LocalPolicyFailure<ClientWorldBootstrap>(
+                    ClientHttpOperationCatalog.GetWorldBootstrap);
+            }
+
             return ExecuteAsync(
                 ClientHttpOperationCatalog.GetWorldBootstrap,
                 requestBody: null,
                 accessToken,
-                _codec.DecodeWorldBootstrap,
+                _mapper.DecodeWorldBootstrap,
                 cancellationToken);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
-            string accessToken,
-            ClientVisitInviteAcceptRequest request,
-            string idempotencyKey,
+        public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+            ClientAcceptVisitInviteGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (request == null ||
+                !request.Authorization.TryTake(
+                    ClientCredentialPurpose.HttpAuthorization,
+                    out var accessToken))
+            {
+                return LocalPolicyFailure<ClientVisitReservation>(
+                    ClientHttpOperationCatalog.AcceptVisitInvite);
+            }
+
             string requestPath;
             byte[] requestBody;
             try
             {
-                requestPath = _codec.BuildVisitInviteAcceptPath(request);
-                requestBody = _codec.EncodeVisitInviteAccept(request);
+                requestPath = _mapper.BuildVisitInviteAcceptPath(request.Invite);
+                requestBody = _mapper.EncodeVisitInviteAccept(request.Invite);
             }
             catch (ArgumentException)
             {
-                return Task.FromResult(ClientHttpResult<ClientVisitReservation>.Failed(
-                    new ClientHttpFailure(
-                        ClientHttpFailureKind.LocalPolicy,
+                return Task.FromResult(ClientGatewayResult<ClientVisitReservation>.Failed(
+                    new ClientGatewayFailure(
+                        ClientGatewayFailureKind.LocalPolicy,
                         ClientHttpOperationCatalog.AcceptVisitInvite.OperationID)));
             }
 
@@ -163,26 +224,62 @@ namespace IHomeland.Client.Infrastructure.Http
                 ClientHttpOperationCatalog.AcceptVisitInvite,
                 requestBody,
                 accessToken,
-                body => _codec.DecodeVisitInviteAccept(body, request),
+                body => _mapper.DecodeVisitInviteAccept(body, request.Invite),
                 cancellationToken,
-                idempotencyKey,
+                request.IdempotencyKey,
                 requestPath);
         }
 
         /// <inheritdoc />
-        public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
-            string accessToken,
-            ClientWorldAdmissionTarget target,
-            string idempotencyKey,
+        public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
+            ClientWorldAdmissionGatewayRequest request,
             CancellationToken cancellationToken)
         {
+            if (request == null ||
+                !request.Authorization.TryTake(
+                    ClientCredentialPurpose.HttpAuthorization,
+                    out var accessToken))
+            {
+                return LocalPolicyFailure<ClientWorldAdmission>(
+                    ClientHttpOperationCatalog.IssueWorldAdmission);
+            }
+
             return ExecuteAsync(
                 ClientHttpOperationCatalog.IssueWorldAdmission,
-                _codec.EncodeWorldAdmission(target),
+                _mapper.EncodeWorldAdmission(request.Target),
                 accessToken,
-                _codec.DecodeWorldAdmission,
+                _mapper.DecodeWorldAdmission,
                 cancellationToken,
-                idempotencyKey);
+                request.IdempotencyKey);
+        }
+
+        /// <summary>从只含 credential 的请求取得匹配 operation purpose 的 secret。</summary>
+        /// <param name="request">封闭 gateway 请求。</param>
+        /// <param name="purpose">目标 operation 要求的 purpose。</param>
+        /// <param name="credential">成功时返回唯一 credential 使用权。</param>
+        /// <returns>请求有效、purpose 匹配且 lease 尚未使用时返回 true。</returns>
+        private static bool TryTakeCredential(
+            ClientCredentialGatewayRequest request,
+            ClientCredentialPurpose purpose,
+            out string credential)
+        {
+            credential = null;
+            return request != null &&
+                   request.Credential.TryTake(purpose, out credential);
+        }
+
+        /// <summary>创建 credential lease 无效时的稳定本地策略失败。</summary>
+        /// <typeparam name="T">目标 operation 的成功投影类型。</typeparam>
+        /// <param name="operation">固定 operation descriptor。</param>
+        /// <returns>不包含 secret 的已完成失败任务。</returns>
+        private static Task<ClientGatewayResult<T>> LocalPolicyFailure<T>(
+            ClientHttpOperation operation)
+        {
+            return Task.FromResult(
+                ClientGatewayResult<T>.Failed(
+                    new ClientGatewayFailure(
+                        ClientGatewayFailureKind.LocalPolicy,
+                        operation.OperationID)));
         }
 
         /// <summary>
@@ -197,7 +294,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="idempotencyKey">仅需要幂等 header 的 operation 提供；其他 operation 必须为空。</param>
         /// <param name="requestPath">仅带 path parameter 的冻结 operation 提供；其他 operation 必须为空。</param>
         /// <returns>成功、服务端错误或本地失败三选一结果。</returns>
-        private async Task<ClientHttpResult<T>> ExecuteAsync<T>(
+        private async Task<ClientGatewayResult<T>> ExecuteAsync<T>(
             ClientHttpOperation operation,
             byte[] requestBody,
             string bearerToken,
@@ -215,7 +312,7 @@ namespace IHomeland.Client.Infrastructure.Http
                 requestPath);
             if (!raw.HasResponse)
             {
-                return ClientHttpResult<T>.Failed(raw.Failure);
+                return ClientGatewayResult<T>.Failed(raw.Failure);
             }
 
             var response = raw.Response;
@@ -228,7 +325,7 @@ namespace IHomeland.Client.Infrastructure.Http
                         return Malformed<T>(operation, response.StatusCode);
                     }
 
-                    return ClientHttpResult<T>.Success(decodeSuccess(response.Body));
+                    return ClientGatewayResult<T>.Success(decodeSuccess(response.Body));
                 }
 
                 return DecodeRejected<T>(operation, response);
@@ -247,7 +344,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="bearerToken">当前 access token。</param>
         /// <param name="cancellationToken">调用方取消等待的信号。</param>
         /// <returns>空成功、服务端错误或本地失败。</returns>
-        private async Task<ClientHttpResult<ClientHttpEmpty>> ExecuteEmptyAsync(
+        private async Task<ClientGatewayResult<ClientGatewayEmpty>> ExecuteEmptyAsync(
             ClientHttpOperation operation,
             byte[] requestBody,
             string bearerToken,
@@ -260,24 +357,24 @@ namespace IHomeland.Client.Infrastructure.Http
                 cancellationToken);
             if (!raw.HasResponse)
             {
-                return ClientHttpResult<ClientHttpEmpty>.Failed(raw.Failure);
+                return ClientGatewayResult<ClientGatewayEmpty>.Failed(raw.Failure);
             }
 
             var response = raw.Response;
             if (response.StatusCode == operation.SuccessStatus)
             {
                 return response.Body.Length == 0
-                    ? ClientHttpResult<ClientHttpEmpty>.Success(new ClientHttpEmpty())
-                    : Malformed<ClientHttpEmpty>(operation, response.StatusCode);
+                    ? ClientGatewayResult<ClientGatewayEmpty>.Success(new ClientGatewayEmpty())
+                    : Malformed<ClientGatewayEmpty>(operation, response.StatusCode);
             }
 
             try
             {
-                return DecodeRejected<ClientHttpEmpty>(operation, response);
+                return DecodeRejected<ClientGatewayEmpty>(operation, response);
             }
             catch (ClientHttpContractException)
             {
-                return Malformed<ClientHttpEmpty>(operation, response.StatusCode);
+                return Malformed<ClientGatewayEmpty>(operation, response.StatusCode);
             }
         }
 
@@ -288,7 +385,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="operation">冻结 descriptor。</param>
         /// <param name="response">完整有界响应。</param>
         /// <returns>结构有效的服务端拒绝或 malformed failure。</returns>
-        private ClientHttpResult<T> DecodeRejected<T>(
+        private ClientGatewayResult<T> DecodeRejected<T>(
             ClientHttpOperation operation,
             ClientHttpRawResponse response)
         {
@@ -298,7 +395,7 @@ namespace IHomeland.Client.Infrastructure.Http
                 return Malformed<T>(operation, response.StatusCode);
             }
 
-            var serverError = _codec.DecodeServerError(response.Body, response.StatusCode);
+            var serverError = _mapper.DecodeServerError(response.Body, response.StatusCode);
             if (response.RetryAfter.HasValue)
             {
                 if (response.RetryAfter.Value < TimeSpan.Zero ||
@@ -321,7 +418,7 @@ namespace IHomeland.Client.Infrastructure.Http
                 }
             }
 
-            return ClientHttpResult<T>.Rejected(serverError);
+            return ClientGatewayResult<T>.Rejected(serverError);
         }
 
         /// <summary>
@@ -341,14 +438,13 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="operation">发生 contract 漂移的 descriptor。</param>
         /// <param name="statusCode">实际 HTTP status。</param>
         /// <returns>稳定本地失败。</returns>
-        private static ClientHttpResult<T> Malformed<T>(
+        private static ClientGatewayResult<T> Malformed<T>(
             ClientHttpOperation operation,
             HttpStatusCode statusCode)
         {
-            return ClientHttpResult<T>.Failed(new ClientHttpFailure(
-                ClientHttpFailureKind.MalformedResponse,
-                operation.OperationID,
-                statusCode));
+            return ClientGatewayResult<T>.Failed(new ClientGatewayFailure(
+                ClientGatewayFailureKind.MalformedResponse,
+                operation.OperationID));
         }
     }
 }

@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
+using IHomeland.Client.Application.Configuration;
 using IHomeland.Client.Core.Configuration;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
 using IHomeland.Client.Core.Qualification;

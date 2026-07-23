@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Core.Composition;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Foundation.Lifetime;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
 using IHomeland.Client.Core.Qualification;
 #endif

@@ -28,7 +28,7 @@ BootstrapScene
 
 ## Composition Root
 
-`AppComposition` 是唯一了解 concrete types 的位置，负责：
+`AppComposition` 是唯一应用装配入口；各模块的 concrete types 只由对应子 Composition 了解。该装配层负责：
 
 - 读取环境配置与 endpoint manifest model
 - 创建 logger、clock、main-thread dispatcher
@@ -40,6 +40,46 @@ BootstrapScene
 - 失败时逆序清理已成功项
 
 当前规模不引入第三方 DI 容器。使用构造参数、初始化参数和窄接口即可。
+
+### 编译期模块与分层 Composition
+
+客户端生产代码固定为下面的单向程序集 DAG：
+
+```text
+Foundation
+   ↓
+Application
+   ↓ ↘
+Infrastructure  Presentation
+          ↘     ↙
+            Runtime
+```
+
+- `Foundation` 只包含 lifetime、clock、dispatcher 等无 Unity、无协议的基础契约。
+- `Application` 只包含业务 owner、不可变 contracts、窄 ports、reducers、state machines 与 flows。
+- `Infrastructure` 实现 HTTP/WSS/TLS-TCP、secure storage、generated protocol mapping。
+- `Presentation` 是 `noEngineReferences` 的 Router、Experience、View State 与 presentation transactions。
+- `Runtime` 只保留 Bootstrap、Composition、Unity Hosts、Views、Scenes 与 qualification adapter。
+
+`AppComposition` 仍是唯一应用装配入口，但不再直接展开全部对象创建。它按
+`FoundationComposition -> InfrastructureComposition -> SessionComposition -> ChannelComposition -> WorldComposition -> PresentationComposition -> RuntimeQualificationComposition`
+依次取得封闭 bundle；bundle 只在 Composition 内传播，feature 不能访问容器或按类型解析服务。项目不引入 DI 框架和全局容器，依赖仍由构造函数在编译期显式验证。
+
+`AppCompositionResult` 只跨越 `Runtime` 内部的 `AppRoot` 与 Development qualification 边界；业务 feature、SceneContext 和页面均不得持有它。新增对象时先确定 module、owner 与窄 port，再在对应子 Composition 装配，不把 `AppComposition` 重新增长为业务协调器。
+
+### 大协调器拆分原则
+
+拆分不是把一个类机械切成多个 partial 文件，而是转移状态所有权和可独立测试的决策：
+
+- `SessionCoordinator` 只拥有 Session facade，认证、refresh、restore、logout 分别进入 flow，credential 进入 `SessionCredentialRegistry`。
+- `ClientControlChannel` 只拥有 WSS lifecycle/generation；attempt、receive pump、retry policy、push dispatch 各自封闭。
+- `ClientGameplayChannel` 只拥有 TLS/TCP lifecycle/generation；attempt、reader、writer、pending、heartbeat、route dispatch 各自封闭。
+- `WorldAdmissionCoordinator` 只拥有 current target/target generation；OwnWorld、Visit、Return、Reconnect 由具名 flow 编排，projection 由 reducer 提交。
+- `ClientConnectionRecoveryCoordinator` 只拥有 recovery intent；state machine、plan builder、control/gameplay flow 分离。
+- `ClientUiRouter` 只拥有 route/navigation；planner、bounded queue、route state、interaction resolver 与 host transaction 分离。
+- `ClientPersonalWorldExperience` 只拥有 presentation intent 与订阅编排；View State projector、failure mapper、Scene/route、Session invalidation、recovery transaction 分离。
+
+复杂度报告仅提示超过阈值的文件，不以行数替代职责判断。只要 owner 仍唯一、依赖方向稳定、状态提交有单一入口，协调器可以保留必要的编排代码。
 
 ## AppRoot
 

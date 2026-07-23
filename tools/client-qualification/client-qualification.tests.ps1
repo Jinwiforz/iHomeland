@@ -289,6 +289,12 @@ try {
     Assert-True ($toolText -match '(?s)finally\s*\{\s*Stop-OwnedProcesses') "Ctrl+C cannot reach the exact owned-process cleanup path"
     Assert-True ($toolText -match 'ValidateSet\("validate", "diagnose", "automatic"') "diagnose action is not a closed command contract"
     Assert-True ($toolText -match 'qualificationEvidence\s*=\s*\$false') "diagnostic output can be mistaken for qualification evidence"
+    Assert-True (
+        $toolText -match 'openspec\.cmd validate --all --strict --no-interactive') `
+        "qualification governance no longer validates all current specs and changes"
+    Assert-True (
+        $toolText -notmatch 'openspec\.cmd validate qualify-client-v1') `
+        "qualification governance still depends on an archived change name"
     $cleanupFunction = [regex]::Match(
         $toolText,
         '(?s)function Invoke-PlayerStorageCleanup\s*\{.*?\n\}')

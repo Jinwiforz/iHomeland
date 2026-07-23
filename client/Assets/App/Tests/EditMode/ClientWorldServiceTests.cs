@@ -3,7 +3,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
-using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Protocol.Session.V1;
 using IHomeland.Protocol.Visit.V1;
 using IHomeland.Protocol.World.V1;
@@ -346,8 +347,8 @@ namespace IHomeland.Client.Tests.EditMode
             var service = new VisitSessionService(new FakeClock(1_000));
 
             Assert.That(service.SetTargetRole(ClientVisitRole.Visitor, "visit/escape"), Is.False);
-            Assert.That(ClientWorldProjectionMapper.IsValidIdentity(new string('a', 129)), Is.False);
-            Assert.That(ClientWorldProjectionMapper.IsValidIdentity("visit_one"), Is.True);
+            Assert.That(ClientWorldProjectionPolicy.IsValidIdentity(new string('a', 129)), Is.False);
+            Assert.That(ClientWorldProjectionPolicy.IsValidIdentity("visit_one"), Is.True);
         }
 
         /// <summary>验证未过期 invite 达到硬上限后返回 overflow 而不增长集合。</summary>

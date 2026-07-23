@@ -1,12 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Protocol.Common.V1;
@@ -638,7 +641,7 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>提供认证、ticket 与 admission 的确定性 HTTP 替换。</summary>
-        private sealed class FakeHttpApi : IClientHttpApi
+        private sealed class FakeHttpApi : IClientBootstrapGateway, IClientSessionGateway
         {
             /// <summary>保存 ticket/admission 共同绑定 endpoint。</summary>
             private readonly ClientEndpoint _endpoint;
@@ -650,21 +653,21 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(string username, string password, string displayName, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(string username, string password, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken cancellationToken)
             {
-                return Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                return Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     new ClientAuthentication(
                         new ClientAccountSummary("account-fixture", "Fixture", 1),
                         new ClientSessionSummary("session-fixture", 1, 10000),
@@ -673,17 +676,17 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(string refreshToken, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(string accessToken, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(string accessToken, ClientEndpointChannel channel, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken cancellationToken)
             {
-                return Task.FromResult(ClientHttpResult<ClientConnectionTicket>.Success(
+                return Task.FromResult(ClientGatewayResult<ClientConnectionTicket>.Success(
                     new ClientConnectionTicket(
                         "0102030405060708090a0b0c0d0e0f10",
                         _endpoint,
@@ -692,18 +695,18 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(string accessToken, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(string accessToken, ClientVisitInviteAcceptRequest request, string idempotencyKey, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken cancellationToken) =>
                 throw new NotSupportedException();
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(string accessToken, ClientWorldAdmissionTarget target, string idempotencyKey, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken cancellationToken)
             {
-                var visit = target.Kind == ClientWorldAdmissionTargetKind.VisitWorld;
-                return Task.FromResult(ClientHttpResult<ClientWorldAdmission>.Success(
+                var visit = request.Target.Kind == ClientWorldAdmissionTargetKind.VisitWorld;
+                return Task.FromResult(ClientGatewayResult<ClientWorldAdmission>.Success(
                     new ClientWorldAdmission(
                         "wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                         _endpoint,
@@ -715,7 +718,7 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>由测试显式释放每个 heartbeat interval，不依赖真实时间。</summary>
-        private sealed class FakeGameplayDelay : IClientGameplayDelay
+        private sealed class FakeGameplayDelay : IClientDelay
         {
             /// <summary>保护等待队列。</summary>
             private readonly object _sync = new object();

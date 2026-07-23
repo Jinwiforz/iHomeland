@@ -1,10 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
-using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using NUnit.Framework;
 
@@ -608,23 +611,23 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>只实现测试登录与同Session token轮换，其余HTTP operation稳定拒绝。</summary>
-        private sealed class AuthenticationApi : IClientHttpApi
+        private sealed class AuthenticationApi : IClientBootstrapGateway, IClientSessionGateway
         {
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(CancellationToken token) =>
+            public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(CancellationToken token) =>
                 Unsupported<ClientVersionInfo>("version");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken token) =>
+            public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken token) =>
                 Unsupported<ClientBootstrapConfiguration>("config");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(string username, string password, string displayName, CancellationToken token) =>
+            public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken token) =>
                 Unsupported<ClientAuthentication>("register");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(string username, string password, CancellationToken token) =>
-                Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+            public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken token) =>
+                Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     new ClientAuthentication(
                         new ClientAccountSummary("account_fixture", "Fixture", 1),
                         new ClientSessionSummary("session_fixture", 1, 100_000),
@@ -632,10 +635,8 @@ namespace IHomeland.Client.Tests.EditMode
                         Array.Empty<ClientEndpoint>())));
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
-                string refreshToken,
-                CancellationToken token) =>
-                Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
+            public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken token) =>
+                Task.FromResult(ClientGatewayResult<ClientTokenPair>.Success(
                     new ClientTokenPair(
                         "access_refreshed",
                         "refresh_rotated",
@@ -643,25 +644,25 @@ namespace IHomeland.Client.Tests.EditMode
                         99_000)));
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(string accessToken, CancellationToken token) => Unsupported<ClientHttpEmpty>("logout");
+            public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken token) => Unsupported<ClientGatewayEmpty>("logout");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(string accessToken, ClientEndpointChannel channel, CancellationToken token) => Unsupported<ClientConnectionTicket>("ticket");
+            public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken token) => Unsupported<ClientConnectionTicket>("ticket");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(string accessToken, CancellationToken token) => Unsupported<ClientWorldBootstrap>("world");
+            public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken token) => Unsupported<ClientWorldBootstrap>("world");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(string accessToken, ClientVisitInviteAcceptRequest request, string idempotencyKey, CancellationToken token) => Unsupported<ClientVisitReservation>("accept");
+            public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken token) => Unsupported<ClientVisitReservation>("accept");
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(string accessToken, ClientWorldAdmissionTarget target, string idempotencyKey, CancellationToken token) => Unsupported<ClientWorldAdmission>("admission");
+            public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken token) => Unsupported<ClientWorldAdmission>("admission");
 
             /// <summary>返回不触发网络的固定policy失败。</summary>
-            private static Task<ClientHttpResult<T>> Unsupported<T>(string operation)
+            private static Task<ClientGatewayResult<T>> Unsupported<T>(string operation)
             {
-                return Task.FromResult(ClientHttpResult<T>.Failed(
-                    new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation)));
+                return Task.FromResult(ClientGatewayResult<T>.Failed(
+                    new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation)));
             }
         }
     }

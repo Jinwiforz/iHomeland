@@ -1,9 +1,11 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
 
 namespace IHomeland.Client.Application.Session
 {
@@ -30,7 +32,27 @@ namespace IHomeland.Client.Application.Session
         /// <summary>
         /// 保存不暴露任意 path 的强类型 HTTP API。
         /// </summary>
-        private readonly IClientHttpApi _httpApi;
+        private readonly IClientSessionGateway _gateway;
+
+        /// <summary>执行无状态 register/login gateway 候选调用。</summary>
+        private readonly SessionAuthenticationFlow _authenticationFlow;
+
+        /// <summary>执行无状态 refresh gateway 候选调用。</summary>
+        private readonly SessionRefreshFlow _refreshFlow;
+
+        /// <summary>执行启动 secure lineage 轮换候选。</summary>
+        private readonly SessionRestoreFlow _restoreFlow;
+
+        /// <summary>执行 logout gateway 候选，不决定 owner 终态。</summary>
+        private readonly SessionTerminationFlow _terminationFlow;
+
+        /// <summary>集中 ticket/admission lease 创建与单次交付规则。</summary>
+        private readonly SessionCredentialRegistry _credentialRegistry =
+            new SessionCredentialRegistry();
+
+        /// <summary>纯计算 generation、epoch 与迟到提交决议。</summary>
+        private readonly SessionStateMachine _stateMachine =
+            new SessionStateMachine();
 
         /// <summary>
         /// 保存 ticket expiry 判断使用的可测试 UTC 时钟。
@@ -75,7 +97,7 @@ namespace IHomeland.Client.Application.Session
         /// <summary>
         /// 保存当前共享 refresh 结果；没有进行中 refresh 时为空。
         /// </summary>
-        private Task<ClientHttpResult<ClientSessionSnapshot>> _refreshTask;
+        private Task<ClientGatewayResult<ClientSessionSnapshot>> _refreshTask;
 
         /// <summary>启动restore正在独占unauthenticated入口。</summary>
         private bool _restoreInProgress;
@@ -89,20 +111,24 @@ namespace IHomeland.Client.Application.Session
         /// 创建唯一 Session owner。
         /// </summary>
         /// <param name="configurationStore">App Scope 唯一 Configuration owner。</param>
-        /// <param name="httpApi">强类型 HTTP operation 边界。</param>
+        /// <param name="gateway">Session 固定 operation 边界。</param>
         /// <param name="clock">Credential expiry 使用的 UTC 时钟。</param>
         /// <param name="secureSessionStore">唯一refresh lineage安全存储owner。</param>
         /// <param name="environmentBinding">当前环境的稳定secure record binding。</param>
         /// <exception cref="ArgumentNullException">任一依赖为空时抛出。</exception>
         internal SessionCoordinator(
             ClientConfigurationStore configurationStore,
-            IClientHttpApi httpApi,
+            IClientSessionGateway gateway,
             IClientClock clock,
             IClientSecureSessionStore secureSessionStore,
             string environmentBinding)
         {
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
-            _httpApi = httpApi ?? throw new ArgumentNullException(nameof(httpApi));
+            _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
+            _authenticationFlow = new SessionAuthenticationFlow(_gateway);
+            _refreshFlow = new SessionRefreshFlow(_gateway);
+            _restoreFlow = new SessionRestoreFlow(_refreshFlow);
+            _terminationFlow = new SessionTerminationFlow(_gateway);
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             _secureSessionStore = secureSessionStore ??
                 throw new ArgumentNullException(nameof(secureSessionStore));
@@ -168,15 +194,19 @@ namespace IHomeland.Client.Application.Session
         /// <param name="displayName">待服务端规范化的显示名。</param>
         /// <param name="cancellationToken">取消等待；取消不证明服务端未提交。</param>
         /// <returns>已提交 current snapshot、服务端错误或稳定本地失败。</returns>
-        internal Task<ClientHttpResult<ClientSessionSnapshot>> RegisterAsync(
+        internal Task<ClientGatewayResult<ClientSessionSnapshot>> RegisterAsync(
             string username,
             string password,
             string displayName,
             CancellationToken cancellationToken)
         {
             return AuthenticateAsync(
-                token => _httpApi.RegisterAsync(username, password, displayName, token),
-                ClientHttpOperationCatalog.RegisterAccount.OperationID,
+                token => _authenticationFlow.RegisterAsync(
+                    username,
+                    password,
+                    displayName,
+                    token),
+                ClientOperationIDs.RegisterAccount,
                 cancellationToken);
         }
 
@@ -187,14 +217,17 @@ namespace IHomeland.Client.Application.Session
         /// <param name="password">只存活于当前调用的原始 password。</param>
         /// <param name="cancellationToken">取消等待；取消不证明服务端未提交。</param>
         /// <returns>已提交 current snapshot、服务端错误或稳定本地失败。</returns>
-        internal Task<ClientHttpResult<ClientSessionSnapshot>> LoginAsync(
+        internal Task<ClientGatewayResult<ClientSessionSnapshot>> LoginAsync(
             string username,
             string password,
             CancellationToken cancellationToken)
         {
             return AuthenticateAsync(
-                token => _httpApi.LoginAsync(username, password, token),
-                ClientHttpOperationCatalog.LoginAccount.OperationID,
+                token => _authenticationFlow.LoginAsync(
+                    username,
+                    password,
+                    token),
+                ClientOperationIDs.LoginAccount,
                 cancellationToken);
         }
 
@@ -250,8 +283,8 @@ namespace IHomeland.Client.Application.Session
                         : ClientSessionRestoreOutcome.StorageFailure);
                 }
 
-                var refresh = await _httpApi.RefreshAsync(
-                    record.RefreshToken,
+                var refresh = await _restoreFlow.ExecuteAsync(
+                    record,
                     cancellationToken);
                 if (!refresh.IsSuccess)
                 {
@@ -267,7 +300,7 @@ namespace IHomeland.Client.Application.Session
 
                     if (IsCommitUnknown(refresh.Failure))
                     {
-                        var outcome = refresh.Failure.Kind == ClientHttpFailureKind.Stopped
+                        var outcome = refresh.Failure.Kind == ClientGatewayFailureKind.Stopped
                             ? ClientSessionRestoreOutcome.Stopped
                             : ClientSessionRestoreOutcome.Unresolved;
                         var retired = await RetireRestoreRecordAsync(
@@ -384,11 +417,11 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         /// <param name="cancellationToken">第一个调用方拥有底层请求；后续调用方可独立取消等待。</param>
         /// <returns>更新后的 current snapshot、服务端错误或稳定本地失败。</returns>
-        internal Task<ClientHttpResult<ClientSessionSnapshot>> RefreshAsync(
+        internal Task<ClientGatewayResult<ClientSessionSnapshot>> RefreshAsync(
             CancellationToken cancellationToken)
         {
-            Task<ClientHttpResult<ClientSessionSnapshot>> sharedTask;
-            TaskCompletionSource<ClientHttpResult<ClientSessionSnapshot>> completion = null;
+            Task<ClientGatewayResult<ClientSessionSnapshot>> sharedTask;
+            TaskCompletionSource<ClientGatewayResult<ClientSessionSnapshot>> completion = null;
             ClientSessionSnapshot source = null;
             lock (_sync)
             {
@@ -402,10 +435,10 @@ namespace IHomeland.Client.Application.Session
                 if (!CanUseAuthenticatedSnapshot(out source))
                 {
                     return Task.FromResult(LocalPolicy<ClientSessionSnapshot>(
-                        ClientHttpOperationCatalog.RefreshSession.OperationID));
+                        ClientOperationIDs.RefreshSession));
                 }
 
-                completion = new TaskCompletionSource<ClientHttpResult<ClientSessionSnapshot>>(
+                completion = new TaskCompletionSource<ClientGatewayResult<ClientSessionSnapshot>>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 _refreshTask = completion.Task;
                 sharedTask = _refreshTask;
@@ -420,20 +453,22 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         /// <param name="cancellationToken">取消等待；timeout/cancel/transport 均可能表示远端已提交。</param>
         /// <returns>204 成功、服务端错误或稳定本地失败。</returns>
-        internal async Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
+        internal async Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(
             CancellationToken cancellationToken)
         {
             var access = await CaptureFreshAuthenticatedAsync(
-                ClientHttpOperationCatalog.LogoutSession.OperationID,
+                ClientOperationIDs.LogoutSession,
                 cancellationToken);
             if (!access.IsSuccess)
             {
-                return ConvertFailure<ClientSessionSnapshot, ClientHttpEmpty>(access);
+                return ConvertFailure<ClientSessionSnapshot, ClientGatewayEmpty>(access);
             }
 
             var source = access.Value;
 
-            var result = await _httpApi.LogoutAsync(source.Tokens.AccessToken, cancellationToken);
+            var result = await _terminationFlow.LogoutAsync(
+                source.Tokens.AccessToken,
+                cancellationToken);
             ClientSessionOwnerState? terminalState = null;
             if (result.IsSuccess || IsUnauthenticated(result.ServerError))
             {
@@ -447,8 +482,8 @@ namespace IHomeland.Client.Application.Session
             if (terminalState.HasValue &&
                 !await RetireCurrentLineageAsync(source.Generation, terminalState.Value))
             {
-                return SecureStorageFailure<ClientHttpEmpty>(
-                    ClientHttpOperationCatalog.LogoutSession.OperationID);
+                return SecureStorageFailure<ClientGatewayEmpty>(
+                    ClientOperationIDs.LogoutSession);
             }
 
             return result;
@@ -460,12 +495,12 @@ namespace IHomeland.Client.Application.Session
         /// <param name="channel">WSS 或 TLS_TCP channel。</param>
         /// <param name="cancellationToken">取消等待；不会自动重试签发。</param>
         /// <returns>绑定 source generation 的单次 lease、服务端错误或本地失败。</returns>
-        internal async Task<ClientHttpResult<ClientConnectionTicketLease>> IssueConnectionTicketAsync(
+        internal async Task<ClientGatewayResult<ClientConnectionTicketLease>> IssueConnectionTicketAsync(
             ClientEndpointChannel channel,
             CancellationToken cancellationToken)
         {
             var access = await CaptureFreshAuthenticatedAsync(
-                ClientHttpOperationCatalog.IssueConnectionTicket.OperationID,
+                ClientOperationIDs.IssueConnectionTicket,
                 cancellationToken);
             if (!access.IsSuccess)
             {
@@ -474,9 +509,10 @@ namespace IHomeland.Client.Application.Session
 
             var source = access.Value;
 
-            var result = await _httpApi.IssueConnectionTicketAsync(
-                source.Tokens.AccessToken,
-                channel,
+            var result = await _gateway.IssueConnectionTicketAsync(
+                new ClientConnectionTicketGatewayRequest(
+                    CreateAuthorizationLease(source.Tokens.AccessToken),
+                    channel),
                 cancellationToken);
             if (!result.IsSuccess)
             {
@@ -488,9 +524,9 @@ namespace IHomeland.Client.Application.Session
 
             if (!TicketMatchesChannel(result.Value, channel))
             {
-                return ClientHttpResult<ClientConnectionTicketLease>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.MalformedResponse,
-                    ClientHttpOperationCatalog.IssueConnectionTicket.OperationID));
+                return ClientGatewayResult<ClientConnectionTicketLease>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.MalformedResponse,
+                    ClientOperationIDs.IssueConnectionTicket));
             }
 
             lock (_sync)
@@ -498,11 +534,13 @@ namespace IHomeland.Client.Application.Session
                 if (!IsCurrent(source.Generation))
                 {
                     return LocalPolicy<ClientConnectionTicketLease>(
-                        ClientHttpOperationCatalog.IssueConnectionTicket.OperationID);
+                        ClientOperationIDs.IssueConnectionTicket);
                 }
 
-                return ClientHttpResult<ClientConnectionTicketLease>.Success(
-                    new ClientConnectionTicketLease(result.Value, source.Generation));
+                return ClientGatewayResult<ClientConnectionTicketLease>.Success(
+                    _credentialRegistry.CreateConnectionTicket(
+                        result.Value,
+                        source.Generation));
             }
         }
 
@@ -511,11 +549,11 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         /// <param name="cancellationToken">取消等待；结果不保存为 PersonalWorld 最终事实。</param>
         /// <returns>当前 generation 的查询投影、服务端错误或本地失败。</returns>
-        internal async Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
+        internal async Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
             CancellationToken cancellationToken)
         {
             var access = await CaptureFreshAuthenticatedAsync(
-                ClientHttpOperationCatalog.GetWorldBootstrap.OperationID,
+                ClientOperationIDs.GetWorldBootstrap,
                 cancellationToken);
             if (!access.IsSuccess)
             {
@@ -524,8 +562,8 @@ namespace IHomeland.Client.Application.Session
 
             var source = access.Value;
 
-            var result = await _httpApi.GetWorldBootstrapAsync(
-                source.Tokens.AccessToken,
+            var result = await _gateway.GetWorldBootstrapAsync(
+                CreateAuthorizationRequest(source.Tokens.AccessToken),
                 cancellationToken);
             if (!result.IsSuccess)
             {
@@ -540,7 +578,7 @@ namespace IHomeland.Client.Application.Session
                 return IsCurrent(source.Generation)
                     ? result
                     : LocalPolicy<ClientWorldBootstrap>(
-                        ClientHttpOperationCatalog.GetWorldBootstrap.OperationID);
+                        ClientOperationIDs.GetWorldBootstrap);
             }
         }
 
@@ -551,13 +589,13 @@ namespace IHomeland.Client.Application.Session
         /// <param name="idempotencyKey">同一 accept intent 稳定复用的 key。</param>
         /// <param name="cancellationToken">取消等待；不会自动重试或声称服务端未提交。</param>
         /// <returns>Current generation 的有效 reservation、服务端错误或本地失败。</returns>
-        internal async Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
+        internal async Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(
             ClientVisitInviteAcceptRequest request,
             string idempotencyKey,
             CancellationToken cancellationToken)
         {
             var access = await CaptureFreshAuthenticatedAsync(
-                ClientHttpOperationCatalog.AcceptVisitInvite.OperationID,
+                ClientOperationIDs.AcceptVisitInvite,
                 cancellationToken);
             if (!access.IsSuccess)
             {
@@ -566,10 +604,11 @@ namespace IHomeland.Client.Application.Session
 
             var source = access.Value;
 
-            var result = await _httpApi.AcceptVisitInviteAsync(
-                source.Tokens.AccessToken,
-                request,
-                idempotencyKey,
+            var result = await _gateway.AcceptVisitInviteAsync(
+                new ClientAcceptVisitInviteGatewayRequest(
+                    CreateAuthorizationLease(source.Tokens.AccessToken),
+                    request,
+                    idempotencyKey),
                 cancellationToken);
             if (!result.IsSuccess)
             {
@@ -581,9 +620,9 @@ namespace IHomeland.Client.Application.Session
 
             if (result.Value.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds)
             {
-                return ClientHttpResult<ClientVisitReservation>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.MalformedResponse,
-                    ClientHttpOperationCatalog.AcceptVisitInvite.OperationID));
+                return ClientGatewayResult<ClientVisitReservation>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.MalformedResponse,
+                    ClientOperationIDs.AcceptVisitInvite));
             }
 
             lock (_sync)
@@ -591,7 +630,7 @@ namespace IHomeland.Client.Application.Session
                 return IsCurrent(source.Generation)
                     ? result
                     : LocalPolicy<ClientVisitReservation>(
-                        ClientHttpOperationCatalog.AcceptVisitInvite.OperationID);
+                        ClientOperationIDs.AcceptVisitInvite);
             }
         }
 
@@ -602,13 +641,13 @@ namespace IHomeland.Client.Application.Session
         /// <param name="idempotencyKey">稳定签发意图 key；transport 不自动重试。</param>
         /// <param name="cancellationToken">取消等待的信号。</param>
         /// <returns>绑定 source generation 的单次 lease、服务端错误或本地失败。</returns>
-        internal async Task<ClientHttpResult<ClientWorldAdmissionLease>> IssueWorldAdmissionAsync(
+        internal async Task<ClientGatewayResult<ClientWorldAdmissionLease>> IssueWorldAdmissionAsync(
             ClientWorldAdmissionTarget target,
             string idempotencyKey,
             CancellationToken cancellationToken)
         {
             var access = await CaptureFreshAuthenticatedAsync(
-                ClientHttpOperationCatalog.IssueWorldAdmission.OperationID,
+                ClientOperationIDs.IssueWorldAdmission,
                 cancellationToken);
             if (!access.IsSuccess)
             {
@@ -617,10 +656,11 @@ namespace IHomeland.Client.Application.Session
 
             var source = access.Value;
 
-            var result = await _httpApi.IssueWorldAdmissionAsync(
-                source.Tokens.AccessToken,
-                target,
-                idempotencyKey,
+            var result = await _gateway.IssueWorldAdmissionAsync(
+                new ClientWorldAdmissionGatewayRequest(
+                    CreateAuthorizationLease(source.Tokens.AccessToken),
+                    target,
+                    idempotencyKey),
                 cancellationToken);
             if (!result.IsSuccess)
             {
@@ -635,11 +675,13 @@ namespace IHomeland.Client.Application.Session
                 if (!IsCurrent(source.Generation))
                 {
                     return LocalPolicy<ClientWorldAdmissionLease>(
-                        ClientHttpOperationCatalog.IssueWorldAdmission.OperationID);
+                        ClientOperationIDs.IssueWorldAdmission);
                 }
 
-                return ClientHttpResult<ClientWorldAdmissionLease>.Success(
-                    new ClientWorldAdmissionLease(result.Value, source.Generation));
+                return ClientGatewayResult<ClientWorldAdmissionLease>.Success(
+                    _credentialRegistry.CreateWorldAdmission(
+                        result.Value,
+                        source.Generation));
             }
         }
 
@@ -667,7 +709,8 @@ namespace IHomeland.Client.Application.Session
                     return false;
                 }
 
-                return lease.TryTake(
+                return _credentialRegistry.TryTakeConnectionTicket(
+                    lease,
                     _snapshot.Generation,
                     _clock.UtcNowMilliseconds,
                     out ticketUse);
@@ -698,7 +741,8 @@ namespace IHomeland.Client.Application.Session
                     return false;
                 }
 
-                return lease.TryTake(
+                return _credentialRegistry.TryTakeWorldAdmission(
+                    lease,
                     _snapshot.Generation,
                     _clock.UtcNowMilliseconds,
                     out admissionUse);
@@ -735,10 +779,11 @@ namespace IHomeland.Client.Application.Session
             {
                 lock (_sync)
                 {
-                    if (_state != ClientSessionOwnerState.Authenticated ||
-                        _snapshot == null ||
-                        _snapshot.Generation != sourceGeneration ||
-                        invalidatedEpoch <= (ulong)_snapshot.Session.SessionEpoch)
+                    if (!_stateMachine.CanAcceptInvalidation(
+                            _state,
+                            _snapshot,
+                            sourceGeneration,
+                            invalidatedEpoch))
                     {
                         return false;
                     }
@@ -829,8 +874,8 @@ namespace IHomeland.Client.Application.Session
         /// <param name="operationID">用于本地竞态拒绝的冻结 operationId。</param>
         /// <param name="cancellationToken">调用方取消等待的信号。</param>
         /// <returns>Current snapshot、服务端错误或本地失败。</returns>
-        private async Task<ClientHttpResult<ClientSessionSnapshot>> AuthenticateAsync(
-            Func<CancellationToken, Task<ClientHttpResult<ClientAuthentication>>> send,
+        private async Task<ClientGatewayResult<ClientSessionSnapshot>> AuthenticateAsync(
+            Func<CancellationToken, Task<ClientGatewayResult<ClientAuthentication>>> send,
             string operationID,
             CancellationToken cancellationToken)
         {
@@ -852,7 +897,7 @@ namespace IHomeland.Client.Application.Session
                 return ConvertFailure<ClientAuthentication, ClientSessionSnapshot>(result);
             }
 
-            ClientHttpResult<ClientSessionSnapshot> commitResult;
+            ClientGatewayResult<ClientSessionSnapshot> commitResult;
             var retireCandidate = false;
             await _credentialMutation.WaitAsync(CancellationToken.None);
             try
@@ -919,7 +964,7 @@ namespace IHomeland.Client.Application.Session
                         }
                         else
                         {
-                            commitResult = ClientHttpResult<ClientSessionSnapshot>.Success(committed);
+                            commitResult = ClientGatewayResult<ClientSessionSnapshot>.Success(committed);
                         }
                     }
                 }
@@ -948,16 +993,16 @@ namespace IHomeland.Client.Application.Session
         private async Task CompleteRefreshAsync(
             ClientSessionSnapshot source,
             CancellationToken cancellationToken,
-            TaskCompletionSource<ClientHttpResult<ClientSessionSnapshot>> completion,
-            Task<ClientHttpResult<ClientSessionSnapshot>> sharedTask)
+            TaskCompletionSource<ClientGatewayResult<ClientSessionSnapshot>> completion,
+            Task<ClientGatewayResult<ClientSessionSnapshot>> sharedTask)
         {
             long invalidatedGeneration = 0;
             try
             {
-                var result = await _httpApi.RefreshAsync(
+                var result = await _refreshFlow.ExecuteAsync(
                     source.Tokens.RefreshToken,
                     cancellationToken);
-                ClientHttpResult<ClientSessionSnapshot> mapped;
+                ClientGatewayResult<ClientSessionSnapshot> mapped;
                 if (!result.IsSuccess)
                 {
                     ClientSessionOwnerState? terminalState = null;
@@ -977,7 +1022,7 @@ namespace IHomeland.Client.Application.Session
                     mapped = retired
                         ? ConvertFailure<ClientTokenPair, ClientSessionSnapshot>(result)
                         : SecureStorageFailure<ClientSessionSnapshot>(
-                            ClientHttpOperationCatalog.RefreshSession.OperationID);
+                            ClientOperationIDs.RefreshSession);
                 }
                 else
                 {
@@ -989,7 +1034,7 @@ namespace IHomeland.Client.Application.Session
                             if (!IsCurrent(source.Generation))
                             {
                                 mapped = LocalPolicy<ClientSessionSnapshot>(
-                                    ClientHttpOperationCatalog.RefreshSession.OperationID);
+                                    ClientOperationIDs.RefreshSession);
                             }
                             else
                             {
@@ -1024,7 +1069,7 @@ namespace IHomeland.Client.Application.Session
 
                                 await _secureSessionStore.DeleteAsync(CancellationToken.None);
                                 mapped = SecureStorageFailure<ClientSessionSnapshot>(
-                                    ClientHttpOperationCatalog.RefreshSession.OperationID);
+                                    ClientOperationIDs.RefreshSession);
                             }
                             else
                             {
@@ -1052,11 +1097,11 @@ namespace IHomeland.Client.Application.Session
                                 {
                                     await _secureSessionStore.DeleteAsync(CancellationToken.None);
                                     mapped = LocalPolicy<ClientSessionSnapshot>(
-                                        ClientHttpOperationCatalog.RefreshSession.OperationID);
+                                        ClientOperationIDs.RefreshSession);
                                 }
                                 else
                                 {
-                                    mapped = ClientHttpResult<ClientSessionSnapshot>.Success(committed);
+                                    mapped = ClientGatewayResult<ClientSessionSnapshot>.Success(committed);
                                 }
                             }
                         }
@@ -1095,7 +1140,7 @@ namespace IHomeland.Client.Application.Session
         /// 本方法只比较服务端签发的绝对 expiry，不启动 timer、tick 或延时任务。Refresh 的
         /// commit-unknown 继续由 <see cref="RefreshAsync"/> 撤销旧 lineage，调用方不得使用旧 access。
         /// </remarks>
-        private async Task<ClientHttpResult<ClientSessionSnapshot>> CaptureFreshAuthenticatedAsync(
+        private async Task<ClientGatewayResult<ClientSessionSnapshot>> CaptureFreshAuthenticatedAsync(
             string operationID,
             CancellationToken cancellationToken)
         {
@@ -1106,7 +1151,7 @@ namespace IHomeland.Client.Application.Session
 
             if (_clock.UtcNowMilliseconds < source.Tokens.AccessExpiresAtMilliseconds)
             {
-                return ClientHttpResult<ClientSessionSnapshot>.Success(source);
+                return ClientGatewayResult<ClientSessionSnapshot>.Success(source);
             }
 
             return await RefreshAsync(cancellationToken);
@@ -1118,8 +1163,8 @@ namespace IHomeland.Client.Application.Session
         /// <param name="sharedTask">第一个调用方创建并拥有的共享 refresh 任务。</param>
         /// <param name="cancellationToken">当前后续调用方的独立取消信号。</param>
         /// <returns>共享 refresh 结果，或当前等待方的 CallerCancelled 结果。</returns>
-        private static async Task<ClientHttpResult<ClientSessionSnapshot>> AwaitSharedRefreshAsync(
-            Task<ClientHttpResult<ClientSessionSnapshot>> sharedTask,
+        private static async Task<ClientGatewayResult<ClientSessionSnapshot>> AwaitSharedRefreshAsync(
+            Task<ClientGatewayResult<ClientSessionSnapshot>> sharedTask,
             CancellationToken cancellationToken)
         {
             if (sharedTask.IsCompleted)
@@ -1134,9 +1179,9 @@ namespace IHomeland.Client.Application.Session
                 var completed = await Task.WhenAny(sharedTask, cancellationSignal.Task);
                 return ReferenceEquals(completed, sharedTask)
                     ? await sharedTask
-                    : ClientHttpResult<ClientSessionSnapshot>.Failed(new ClientHttpFailure(
-                        ClientHttpFailureKind.CallerCancelled,
-                        ClientHttpOperationCatalog.RefreshSession.OperationID));
+                    : ClientGatewayResult<ClientSessionSnapshot>.Failed(new ClientGatewayFailure(
+                        ClientGatewayFailureKind.CallerCancelled,
+                        ClientOperationIDs.RefreshSession));
             }
         }
 
@@ -1186,9 +1231,10 @@ namespace IHomeland.Client.Application.Session
         /// <returns>Owner 仍为同一 authenticated snapshot 时返回 true。</returns>
         private bool IsCurrent(long sourceGeneration)
         {
-            return _state == ClientSessionOwnerState.Authenticated &&
-                   _snapshot != null &&
-                   _snapshot.Generation == sourceGeneration;
+            return _stateMachine.IsCurrent(
+                _state,
+                _snapshot,
+                sourceGeneration);
         }
 
         /// <summary>
@@ -1294,7 +1340,29 @@ namespace IHomeland.Client.Application.Session
         /// <returns>服务端调用得出封闭结果时完成。</returns>
         private async Task RetireUnpublishedServerSessionAsync(string accessToken)
         {
-            await _httpApi.LogoutAsync(accessToken, CancellationToken.None);
+            await _gateway.LogoutAsync(
+                CreateAuthorizationRequest(accessToken),
+                CancellationToken.None);
+        }
+
+        /// <summary>为单个带认证 gateway operation 创建一次性 authorization 请求。</summary>
+        /// <param name="accessToken">Session owner 当前 opaque access token。</param>
+        /// <returns>只允许 HTTP adapter 单次取得 credential 的请求。</returns>
+        private static ClientCredentialGatewayRequest CreateAuthorizationRequest(
+            string accessToken)
+        {
+            return new ClientCredentialGatewayRequest(
+                CreateAuthorizationLease(accessToken));
+        }
+
+        /// <summary>为复合 gateway request 创建一次性 authorization lease。</summary>
+        /// <param name="accessToken">Session owner 当前 opaque access token。</param>
+        /// <returns>绑定 HTTP authorization purpose 的 lease。</returns>
+        private static ClientCredentialLease CreateAuthorizationLease(string accessToken)
+        {
+            return new ClientCredentialLease(
+                accessToken,
+                ClientCredentialPurpose.HttpAuthorization);
         }
 
         /// <summary>判断store delete是否已经保证旧lineage不可恢复。</summary>
@@ -1321,10 +1389,10 @@ namespace IHomeland.Client.Application.Session
         /// </summary>
         /// <param name="failure">可选本地失败。</param>
         /// <returns>除发送前 LocalPolicy 外，无法证明远端未提交的本地失败返回 true。</returns>
-        private static bool IsCommitUnknown(ClientHttpFailure failure)
+        private static bool IsCommitUnknown(ClientGatewayFailure failure)
         {
             return failure != null &&
-                   failure.Kind != ClientHttpFailureKind.LocalPolicy;
+                   failure.Kind != ClientGatewayFailureKind.LocalPolicy;
         }
 
         /// <summary>
@@ -1353,8 +1421,10 @@ namespace IHomeland.Client.Application.Session
         /// <param name="nextState">Unauthenticated、Unresolved 或 Stopped。</param>
         private long ClearLocked(ClientSessionOwnerState nextState)
         {
-            var invalidated = _state == ClientSessionOwnerState.Authenticated && _snapshot != null;
-            _generation++;
+            var invalidated = _stateMachine.ShouldPublishInvalidation(
+                _state,
+                _snapshot);
+            _generation = _stateMachine.NextGeneration(_generation);
             _snapshot = null;
             _state = nextState;
             return invalidated ? _generation : 0;
@@ -1394,10 +1464,10 @@ namespace IHomeland.Client.Application.Session
         /// <typeparam name="T">原 operation 成功投影类型。</typeparam>
         /// <param name="operationID">冻结 operationId。</param>
         /// <returns>LocalPolicy 失败。</returns>
-        private static ClientHttpResult<T> LocalPolicy<T>(string operationID)
+        private static ClientGatewayResult<T> LocalPolicy<T>(string operationID)
         {
-            return ClientHttpResult<T>.Failed(new ClientHttpFailure(
-                ClientHttpFailureKind.LocalPolicy,
+            return ClientGatewayResult<T>.Failed(new ClientGatewayFailure(
+                ClientGatewayFailureKind.LocalPolicy,
                 operationID));
         }
 
@@ -1406,15 +1476,15 @@ namespace IHomeland.Client.Application.Session
         /// <param name="operationID">触发原子commit的冻结operationId。</param>
         /// <param name="storeOutcome">触发失败的封闭store结果；只单独保留profile ownership。</param>
         /// <returns>SecureStorage或profile-in-use本地失败。</returns>
-        private static ClientHttpResult<T> SecureStorageFailure<T>(
+        private static ClientGatewayResult<T> SecureStorageFailure<T>(
             string operationID,
             ClientSecureSessionStoreOutcome storeOutcome =
                 ClientSecureSessionStoreOutcome.StorageFailure)
         {
-            return ClientHttpResult<T>.Failed(new ClientHttpFailure(
+            return ClientGatewayResult<T>.Failed(new ClientGatewayFailure(
                 storeOutcome == ClientSecureSessionStoreOutcome.ProfileInUse
-                    ? ClientHttpFailureKind.SecureStorageProfileInUse
-                    : ClientHttpFailureKind.SecureStorage,
+                    ? ClientGatewayFailureKind.SecureStorageProfileInUse
+                    : ClientGatewayFailureKind.SecureStorage,
                 operationID));
         }
 
@@ -1425,12 +1495,12 @@ namespace IHomeland.Client.Application.Session
         /// <typeparam name="TTarget">当前 application 结果类型。</typeparam>
         /// <param name="source">已确认非成功的结果。</param>
         /// <returns>不丢失安全错误语义的新结果。</returns>
-        private static ClientHttpResult<TTarget> ConvertFailure<TSource, TTarget>(
-            ClientHttpResult<TSource> source)
+        private static ClientGatewayResult<TTarget> ConvertFailure<TSource, TTarget>(
+            ClientGatewayResult<TSource> source)
         {
             return source.ServerError != null
-                ? ClientHttpResult<TTarget>.Rejected(source.ServerError)
-                : ClientHttpResult<TTarget>.Failed(source.Failure);
+                ? ClientGatewayResult<TTarget>.Rejected(source.ServerError)
+                : ClientGatewayResult<TTarget>.Failed(source.Failure);
         }
     }
 }

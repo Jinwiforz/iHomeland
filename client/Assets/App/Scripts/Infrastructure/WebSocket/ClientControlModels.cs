@@ -144,7 +144,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
     /// <summary>
     /// 保存已通过完整 WSS control 契约校验的强类型 PUSH。
     /// </summary>
-    internal sealed class ClientControlPush
+    internal sealed class ClientControlWirePush
     {
         /// <summary>
         /// 创建不可变 control push。
@@ -153,7 +153,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
         /// <param name="sequence">当前连接内从 1 开始严格连续的 sequence。</param>
         /// <param name="timestampMilliseconds">服务端 Unix 发送时间，单位为毫秒。</param>
         /// <param name="payload">按 route 精确解析的 generated payload。</param>
-        internal ClientControlPush(
+        internal ClientControlWirePush(
             ClientControlRoute route,
             ulong sequence,
             long timestampMilliseconds,
@@ -191,7 +191,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
         /// <returns>Message ID、sequence 与 timestamp。</returns>
         public override string ToString()
         {
-            return $"ClientControlPush messageId={Route.MessageID} sequence={Sequence} timestampMs={TimestampMilliseconds}";
+            return $"ClientControlWirePush messageId={Route.MessageID} sequence={Sequence} timestampMs={TimestampMilliseconds}";
         }
     }
 

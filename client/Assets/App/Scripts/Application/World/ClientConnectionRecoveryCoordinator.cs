@@ -3,9 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.WebSocket;
+using IHomeland.Client.Foundation.Lifetime;
 
 namespace IHomeland.Client.Application.World
 {
@@ -25,13 +25,25 @@ namespace IHomeland.Client.Application.World
         private readonly SessionCoordinator _sessionCoordinator;
 
         /// <summary>发布generation-bound WSS健康状态。</summary>
-        private readonly ClientControlChannel _controlChannel;
+        private readonly IClientControlChannelPort _controlChannel;
 
         /// <summary>发布已完成资源清理的gameplay非预期终态。</summary>
-        private readonly ClientGameplayChannel _gameplayChannel;
+        private readonly IClientGameplayChannelPort _gameplayChannel;
 
         /// <summary>执行窄权威恢复操作。</summary>
         private readonly IClientConnectionRecoveryOperations _operations;
+
+        /// <summary>纯计算恢复 phase single-flight 与迟到提交。</summary>
+        private readonly ConnectionRecoveryStateMachine _stateMachine =
+            new ConnectionRecoveryStateMachine();
+
+        /// <summary>编排 Control reconciliation。</summary>
+        private readonly RecoverControlFlow _recoverControlFlow =
+            new RecoverControlFlow();
+
+        /// <summary>编排 Gameplay target recovery。</summary>
+        private readonly RecoverGameplayFlow _recoverGameplayFlow =
+            new RecoverGameplayFlow();
 
         /// <summary>每笔恢复intent的总deadline。</summary>
         private readonly TimeSpan _deadline;
@@ -81,8 +93,8 @@ namespace IHomeland.Client.Application.World
         /// <param name="deadline">每笔恢复的正总预算。</param>
         internal ClientConnectionRecoveryCoordinator(
             SessionCoordinator sessionCoordinator,
-            ClientControlChannel controlChannel,
-            ClientGameplayChannel gameplayChannel,
+            IClientControlChannelPort controlChannel,
+            IClientGameplayChannelPort gameplayChannel,
             IClientConnectionRecoveryOperations operations,
             TimeSpan deadline)
             : this(sessionCoordinator, operations, deadline)
@@ -224,8 +236,7 @@ namespace IHomeland.Client.Application.World
             lock (_sync)
             {
                 if (!CanBeginLocked() ||
-                    IsWorldRecoveryLocked() ||
-                    (manual && _snapshot.Phase != ClientConnectionRecoveryPhase.ConnectionLost))
+                    !_stateMachine.CanBeginControl(_snapshot, manual))
                 {
                     return false;
                 }
@@ -349,7 +360,7 @@ namespace IHomeland.Client.Application.World
                 _activeTarget = target;
                 if (_snapshot.Manual &&
                     (_gameplayChannel == null ||
-                     _gameplayChannel.Snapshot.State != ClientGameplayChannelState.Active))
+                     !_gameplayChannel.Snapshot.Active))
                 {
                     // 整服故障时control会先于gameplay恢复；此时不能用control-only投影校验
                     // 要求尚未重建的gameplay已经Active，而应在同一intent内继续恢复冻结world target。
@@ -444,7 +455,7 @@ namespace IHomeland.Client.Application.World
             }
 
             if (_controlChannel == null ||
-                _controlChannel.Snapshot.State == ClientControlChannelState.Connected)
+                _controlChannel.Snapshot.Connected)
             {
                 return BeginManualWorldRecovery();
             }
@@ -663,8 +674,7 @@ namespace IHomeland.Client.Application.World
             lock (_sync)
             {
                 if (!CanBeginLocked() ||
-                    (manual && _snapshot.Phase != ClientConnectionRecoveryPhase.ConnectionLost) ||
-                    (!manual && IsWorldRecoveryLocked()) ||
+                    !_stateMachine.CanBeginGameplay(_snapshot, manual) ||
                     !target.IsBoundTo(session))
                 {
                     return false;
@@ -731,7 +741,10 @@ namespace IHomeland.Client.Application.World
             ClientRecoveryTargetDescriptor target)
         {
             var result = await ExecuteBoundedAsync(
-                token => _operations.ReconcileControlAsync(target, token));
+                token => _recoverControlFlow.ExecuteAsync(
+                    _operations,
+                    target,
+                    token));
             ClientConnectionRecoverySnapshot committed;
             Task continuedWorldRecovery = null;
             lock (_sync)
@@ -823,7 +836,10 @@ namespace IHomeland.Client.Application.World
             bool manual)
         {
             var result = await ExecuteBoundedAsync(
-                token => _operations.RecoverWorldAsync(target, token));
+                token => _recoverGameplayFlow.ExecuteAsync(
+                    _operations,
+                    target,
+                    token));
             var validationTarget = target;
             if (result == ClientConnectionRecoveryResultKind.ReturningOwnWorld &&
                 (!_operations.TryCaptureTarget(out validationTarget) ||
@@ -1003,13 +1019,6 @@ namespace IHomeland.Client.Application.World
                    _snapshot.Phase != ClientConnectionRecoveryPhase.Stopped;
         }
 
-        /// <summary>检查当前是否存在world恢复或等待Scene commit。</summary>
-        private bool IsWorldRecoveryLocked()
-        {
-            return _snapshot.Phase == ClientConnectionRecoveryPhase.RecoveringWorld ||
-                   _snapshot.Phase == ClientConnectionRecoveryPhase.AwaitingSceneCommit;
-        }
-
         /// <summary>判断恢复是否已经进入可由表现层继续处理的稳定边界。</summary>
         private static bool IsSettled(ClientConnectionRecoveryPhase phase)
         {
@@ -1024,7 +1033,7 @@ namespace IHomeland.Client.Application.World
             long intent,
             ClientConnectionRecoveryPhase phase)
         {
-            return _snapshot.IntentGeneration == intent && _snapshot.Phase == phase;
+            return _stateMachine.CanCommit(_snapshot, intent, phase);
         }
 
         /// <summary>锁内提交唯一terminal snapshot。</summary>
@@ -1089,14 +1098,14 @@ namespace IHomeland.Client.Application.World
         }
 
         /// <summary>把control adapter状态变化收敛为独立恢复intent。</summary>
-        private void OnControlHealthChanged(ClientControlChannelSnapshot channel)
+        private void OnControlHealthChanged(ClientControlHealthSnapshot channel)
         {
-            switch (channel.State)
+            switch (channel.Phase)
             {
-                case ClientControlChannelState.Recovering:
+                case ClientControlHealthPhase.Recovering:
                     BeginControlRecovery(channel.Generation);
                     break;
-                case ClientControlChannelState.Connected:
+                case ClientControlHealthPhase.Connected:
                     if (Snapshot.Phase == ClientConnectionRecoveryPhase.ConnectionLost)
                     {
                         BeginControlRecovery(channel.Generation);
@@ -1104,20 +1113,20 @@ namespace IHomeland.Client.Application.World
 
                     _ = CompleteControlRecoveryAsync(channel.Generation);
                     break;
-                case ClientControlChannelState.SessionInvalidated:
+                case ClientControlHealthPhase.SessionInvalidated:
                     BeginControlRecovery(channel.Generation);
                     FailControlRecovery(
                         channel.Generation,
                         ClientConnectionRecoveryResultKind.Authentication);
                     break;
-                case ClientControlChannelState.Disconnected:
-                    if (channel.CloseReason != ClientControlCloseReason.Requested &&
-                        channel.CloseReason != ClientControlCloseReason.SupersededConnection)
+                case ClientControlHealthPhase.Disconnected:
+                    if (channel.DisconnectKind != ClientControlDisconnectKind.Requested &&
+                        channel.DisconnectKind != ClientControlDisconnectKind.Superseded)
                     {
                         BeginControlRecovery(channel.Generation);
                         FailControlRecovery(
                             channel.Generation,
-                            MapControlFailure(channel.CloseReason));
+                            MapControlFailure(channel.DisconnectKind));
                     }
 
                     break;
@@ -1125,7 +1134,7 @@ namespace IHomeland.Client.Application.World
         }
 
         /// <summary>在gameplay已撤销旧owner后启动唯一automatic恢复。</summary>
-        private void OnGameplayUnexpectedDisconnect(ClientGameplayChannelSnapshot channel)
+        private void OnGameplayUnexpectedDisconnect(ClientGameplayHealthSnapshot channel)
         {
             BeginAutomaticWorldRecovery(channel.Generation);
         }
@@ -1144,42 +1153,41 @@ namespace IHomeland.Client.Application.World
                 return;
             }
 
-            if (latest.State == ClientControlChannelState.Recovering)
+            if (latest.Phase == ClientControlHealthPhase.Recovering)
             {
                 BeginControlRecovery(latest.Generation);
                 return;
             }
 
-            if (latest.State == ClientControlChannelState.Connected)
+            if (latest.Phase == ClientControlHealthPhase.Connected)
             {
                 BeginControlRecovery(latest.Generation);
                 _ = CompleteControlRecoveryAsync(latest.Generation);
                 return;
             }
 
-            if (latest.State == ClientControlChannelState.Disconnected &&
-                latest.CloseReason != ClientControlCloseReason.Requested &&
-                latest.CloseReason != ClientControlCloseReason.SupersededConnection)
+            if (latest.Phase == ClientControlHealthPhase.Disconnected &&
+                latest.DisconnectKind != ClientControlDisconnectKind.Requested &&
+                latest.DisconnectKind != ClientControlDisconnectKind.Superseded)
             {
                 BeginControlRecovery(latest.Generation);
-                FailControlRecovery(latest.Generation, MapControlFailure(latest.CloseReason));
+                FailControlRecovery(
+                    latest.Generation,
+                    MapControlFailure(latest.DisconnectKind));
             }
         }
 
         /// <summary>将control关闭原因映射为稳定恢复结果。</summary>
         private static ClientConnectionRecoveryResultKind MapControlFailure(
-            ClientControlCloseReason reason)
+            ClientControlDisconnectKind reason)
         {
             switch (reason)
             {
-                case ClientControlCloseReason.TransportFailure:
-                case ClientControlCloseReason.PeerClosed:
-                case ClientControlCloseReason.RetryExhausted:
+                case ClientControlDisconnectKind.Transport:
                     return ClientConnectionRecoveryResultKind.Transport;
-                case ClientControlCloseReason.ProtocolFailure:
-                case ClientControlCloseReason.MainThreadBackpressure:
+                case ClientControlDisconnectKind.Protocol:
                     return ClientConnectionRecoveryResultKind.Protocol;
-                case ClientControlCloseReason.SessionInvalidated:
+                case ClientControlDisconnectKind.SessionInvalidated:
                     return ClientConnectionRecoveryResultKind.Authentication;
                 default:
                     return ClientConnectionRecoveryResultKind.Policy;

@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Google.Protobuf;
+using IHomeland.Client.Application.Control;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Protocol.Common.V1;
 using IHomeland.Protocol.Control.V1;
+using IHomeland.Protocol.Session.V1;
 using IHomeland.Protocol.Visit.V1;
 using IHomeland.Protocol.World.V1;
 using NUnit.Framework;
@@ -166,6 +168,64 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
+        /// 确认九条登记 route 都在 Infrastructure 边界映射为固定 Application notification。
+        /// </summary>
+        [Test]
+        public void Adapter_AllCatalogPayloads_MapToApplicationNotifications()
+        {
+            var payloads = ValidAdapterPayloads();
+            var expected = new Dictionary<uint, ClientControlPushKind>
+            {
+                { 500, ClientControlPushKind.Maintenance },
+                { 501, ClientControlPushKind.ForcedLogout },
+                { 502, ClientControlPushKind.QueueStatus },
+                { 503, ClientControlPushKind.EndpointUpdate },
+                { 504, ClientControlPushKind.SessionInvalidated },
+                { 2003, ClientControlPushKind.WorldAssignmentChanged },
+                { 2100, ClientControlPushKind.VisitInvite },
+                { 2101, ClientControlPushKind.VisitOwnerAvailability },
+                { 2102, ClientControlPushKind.VisitClosed },
+            };
+            var codec = CreateCodec();
+            var adapter = new ClientControlProtocolAdapter();
+
+            foreach (var pair in payloads)
+            {
+                var frame = EnvelopeBytes(pair.Key, 1, pair.Value);
+                var notification = adapter.Map(
+                    codec.Decode(frame, frame.Length, 65536, 1));
+
+                Assert.That(notification.Kind, Is.EqualTo(expected[pair.Key]));
+                Assert.That(notification.Sequence, Is.EqualTo(1));
+                Assert.That(notification.TimestampMilliseconds, Is.EqualTo(1700000000000));
+            }
+        }
+
+        /// <summary>
+        /// 确认 generated payload 可解析但字段合同无效时不会越过 adapter。
+        /// </summary>
+        [Test]
+        public void Adapter_ParsedButInvalidPayload_IsRejected()
+        {
+            var frame = EnvelopeBytes(
+                501,
+                1,
+                new ForcedLogoutPush
+                {
+                    SessionEpoch = 0,
+                    ReasonKey = "session.invalidated",
+                });
+            var wire = CreateCodec().Decode(frame, frame.Length, 65536, 1);
+
+            var exception = Assert.Throws<ClientControlProtocolException>(
+                () => new ClientControlProtocolAdapter().Map(wire));
+
+            Assert.That(
+                exception.FailureKind,
+                Is.EqualTo(ClientControlProtocolFailureKind.MalformedPayload));
+        }
+
+        /// <summary>
         /// 确认连接内 sequence 缺口在 payload 分发前 fail closed。
         /// </summary>
         [Test]
@@ -250,6 +310,106 @@ namespace IHomeland.Client.Tests.EditMode
         private static ClientControlCodec CreateCodec()
         {
             return new ClientControlCodec(new ClientControlCatalog());
+        }
+
+        /// <summary>创建九条 route 各自满足字段合同的 generated payload。</summary>
+        /// <returns>按 message ID 索引的完整 payload 集合。</returns>
+        private static IReadOnlyDictionary<uint, IMessage> ValidAdapterPayloads()
+        {
+            return new Dictionary<uint, IMessage>
+            {
+                {
+                    500,
+                    new MaintenancePush
+                    {
+                        StartsAtMs = 1000,
+                        ExpectedEndAtMs = 2000,
+                        MessageKey = "maintenance.fixture",
+                    }
+                },
+                {
+                    501,
+                    new ForcedLogoutPush
+                    {
+                        SessionEpoch = 2,
+                        ReasonKey = "session.forced_logout",
+                    }
+                },
+                {
+                    502,
+                    new QueueStatusPush
+                    {
+                        Position = 1,
+                        RetryAfterMs = 1000,
+                    }
+                },
+                {
+                    503,
+                    new EndpointUpdatePush
+                    {
+                        Endpoints =
+                        {
+                            new Endpoint
+                            {
+                                Channel = TransportChannel.Wss,
+                                Host = "control.example.invalid",
+                                Port = 443,
+                            },
+                        },
+                        EffectiveAtMs = 1000,
+                    }
+                },
+                {
+                    504,
+                    new SessionInvalidatedPush
+                    {
+                        SessionEpoch = 3,
+                        ReasonKey = "session.invalidated",
+                    }
+                },
+                {
+                    2003,
+                    new WorldAssignmentChangedPush
+                    {
+                        PersonalWorldId = "world_fixture",
+                        ReasonKey = "world.assignment_changed",
+                    }
+                },
+                {
+                    2100,
+                    new VisitInvitePush
+                    {
+                        OwnerPlayerId = "player_owner",
+                        Invite = new VisitInviteSummary
+                        {
+                            InviteId = "invite_fixture",
+                            VisitSessionId = "visit_fixture",
+                            TargetVisitorId = "player_visitor",
+                            State = VisitInviteState.Pending,
+                            CreatedRevision = 1,
+                            ExpiresAtMs = 5000,
+                        },
+                    }
+                },
+                {
+                    2101,
+                    new VisitOwnerAvailabilityPush
+                    {
+                        VisitSessionId = "visit_fixture",
+                        Available = true,
+                        Revision = 2,
+                    }
+                },
+                {
+                    2102,
+                    new VisitClosedNoticePush
+                    {
+                        VisitSessionId = "visit_fixture",
+                        Reason = SafeReturnReason.OwnerClosed,
+                        Revision = 3,
+                    }
+                },
+            };
         }
 
         /// <summary>

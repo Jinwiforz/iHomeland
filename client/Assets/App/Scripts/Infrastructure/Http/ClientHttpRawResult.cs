@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Net;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Infrastructure.Http
 {
@@ -58,7 +59,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// </summary>
         /// <param name="response">成功读取的原始响应。</param>
         /// <param name="failure">不含内部 cause 的本地失败。</param>
-        private ClientHttpRawResult(ClientHttpRawResponse response, ClientHttpFailure failure)
+        private ClientHttpRawResult(ClientHttpRawResponse response, ClientGatewayFailure failure)
         {
             Response = response;
             Failure = failure;
@@ -77,7 +78,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <summary>
         /// 获取稳定本地失败；完整响应时为空。
         /// </summary>
-        internal ClientHttpFailure Failure { get; }
+        internal ClientGatewayFailure Failure { get; }
 
         /// <summary>
         /// 创建完整响应结果。
@@ -96,7 +97,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// </summary>
         /// <param name="failure">不含内部 exception 或 credential 的失败。</param>
         /// <returns>只包含 failure 的 raw result。</returns>
-        internal static ClientHttpRawResult Failed(ClientHttpFailure failure)
+        internal static ClientHttpRawResult Failed(ClientGatewayFailure failure)
         {
             return new ClientHttpRawResult(
                 null,

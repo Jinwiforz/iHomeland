@@ -2,6 +2,10 @@
   "name": "IHomeland.Client.Runtime.EditModeTests",
   "rootNamespace": "IHomeland.Client.Tests.EditMode",
   "references": [
+    "IHomeland.Client.Foundation",
+    "IHomeland.Client.Application",
+    "IHomeland.Client.Infrastructure",
+    "IHomeland.Client.Presentation",
     "IHomeland.Client.Runtime",
     "IHomeland.Client.Protocol.Generated",
     "Unity.InputSystem"

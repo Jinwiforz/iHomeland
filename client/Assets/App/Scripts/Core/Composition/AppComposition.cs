@@ -1,15 +1,18 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.Security;
 using IHomeland.Client.Infrastructure.Tcp;
+using IHomeland.Client.Infrastructure.Time;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Presentation.Navigation;
@@ -135,169 +138,43 @@ namespace IHomeland.Client.Core.Composition
             }
 
             _built = true;
-            var dispatcher = new MainThreadDispatcher(
-                Environment.CurrentManagedThreadId,
-                MainThreadQueueCapacity);
-            var configurationStore = new ClientConfigurationStore();
-            var transport = new ClientHttpTransport(environment);
-            var codec = new ClientHttpCodec();
-            var httpApi = new ClientHttpApi(transport, codec);
-            var bootstrapService = new ClientBootstrapService(environment, httpApi, configurationStore);
-            var clock = new SystemClientClock();
-            var environmentBinding = ClientSecureSessionEnvironmentBinding.Create(environment);
-            var processArguments = Environment.GetCommandLineArgs();
-            var isDebugBuild = UnityEngine.Application.isEditor || UnityEngine.Debug.isDebugBuild;
-            var secureSessionProfile = ClientSecureSessionProfile.Resolve(
-                environment.EnvironmentKind,
-                processArguments,
-                isDebugBuild);
-            var secureSessionRoot = ClientSecureSessionProfile.ResolveStorageRoot(
-                environment.EnvironmentKind,
-                processArguments,
-                isDebugBuild,
-                UnityEngine.Application.persistentDataPath);
-            var windowsSecureStorage =
-                UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsEditor ||
-                UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsPlayer;
-            IClientSecureSessionStore secureSessionStore = windowsSecureStorage
-                ? (IClientSecureSessionStore)new ClientSecureSessionFileStore(
-                    secureSessionRoot,
-                    secureSessionProfile,
-                    environmentBinding,
-                    new WindowsDpapiDataProtector(),
-                    platformSupported: true)
-                : new UnsupportedClientSecureSessionStore();
-            var sessionCoordinator = new SessionCoordinator(
-                configurationStore,
-                httpApi,
-                clock,
-                secureSessionStore,
-                environmentBinding);
-            var sessionRestoreCoordinator = new ClientSessionRestoreCoordinator(
-                secureSessionStore,
-                bootstrapService,
-                sessionCoordinator,
-                ClientSessionRestoreCoordinator.DefaultRestoreDeadline);
-            var controlCatalog = new ClientControlCatalog();
-            var controlCodec = new ClientControlCodec(controlCatalog);
-            var gameplayChannel = new ClientGameplayChannel(
-                configurationStore,
-                sessionCoordinator,
-                new SystemClientGameplayConnectionFactory(environment),
-                new ClientGameplayCodec(),
-                dispatcher,
-                new SystemClientGameplayDelay());
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            gameplayChannel.DiagnosticRecorded += RecordGameplayDiagnostic;
-#endif
-            var controlChannel = new ClientControlChannel(
+            var foundation = FoundationComposition.Create(MainThreadQueueCapacity);
+            var infrastructure = InfrastructureComposition.Create(environment);
+            var session = SessionComposition.Create(
                 environment,
-                configurationStore,
-                sessionCoordinator,
-                new SystemClientWebSocketFactory(),
-                controlCodec,
-                dispatcher,
-                new SystemClientControlDelay(),
-                ControlRetryDelays,
-                gameplayChannel.InvalidateSession);
-            var personalWorldService = new PersonalWorldService(controlChannel, gameplayChannel);
-            var visitSessionService = new VisitSessionService(controlChannel, gameplayChannel, clock);
-            var worldAdmissionCoordinator = new WorldAdmissionCoordinator(
-                sessionCoordinator,
-                clock,
-                gameplayChannel,
-                personalWorldService,
-                visitSessionService);
-            var connectionRecoveryCoordinator = new ClientConnectionRecoveryCoordinator(
-                sessionCoordinator,
-                controlChannel,
-                gameplayChannel,
-                worldAdmissionCoordinator,
-                ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
-            var sceneLifetimeOwner = new SceneLifetimeOwner();
-            if (productExperience)
-            {
-                sceneTransitionHost.Configure(sceneLifetimeOwner);
-            }
-
-            var routeDefinitions = productExperience
-                ? ClientPersonalWorldUiRoutes.Definitions
-                : Array.Empty<ClientUiRouteDefinition>();
-            var uiRegistry = new ClientUiRegistry(
-                routeDefinitions,
-                uiHostRoot.GetHosts());
-            var uiRouter = new ClientUiRouter(
-                uiRegistry,
+                foundation,
+                infrastructure);
+            var channels = ChannelComposition.Create(
+                environment,
+                foundation,
+                infrastructure,
+                session,
+                ControlRetryDelays);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            channels.GameplayChannel.DiagnosticRecorded += RecordGameplayDiagnostic;
+#endif
+            var world = WorldComposition.Create(foundation, session, channels);
+            var presentation = PresentationComposition.Create(
                 uiHostRoot,
-                maximumQueuedTransitions: UiTransitionQueueCapacity,
-                cleanupTimeout: RollbackTimeout);
-            ClientPersonalWorldExperience experience = null;
-            if (productExperience)
-            {
-                experience = new ClientPersonalWorldExperience(
-                    bootstrapService,
-                    sessionCoordinator,
-                    sessionRestoreCoordinator,
-                    connectionRecoveryCoordinator,
-                    dispatcher,
-                    controlChannel,
-                    personalWorldService,
-                    visitSessionService,
-                    worldAdmissionCoordinator,
-                    uiRouter,
-                    sceneTransitionHost,
-                    ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
-                uiHostRoot.GameplayMenuRequested += experience.RequestWorldVisitFromGameplayMenu;
-                uiHostRoot.UiCancelRequested += experience.RequestUiCancel;
-                uiHostRoot.ConfigureProductBindings(experience);
-            }
-
-            // 逆序停止先拒绝产品 intent，再关闭 UI route、Scene、world flow/subscriber、WSS、TCP、Session、安全存储、HTTP、Configuration，最后释放 Input 并拒绝主线程回写。
-            var participants = new List<IAppLifetimeParticipant>
-            {
-                dispatcher,
+                sceneTransitionHost,
+                productExperience,
+                UiTransitionQueueCapacity,
+                RollbackTimeout,
+                foundation,
+                session,
+                channels,
+                world);
+            return RuntimeQualificationComposition.Create(
                 uiHostRoot,
-                configurationStore,
-                transport,
-                secureSessionStore,
-                sessionCoordinator,
-                sessionRestoreCoordinator,
-                gameplayChannel,
-                controlChannel,
-                personalWorldService,
-                visitSessionService,
-                worldAdmissionCoordinator,
-                connectionRecoveryCoordinator,
-                sceneLifetimeOwner,
-            };
-            if (productExperience)
-            {
-                participants.Add(sceneTransitionHost);
-            }
-
-            participants.Add(uiRouter);
-            if (experience != null)
-            {
-                participants.Add(experience);
-            }
-
-            var lifetime = new AppLifetime(participants, RollbackTimeout, ShutdownTimeout);
-            return new AppCompositionResult(
-                lifetime,
-                dispatcher,
-                Array.Empty<IAppTickable>(),
-                MaximumDispatchesPerFrame,
-                bootstrapService,
-                sessionCoordinator,
-                controlChannel,
-                gameplayChannel,
-                personalWorldService,
-                visitSessionService,
-                worldAdmissionCoordinator,
-                connectionRecoveryCoordinator,
-                uiRouter,
-                experience,
-                sceneTransitionHost);
+                foundation,
+                infrastructure,
+                session,
+                channels,
+                world,
+                presentation,
+                RollbackTimeout,
+                ShutdownTimeout,
+                MaximumDispatchesPerFrame);
         }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR

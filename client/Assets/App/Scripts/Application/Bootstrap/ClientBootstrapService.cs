@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
+using IHomeland.Client.Application.Configuration;
 
 namespace IHomeland.Client.Application.Bootstrap
 {
@@ -24,7 +25,7 @@ namespace IHomeland.Client.Application.Bootstrap
         /// <summary>
         /// 保存只暴露冻结 operation 的 HTTP API。
         /// </summary>
-        private readonly IClientHttpApi _httpApi;
+        private readonly IClientBootstrapGateway _gateway;
 
         /// <summary>
         /// 保存 App Scope 唯一 Configuration owner。
@@ -35,16 +36,16 @@ namespace IHomeland.Client.Application.Bootstrap
         /// 创建显式 bootstrap 用例。
         /// </summary>
         /// <param name="environment">已验证客户端环境与 build identity。</param>
-        /// <param name="httpApi">强类型 HTTP operation 边界。</param>
+        /// <param name="gateway">认证前固定 operation 边界。</param>
         /// <param name="configurationStore">唯一配置发布 owner。</param>
         /// <exception cref="ArgumentNullException">任一依赖为空时抛出。</exception>
         internal ClientBootstrapService(
             ClientEnvironment environment,
-            IClientHttpApi httpApi,
+            IClientBootstrapGateway gateway,
             ClientConfigurationStore configurationStore)
         {
             _environment = environment ?? throw new ArgumentNullException(nameof(environment));
-            _httpApi = httpApi ?? throw new ArgumentNullException(nameof(httpApi));
+            _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
         }
 
@@ -53,7 +54,7 @@ namespace IHomeland.Client.Application.Bootstrap
         /// </summary>
         /// <param name="cancellationToken">取消本次等待；已成功旧配置不会被部分结果覆盖。</param>
         /// <returns>完整启动快照、服务端错误或稳定本地失败。</returns>
-        internal async Task<ClientHttpResult<ClientConfigurationSnapshot>> BootstrapAsync(
+        internal async Task<ClientGatewayResult<ClientConfigurationSnapshot>> BootstrapAsync(
             CancellationToken cancellationToken)
         {
             var enteredGate = false;
@@ -66,12 +67,12 @@ namespace IHomeland.Client.Application.Bootstrap
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    return ClientHttpResult<ClientConfigurationSnapshot>.Failed(new ClientHttpFailure(
-                        ClientHttpFailureKind.CallerCancelled,
-                        ClientHttpOperationCatalog.GetVersion.OperationID));
+                    return ClientGatewayResult<ClientConfigurationSnapshot>.Failed(new ClientGatewayFailure(
+                        ClientGatewayFailureKind.CallerCancelled,
+                        ClientOperationIDs.GetVersion));
                 }
 
-                var versionResult = await _httpApi.GetVersionAsync(cancellationToken);
+                var versionResult = await _gateway.GetVersionAsync(cancellationToken);
                 if (!versionResult.IsSuccess)
                 {
                     return ConvertFailure<ClientVersionInfo>(versionResult);
@@ -80,12 +81,12 @@ namespace IHomeland.Client.Application.Bootstrap
                 if (!IsCompatible(versionResult.Value))
                 {
                     _configurationStore.MarkIncompatible();
-                    return ClientHttpResult<ClientConfigurationSnapshot>.Failed(new ClientHttpFailure(
-                        ClientHttpFailureKind.LocalPolicy,
-                        ClientHttpOperationCatalog.GetVersion.OperationID));
+                    return ClientGatewayResult<ClientConfigurationSnapshot>.Failed(new ClientGatewayFailure(
+                        ClientGatewayFailureKind.LocalPolicy,
+                        ClientOperationIDs.GetVersion));
                 }
 
-                var configurationResult = await _httpApi.GetBootstrapConfigurationAsync(cancellationToken);
+                var configurationResult = await _gateway.GetBootstrapConfigurationAsync(cancellationToken);
                 if (!configurationResult.IsSuccess)
                 {
                     return ConvertFailure<ClientBootstrapConfiguration>(configurationResult);
@@ -95,7 +96,7 @@ namespace IHomeland.Client.Application.Bootstrap
                     versionResult.Value,
                     configurationResult.Value);
                 _configurationStore.Publish(snapshot);
-                return ClientHttpResult<ClientConfigurationSnapshot>.Success(snapshot);
+                return ClientGatewayResult<ClientConfigurationSnapshot>.Success(snapshot);
             }
             finally
             {
@@ -156,12 +157,12 @@ namespace IHomeland.Client.Application.Bootstrap
         /// <typeparam name="TSource">上游成功投影类型。</typeparam>
         /// <param name="source">已确认非成功的上游结果。</param>
         /// <returns>不丢失安全错误语义的 bootstrap 结果。</returns>
-        private static ClientHttpResult<ClientConfigurationSnapshot> ConvertFailure<TSource>(
-            ClientHttpResult<TSource> source)
+        private static ClientGatewayResult<ClientConfigurationSnapshot> ConvertFailure<TSource>(
+            ClientGatewayResult<TSource> source)
         {
             return source.ServerError != null
-                ? ClientHttpResult<ClientConfigurationSnapshot>.Rejected(source.ServerError)
-                : ClientHttpResult<ClientConfigurationSnapshot>.Failed(source.Failure);
+                ? ClientGatewayResult<ClientConfigurationSnapshot>.Rejected(source.ServerError)
+                : ClientGatewayResult<ClientConfigurationSnapshot>.Failed(source.Failure);
         }
     }
 }

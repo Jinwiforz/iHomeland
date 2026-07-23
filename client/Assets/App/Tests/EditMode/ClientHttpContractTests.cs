@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -6,8 +6,9 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using IHomeland.Client.Core.Composition;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Presentation.Hosts.UGUI;
@@ -224,7 +225,7 @@ namespace IHomeland.Client.Tests.EditMode
         public void CodecMatchesLoginFixtureAndRedactsCredentials()
         {
             const string password = "fixture-password-not-secret";
-            var codec = new ClientHttpCodec();
+            var codec = new ClientHttpContractMapper();
             var body = codec.EncodeLogin("fixture-user", password);
 
             using (var document = JsonDocument.Parse(body))
@@ -246,7 +247,7 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public void CodecValidatesRequiredFieldsAndEnums()
         {
-            var codec = new ClientHttpCodec();
+            var codec = new ClientHttpContractMapper();
             var version = codec.DecodeVersion(Utf8(
                 "{\"minimumClientVersion\":\"0.1.0\",\"protocolVersion\":1,\"serverVersion\":\"0.1.0\",\"future\":true}"));
             Assert.That(version.ProtocolVersion, Is.EqualTo(1));
@@ -274,7 +275,7 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public void CodecFreezesWorldAdmissionContract()
         {
-            var codec = new ClientHttpCodec();
+            var codec = new ClientHttpContractMapper();
             using (var own = JsonDocument.Parse(codec.EncodeWorldAdmission(
                        ClientWorldAdmissionTarget.OwnWorld())))
             {
@@ -306,7 +307,7 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public void CodecFreezesVisitInviteAcceptContract()
         {
-            var codec = new ClientHttpCodec();
+            var codec = new ClientHttpContractMapper();
             var request = new ClientVisitInviteAcceptRequest("visit:fixture", "invite_fixture", 7);
 
             Assert.That(
@@ -342,7 +343,7 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public void ErrorCodecFreezesKnownRegistryAndToleratesUnknownCode()
         {
-            var codec = new ClientHttpCodec();
+            var codec = new ClientHttpContractMapper();
             var known = codec.DecodeServerError(
                 Utf8("{\"code\":102,\"messageKey\":\"error.auth.invalid_credentials\",\"requestId\":\"fixture-request-id\",\"retryable\":false}"),
                 HttpStatusCode.Unauthorized);
@@ -424,7 +425,7 @@ namespace IHomeland.Client.Tests.EditMode
                 var cases = document.RootElement.GetProperty("cases")
                     .EnumerateArray()
                     .ToDictionary(item => item.GetProperty("name").GetString(), StringComparer.Ordinal);
-                var codec = new ClientHttpCodec();
+                var codec = new ClientHttpContractMapper();
 
                 var version = codec.DecodeVersion(Utf8(cases["version-success"]
                     .GetProperty("response").GetProperty("body").GetRawText()));

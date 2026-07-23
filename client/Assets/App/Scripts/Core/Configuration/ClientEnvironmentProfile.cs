@@ -1,29 +1,9 @@
 using System;
+using IHomeland.Client.Application.Configuration;
 using UnityEngine;
 
 namespace IHomeland.Client.Core.Configuration
 {
-    /// <summary>
-    /// 标识客户端环境对网络安全例外的授权范围。
-    /// </summary>
-    public enum ClientEnvironmentKind
-    {
-        /// <summary>
-        /// 允许只指向 loopback 的本地明文开发环境。
-        /// </summary>
-        Local = 0,
-
-        /// <summary>
-        /// 允许只指向 loopback 的自动化测试环境。
-        /// </summary>
-        Test = 1,
-
-        /// <summary>
-        /// 只允许 HTTPS 的正式发布环境。
-        /// </summary>
-        Production = 2,
-    }
-
     /// <summary>
     /// 保存 BootstrapScene 可序列化的非敏感客户端环境定义。
     /// </summary>

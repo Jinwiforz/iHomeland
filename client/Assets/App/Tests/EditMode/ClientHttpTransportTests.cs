@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -7,7 +7,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 using NUnit.Framework;
 
@@ -37,7 +38,7 @@ namespace IHomeland.Client.Tests.EditMode
             await transport.InitializeAsync(CancellationToken.None);
             Assert.That(handler.SendCount, Is.EqualTo(0));
 
-            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
             var result = await api.GetVersionAsync(CancellationToken.None);
 
             Assert.That(result.IsSuccess, Is.True);
@@ -67,12 +68,72 @@ namespace IHomeland.Client.Tests.EditMode
             });
             var transport = CreateTransport(handler);
             await transport.InitializeAsync(CancellationToken.None);
-            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
 
-            var result = await api.LogoutAsync(accessToken, CancellationToken.None);
+            var result = await api.LogoutAsync(
+                AuthorizationRequest(accessToken),
+                CancellationToken.None);
 
             Assert.That(result.IsSuccess, Is.True);
             Assert.That(authorization, Is.EqualTo($"Bearer {accessToken}"));
+            await transport.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 验证 credential lease 只能由匹配 operation 单次取得，复用不会触达 transport。
+        /// </summary>
+        /// <returns>等待首次 logout、复用拒绝与 transport 停止完成的任务。</returns>
+        [Test]
+        public async Task CredentialLeaseRejectsReuseBeforeTransport()
+        {
+            var calls = 0;
+            var handler = new DelegateHandler((_, __) =>
+            {
+                calls++;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent)
+                {
+                    Content = new ByteArrayContent(Array.Empty<byte>()),
+                });
+            });
+            var transport = CreateTransport(handler);
+            await transport.InitializeAsync(CancellationToken.None);
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
+            var request = AuthorizationRequest("access-token-once");
+
+            var first = await api.LogoutAsync(request, CancellationToken.None);
+            var second = await api.LogoutAsync(request, CancellationToken.None);
+
+            Assert.That(first.IsSuccess, Is.True);
+            Assert.That(second.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
+            Assert.That(calls, Is.EqualTo(1));
+            await transport.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 验证错误 purpose 的 credential lease 在 JSON 编码与 transport 之前被拒绝。
+        /// </summary>
+        /// <returns>等待本地拒绝与 transport 停止完成的任务。</returns>
+        [Test]
+        public async Task CredentialLeaseRejectsWrongPurposeBeforeTransport()
+        {
+            var calls = 0;
+            var handler = new DelegateHandler((_, __) =>
+            {
+                calls++;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            });
+            var transport = CreateTransport(handler);
+            await transport.InitializeAsync(CancellationToken.None);
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
+            var request = new ClientCredentialGatewayRequest(
+                new ClientCredentialLease(
+                    "refresh-token",
+                    ClientCredentialPurpose.RefreshSession));
+
+            var result = await api.LogoutAsync(request, CancellationToken.None);
+
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
+            Assert.That(calls, Is.Zero);
             await transport.StopAsync(CancellationToken.None);
         }
 
@@ -100,12 +161,13 @@ namespace IHomeland.Client.Tests.EditMode
             });
             var transport = CreateTransport(handler);
             await transport.InitializeAsync(CancellationToken.None);
-            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
 
             var result = await api.IssueWorldAdmissionAsync(
-                "access-token",
-                ClientWorldAdmissionTarget.OwnWorld(),
-                key,
+                new ClientWorldAdmissionGatewayRequest(
+                    AuthorizationLease("access-token"),
+                    ClientWorldAdmissionTarget.OwnWorld(),
+                    key),
                 CancellationToken.None);
 
             Assert.That(result.IsSuccess, Is.True);
@@ -140,12 +202,13 @@ namespace IHomeland.Client.Tests.EditMode
             });
             var transport = CreateTransport(handler);
             await transport.InitializeAsync(CancellationToken.None);
-            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
 
             var result = await api.AcceptVisitInviteAsync(
-                "access-token",
-                new ClientVisitInviteAcceptRequest("visit:fixture", "invite_fixture", 4),
-                key,
+                new ClientAcceptVisitInviteGatewayRequest(
+                    AuthorizationLease("access-token"),
+                    new ClientVisitInviteAcceptRequest("visit:fixture", "invite_fixture", 4),
+                    key),
                 CancellationToken.None);
 
             Assert.That(result.IsSuccess, Is.True);
@@ -178,16 +241,17 @@ namespace IHomeland.Client.Tests.EditMode
             });
             var transport = CreateTransport(handler);
             await transport.InitializeAsync(CancellationToken.None);
-            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
 
             var result = await api.AcceptVisitInviteAsync(
-                "access-token",
-                new ClientVisitInviteAcceptRequest("visit/escape", "invite_fixture", 4),
-                "fixture-accept-key-0002",
+                new ClientAcceptVisitInviteGatewayRequest(
+                    AuthorizationLease("access-token"),
+                    new ClientVisitInviteAcceptRequest("visit/escape", "invite_fixture", 4),
+                    "fixture-accept-key-0002"),
                 CancellationToken.None);
 
             Assert.That(result.IsSuccess, Is.False);
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
             Assert.That(calls, Is.Zero);
             await transport.StopAsync(CancellationToken.None);
         }
@@ -213,7 +277,7 @@ namespace IHomeland.Client.Tests.EditMode
                 CancellationToken.None);
 
             Assert.That(raw.HasResponse, Is.False);
-            Assert.That(raw.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.ResponseTooLarge));
+            Assert.That(raw.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.ResponseTooLarge));
             Assert.That(raw.Failure.ToString(), Does.Not.Contain("byte["));
             await transport.StopAsync(CancellationToken.None);
         }
@@ -240,7 +304,7 @@ namespace IHomeland.Client.Tests.EditMode
                     null,
                     null,
                     callerCancellation.Token);
-                Assert.That(callerResult.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.CallerCancelled));
+                Assert.That(callerResult.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.CallerCancelled));
             }
 
             var shortOperation = new ClientHttpOperation(
@@ -259,7 +323,7 @@ namespace IHomeland.Client.Tests.EditMode
                 null,
                 null,
                 CancellationToken.None);
-            Assert.That(timeoutResult.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Timeout));
+            Assert.That(timeoutResult.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.Timeout));
             await transport.StopAsync(CancellationToken.None);
         }
 
@@ -292,14 +356,14 @@ namespace IHomeland.Client.Tests.EditMode
             await firstStop;
 
             var requestResult = await request;
-            Assert.That(requestResult.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Stopped));
+            Assert.That(requestResult.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.Stopped));
             Assert.That(handler.DisposeCount, Is.EqualTo(1));
             var late = await transport.SendAsync(
                 ClientHttpOperationCatalog.GetVersion,
                 null,
                 null,
                 CancellationToken.None);
-            Assert.That(late.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Stopped));
+            Assert.That(late.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.Stopped));
         }
 
         /// <summary>
@@ -330,15 +394,33 @@ namespace IHomeland.Client.Tests.EditMode
             });
             var transport = CreateTransport(handler);
             await transport.InitializeAsync(CancellationToken.None);
-            var api = new ClientHttpApi(transport, new ClientHttpCodec());
+            var api = new ClientHttpApi(transport, new ClientHttpContractMapper());
 
             var contentTypeFailure = await api.GetVersionAsync(CancellationToken.None);
-            Assert.That(contentTypeFailure.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.MalformedResponse));
+            Assert.That(contentTypeFailure.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.MalformedResponse));
             var retryAfterFailure = await api.GetWorldBootstrapAsync(
-                "access-token",
+                AuthorizationRequest("access-token"),
                 CancellationToken.None);
-            Assert.That(retryAfterFailure.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.MalformedResponse));
+            Assert.That(retryAfterFailure.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.MalformedResponse));
             await transport.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>创建 HTTP adapter 单次取得的 authorization lease。</summary>
+        /// <param name="accessToken">测试 opaque access token。</param>
+        /// <returns>绑定 HTTP authorization purpose 的 lease。</returns>
+        private static ClientCredentialLease AuthorizationLease(string accessToken)
+        {
+            return new ClientCredentialLease(
+                accessToken,
+                ClientCredentialPurpose.HttpAuthorization);
+        }
+
+        /// <summary>创建只携带单次 authorization lease 的 gateway request。</summary>
+        /// <param name="accessToken">测试 opaque access token。</param>
+        /// <returns>不可变 gateway request。</returns>
+        private static ClientCredentialGatewayRequest AuthorizationRequest(string accessToken)
+        {
+            return new ClientCredentialGatewayRequest(AuthorizationLease(accessToken));
         }
 
         /// <summary>

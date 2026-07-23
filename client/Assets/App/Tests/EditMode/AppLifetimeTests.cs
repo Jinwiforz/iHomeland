@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Foundation.Lifetime;
 using NUnit.Framework;
 
 namespace IHomeland.Client.Tests.EditMode

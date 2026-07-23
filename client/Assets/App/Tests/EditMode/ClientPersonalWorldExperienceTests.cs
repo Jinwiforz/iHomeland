@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,10 +7,14 @@ using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Client.Infrastructure.Tcp;
+using IHomeland.Client.Infrastructure.Time;
 using IHomeland.Client.Infrastructure.WebSocket;
 using IHomeland.Client.Presentation.Navigation;
 using IHomeland.Client.Presentation.PersonalWorld;
@@ -522,7 +526,9 @@ namespace IHomeland.Client.Tests.EditMode
                 ClientConfigurationStore configuration,
                 SessionCoordinator session,
                 ClientGameplayChannel gameplay,
+                ClientGameplayChannelPortAdapter gameplayPort,
                 ClientControlChannel control,
+                ClientControlChannelPortAdapter controlPort,
                 PersonalWorldService world,
                 VisitSessionService visit,
                 WorldAdmissionCoordinator admission,
@@ -536,7 +542,9 @@ namespace IHomeland.Client.Tests.EditMode
                 Configuration = configuration;
                 Session = session;
                 Gameplay = gameplay;
+                GameplayPort = gameplayPort;
                 Control = control;
+                ControlPort = controlPort;
                 World = world;
                 Visit = visit;
                 Admission = admission;
@@ -561,8 +569,14 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>获取 gameplay channel owner。</summary>
             internal ClientGameplayChannel Gameplay { get; }
 
+            /// <summary>获取 Application 使用的 typed gameplay port。</summary>
+            internal ClientGameplayChannelPortAdapter GameplayPort { get; }
+
             /// <summary>获取 control channel owner。</summary>
             internal ClientControlChannel Control { get; }
+
+            /// <summary>获取 Application 使用的 typed control port。</summary>
+            internal ClientControlChannelPortAdapter ControlPort { get; }
 
             /// <summary>获取 PersonalWorld projection owner。</summary>
             internal PersonalWorldService World { get; }
@@ -617,24 +631,34 @@ namespace IHomeland.Client.Tests.EditMode
                     new RejectingGameplayConnectionFactory(),
                     new ClientGameplayCodec(),
                     dispatcher,
-                    new SystemClientGameplayDelay());
+                    new SystemClientDelay());
+                var gameplayPort = new ClientGameplayChannelPortAdapter(
+                    gameplay,
+                    new ClientGameplayProtocolAdapter());
                 var control = new ClientControlChannel(
                     environment,
                     configuration,
                     session,
                     webSocketFactory ?? new RejectingWebSocketFactory(),
                     new ClientControlCodec(new ClientControlCatalog()),
+                    new ClientControlProtocolAdapter(),
                     dispatcher,
                     new ImmediateDelay(),
                     Array.Empty<TimeSpan>(),
-                    gameplay.InvalidateSession);
-                var world = new PersonalWorldService(control, gameplay);
-                var visit = new VisitSessionService(control, gameplay, clock);
-                var admission = new WorldAdmissionCoordinator(session, clock, gameplay, world, visit);
+                    gameplayPort.InvalidateSession);
+                var controlPort = new ClientControlChannelPortAdapter(control);
+                var world = new PersonalWorldService(controlPort, gameplayPort);
+                var visit = new VisitSessionService(controlPort, gameplayPort, clock);
+                var admission = new WorldAdmissionCoordinator(
+                    session,
+                    clock,
+                    gameplayPort,
+                    world,
+                    visit);
                 var recovery = new ClientConnectionRecoveryCoordinator(
                     session,
-                    control,
-                    gameplay,
+                    controlPort,
+                    gameplayPort,
                     admission,
                     ClientPersonalWorldExperience.DefaultConnectionRecoveryTimeout);
                 var host = new FixtureViewHost(ClientUiRouteId.Login);
@@ -658,8 +682,8 @@ namespace IHomeland.Client.Tests.EditMode
                 await dispatcher.InitializeAsync(CancellationToken.None);
                 await configuration.InitializeAsync(CancellationToken.None);
                 await session.InitializeAsync(CancellationToken.None);
-                await gameplay.InitializeAsync(CancellationToken.None);
-                await control.InitializeAsync(CancellationToken.None);
+                await gameplayPort.InitializeAsync(CancellationToken.None);
+                await controlPort.InitializeAsync(CancellationToken.None);
                 await world.InitializeAsync(CancellationToken.None);
                 await visit.InitializeAsync(CancellationToken.None);
                 await admission.InitializeAsync(CancellationToken.None);
@@ -672,7 +696,7 @@ namespace IHomeland.Client.Tests.EditMode
                     null,
                     recovery,
                     dispatcher,
-                    control,
+                    controlPort,
                     world,
                     visit,
                     admission,
@@ -686,7 +710,9 @@ namespace IHomeland.Client.Tests.EditMode
                     configuration,
                     session,
                     gameplay,
+                    gameplayPort,
                     control,
+                    controlPort,
                     world,
                     visit,
                     admission,
@@ -712,8 +738,8 @@ namespace IHomeland.Client.Tests.EditMode
                 await Admission.StopAsync(CancellationToken.None);
                 await Visit.StopAsync(CancellationToken.None);
                 await World.StopAsync(CancellationToken.None);
-                await Control.StopAsync(CancellationToken.None);
-                await Gameplay.StopAsync(CancellationToken.None);
+                await ControlPort.StopAsync(CancellationToken.None);
+                await GameplayPort.StopAsync(CancellationToken.None);
                 await Session.StopAsync(CancellationToken.None);
                 await Configuration.StopAsync(CancellationToken.None);
                 await Dispatcher.StopAsync(CancellationToken.None);
@@ -721,7 +747,7 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>提供可取消 version 阻塞与稳定 transport failure 的 HTTP fake。</summary>
-        private sealed class RecordingHttpApi : IClientHttpApi
+        private sealed class RecordingHttpApi : IClientBootstrapGateway, IClientSessionGateway
         {
             /// <summary>通知测试已有 version 调用进入 fake。</summary>
             private TaskCompletionSource<bool> _versionCalled = NewSignal();
@@ -764,7 +790,7 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>按配置阻塞或返回稳定 transport failure。</summary>
-            public async Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(
+            public async Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(
                 CancellationToken cancellationToken)
             {
                 TotalCalls++;
@@ -776,18 +802,18 @@ namespace IHomeland.Client.Tests.EditMode
 
                 _versionCalled = NewSignal();
                 return BootstrapSucceeds
-                    ? ClientHttpResult<ClientVersionInfo>.Success(
+                    ? ClientGatewayResult<ClientVersionInfo>.Success(
                         new ClientVersionInfo(1, "0.1.0", "0.1.0"))
                     : Failure<ClientVersionInfo>("getVersion");
             }
 
             /// <summary>按脚本返回兼容配置或稳定 transport failure。</summary>
-            public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(CancellationToken cancellationToken)
             {
                 TotalCalls++;
                 ConfigurationCalls++;
                 var result = BootstrapSucceeds
-                    ? ClientHttpResult<ClientBootstrapConfiguration>.Success(
+                    ? ClientGatewayResult<ClientBootstrapConfiguration>.Success(
                         new ClientBootstrapConfiguration(
                             new[]
                             {
@@ -800,7 +826,7 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>按脚本返回 register 认证投影或稳定 transport failure。</summary>
-            public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(string username, string password, string displayName, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken cancellationToken)
             {
                 TotalCalls++;
                 RegisterCalls++;
@@ -808,7 +834,7 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>按脚本返回 login 认证投影或稳定 transport failure。</summary>
-            public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(string username, string password, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken cancellationToken)
             {
                 TotalCalls++;
                 LoginCalls++;
@@ -816,28 +842,26 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>未使用 operation 返回稳定失败。</summary>
-            public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(string refreshToken, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken) =>
                 Unused<ClientTokenPair>("refreshSession");
 
             /// <summary>按脚本返回 logout 成功或稳定 transport failure。</summary>
-            public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 TotalCalls++;
                 return Task.FromResult(
                     LogoutSucceeds
-                        ? ClientHttpResult<ClientHttpEmpty>.Success(new ClientHttpEmpty())
-                        : Failure<ClientHttpEmpty>("logoutSession"));
+                        ? ClientGatewayResult<ClientGatewayEmpty>.Success(new ClientGatewayEmpty())
+                        : Failure<ClientGatewayEmpty>("logoutSession"));
             }
 
             /// <summary>认证成功后提供一次 control ticket，使 run 能进入 socket failure 路径。</summary>
-            public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(string accessToken, ClientEndpointChannel channel, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken cancellationToken)
             {
                 TotalCalls++;
                 ConnectionTicketCalls++;
-                return Task.FromResult(ClientHttpResult<ClientConnectionTicket>.Success(
+                return Task.FromResult(ClientGatewayResult<ClientConnectionTicket>.Success(
                     new ClientConnectionTicket(
                         "00000000000000000000000000000001",
                         new ClientEndpoint(ClientEndpointChannel.Wss, "127.0.0.1", 8443),
@@ -846,7 +870,7 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>记录 own-world 解析并返回稳定 transport failure。</summary>
-            public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(string accessToken, CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 TotalCalls++;
@@ -855,15 +879,15 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>未使用 operation 返回稳定失败。</summary>
-            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(string accessToken, ClientVisitInviteAcceptRequest request, string idempotencyKey, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken cancellationToken) =>
                 Unused<ClientVisitReservation>("acceptVisitInvite");
 
             /// <summary>未使用 operation 返回稳定失败。</summary>
-            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(string accessToken, ClientWorldAdmissionTarget target, string idempotencyKey, CancellationToken cancellationToken) =>
+            public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken cancellationToken) =>
                 Unused<ClientWorldAdmission>("issueWorldAdmission");
 
             /// <summary>记录意外调用并返回稳定失败。</summary>
-            private Task<ClientHttpResult<T>> Unused<T>(string operationID)
+            private Task<ClientGatewayResult<T>> Unused<T>(string operationID)
             {
                 TotalCalls++;
                 return Task.FromResult(Failure<T>(operationID));
@@ -872,10 +896,10 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>创建完整认证投影或当前脚本指定的稳定失败。</summary>
             /// <param name="operationID">失败时登记的 operation identity。</param>
             /// <returns>认证 HTTP 结果。</returns>
-            private ClientHttpResult<ClientAuthentication> AuthenticationResult(string operationID)
+            private ClientGatewayResult<ClientAuthentication> AuthenticationResult(string operationID)
             {
                 return AuthenticationSucceeds
-                    ? ClientHttpResult<ClientAuthentication>.Success(
+                    ? ClientGatewayResult<ClientAuthentication>.Success(
                         new ClientAuthentication(
                             new ClientAccountSummary("account-fixture", "Fixture", 1),
                             new ClientSessionSummary("session-fixture", 1, 9_000),
@@ -885,10 +909,10 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <summary>创建 transport failure。</summary>
-            private static ClientHttpResult<T> Failure<T>(string operationID)
+            private static ClientGatewayResult<T> Failure<T>(string operationID)
             {
-                return ClientHttpResult<T>.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.Transport,
+                return ClientGatewayResult<T>.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.Transport,
                     operationID));
             }
 
@@ -1156,7 +1180,7 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>提供不等待的 control backoff。</summary>
-        private sealed class ImmediateDelay : IClientControlDelay
+        private sealed class ImmediateDelay : IClientDelay
         {
             /// <summary>直接完成测试等待。</summary>
             public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;

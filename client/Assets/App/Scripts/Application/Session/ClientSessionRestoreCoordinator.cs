@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Bootstrap;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Application.Session
 {
@@ -169,7 +169,7 @@ namespace IHomeland.Client.Application.Session
                 return ClientSessionRestoreResult.Failed(
                     IsStopped() ||
                     bootstrap.Failure != null &&
-                    bootstrap.Failure.Kind == ClientHttpFailureKind.Stopped
+                    bootstrap.Failure.Kind == ClientGatewayFailureKind.Stopped
                         ? ClientSessionRestoreOutcome.Stopped
                         : ClientSessionRestoreOutcome.Unresolved);
             }

@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Foundation.Lifetime;
 
 namespace IHomeland.Client.Scenes.Contexts
 {

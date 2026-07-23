@@ -2,6 +2,10 @@
   "name": "IHomeland.Client.Runtime",
   "rootNamespace": "IHomeland.Client",
   "references": [
+    "IHomeland.Client.Foundation",
+    "IHomeland.Client.Application",
+    "IHomeland.Client.Infrastructure",
+    "IHomeland.Client.Presentation",
     "IHomeland.Client.Protocol.Generated",
     "Unity.InputSystem",
     "Unity.TextMeshPro"

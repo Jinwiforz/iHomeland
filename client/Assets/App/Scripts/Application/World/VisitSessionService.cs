@@ -4,11 +4,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.Tcp;
-using IHomeland.Client.Infrastructure.WebSocket;
-using IHomeland.Protocol.Visit.V1;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
 
 namespace IHomeland.Client.Application.World
 {
@@ -24,13 +23,28 @@ namespace IHomeland.Client.Application.World
         private readonly object _sync = new object();
 
         /// <summary>提供 WSS invite/availability/closed typed PUSH。</summary>
-        private readonly ClientControlChannel _controlChannel;
+        private readonly IClientControlChannelPort _controlChannel;
 
         /// <summary>提供 Visit command、完整 snapshot 与 safe-return。</summary>
-        private readonly ClientGameplayChannel _gameplayChannel;
+        private readonly IClientGameplayChannelPort _gameplayChannel;
+
+        /// <summary>执行六条登记 command，不保存 VisitSession 最终事实。</summary>
+        private readonly VisitSessionCommandFlows _commands;
 
         /// <summary>提供 invite 等于即失效的确定性 UTC 时间。</summary>
         private readonly IClientClock _clock;
+
+        /// <summary>纯计算 VisitSession revision 与 assignment replacement 决议。</summary>
+        private readonly VisitSessionProjectionReducer _projectionReducer =
+            new VisitSessionProjectionReducer();
+
+        /// <summary>纯计算 invite identity/revision replacement。</summary>
+        private readonly VisitInviteInboxReducer _inviteReducer =
+            new VisitInviteInboxReducer();
+
+        /// <summary>纯计算 invite expiry、replacement 与 member retirement。</summary>
+        private readonly VisitInviteRetirementPolicy _inviteRetirement =
+            new VisitInviteRetirementPolicy();
 
         /// <summary>按 VisitSessionID + InviteID 保存有界定向 inbox。</summary>
         private readonly Dictionary<string, ClientVisitInviteProjection> _invites =
@@ -76,13 +90,16 @@ namespace IHomeland.Client.Application.World
         /// <param name="gameplayChannel">TLS/TCP gameplay owner。</param>
         /// <param name="clock">Invite expiry 时钟。</param>
         internal VisitSessionService(
-            ClientControlChannel controlChannel,
-            ClientGameplayChannel gameplayChannel,
+            IClientControlChannelPort controlChannel,
+            IClientGameplayChannelPort gameplayChannel,
             IClientClock clock)
         {
             _controlChannel = controlChannel;
             _gameplayChannel = gameplayChannel;
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _commands = gameplayChannel == null
+                ? null
+                : new VisitSessionCommandFlows(gameplayChannel);
         }
 
         /// <summary>在不可变 snapshot 已提交后通知消费者。</summary>
@@ -150,7 +167,7 @@ namespace IHomeland.Client.Application.World
 
             if (role == ClientVisitRole.Owner && visitSessionID != null ||
                 role == ClientVisitRole.Visitor &&
-                !ClientWorldProjectionMapper.IsValidIdentity(visitSessionID))
+                !ClientWorldProjectionPolicy.IsValidIdentity(visitSessionID))
             {
                 return false;
             }
@@ -235,20 +252,15 @@ namespace IHomeland.Client.Application.World
             Notify(committed, false);
         }
 
-        /// <summary>提交完整 VisitSession replacement，并施加 identity/revision gate。</summary>
-        /// <param name="snapshot">Generated 完整快照。</param>
-        /// <param name="role">由 current flow 建立的角色。</param>
-        /// <returns>稳定 apply 结果。</returns>
+        /// <summary>提交 gameplay port 已映射的完整 VisitSession replacement。</summary>
+        /// <param name="incoming">无 generated message 的不可变 projection。</param>
+        /// <param name="role">由 current target owner 建立的角色。</param>
+        /// <returns>稳定 identity/revision gate 结果。</returns>
         internal ClientProjectionApplyResult ApplySnapshot(
-            VisitSessionSnapshot snapshot,
+            ClientVisitSessionProjection incoming,
             ClientVisitRole role)
         {
-            ClientVisitSessionProjection incoming;
-            try
-            {
-                incoming = ClientWorldProjectionMapper.FromVisitSnapshot(snapshot, role);
-            }
-            catch (ClientWorldProjectionException)
+            if (incoming == null)
             {
                 return ClientProjectionApplyResult.Rejected;
             }
@@ -274,7 +286,7 @@ namespace IHomeland.Client.Application.World
                     baseline = _retiredSession;
                 }
 
-                result = Compare(baseline, incoming);
+                result = _projectionReducer.Compare(baseline, incoming);
                 if (result == ClientProjectionApplyResult.Applied ||
                     (result == ClientProjectionApplyResult.Duplicate && _current == null))
                 {
@@ -308,12 +320,6 @@ namespace IHomeland.Client.Application.World
                 }
                 else if (result == ClientProjectionApplyResult.Conflict)
                 {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    UnityEngine.Debug.LogWarning(
-                        "[IHOMELAND_PROJECTION] component=VisitSessionService " +
-                        "operation=apply_snapshot outcome=conflict differences=" +
-                        DescribeProjectionDifferences(baseline, incoming));
-#endif
                     _needsRefresh = true;
                     committed = BuildSnapshotLocked();
                 }
@@ -321,24 +327,6 @@ namespace IHomeland.Client.Application.World
 
             Notify(committed, result == ClientProjectionApplyResult.Conflict);
             return result;
-        }
-
-        /// <summary>应用按 identity 去重且按 expiry 清理的定向 invite。</summary>
-        /// <param name="push">WSS generated invite PUSH。</param>
-        /// <returns>稳定 inbox apply 结果。</returns>
-        internal ClientProjectionApplyResult ApplyInvite(VisitInvitePush push)
-        {
-            ClientVisitInviteProjection incoming;
-            try
-            {
-                incoming = ClientWorldProjectionMapper.FromInvitePush(push);
-            }
-            catch (ClientWorldProjectionException)
-            {
-                return ClientProjectionApplyResult.Rejected;
-            }
-
-            return ApplyInviteProjection(incoming, outgoing: false);
         }
 
         /// <summary>在 HTTP accept 已明确提交后从 inbox 退役对应 pending invite。</summary>
@@ -373,8 +361,8 @@ namespace IHomeland.Client.Application.World
         /// <returns>当前 inbox 包含并移除该 identity 时返回 true。</returns>
         private bool RetireInvite(string visitSessionID, string inviteID)
         {
-            if (!ClientWorldProjectionMapper.IsValidIdentity(visitSessionID) ||
-                !ClientWorldProjectionMapper.IsValidIdentity(inviteID))
+            if (!ClientWorldProjectionPolicy.IsValidIdentity(visitSessionID) ||
+                !ClientWorldProjectionPolicy.IsValidIdentity(inviteID))
             {
                 return false;
             }
@@ -403,7 +391,7 @@ namespace IHomeland.Client.Application.World
         /// <param name="incoming">由 response 或 PUSH 转换的不可变邀请。</param>
         /// <param name="outgoing">是否保存为 Owner 发出邀请；false 表示 Visitor inbox。</param>
         /// <returns>稳定 apply 结果。</returns>
-        private ClientProjectionApplyResult ApplyInviteProjection(
+        internal ClientProjectionApplyResult ApplyInviteProjection(
             ClientVisitInviteProjection incoming,
             bool outgoing)
         {
@@ -417,8 +405,9 @@ namespace IHomeland.Client.Application.World
             lock (_sync)
             {
                 if (_stopped ||
-                    (incoming.State == ClientVisitInviteState.Pending &&
-                     incoming.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds))
+                    _inviteRetirement.IsExpired(
+                        incoming,
+                        _clock.UtcNowMilliseconds))
                 {
                     return ClientProjectionApplyResult.Rejected;
                 }
@@ -451,16 +440,15 @@ namespace IHomeland.Client.Application.World
                     var removedSuperseded = RemoveSupersededTargetInvitesLocked(invites, incoming);
                     if (invites.TryGetValue(key, out var current))
                     {
-                        if (incoming.CreatedRevision < current.CreatedRevision)
+                        result = _inviteReducer.Compare(current, incoming);
+                        if (result == ClientProjectionApplyResult.Stale)
                         {
                             return ClientProjectionApplyResult.Stale;
                         }
 
-                        if (incoming.CreatedRevision == current.CreatedRevision)
+                        if (result == ClientProjectionApplyResult.Duplicate ||
+                            result == ClientProjectionApplyResult.Conflict)
                         {
-                            result = current.IsEquivalent(incoming)
-                            ? ClientProjectionApplyResult.Duplicate
-                            : ClientProjectionApplyResult.Conflict;
                             if (removedSuperseded)
                             {
                                 committed = BuildSnapshotLocked();
@@ -492,51 +480,18 @@ namespace IHomeland.Client.Application.World
             return result;
         }
 
-        /// <summary>应用 Owner availability control hint，且不替代完整 snapshot。</summary>
-        /// <param name="push">WSS generated availability PUSH。</param>
-        /// <returns>稳定 hint apply 结果。</returns>
-        internal ClientProjectionApplyResult ApplyOwnerAvailability(VisitOwnerAvailabilityPush push)
-        {
-            try
-            {
-                return ApplyControlHint(ClientWorldProjectionMapper.FromOwnerAvailability(push));
-            }
-            catch (ClientWorldProjectionException)
-            {
-                return ClientProjectionApplyResult.Rejected;
-            }
-        }
-
-        /// <summary>应用 terminal close control hint，且不伪造 safe-return。</summary>
-        /// <param name="push">WSS generated close notice PUSH。</param>
-        /// <returns>稳定 hint apply 结果。</returns>
-        internal ClientProjectionApplyResult ApplyClosedNotice(VisitClosedNoticePush push)
-        {
-            try
-            {
-                return ApplyControlHint(ClientWorldProjectionMapper.FromClosedNotice(push));
-            }
-            catch (ClientWorldProjectionException)
-            {
-                return ClientProjectionApplyResult.Rejected;
-            }
-        }
-
         /// <summary>在 own-world Owner target 上开启或读取 active VisitSession。</summary>
         /// <param name="cancellationToken">只取消 caller 等待。</param>
         /// <returns>强类型 command result。</returns>
-        internal async Task<ClientGameplayResult<VisitOpenResponse>> OpenAsync(
+        internal async Task<ClientGameplayResult<ClientVisitMutationCandidate>> OpenAsync(
             CancellationToken cancellationToken)
         {
             if (!CanOpen())
             {
-                return Policy<VisitOpenResponse>();
+                return Policy<ClientVisitMutationCandidate>();
             }
 
-            var result = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitOpen,
-                new VisitOpenCommand(),
-                cancellationToken);
+            var result = await _commands.OpenAsync(cancellationToken);
             if (!result.IsSuccess)
             {
                 return result;
@@ -548,7 +503,8 @@ namespace IHomeland.Client.Application.World
             return applied == ClientProjectionApplyResult.Applied ||
                    applied == ClientProjectionApplyResult.Duplicate
                 ? result
-                : ClientGameplayResult<VisitOpenResponse>.Failed(ClientGameplayFailureKind.Protocol);
+                : ClientGameplayResult<ClientVisitMutationCandidate>.Failed(
+                    ClientGameplayFailureKind.Protocol);
         }
 
         /// <summary>以 current revision 创建定向 invite。</summary>
@@ -556,49 +512,34 @@ namespace IHomeland.Client.Application.World
         /// <param name="lifetimeMilliseconds">请求有效期，单位为毫秒。</param>
         /// <param name="cancellationToken">只取消 caller 等待。</param>
         /// <returns>强类型 mutation result。</returns>
-        internal async Task<ClientGameplayResult<VisitCreateInviteResponse>> CreateInviteAsync(
+        internal async Task<ClientGameplayResult<ClientVisitMutationCandidate>> CreateInviteAsync(
             string targetVisitorID,
             uint lifetimeMilliseconds,
             CancellationToken cancellationToken)
         {
             if (!TryOwnerRevision(out var revision) ||
-                !ClientWorldProjectionMapper.IsValidIdentity(targetVisitorID) ||
+                !ClientWorldProjectionPolicy.IsValidIdentity(targetVisitorID) ||
                 lifetimeMilliseconds == 0)
             {
-                return Policy<VisitCreateInviteResponse>();
+                return Policy<ClientVisitMutationCandidate>();
             }
 
-            var result = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitCreateInvite,
-                new VisitCreateInviteCommand
-                {
-                    TargetVisitorId = targetVisitorID,
-                    InviteLifetimeMs = lifetimeMilliseconds,
-                    ExpectedRevision = revision,
-                },
+            var result = await _commands.CreateInviteAsync(
+                new ClientCreateVisitInviteRequest(
+                    targetVisitorID,
+                    lifetimeMilliseconds,
+                    revision),
                 cancellationToken);
-            var mutationApplied = ApplyMutationResult(result, value => value.Result);
+            var mutationApplied = ApplyMutationResult(result);
             if (!mutationApplied.IsSuccess)
             {
                 return mutationApplied;
             }
 
-            ClientVisitInviteProjection invite;
-            try
+            var invite = mutationApplied.Value?.Invite;
+            if (invite == null)
             {
-                string ownerPlayerID;
-                lock (_sync)
-                {
-                    ownerPlayerID = _current?.OwnerPlayerID;
-                }
-
-                invite = ClientWorldProjectionMapper.FromInviteSummary(
-                    mutationApplied.Value?.Invite,
-                    ownerPlayerID);
-            }
-            catch (ClientWorldProjectionException)
-            {
-                return ClientGameplayResult<VisitCreateInviteResponse>.Failed(
+                return ClientGameplayResult<ClientVisitMutationCandidate>.Failed(
                     ClientGameplayFailureKind.Protocol);
             }
 
@@ -606,7 +547,7 @@ namespace IHomeland.Client.Application.World
             return inviteApplied == ClientProjectionApplyResult.Applied ||
                    inviteApplied == ClientProjectionApplyResult.Duplicate
                 ? mutationApplied
-                : ClientGameplayResult<VisitCreateInviteResponse>.Failed(
+                : ClientGameplayResult<ClientVisitMutationCandidate>.Failed(
                     ClientGameplayFailureKind.Protocol);
         }
 
@@ -614,21 +555,20 @@ namespace IHomeland.Client.Application.World
         /// <param name="inviteID">待撤销 invite identity。</param>
         /// <param name="cancellationToken">只取消 caller 等待。</param>
         /// <returns>强类型 mutation result。</returns>
-        internal async Task<ClientGameplayResult<VisitRevokeInviteResponse>> RevokeInviteAsync(
+        internal async Task<ClientGameplayResult<ClientVisitMutationCandidate>> RevokeInviteAsync(
             string inviteID,
             CancellationToken cancellationToken)
         {
             if (!TryOwnerRevision(out var revision) ||
-                !ClientWorldProjectionMapper.IsValidIdentity(inviteID))
+                !ClientWorldProjectionPolicy.IsValidIdentity(inviteID))
             {
-                return Policy<VisitRevokeInviteResponse>();
+                return Policy<ClientVisitMutationCandidate>();
             }
 
-            var result = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitRevokeInvite,
-                new VisitRevokeInviteCommand { InviteId = inviteID, ExpectedRevision = revision },
+            var result = await _commands.RevokeAsync(
+                new ClientRevisionedIdentityRequest(inviteID, revision),
                 cancellationToken);
-            var mutationApplied = ApplyMutationResult(result, value => value.Result);
+            var mutationApplied = ApplyMutationResult(result);
             if (!mutationApplied.IsSuccess)
             {
                 return mutationApplied;
@@ -652,57 +592,54 @@ namespace IHomeland.Client.Application.World
         /// <param name="targetVisitorID">被操作 Visitor identity。</param>
         /// <param name="cancellationToken">只取消 caller 等待。</param>
         /// <returns>强类型 mutation result。</returns>
-        internal async Task<ClientGameplayResult<VisitKickResponse>> KickAsync(
+        internal async Task<ClientGameplayResult<ClientVisitMutationCandidate>> KickAsync(
             string targetVisitorID,
             CancellationToken cancellationToken)
         {
             if (!TryOwnerRevision(out var revision) ||
-                !ClientWorldProjectionMapper.IsValidIdentity(targetVisitorID))
+                !ClientWorldProjectionPolicy.IsValidIdentity(targetVisitorID))
             {
-                return Policy<VisitKickResponse>();
+                return Policy<ClientVisitMutationCandidate>();
             }
 
-            var result = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitKick,
-                new VisitKickCommand { TargetVisitorId = targetVisitorID, ExpectedRevision = revision },
+            var result = await _commands.KickAsync(
+                new ClientRevisionedIdentityRequest(targetVisitorID, revision),
                 cancellationToken);
-            return ApplyMutationResult(result, value => value.Result);
+            return ApplyMutationResult(result);
         }
 
         /// <summary>以 current revision 关闭 Owner 的 VisitSession。</summary>
         /// <param name="cancellationToken">只取消 caller 等待。</param>
         /// <returns>强类型 mutation result。</returns>
-        internal async Task<ClientGameplayResult<VisitCloseResponse>> CloseAsync(
+        internal async Task<ClientGameplayResult<ClientVisitMutationCandidate>> CloseAsync(
             CancellationToken cancellationToken)
         {
             if (!TryOwnerRevision(out var revision))
             {
-                return Policy<VisitCloseResponse>();
+                return Policy<ClientVisitMutationCandidate>();
             }
 
-            var result = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitClose,
-                new VisitCloseCommand { ExpectedRevision = revision },
+            var result = await _commands.CloseAsync(
+                revision,
                 cancellationToken);
-            return ApplyMutationResult(result, value => value.Result);
+            return ApplyMutationResult(result);
         }
 
         /// <summary>以 current Visitor revision 主动离开 active VisitSession。</summary>
         /// <param name="cancellationToken">只取消 caller 等待。</param>
         /// <returns>强类型 mutation result。</returns>
-        internal async Task<ClientGameplayResult<VisitLeaveResponse>> LeaveAsync(
+        internal async Task<ClientGameplayResult<ClientVisitMutationCandidate>> LeaveAsync(
             CancellationToken cancellationToken)
         {
             if (!TryVisitorRevision(out var revision))
             {
-                return Policy<VisitLeaveResponse>();
+                return Policy<ClientVisitMutationCandidate>();
             }
 
-            var result = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitLeave,
-                new VisitLeaveCommand { ExpectedRevision = revision },
+            var result = await _commands.LeaveAsync(
+                revision,
                 cancellationToken);
-            return ApplyMutationResult(result, value => value.Result);
+            return ApplyMutationResult(result);
         }
 
         /// <summary>解除 subscriber、关闭 role gate 并拒绝迟到输入。</summary>
@@ -743,7 +680,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>提交 control hint 并保持完整 snapshot 不变。</summary>
         /// <param name="incoming">已验证 hint。</param>
         /// <returns>稳定 revision gate 结果。</returns>
-        private ClientProjectionApplyResult ApplyControlHint(ClientVisitControlHint incoming)
+        internal ClientProjectionApplyResult ApplyControlHint(ClientVisitControlHint incoming)
         {
             ClientVisitSessionServiceSnapshot committed;
             var conflict = false;
@@ -791,30 +728,28 @@ namespace IHomeland.Client.Application.World
         /// <param name="result">Gameplay operation result。</param>
         /// <param name="selector">取得共享 mutation result。</param>
         /// <returns>原成功/拒绝结果或 projection protocol failure。</returns>
-        private ClientGameplayResult<TResponse> ApplyMutationResult<TResponse>(
-            ClientGameplayResult<TResponse> result,
-            Func<TResponse, VisitMutationResult> selector)
-            where TResponse : class
+        private ClientGameplayResult<ClientVisitMutationCandidate> ApplyMutationResult(
+            ClientGameplayResult<ClientVisitMutationCandidate> result)
         {
             if (!result.IsSuccess)
             {
                 return result;
             }
 
-            var mutation = selector(result.Value);
             ClientVisitRole role;
             lock (_sync)
             {
                 role = _targetRole;
             }
 
-            var applied = mutation?.Snapshot == null
+            var applied = result.Value?.Snapshot == null
                 ? ClientProjectionApplyResult.Rejected
-                : ApplySnapshot(mutation.Snapshot, role);
+                : ApplySnapshot(result.Value.Snapshot, role);
             return applied == ClientProjectionApplyResult.Applied ||
                    applied == ClientProjectionApplyResult.Duplicate
                 ? result
-                : ClientGameplayResult<TResponse>.Failed(ClientGameplayFailureKind.Protocol);
+                : ClientGameplayResult<ClientVisitMutationCandidate>.Failed(
+                    ClientGameplayFailureKind.Protocol);
         }
 
         /// <summary>判断 Owner open 是否可写入 gameplay channel。</summary>
@@ -872,172 +807,6 @@ namespace IHomeland.Client.Application.World
             }
         }
 
-        /// <summary>比较同一 VisitSession 的 revision 与 immutable fields。</summary>
-        /// <param name="current">Current replacement。</param>
-        /// <param name="incoming">Incoming replacement。</param>
-        /// <returns>稳定 apply 结果。</returns>
-        private static ClientProjectionApplyResult Compare(
-            ClientVisitSessionProjection current,
-            ClientVisitSessionProjection incoming)
-        {
-            if (current == null)
-            {
-                return ClientProjectionApplyResult.Applied;
-            }
-
-            if (!string.Equals(current.VisitSessionID, incoming.VisitSessionID, StringComparison.Ordinal))
-            {
-                return ClientProjectionApplyResult.Conflict;
-            }
-
-            if (incoming.Revision < current.Revision)
-            {
-                return ClientProjectionApplyResult.Stale;
-            }
-
-            if (incoming.Revision == current.Revision)
-            {
-                if (!current.IsEquivalentIgnoringAssignment(incoming))
-                {
-                    return ClientProjectionApplyResult.Conflict;
-                }
-
-                return CompareAssignment(current.Assignment, incoming.Assignment);
-            }
-
-            if (!string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
-                current.CreatedAtMilliseconds != incoming.CreatedAtMilliseconds ||
-                current.ExpiresAtMilliseconds != incoming.ExpiresAtMilliseconds ||
-                current.Role != incoming.Role)
-            {
-                return ClientProjectionApplyResult.Conflict;
-            }
-
-            var assignment = CompareAssignment(current.Assignment, incoming.Assignment);
-            if (assignment == ClientProjectionApplyResult.Conflict ||
-                assignment == ClientProjectionApplyResult.Stale)
-            {
-                return assignment;
-            }
-
-            return ClientProjectionApplyResult.Applied;
-        }
-
-        /// <summary>按独立assignment generation比较VisitSession携带的current placement。</summary>
-        /// <param name="current">已提交assignment。</param>
-        /// <param name="incoming">权威完整replacement携带的assignment。</param>
-        /// <returns>Generation倒退为Stale，同代identity冲突为Conflict，更高代或续租为Applied。</returns>
-        private static ClientProjectionApplyResult CompareAssignment(
-            ClientWorldAssignmentProjection current,
-            ClientWorldAssignmentProjection incoming)
-        {
-            if (current == null || incoming == null ||
-                !string.Equals(
-                    current.PersonalWorldID,
-                    incoming.PersonalWorldID,
-                    StringComparison.Ordinal))
-            {
-                return ClientProjectionApplyResult.Conflict;
-            }
-
-            if (incoming.Generation < current.Generation)
-            {
-                return ClientProjectionApplyResult.Stale;
-            }
-
-            if (incoming.Generation > current.Generation)
-            {
-                return ClientProjectionApplyResult.Applied;
-            }
-
-            if (!current.HasSameIdentity(incoming))
-            {
-                return ClientProjectionApplyResult.Conflict;
-            }
-
-            if (incoming.LeaseExpiresAtMilliseconds < current.LeaseExpiresAtMilliseconds)
-            {
-                return ClientProjectionApplyResult.Stale;
-            }
-
-            return incoming.LeaseExpiresAtMilliseconds == current.LeaseExpiresAtMilliseconds
-                ? ClientProjectionApplyResult.Duplicate
-                : ClientProjectionApplyResult.Applied;
-        }
-
-        /// <summary>生成不包含玩家、世界或连接 identity 的投影差异字段列表。</summary>
-        /// <param name="current">当前已提交投影。</param>
-        /// <param name="incoming">待提交投影。</param>
-        /// <returns>用于 Development 诊断的稳定字段名列表。</returns>
-        private static string DescribeProjectionDifferences(
-            ClientVisitSessionProjection current,
-            ClientVisitSessionProjection incoming)
-        {
-            if (current == null || incoming == null)
-            {
-                return "projection_presence";
-            }
-
-            var differences = new List<string>();
-            AddDifference(differences, "visit_session_id", !string.Equals(
-                current.VisitSessionID,
-                incoming.VisitSessionID,
-                StringComparison.Ordinal));
-            AddDifference(differences, "owner_player_id", !string.Equals(
-                current.OwnerPlayerID,
-                incoming.OwnerPlayerID,
-                StringComparison.Ordinal));
-            AddDifference(differences, "assignment", !current.Assignment.IsEquivalent(incoming.Assignment));
-            AddDifference(differences, "lifecycle", current.Lifecycle != incoming.Lifecycle);
-            AddDifference(differences, "revision", current.Revision != incoming.Revision);
-            AddDifference(differences, "capacity", current.Capacity != incoming.Capacity);
-            AddDifference(differences, "created_at_ms", current.CreatedAtMilliseconds != incoming.CreatedAtMilliseconds);
-            AddDifference(differences, "expires_at_ms", current.ExpiresAtMilliseconds != incoming.ExpiresAtMilliseconds);
-            AddDifference(
-                differences,
-                "owner_grace_expires_at_ms",
-                current.OwnerGraceExpiresAtMilliseconds != incoming.OwnerGraceExpiresAtMilliseconds);
-            AddDifference(differences, "role", current.Role != incoming.Role);
-            AddDifference(differences, "visitors", !VisitorsEquivalent(current.Visitors, incoming.Visitors));
-            return differences.Count == 0 ? "unknown" : string.Join(",", differences);
-        }
-
-        /// <summary>把发生变化的字段名追加到诊断列表。</summary>
-        /// <param name="differences">待追加的差异列表。</param>
-        /// <param name="field">稳定字段名。</param>
-        /// <param name="different">字段是否发生变化。</param>
-        private static void AddDifference(List<string> differences, string field, bool different)
-        {
-            if (different)
-            {
-                differences.Add(field);
-            }
-        }
-
-        /// <summary>比较两个稳定排序的 Visitor 投影集合。</summary>
-        /// <param name="current">当前 Visitor 集合。</param>
-        /// <param name="incoming">待提交 Visitor 集合。</param>
-        /// <returns>数量、顺序和全部字段一致时返回 true。</returns>
-        private static bool VisitorsEquivalent(
-            IReadOnlyList<ClientVisitVisitorProjection> current,
-            IReadOnlyList<ClientVisitVisitorProjection> incoming)
-        {
-            if (current.Count != incoming.Count)
-            {
-                return false;
-            }
-
-            for (var index = 0; index < current.Count; index++)
-            {
-                if (!current[index].IsEquivalent(incoming[index]))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         /// <summary>按当前 UTC 时间惰性清理等于即失效 invite。</summary>
         /// <returns>集合是否发生变化。</returns>
         private bool PruneExpiredLocked()
@@ -1053,7 +822,9 @@ namespace IHomeland.Client.Application.World
             List<string> expired = null;
             foreach (var pair in invites)
             {
-                if (pair.Value.ExpiresAtMilliseconds <= _clock.UtcNowMilliseconds)
+                if (_inviteRetirement.IsExpired(
+                        pair.Value,
+                        _clock.UtcNowMilliseconds))
                 {
                     if (expired == null)
                     {
@@ -1114,7 +885,7 @@ namespace IHomeland.Client.Application.World
         /// 证明旧 identity 已被撤销、接受或到期。反向或同 revision 不在此处删除，仍交给 identity gate。
         /// </remarks>
         /// <returns>至少移除一个旧 identity 时返回 true。</returns>
-        private static bool RemoveSupersededTargetInvitesLocked(
+        private bool RemoveSupersededTargetInvitesLocked(
             IDictionary<string, ClientVisitInviteProjection> invites,
             ClientVisitInviteProjection incoming)
         {
@@ -1122,11 +893,7 @@ namespace IHomeland.Client.Application.World
             foreach (var pair in invites)
             {
                 var current = pair.Value;
-                if (current.State != ClientVisitInviteState.Pending ||
-                    current.CreatedRevision >= incoming.CreatedRevision ||
-                    !string.Equals(current.VisitSessionID, incoming.VisitSessionID, StringComparison.Ordinal) ||
-                    !string.Equals(current.OwnerPlayerID, incoming.OwnerPlayerID, StringComparison.Ordinal) ||
-                    !string.Equals(current.TargetVisitorID, incoming.TargetVisitorID, StringComparison.Ordinal))
+                if (!_inviteRetirement.IsSuperseded(current, incoming))
                 {
                     continue;
                 }
@@ -1199,20 +966,10 @@ namespace IHomeland.Client.Application.World
                 return;
             }
 
-            var visitorIDs = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var visitor in snapshot.Visitors)
-            {
-                visitorIDs.Add(visitor.PlayerID);
-            }
-
             var retiredKeys = new List<string>();
             foreach (var pair in _outgoingInvites)
             {
-                if (string.Equals(
-                        pair.Value.VisitSessionID,
-                        snapshot.VisitSessionID,
-                        StringComparison.Ordinal) &&
-                    visitorIDs.Contains(pair.Value.TargetVisitorID))
+                if (_inviteRetirement.IsConsumedBy(pair.Value, snapshot))
                 {
                     retiredKeys.Add(pair.Key);
                 }
@@ -1257,25 +1014,25 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>分派 control channel 的三个 Visit typed PUSH。</summary>
         /// <param name="push">已验证 control PUSH。</param>
-        private void OnControlPush(ClientControlPush push)
+        private void OnControlPush(ClientControlNotification push)
         {
-            if (push?.Payload is VisitInvitePush invite)
+            if (push is ClientVisitInvitePush invite)
             {
-                ApplyInvite(invite);
+                ApplyInviteProjection(invite.Invite, outgoing: false);
             }
-            else if (push?.Payload is VisitOwnerAvailabilityPush availability)
+            else if (push is ClientVisitOwnerAvailabilityPush availability)
             {
-                ApplyOwnerAvailability(availability);
+                ApplyControlHint(availability.Hint);
             }
-            else if (push?.Payload is VisitClosedNoticePush closed)
+            else if (push is ClientVisitClosedPush closed)
             {
-                ApplyClosedNotice(closed);
+                ApplyControlHint(closed.Hint);
             }
         }
 
         /// <summary>提交 gameplay 完整 VisitSession PUSH。</summary>
         /// <param name="push">已验证 gameplay PUSH。</param>
-        private void OnVisitSnapshotPush(VisitSnapshotPush push)
+        private void OnVisitSnapshotPush(ClientVisitSessionProjection push)
         {
             ClientVisitRole role;
             lock (_sync)
@@ -1285,28 +1042,23 @@ namespace IHomeland.Client.Application.World
 
             if (push != null && role != ClientVisitRole.None)
             {
-                ApplySnapshot(push.Snapshot, role);
+                ApplySnapshot(push, role);
             }
         }
 
         /// <summary>校验 safe-return identity 后在锁外通知 coordinator。</summary>
         /// <param name="push">Gameplay channel 已先关闭 mutation gate 的 PUSH。</param>
-        private void OnSafeReturnPush(VisitSafeReturnPush push)
+        private void OnSafeReturnPush(ClientSafeReturnProjection push)
         {
-            ApplySafeReturn(push?.Directive);
+            ApplySafeReturn(push);
         }
 
-        /// <summary>校验 safe-return identity 与 revision，并只向 current Visitor target 交付非迟到指令。</summary>
-        /// <param name="directive">Gameplay channel 解码得到的权威指令。</param>
-        /// <returns>指令是否通过 current target 的权威版本门。</returns>
-        internal bool ApplySafeReturn(SafeReturnDirective directive)
+        /// <summary>校验已映射 safe-return identity 后在锁外通知 coordinator。</summary>
+        /// <param name="projection">Gameplay adapter 已验证的权威投影。</param>
+        /// <returns>Projection 通过 current target revision gate 时返回 true。</returns>
+        internal bool ApplySafeReturn(ClientSafeReturnProjection projection)
         {
-            ClientSafeReturnProjection projection;
-            try
-            {
-                projection = ClientWorldProjectionMapper.FromSafeReturn(directive);
-            }
-            catch (ClientWorldProjectionException)
+            if (projection == null)
             {
                 return false;
             }

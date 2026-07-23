@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "owners": [
+    {
+      "id": "configuration",
+      "stateKinds": [
+        "client-configuration"
+      ],
+      "ownerType": "IHomeland.Client.Application.Configuration.ClientConfigurationStore",
+      "facadeType": "IHomeland.Client.Application.Configuration.ClientConfigurationStore",
+      "snapshotType": "IHomeland.Client.Application.Configuration.ClientConfigurationSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/Configuration/ClientConfigurationStore.cs",
+      "commands": [
+        "InitializeAsync",
+        "Publish",
+        "MarkIncompatible",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "bootstrap"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.BaselineConfigurationTests",
+        "IHomeland.Client.Tests.EditMode.ClientSessionCoordinatorTests"
+      ]
+    },
+    {
+      "id": "session",
+      "stateKinds": [
+        "session-authority"
+      ],
+      "ownerType": "IHomeland.Client.Application.Session.SessionCoordinator",
+      "facadeType": "IHomeland.Client.Application.Session.SessionCoordinator",
+      "snapshotType": "IHomeland.Client.Application.Session.ClientSessionSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/Session/SessionCoordinator.cs",
+      "commands": [
+        "RegisterAsync",
+        "LoginAsync",
+        "RestoreAsync",
+        "RefreshAsync",
+        "LogoutAsync",
+        "ForgetAsync",
+        "TryInvalidateFromControlAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "configuration",
+        "session-gateway",
+        "secure-session-store",
+        "clock"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientSessionCoordinatorTests",
+        "IHomeland.Client.Tests.EditMode.ClientSessionRestoreCoordinatorTests"
+      ]
+    },
+    {
+      "id": "control",
+      "stateKinds": [
+        "control-connection"
+      ],
+      "ownerType": "IHomeland.Client.Infrastructure.WebSocket.ClientControlChannel",
+      "facadeType": "IHomeland.Client.Infrastructure.WebSocket.ClientControlChannel",
+      "snapshotType": "IHomeland.Client.Infrastructure.WebSocket.ClientControlChannelSnapshot",
+      "module": "Infrastructure",
+      "source": "client/Assets/App/Scripts/Infrastructure/WebSocket/ClientControlChannel.cs",
+      "commands": [
+        "RunAsync",
+        "WaitUntilConnectedAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "session",
+        "control-transport",
+        "control-protocol-adapter",
+        "main-thread-dispatcher",
+        "gameplay"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientControlChannelTests",
+        "IHomeland.Client.Tests.EditMode.ClientControlCodecTests"
+      ]
+    },
+    {
+      "id": "gameplay",
+      "stateKinds": [
+        "gameplay-connection"
+      ],
+      "ownerType": "IHomeland.Client.Infrastructure.Tcp.ClientGameplayChannel",
+      "facadeType": "IHomeland.Client.Infrastructure.Tcp.ClientGameplayChannel",
+      "snapshotType": "IHomeland.Client.Application.Gameplay.ClientGameplayChannelSnapshot",
+      "module": "Infrastructure",
+      "source": "client/Assets/App/Scripts/Infrastructure/Tcp/ClientGameplayChannel.cs",
+      "commands": [
+        "ConnectAsync",
+        "JoinPendingVisitAsync",
+        "ReconnectPendingVisitAsync",
+        "CloseAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "configuration",
+        "session",
+        "gameplay-transport",
+        "gameplay-protocol-adapter",
+        "main-thread-dispatcher"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientGameplayChannelTests",
+        "IHomeland.Client.Tests.EditMode.ClientGameplayProtocolTests"
+      ]
+    },
+    {
+      "id": "personal-world",
+      "stateKinds": [
+        "personal-world-projection",
+        "world-assignment-projection"
+      ],
+      "ownerType": "IHomeland.Client.Application.World.PersonalWorldService",
+      "facadeType": "IHomeland.Client.Application.World.PersonalWorldService",
+      "snapshotType": "IHomeland.Client.Application.World.ClientPersonalWorldServiceSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/World/PersonalWorldService.cs",
+      "commands": [
+        "ApplyBootstrap",
+        "ApplyWorldSnapshot",
+        "ApplyAssignmentHint",
+        "ClearCurrentTarget",
+        "InvalidateControlProjection",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "control",
+        "gameplay"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests",
+        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"
+      ]
+    },
+    {
+      "id": "visit-session",
+      "stateKinds": [
+        "visit-session-projection",
+        "visit-invite-inbox"
+      ],
+      "ownerType": "IHomeland.Client.Application.World.VisitSessionService",
+      "facadeType": "IHomeland.Client.Application.World.VisitSessionService",
+      "snapshotType": "IHomeland.Client.Application.World.ClientVisitSessionServiceSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/World/VisitSessionService.cs",
+      "commands": [
+        "OpenAsync",
+        "CreateInviteAsync",
+        "RevokeInviteAsync",
+        "KickAsync",
+        "CloseAsync",
+        "LeaveAsync",
+        "ApplySafeReturn",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "control",
+        "gameplay",
+        "clock"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests",
+        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"
+      ]
+    },
+    {
+      "id": "world-target",
+      "stateKinds": [
+        "world-target",
+        "world-target-generation"
+      ],
+      "ownerType": "IHomeland.Client.Application.World.WorldAdmissionCoordinator",
+      "facadeType": "IHomeland.Client.Application.World.WorldAdmissionCoordinator",
+      "snapshotType": "IHomeland.Client.Application.World.ClientWorldFlowSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/World/WorldAdmissionCoordinator.cs",
+      "commands": [
+        "EnterOwnWorldAsync",
+        "JoinVisitAsync",
+        "LeaveVisitAsync",
+        "RetryReturnAsync",
+        "InvalidateSession",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "session",
+        "gameplay",
+        "personal-world",
+        "visit-session",
+        "clock"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"
+      ]
+    },
+    {
+      "id": "recovery",
+      "stateKinds": [
+        "connection-recovery-intent"
+      ],
+      "ownerType": "IHomeland.Client.Application.World.ClientConnectionRecoveryCoordinator",
+      "facadeType": "IHomeland.Client.Application.World.ClientConnectionRecoveryCoordinator",
+      "snapshotType": "IHomeland.Client.Application.World.ClientConnectionRecoverySnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/World/ClientConnectionRecoveryCoordinator.cs",
+      "commands": [
+        "BeginControlRecovery",
+        "CompleteControlRecoveryAsync",
+        "BeginAutomaticWorldRecovery",
+        "BeginManualWorldRecovery",
+        "WaitForSettledAsync",
+        "ConfirmSceneCommit",
+        "FailSceneCommit",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "session",
+        "control",
+        "gameplay",
+        "world-target",
+        "scene"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientConnectionRecoveryCoordinatorTests",
+        "IHomeland.Client.Tests.EditMode.ClientPersonalWorldExperienceTests"
+      ]
+    },
+    {
+      "id": "route",
+      "stateKinds": [
+        "ui-route"
+      ],
+      "ownerType": "IHomeland.Client.Presentation.Navigation.ClientUiRouter",
+      "facadeType": "IHomeland.Client.Presentation.Navigation.ClientUiRouter",
+      "snapshotType": "IHomeland.Client.Presentation.Navigation.ClientUiRouteSnapshot",
+      "module": "Presentation",
+      "source": "client/Assets/App/Scripts/Presentation/Pure/Navigation/ClientUiRouter.cs",
+      "commands": [
+        "OpenAsync",
+        "CloseAsync",
+        "InvalidateSceneAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "ui-registry",
+        "ui-host",
+        "input-focus-host"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientUiRouterTests",
+        "IHomeland.Client.Tests.PlayMode.ClientUiHostPlayModeTests"
+      ]
+    },
+    {
+      "id": "presentation",
+      "stateKinds": [
+        "personal-world-presentation",
+        "presentation-intent"
+      ],
+      "ownerType": "IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldExperience",
+      "facadeType": "IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldExperience",
+      "snapshotType": "IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldViewState",
+      "module": "Presentation",
+      "source": "client/Assets/App/Scripts/Presentation/Pure/PersonalWorld/ClientPersonalWorldExperience.cs",
+      "commands": [
+        "RegisterAsync",
+        "LoginAsync",
+        "RetryEnterOwnWorldAsync",
+        "RetryReturnAsync",
+        "RetryConnectionAsync",
+        "LogoutAsync",
+        "OpenVisitAsync",
+        "CreateInviteAsync",
+        "RevokeInviteAsync",
+        "AcceptInviteAsync",
+        "KickVisitorAsync",
+        "CloseVisitAsync",
+        "LeaveVisitAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "bootstrap",
+        "session",
+        "control",
+        "recovery",
+        "personal-world",
+        "visit-session",
+        "world-target",
+        "route",
+        "scene",
+        "main-thread-dispatcher"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientPersonalWorldExperienceTests",
+        "IHomeland.Client.Tests.EditMode.ClientPersonalWorldPresentationTests",
+        "IHomeland.Client.Tests.PlayMode.ClientProductHostPlayModeTests"
+      ]
+    },
+    {
+      "id": "scene",
+      "stateKinds": [
+        "scene-transition",
+        "scene-generation"
+      ],
+      "ownerType": "IHomeland.Client.Scenes.PersonalWorld.ClientWorldSceneTransitionHost",
+      "facadeType": "IHomeland.Client.Scenes.PersonalWorld.IClientWorldSceneTransition",
+      "snapshotType": "IHomeland.Client.Scenes.PersonalWorld.ClientWorldSceneSnapshot",
+      "module": "Runtime",
+      "source": "client/Assets/App/Scripts/Scenes/PersonalWorld/ClientWorldSceneTransitionHost.cs",
+      "commands": [
+        "LoadAsync",
+        "UnloadAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "scene-lifetime",
+        "scene-manager",
+        "personal-world-scene-context"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.SceneLifetimeOwnerTests",
+        "IHomeland.Client.Tests.PlayMode.PersonalWorldSceneContextPlayModeTests",
+        "IHomeland.Client.Tests.PlayMode.ClientProductHostPlayModeTests"
+      ]
+    }
+  ]
+}

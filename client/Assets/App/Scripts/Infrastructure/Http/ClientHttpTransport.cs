@@ -1,11 +1,12 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using IHomeland.Client.Core.Configuration;
-using IHomeland.Client.Core.Lifetime;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Lifetime;
 
 namespace IHomeland.Client.Infrastructure.Http
 {
@@ -229,8 +230,8 @@ namespace IHomeland.Client.Infrastructure.Http
 
             if (!TryBeginRequest())
             {
-                return ClientHttpRawResult.Failed(new ClientHttpFailure(
-                    ClientHttpFailureKind.Stopped,
+                return ClientHttpRawResult.Failed(new ClientGatewayFailure(
+                    ClientGatewayFailureKind.Stopped,
                     operation.OperationID));
             }
 
@@ -256,10 +257,9 @@ namespace IHomeland.Client.Infrastructure.Http
                         if (response.Content.Headers.ContentLength.HasValue &&
                             response.Content.Headers.ContentLength.Value > operation.ResponseBodyLimitBytes)
                         {
-                            return ClientHttpRawResult.Failed(new ClientHttpFailure(
-                                ClientHttpFailureKind.ResponseTooLarge,
-                                operation.OperationID,
-                                response.StatusCode));
+                            return ClientHttpRawResult.Failed(new ClientGatewayFailure(
+                                ClientGatewayFailureKind.ResponseTooLarge,
+                                operation.OperationID));
                         }
 
                         var body = await ReadBodyAsync(
@@ -268,10 +268,9 @@ namespace IHomeland.Client.Infrastructure.Http
                             linkedCancellation.Token);
                         if (body == null)
                         {
-                            return ClientHttpRawResult.Failed(new ClientHttpFailure(
-                                ClientHttpFailureKind.ResponseTooLarge,
-                                operation.OperationID,
-                                response.StatusCode));
+                            return ClientHttpRawResult.Failed(new ClientGatewayFailure(
+                                ClientGatewayFailureKind.ResponseTooLarge,
+                                operation.OperationID));
                         }
 
                         var mediaType = response.Content.Headers.ContentType?.MediaType;
@@ -285,20 +284,20 @@ namespace IHomeland.Client.Infrastructure.Http
                 }
                 catch (OperationCanceledException)
                 {
-                    return ClientHttpRawResult.Failed(new ClientHttpFailure(
+                    return ClientHttpRawResult.Failed(new ClientGatewayFailure(
                         ClassifyCancellation(cancellationToken, deadlineCancellation.Token),
                         operation.OperationID));
                 }
                 catch (HttpRequestException)
                 {
-                    return ClientHttpRawResult.Failed(new ClientHttpFailure(
-                        ClientHttpFailureKind.Transport,
+                    return ClientHttpRawResult.Failed(new ClientGatewayFailure(
+                        ClientGatewayFailureKind.Transport,
                         operation.OperationID));
                 }
                 catch (IOException)
                 {
-                    return ClientHttpRawResult.Failed(new ClientHttpFailure(
-                        ClientHttpFailureKind.Transport,
+                    return ClientHttpRawResult.Failed(new ClientGatewayFailure(
+                        ClientGatewayFailureKind.Transport,
                         operation.OperationID));
                 }
                 finally
@@ -409,7 +408,7 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="idempotencyKey">可选幂等 header。</param>
         /// <param name="requestPath">可选冻结 path parameter 绑定结果。</param>
         /// <returns>违反本地策略时返回失败，否则为空。</returns>
-        private static ClientHttpFailure ValidateRequest(
+        private static ClientGatewayFailure ValidateRequest(
             ClientHttpOperation operation,
             byte[] requestBody,
             string bearerToken,
@@ -419,23 +418,23 @@ namespace IHomeland.Client.Infrastructure.Http
             var hasBody = requestBody != null && requestBody.Length > 0;
             if (operation.RequestBodyPolicy == ClientHttpBodyPolicy.None && hasBody)
             {
-                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+                return new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation.OperationID);
             }
 
             if (operation.RequestBodyPolicy == ClientHttpBodyPolicy.Json && !hasBody)
             {
-                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+                return new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation.OperationID);
             }
 
             if (hasBody && requestBody.Length > operation.RequestBodyLimitBytes)
             {
-                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+                return new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation.OperationID);
             }
 
             var hasBearer = !string.IsNullOrEmpty(bearerToken);
             if ((operation.Authentication == ClientHttpAuthentication.Bearer) != hasBearer)
             {
-                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+                return new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation.OperationID);
             }
 
             var requiresIdempotencyKey = ReferenceEquals(operation, ClientHttpOperationCatalog.AcceptVisitInvite) ||
@@ -443,14 +442,14 @@ namespace IHomeland.Client.Infrastructure.Http
             if (requiresIdempotencyKey != !string.IsNullOrEmpty(idempotencyKey) ||
                 (requiresIdempotencyKey && !IsValidIdempotencyKey(idempotencyKey)))
             {
-                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+                return new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation.OperationID);
             }
 
             var requiresBoundPath = ReferenceEquals(operation, ClientHttpOperationCatalog.AcceptVisitInvite);
             if (requiresBoundPath != !string.IsNullOrEmpty(requestPath) ||
                 (requiresBoundPath && !IsValidVisitInviteAcceptPath(requestPath)))
             {
-                return new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, operation.OperationID);
+                return new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, operation.OperationID);
             }
 
             return null;
@@ -671,23 +670,23 @@ namespace IHomeland.Client.Infrastructure.Http
         /// <param name="callerToken">调用方取消信号。</param>
         /// <param name="deadlineToken">Operation deadline 信号。</param>
         /// <returns>不会泄漏内部 exception 的 failure kind。</returns>
-        private ClientHttpFailureKind ClassifyCancellation(
+        private ClientGatewayFailureKind ClassifyCancellation(
             CancellationToken callerToken,
             CancellationToken deadlineToken)
         {
             if (callerToken.IsCancellationRequested)
             {
-                return ClientHttpFailureKind.CallerCancelled;
+                return ClientGatewayFailureKind.CallerCancelled;
             }
 
             if (_lifetimeCancellation.IsCancellationRequested)
             {
-                return ClientHttpFailureKind.Stopped;
+                return ClientGatewayFailureKind.Stopped;
             }
 
             return deadlineToken.IsCancellationRequested
-                ? ClientHttpFailureKind.Timeout
-                : ClientHttpFailureKind.Transport;
+                ? ClientGatewayFailureKind.Timeout
+                : ClientGatewayFailureKind.Transport;
         }
 
         /// <summary>

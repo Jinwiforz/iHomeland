@@ -1,10 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Bootstrap;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Configuration;
+using IHomeland.Client.Application.Configuration;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Infrastructure.Http;
 using NUnit.Framework;
 
@@ -23,9 +26,9 @@ namespace IHomeland.Client.Tests.EditMode
         public async Task BootstrapPublishesOnlyCompleteCompatibleSnapshot()
         {
             var api = new FakeHttpApi();
-            var configCompletion = new TaskCompletionSource<ClientHttpResult<ClientBootstrapConfiguration>>(
+            var configCompletion = new TaskCompletionSource<ClientGatewayResult<ClientBootstrapConfiguration>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
-            api.VersionHandler = _ => Task.FromResult(ClientHttpResult<ClientVersionInfo>.Success(
+            api.VersionHandler = _ => Task.FromResult(ClientGatewayResult<ClientVersionInfo>.Success(
                 new ClientVersionInfo(1, "0.1.0", "0.1.0")));
             api.ConfigurationHandler = _ => configCompletion.Task;
             var store = new ClientConfigurationStore();
@@ -35,7 +38,7 @@ namespace IHomeland.Client.Tests.EditMode
             var bootstrap = service.BootstrapAsync(CancellationToken.None);
             Assert.That(api.Calls, Is.EqualTo(new[] { "version", "config" }));
             Assert.That(store.State, Is.EqualTo(ClientConfigurationState.Empty));
-            configCompletion.SetResult(ClientHttpResult<ClientBootstrapConfiguration>.Success(
+            configCompletion.SetResult(ClientGatewayResult<ClientBootstrapConfiguration>.Success(
                 CreateConfiguration()));
 
             var result = await bootstrap;
@@ -51,11 +54,11 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public async Task BootstrapWaiterCancellationDoesNotInterruptActiveBootstrap()
         {
-            var configCompletion = new TaskCompletionSource<ClientHttpResult<ClientBootstrapConfiguration>>(
+            var configCompletion = new TaskCompletionSource<ClientGatewayResult<ClientBootstrapConfiguration>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var api = new FakeHttpApi
             {
-                VersionHandler = _ => Task.FromResult(ClientHttpResult<ClientVersionInfo>.Success(
+                VersionHandler = _ => Task.FromResult(ClientGatewayResult<ClientVersionInfo>.Success(
                     new ClientVersionInfo(1, "0.1.0", "0.1.0"))),
                 ConfigurationHandler = _ => configCompletion.Task,
             };
@@ -70,11 +73,11 @@ namespace IHomeland.Client.Tests.EditMode
                 waiterCancellation.Cancel();
 
                 var cancelled = await waiter;
-                Assert.That(cancelled.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.CallerCancelled));
+                Assert.That(cancelled.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.CallerCancelled));
                 Assert.That(active.IsCompleted, Is.False);
             }
 
-            configCompletion.SetResult(ClientHttpResult<ClientBootstrapConfiguration>.Success(
+            configCompletion.SetResult(ClientGatewayResult<ClientBootstrapConfiguration>.Success(
                 CreateConfiguration()));
             Assert.That((await active).IsSuccess, Is.True);
             Assert.That(api.Calls, Is.EqualTo(new[] { "version", "config" }));
@@ -89,7 +92,7 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var api = new FakeHttpApi
             {
-                VersionHandler = _ => Task.FromResult(ClientHttpResult<ClientVersionInfo>.Success(
+                VersionHandler = _ => Task.FromResult(ClientGatewayResult<ClientVersionInfo>.Success(
                     new ClientVersionInfo(2, "9.0.0", "9.0.0"))),
             };
             var store = new ClientConfigurationStore();
@@ -98,7 +101,7 @@ namespace IHomeland.Client.Tests.EditMode
 
             var result = await service.BootstrapAsync(CancellationToken.None);
 
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
             Assert.That(store.State, Is.EqualTo(ClientConfigurationState.Incompatible));
             Assert.That(api.Calls, Is.EqualTo(new[] { "version" }));
         }
@@ -122,15 +125,15 @@ namespace IHomeland.Client.Tests.EditMode
 
             var first = coordinator.LoginAsync("first-user", "password", CancellationToken.None);
             var second = coordinator.LoginAsync("second-user", "password", CancellationToken.None);
-            secondCompletion.SetResult(ClientHttpResult<ClientAuthentication>.Success(
+            secondCompletion.SetResult(ClientGatewayResult<ClientAuthentication>.Success(
                 CreateAuthentication("account-second", "session-second", "access-second", "refresh-second")));
             var secondResult = await second;
-            firstCompletion.SetResult(ClientHttpResult<ClientAuthentication>.Success(
+            firstCompletion.SetResult(ClientGatewayResult<ClientAuthentication>.Success(
                 CreateAuthentication("account-first", "session-first", "access-first", "refresh-first")));
             var firstResult = await first;
 
             Assert.That(secondResult.IsSuccess, Is.True);
-            Assert.That(firstResult.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(firstResult.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
             Assert.That(coordinator.TryGetCurrent(out var current), Is.True);
             Assert.That(current.Account.AccountID, Is.EqualTo("account-second"));
             Assert.That(current.ToString(), Does.Not.Contain("access-second"));
@@ -143,11 +146,11 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public async Task RefreshIsSingleFlightAndLateCompletionCannotRestoreSession()
         {
-            var refreshCompletion = new TaskCompletionSource<ClientHttpResult<ClientTokenPair>>(
+            var refreshCompletion = new TaskCompletionSource<ClientGatewayResult<ClientTokenPair>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "access", "refresh"))),
                 RefreshHandler = (_, __) => refreshCompletion.Task,
             };
@@ -159,11 +162,11 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(second, Is.SameAs(first));
             Assert.That(api.RefreshCount, Is.EqualTo(1));
             await coordinator.ForgetAsync(CancellationToken.None);
-            refreshCompletion.SetResult(ClientHttpResult<ClientTokenPair>.Success(
+            refreshCompletion.SetResult(ClientGatewayResult<ClientTokenPair>.Success(
                 new ClientTokenPair("new-access", "new-refresh", 3000, 4000)));
 
             var result = await first;
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unauthenticated));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
         }
@@ -175,11 +178,11 @@ namespace IHomeland.Client.Tests.EditMode
         [Test]
         public async Task RefreshWaiterCancellationDoesNotCancelSharedRequest()
         {
-            var refreshCompletion = new TaskCompletionSource<ClientHttpResult<ClientTokenPair>>(
+            var refreshCompletion = new TaskCompletionSource<ClientGatewayResult<ClientTokenPair>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "access", "refresh"))),
                 RefreshHandler = (_, __) => refreshCompletion.Task,
             };
@@ -193,11 +196,11 @@ namespace IHomeland.Client.Tests.EditMode
                 waiterCancellation.Cancel();
 
                 var cancelled = await waiter;
-                Assert.That(cancelled.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.CallerCancelled));
+                Assert.That(cancelled.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.CallerCancelled));
                 Assert.That(active.IsCompleted, Is.False);
             }
 
-            refreshCompletion.SetResult(ClientHttpResult<ClientTokenPair>.Success(
+            refreshCompletion.SetResult(ClientGatewayResult<ClientTokenPair>.Success(
                 new ClientTokenPair("new-access", "new-refresh", 3000, 4000)));
             Assert.That((await active).IsSuccess, Is.True);
             Assert.That(api.RefreshCount, Is.EqualTo(1));
@@ -212,17 +215,17 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "access", "refresh"))),
-                RefreshHandler = (_, __) => Task.FromResult(ClientHttpResult<ClientTokenPair>.Failed(
-                    new ClientHttpFailure(ClientHttpFailureKind.Transport, "refreshSession"))),
+                RefreshHandler = (_, __) => Task.FromResult(ClientGatewayResult<ClientTokenPair>.Failed(
+                    new ClientGatewayFailure(ClientGatewayFailureKind.Transport, "refreshSession"))),
             };
             var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
             await coordinator.LoginAsync("fixture-user", "password", CancellationToken.None);
 
             var result = await coordinator.RefreshAsync(CancellationToken.None);
 
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Transport));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.Transport));
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
         }
@@ -236,22 +239,22 @@ namespace IHomeland.Client.Tests.EditMode
         {
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "access", "refresh"))),
-                LogoutHandler = (_, __) => Task.FromResult(ClientHttpResult<ClientHttpEmpty>.Failed(
-                    new ClientHttpFailure(ClientHttpFailureKind.Timeout, "logoutSession"))),
+                LogoutHandler = (_, __) => Task.FromResult(ClientGatewayResult<ClientGatewayEmpty>.Failed(
+                    new ClientGatewayFailure(ClientGatewayFailureKind.Timeout, "logoutSession"))),
             };
             var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
             await coordinator.LoginAsync("fixture-user", "password", CancellationToken.None);
 
             var result = await coordinator.LogoutAsync(CancellationToken.None);
 
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Timeout));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.Timeout));
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
             var ticket = await coordinator.IssueConnectionTicketAsync(
                 ClientEndpointChannel.TlsTcp,
                 CancellationToken.None);
-            Assert.That(ticket.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(ticket.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
 
             var relogin = await coordinator.LoginAsync(
                 "fixture-user",
@@ -276,10 +279,10 @@ namespace IHomeland.Client.Tests.EditMode
             var clock = new FakeClock(1000);
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "access", "refresh"))),
                 TicketHandler = (_, channel, __) => Task.FromResult(
-                    ClientHttpResult<ClientConnectionTicket>.Success(new ClientConnectionTicket(
+                    ClientGatewayResult<ClientConnectionTicket>.Success(new ClientConnectionTicket(
                         "opaque-ticket",
                         new ClientEndpoint(channel, "game.example.invalid", 4433),
                         new[] { ClientConnectionScope.Gameplay },
@@ -313,14 +316,14 @@ namespace IHomeland.Client.Tests.EditMode
             string observedAccess = null;
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "expired-access", "refresh"))),
-                RefreshHandler = (_, __) => Task.FromResult(ClientHttpResult<ClientTokenPair>.Success(
+                RefreshHandler = (_, __) => Task.FromResult(ClientGatewayResult<ClientTokenPair>.Success(
                     new ClientTokenPair("fresh-access", "fresh-refresh", 4500, 5000))),
                 TicketHandler = (access, channel, _) =>
                 {
                     observedAccess = access;
-                    return Task.FromResult(ClientHttpResult<ClientConnectionTicket>.Success(
+                    return Task.FromResult(ClientGatewayResult<ClientConnectionTicket>.Success(
                         new ClientConnectionTicket(
                             "opaque-ticket",
                             new ClientEndpoint(channel, "game.example.invalid", 4433),
@@ -349,7 +352,7 @@ namespace IHomeland.Client.Tests.EditMode
         public async Task VisitInviteAcceptIsGenerationBoundExpiringAndNotRetried()
         {
             var clock = new FakeClock(1000);
-            var acceptCompletion = new TaskCompletionSource<ClientHttpResult<ClientVisitReservation>>(
+            var acceptCompletion = new TaskCompletionSource<ClientGatewayResult<ClientVisitReservation>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var authenticationQueue = new Queue<ClientAuthentication>();
             authenticationQueue.Enqueue(CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"));
@@ -358,7 +361,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, _, _) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
+                    ClientGatewayResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
                 AcceptHandler = (_, _, _, _) =>
                 {
                     acceptCalls++;
@@ -374,33 +377,33 @@ namespace IHomeland.Client.Tests.EditMode
                 "fixture-accept-key-0001",
                 CancellationToken.None);
             await coordinator.LoginAsync("user-b", "password", CancellationToken.None);
-            acceptCompletion.SetResult(ClientHttpResult<ClientVisitReservation>.Success(
+            acceptCompletion.SetResult(ClientGatewayResult<ClientVisitReservation>.Success(
                 new ClientVisitReservation("visit-a", 5, 2000)));
 
             var late = await pending;
             Assert.That(late.IsSuccess, Is.False);
-            Assert.That(late.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(late.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
             Assert.That(acceptCalls, Is.EqualTo(1));
 
             api.AcceptHandler = (_, _, _, _) => Task.FromResult(
-                ClientHttpResult<ClientVisitReservation>.Success(
+                ClientGatewayResult<ClientVisitReservation>.Success(
                     new ClientVisitReservation("visit-a", 5, 1000)));
             var expired = await coordinator.AcceptVisitInviteAsync(
                 request,
                 "fixture-accept-key-0002",
                 CancellationToken.None);
             Assert.That(expired.IsSuccess, Is.False);
-            Assert.That(expired.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.MalformedResponse));
+            Assert.That(expired.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.MalformedResponse));
 
             api.AcceptHandler = (_, _, _, _) => Task.FromResult(
-                ClientHttpResult<ClientVisitReservation>.Failed(
-                    new ClientHttpFailure(ClientHttpFailureKind.Transport, "acceptVisitInvite")));
+                ClientGatewayResult<ClientVisitReservation>.Failed(
+                    new ClientGatewayFailure(ClientGatewayFailureKind.Transport, "acceptVisitInvite")));
             var unknown = await coordinator.AcceptVisitInviteAsync(
                 request,
                 "fixture-accept-key-0003",
                 CancellationToken.None);
             Assert.That(unknown.IsSuccess, Is.False);
-            Assert.That(unknown.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.Transport));
+            Assert.That(unknown.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.Transport));
             Assert.That(acceptCalls, Is.EqualTo(1));
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Authenticated));
         }
@@ -422,10 +425,10 @@ namespace IHomeland.Client.Tests.EditMode
                 2000);
             var api = new FakeHttpApi
             {
-                LoginHandler = (_, __, ___) => Task.FromResult(ClientHttpResult<ClientAuthentication>.Success(
+                LoginHandler = (_, __, ___) => Task.FromResult(ClientGatewayResult<ClientAuthentication>.Success(
                     CreateAuthentication("account", "session", "access", "refresh"))),
                 AdmissionHandler = (_, __, ___, ____) => Task.FromResult(
-                    ClientHttpResult<ClientWorldAdmission>.Success(admission)),
+                    ClientGatewayResult<ClientWorldAdmission>.Success(admission)),
             };
             var coordinator = await CreateCoordinatorAsync(api, clock);
             var login = await coordinator.LoginAsync("fixture-user", "password", CancellationToken.None);
@@ -469,7 +472,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, _, _) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"))),
             };
             var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
@@ -503,7 +506,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, _, _) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account-a", "session-a", "access-a", "refresh-a"))),
             };
             var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
@@ -532,7 +535,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, _, _) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
+                    ClientGatewayResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
             };
             var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
             var first = await coordinator.LoginAsync("user-a", "password", CancellationToken.None);
@@ -570,7 +573,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account", "session", "access", "refresh"))),
             };
             var coordinator = await CreateCoordinatorAsync(
@@ -604,13 +607,13 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account", "session", "access", "refresh"))),
                 LogoutHandler = (_, __) =>
                 {
                     logoutCount++;
-                    return Task.FromResult(ClientHttpResult<ClientHttpEmpty>.Success(
-                        new ClientHttpEmpty()));
+                    return Task.FromResult(ClientGatewayResult<ClientGatewayEmpty>.Success(
+                        new ClientGatewayEmpty()));
                 },
             };
             var coordinator = await CreateCoordinatorAsync(
@@ -623,7 +626,7 @@ namespace IHomeland.Client.Tests.EditMode
                 "password",
                 CancellationToken.None);
 
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.SecureStorage));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.SecureStorage));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
             Assert.That(secureStore.GetRecord(), Is.Null);
             Assert.That(logoutCount, Is.EqualTo(1));
@@ -640,10 +643,10 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account", "session", "access", "refresh"))),
                 LogoutHandler = (_, __) => Task.FromResult(
-                    ClientHttpResult<ClientHttpEmpty>.Success(new ClientHttpEmpty())),
+                    ClientGatewayResult<ClientGatewayEmpty>.Success(new ClientGatewayEmpty())),
             };
             var coordinator = await CreateCoordinatorAsync(
                 api,
@@ -657,7 +660,7 @@ namespace IHomeland.Client.Tests.EditMode
 
             Assert.That(
                 result.Failure.Kind,
-                Is.EqualTo(ClientHttpFailureKind.SecureStorageProfileInUse));
+                Is.EqualTo(ClientGatewayFailureKind.SecureStorageProfileInUse));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
         }
 
@@ -669,10 +672,10 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account", "session", "access", "refresh"))),
                 RefreshHandler = (_, __) => Task.FromResult(
-                    ClientHttpResult<ClientTokenPair>.Success(
+                    ClientGatewayResult<ClientTokenPair>.Success(
                         new ClientTokenPair("access-new", "refresh-new", 4500, 5000))),
             };
             var coordinator = await CreateCoordinatorAsync(
@@ -684,7 +687,7 @@ namespace IHomeland.Client.Tests.EditMode
 
             var result = await coordinator.RefreshAsync(CancellationToken.None);
 
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.SecureStorage));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.SecureStorage));
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
             Assert.That(secureStore.GetRecord(), Is.Null);
@@ -699,10 +702,10 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account", "session", "access", "refresh"))),
                 LogoutHandler = (_, __) => Task.FromResult(
-                    ClientHttpResult<ClientHttpEmpty>.Success(new ClientHttpEmpty())),
+                    ClientGatewayResult<ClientGatewayEmpty>.Success(new ClientGatewayEmpty())),
             };
             var coordinator = await CreateCoordinatorAsync(
                 api,
@@ -713,7 +716,7 @@ namespace IHomeland.Client.Tests.EditMode
 
             var result = await coordinator.LogoutAsync(CancellationToken.None);
 
-            Assert.That(result.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.SecureStorage));
+            Assert.That(result.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.SecureStorage));
             Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Unresolved));
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
         }
@@ -726,7 +729,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(
+                    ClientGatewayResult<ClientAuthentication>.Success(
                         CreateAuthentication("account", "session", "access", "refresh"))),
             };
             var coordinator = await CreateCoordinatorAsync(
@@ -745,11 +748,47 @@ namespace IHomeland.Client.Tests.EditMode
             Assert.That(coordinator.TryGetCurrent(out _), Is.False);
         }
 
+        /// <summary>验证停止立即撤销current generation，且迟到refresh不能恢复Session或产生第二次失效通知。</summary>
+        [Test]
+        public async Task Stop_RejectsLateRefreshAndPublishesSingleInvalidation()
+        {
+            var refreshCompletion = new TaskCompletionSource<ClientGatewayResult<ClientTokenPair>>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var api = new FakeHttpApi
+            {
+                LoginHandler = (_, __, ___) => Task.FromResult(
+                    ClientGatewayResult<ClientAuthentication>.Success(
+                        CreateAuthentication("account", "session", "access", "refresh"))),
+                RefreshHandler = (_, __) => refreshCompletion.Task,
+            };
+            var coordinator = await CreateCoordinatorAsync(api, new FakeClock(1000));
+            var login = await coordinator.LoginAsync("user", "password", CancellationToken.None);
+            var invalidated = new List<long>();
+            coordinator.Invalidated += invalidated.Add;
+
+            var refresh = coordinator.RefreshAsync(CancellationToken.None);
+            await coordinator.StopAsync(CancellationToken.None);
+
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Stopped));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+            Assert.That(invalidated, Has.Count.EqualTo(1));
+            Assert.That(invalidated[0], Is.GreaterThan(login.Value.Generation));
+
+            refreshCompletion.SetResult(ClientGatewayResult<ClientTokenPair>.Success(
+                new ClientTokenPair("late-access", "late-refresh", 3000, 4000)));
+            var late = await refresh;
+
+            Assert.That(late.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
+            Assert.That(coordinator.State, Is.EqualTo(ClientSessionOwnerState.Stopped));
+            Assert.That(coordinator.TryGetCurrent(out _), Is.False);
+            Assert.That(invalidated, Has.Count.EqualTo(1));
+        }
+
         /// <summary>验证旧refresh晚到不能覆盖后发login已经持久化的新lineage。</summary>
         [Test]
         public async Task NewLogin_WinsAgainstLateRefreshPersistence()
         {
-            var refreshCompletion = new TaskCompletionSource<ClientHttpResult<ClientTokenPair>>(
+            var refreshCompletion = new TaskCompletionSource<ClientGatewayResult<ClientTokenPair>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var authenticationQueue = new Queue<ClientAuthentication>();
             authenticationQueue.Enqueue(
@@ -760,7 +799,7 @@ namespace IHomeland.Client.Tests.EditMode
             var api = new FakeHttpApi
             {
                 LoginHandler = (_, __, ___) => Task.FromResult(
-                    ClientHttpResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
+                    ClientGatewayResult<ClientAuthentication>.Success(authenticationQueue.Dequeue())),
                 RefreshHandler = (_, __) => refreshCompletion.Task,
             };
             var coordinator = await CreateCoordinatorAsync(
@@ -774,12 +813,12 @@ namespace IHomeland.Client.Tests.EditMode
                 "user-b",
                 "password",
                 CancellationToken.None);
-            refreshCompletion.SetResult(ClientHttpResult<ClientTokenPair>.Success(
+            refreshCompletion.SetResult(ClientGatewayResult<ClientTokenPair>.Success(
                 new ClientTokenPair("access-late", "refresh-late", 4500, 5000)));
             var late = await refresh;
 
             Assert.That(relogin.IsSuccess, Is.True);
-            Assert.That(late.Failure.Kind, Is.EqualTo(ClientHttpFailureKind.LocalPolicy));
+            Assert.That(late.Failure.Kind, Is.EqualTo(ClientGatewayFailureKind.LocalPolicy));
             Assert.That(coordinator.TryGetCurrent(out var current), Is.True);
             Assert.That(current.Session.SessionID, Is.EqualTo("session-b"));
             Assert.That(secureStore.GetRecord().RefreshToken, Is.EqualTo("refresh-b"));
@@ -865,9 +904,9 @@ namespace IHomeland.Client.Tests.EditMode
         /// 创建异步认证 completion，便于控制并发返回顺序。
         /// </summary>
         /// <returns>异步连续执行的认证结果 completion。</returns>
-        private static TaskCompletionSource<ClientHttpResult<ClientAuthentication>> NewAuthenticationCompletion()
+        private static TaskCompletionSource<ClientGatewayResult<ClientAuthentication>> NewAuthenticationCompletion()
         {
-            return new TaskCompletionSource<ClientHttpResult<ClientAuthentication>>(
+            return new TaskCompletionSource<ClientGatewayResult<ClientAuthentication>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
@@ -894,7 +933,7 @@ namespace IHomeland.Client.Tests.EditMode
         /// <summary>
         /// 为 application tests 提供十个强类型 operation 的确定性替换边界。
         /// </summary>
-        private sealed class FakeHttpApi : IClientHttpApi
+        private sealed class FakeHttpApi : IClientBootstrapGateway, IClientSessionGateway
         {
             /// <summary>
             /// 保存按发生顺序记录的 operation 名称。
@@ -909,52 +948,52 @@ namespace IHomeland.Client.Tests.EditMode
             /// <summary>
             /// 获取或设置 version 响应函数。
             /// </summary>
-            internal Func<CancellationToken, Task<ClientHttpResult<ClientVersionInfo>>> VersionHandler { get; set; }
+            internal Func<CancellationToken, Task<ClientGatewayResult<ClientVersionInfo>>> VersionHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 config 响应函数。
             /// </summary>
-            internal Func<CancellationToken, Task<ClientHttpResult<ClientBootstrapConfiguration>>> ConfigurationHandler { get; set; }
+            internal Func<CancellationToken, Task<ClientGatewayResult<ClientBootstrapConfiguration>>> ConfigurationHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 login 响应函数。
             /// </summary>
-            internal Func<string, string, CancellationToken, Task<ClientHttpResult<ClientAuthentication>>> LoginHandler { get; set; }
+            internal Func<string, string, CancellationToken, Task<ClientGatewayResult<ClientAuthentication>>> LoginHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 refresh 响应函数。
             /// </summary>
-            internal Func<string, CancellationToken, Task<ClientHttpResult<ClientTokenPair>>> RefreshHandler { get; set; }
+            internal Func<string, CancellationToken, Task<ClientGatewayResult<ClientTokenPair>>> RefreshHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 logout 响应函数。
             /// </summary>
-            internal Func<string, CancellationToken, Task<ClientHttpResult<ClientHttpEmpty>>> LogoutHandler { get; set; }
+            internal Func<string, CancellationToken, Task<ClientGatewayResult<ClientGatewayEmpty>>> LogoutHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 ticket 响应函数。
             /// </summary>
-            internal Func<string, ClientEndpointChannel, CancellationToken, Task<ClientHttpResult<ClientConnectionTicket>>> TicketHandler { get; set; }
+            internal Func<string, ClientEndpointChannel, CancellationToken, Task<ClientGatewayResult<ClientConnectionTicket>>> TicketHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 invite accept 响应函数。
             /// </summary>
-            internal Func<string, ClientVisitInviteAcceptRequest, string, CancellationToken, Task<ClientHttpResult<ClientVisitReservation>>> AcceptHandler { get; set; }
+            internal Func<string, ClientVisitInviteAcceptRequest, string, CancellationToken, Task<ClientGatewayResult<ClientVisitReservation>>> AcceptHandler { get; set; }
 
             /// <summary>
             /// 获取或设置 world admission 响应函数。
             /// </summary>
-            internal Func<string, ClientWorldAdmissionTarget, string, CancellationToken, Task<ClientHttpResult<ClientWorldAdmission>>> AdmissionHandler { get; set; }
+            internal Func<string, ClientWorldAdmissionTarget, string, CancellationToken, Task<ClientGatewayResult<ClientWorldAdmission>>> AdmissionHandler { get; set; }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientVersionInfo>> GetVersionAsync(CancellationToken cancellationToken)
             {
                 Calls.Add("version");
                 return VersionHandler(cancellationToken);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
+            public Task<ClientGatewayResult<ClientBootstrapConfiguration>> GetBootstrapConfigurationAsync(
                 CancellationToken cancellationToken)
             {
                 Calls.Add("config");
@@ -962,87 +1001,101 @@ namespace IHomeland.Client.Tests.EditMode
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> RegisterAsync(
-                string username,
-                string password,
-                string displayName,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> RegisterAsync(ClientRegisterGatewayRequest request, CancellationToken cancellationToken)
             {
-                return Task.FromResult(ClientHttpResult<ClientAuthentication>.Failed(
-                    new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "registerAccount")));
+                return Task.FromResult(ClientGatewayResult<ClientAuthentication>.Failed(
+                    new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, "registerAccount")));
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientAuthentication>> LoginAsync(
-                string username,
-                string password,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientAuthentication>> LoginAsync(ClientLoginGatewayRequest request, CancellationToken cancellationToken)
             {
-                return LoginHandler(username, password, cancellationToken);
+                return LoginHandler(
+                    request.Username,
+                    Take(request.Password, ClientCredentialPurpose.LoginPassword),
+                    cancellationToken);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientTokenPair>> RefreshAsync(
-                string refreshToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientTokenPair>> RefreshAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 RefreshCount++;
-                return RefreshHandler(refreshToken, cancellationToken);
+                return RefreshHandler(
+                    Take(request.Credential, ClientCredentialPurpose.RefreshSession),
+                    cancellationToken);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientHttpEmpty>> LogoutAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientGatewayEmpty>> LogoutAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
                 return LogoutHandler != null
-                    ? LogoutHandler(accessToken, cancellationToken)
-                    : Task.FromResult(ClientHttpResult<ClientHttpEmpty>.Success(
-                        new ClientHttpEmpty()));
+                    ? LogoutHandler(
+                        Take(
+                            request.Credential,
+                            ClientCredentialPurpose.HttpAuthorization),
+                        cancellationToken)
+                    : Task.FromResult(ClientGatewayResult<ClientGatewayEmpty>.Success(
+                        new ClientGatewayEmpty()));
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientConnectionTicket>> IssueConnectionTicketAsync(
-                string accessToken,
-                ClientEndpointChannel channel,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientConnectionTicket>> IssueConnectionTicketAsync(ClientConnectionTicketGatewayRequest request, CancellationToken cancellationToken)
             {
-                return TicketHandler(accessToken, channel, cancellationToken);
+                return TicketHandler(
+                    Take(
+                        request.Authorization,
+                        ClientCredentialPurpose.HttpAuthorization),
+                    request.Channel,
+                    cancellationToken);
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(
-                string accessToken,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldBootstrap>> GetWorldBootstrapAsync(ClientCredentialGatewayRequest request, CancellationToken cancellationToken)
             {
-                return Task.FromResult(ClientHttpResult<ClientWorldBootstrap>.Failed(
-                    new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "getWorldBootstrap")));
+                return Task.FromResult(ClientGatewayResult<ClientWorldBootstrap>.Failed(
+                    new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, "getWorldBootstrap")));
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientVisitReservation>> AcceptVisitInviteAsync(
-                string accessToken,
-                ClientVisitInviteAcceptRequest request,
-                string idempotencyKey,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientVisitReservation>> AcceptVisitInviteAsync(ClientAcceptVisitInviteGatewayRequest request, CancellationToken cancellationToken)
             {
                 return AcceptHandler != null
-                    ? AcceptHandler(accessToken, request, idempotencyKey, cancellationToken)
-                    : Task.FromResult(ClientHttpResult<ClientVisitReservation>.Failed(
-                        new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "acceptVisitInvite")));
+                    ? AcceptHandler(
+                        Take(
+                            request.Authorization,
+                            ClientCredentialPurpose.HttpAuthorization),
+                        request.Invite,
+                        request.IdempotencyKey,
+                        cancellationToken)
+                    : Task.FromResult(ClientGatewayResult<ClientVisitReservation>.Failed(
+                        new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, "acceptVisitInvite")));
             }
 
             /// <inheritdoc />
-            public Task<ClientHttpResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(
-                string accessToken,
-                ClientWorldAdmissionTarget target,
-                string idempotencyKey,
-                CancellationToken cancellationToken)
+            public Task<ClientGatewayResult<ClientWorldAdmission>> IssueWorldAdmissionAsync(ClientWorldAdmissionGatewayRequest request, CancellationToken cancellationToken)
             {
                 return AdmissionHandler != null
-                    ? AdmissionHandler(accessToken, target, idempotencyKey, cancellationToken)
-                    : Task.FromResult(ClientHttpResult<ClientWorldAdmission>.Failed(
-                        new ClientHttpFailure(ClientHttpFailureKind.LocalPolicy, "issueWorldAdmission")));
+                    ? AdmissionHandler(
+                        Take(
+                            request.Authorization,
+                            ClientCredentialPurpose.HttpAuthorization),
+                        request.Target,
+                        request.IdempotencyKey,
+                        cancellationToken)
+                    : Task.FromResult(ClientGatewayResult<ClientWorldAdmission>.Failed(
+                        new ClientGatewayFailure(ClientGatewayFailureKind.LocalPolicy, "issueWorldAdmission")));
+            }
+
+            /// <summary>从 gateway request 验证并取得测试 credential。</summary>
+            /// <param name="lease">待验证的单次 lease。</param>
+            /// <param name="purpose">当前 operation 要求的 purpose。</param>
+            /// <returns>测试 handler 需要的 opaque credential。</returns>
+            private static string Take(
+                ClientCredentialLease lease,
+                ClientCredentialPurpose purpose)
+            {
+                Assert.That(lease.TryTake(purpose, out var credential), Is.True);
+                return credential;
             }
         }
     }

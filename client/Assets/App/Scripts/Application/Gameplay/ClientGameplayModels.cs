@@ -1,5 +1,5 @@
 using System;
-using IHomeland.Protocol.Common.V1;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Application.Gameplay
 {
@@ -163,7 +163,10 @@ namespace IHomeland.Client.Application.Gameplay
         where T : class
     {
         /// <summary>创建不可变 operation 结果。</summary>
-        private ClientGameplayResult(T value, ErrorPayload serverError, ClientGameplayFailureKind? failure)
+        private ClientGameplayResult(
+            T value,
+            ClientServerError serverError,
+            ClientGameplayFailureKind? failure)
         {
             Value = value;
             ServerError = serverError;
@@ -174,7 +177,7 @@ namespace IHomeland.Client.Application.Gameplay
         internal T Value { get; }
 
         /// <summary>获取结构有效的服务端 ErrorPayload；其他结果为空。</summary>
-        internal ErrorPayload ServerError { get; }
+        internal ClientServerError ServerError { get; }
 
         /// <summary>获取稳定本地失败；成功或服务端拒绝时为空。</summary>
         internal ClientGameplayFailureKind? Failure { get; }
@@ -196,7 +199,7 @@ namespace IHomeland.Client.Application.Gameplay
         /// <summary>创建服务端拒绝结果。</summary>
         /// <param name="error">结构有效的公开 ErrorPayload。</param>
         /// <returns>只包含服务端错误的结果。</returns>
-        internal static ClientGameplayResult<T> Rejected(ErrorPayload error)
+        internal static ClientGameplayResult<T> Rejected(ClientServerError error)
         {
             return new ClientGameplayResult<T>(
                 null,

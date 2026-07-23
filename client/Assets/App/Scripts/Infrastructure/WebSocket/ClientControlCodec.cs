@@ -31,7 +31,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
         /// <param name="expectedSequence">当前连接下一条必须精确匹配的 sequence。</param>
         /// <returns>已通过 route 精确解析的不可变 PUSH。</returns>
         /// <exception cref="ClientControlProtocolException">任一冻结协议边界不满足时抛出。</exception>
-        internal ClientControlPush Decode(
+        internal ClientControlWirePush Decode(
             byte[] frame,
             int length,
             int maximumFrameBytes,
@@ -96,7 +96,7 @@ namespace IHomeland.Client.Infrastructure.WebSocket
                 throw new ClientControlProtocolException(ClientControlProtocolFailureKind.MalformedPayload);
             }
 
-            return new ClientControlPush(
+            return new ClientControlWirePush(
                 route,
                 envelope.Sequence,
                 envelope.TimestampMs,

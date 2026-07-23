@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using Google.Protobuf;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 using IHomeland.Protocol.Common.V1;
 
@@ -203,7 +205,7 @@ namespace IHomeland.Client.Infrastructure.Tcp
         /// <summary>解码共享 ErrorPayload 并拒绝不可信 message key/correlation 漂移。</summary>
         /// <param name="envelope">已验证为 Error 的 envelope。</param>
         /// <returns>结构有效的公开错误 payload。</returns>
-        internal ErrorPayload DecodeError(ClientGameplayEnvelope envelope)
+        internal ClientServerError DecodeError(ClientGameplayEnvelope envelope)
         {
             if (envelope == null || envelope.Kind != MessageKind.Error)
             {
@@ -245,7 +247,24 @@ namespace IHomeland.Client.Infrastructure.Tcp
                     throw new ClientGameplayProtocolException("Gameplay ErrorPayload correlation 不一致。");
                 }
 
-                return error;
+                var details = new List<ClientErrorDetail>(error.Details.Count);
+                foreach (var detail in error.Details)
+                {
+                    details.Add(new ClientErrorDetail(detail.Field, detail.Reason));
+                }
+
+                return new ClientServerError(
+                    checked((int)error.Code),
+                    knownError.Category,
+                    error.MessageKey,
+                    error.RequestId.Length == 0
+                        ? string.Empty
+                        : Convert.ToBase64String(error.RequestId.ToByteArray()),
+                    error.Retryable,
+                    error.RetryAfterMs == 0
+                        ? (TimeSpan?)null
+                        : TimeSpan.FromMilliseconds(error.RetryAfterMs),
+                    details);
             }
             catch (InvalidProtocolBufferException parseError)
             {

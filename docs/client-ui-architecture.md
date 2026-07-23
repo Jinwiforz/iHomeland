@@ -61,6 +61,35 @@ Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具
 - Login、Shell、WorldVisit 与 ConnectionLost 使用 UI Toolkit，WorldHud 使用 scene-bound uGUI。产品 UXML/USS、Prefab 与 Scene 必须由 Unity Editor 创建并以直接引用接线，不得把资源路径加入 route definition。
 - 首期只使用一个项目 USS 表达 color、typography、spacing、focus、disabled、loading 与 error 语义；当前不引入 Theme manager、Resources 或 Addressables。
 
+## Router、Experience 与 View 的拆分
+
+```text
+Application owners/snapshots
+          ↓
+ClientPersonalWorldExperience
+  ├─ PersonalWorldPresentationState
+  ├─ PersonalWorldViewStateProjector
+  ├─ PersonalWorldFailureMapper
+  ├─ SessionInvalidationPresentationTransaction
+  ├─ RecoveryPresentationTransaction
+  └─ PersonalWorldSceneTransaction
+          ↓ semantic routes/actions
+ClientUiRouter
+  ├─ ClientUiTransitionPlanner
+  ├─ ClientUiTransitionQueue
+  ├─ ClientUiRouteState
+  ├─ ClientUiInteractionResolver
+  └─ ClientUiTransitionTransaction
+          ↓
+Runtime Hosts / Views / Scene adapters
+```
+
+Router 和 Experience 位于无 Unity 的 `IHomeland.Client.Presentation`。Router 只提交 route/navigation 事实；Host transaction 执行 initialize、bind、show、focus、rollback 与 dispose。Experience 只订阅 Application owner、派生不可变 View State 并暴露语义 action；它不能访问 HTTP、socket、generated message 或 credential。
+
+`ClientPersonalWorldUiToolkitView` 是 Runtime 中唯一产品根 View owner，但 Login、Shell、WorldVisit、ConnectionLost 的节点校验与渲染分别交给页面 adapter。页面 adapter 可以保存选择高亮等页面局部状态，不得复制 Session、PersonalWorld、VisitSession 或连接状态。uGUI HUD 仍由独立 Host 绑定，同一逻辑 screen 不允许出现第二个 active owner。
+
+Scene/route 收敛采用 transaction generation gate：旧 Scene 先失效，加载与 HUD 提交必须同时匹配 presentation、target 和 scene generation；Session invalidation 的优先级高于 recovery，最终只收敛到 Login。页面 route token 只取消页面等待，不能撤销已提交的 Application command。
+
 ## 状态边界
 
 - Account/PersonalWorld/VisitSession Services 保存业务事实。

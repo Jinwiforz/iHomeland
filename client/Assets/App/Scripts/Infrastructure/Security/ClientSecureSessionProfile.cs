@@ -1,5 +1,5 @@
-using System;
-using IHomeland.Client.Core.Configuration;
+﻿using System;
+using IHomeland.Client.Application.Configuration;
 
 namespace IHomeland.Client.Infrastructure.Security
 {

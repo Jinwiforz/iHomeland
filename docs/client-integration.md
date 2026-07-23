@@ -118,6 +118,69 @@ C3资格按 `automatic -> soak -> prepare-manual -> finalize` 继续同一run：
 
 真实双客户端验收派生的四个独立 change 同日归档：stale VisitSession Open 由服务端按 current assignment 显式收敛；CreateInvite 只接受非 Owner 的 active Player；撤销、到期、接受或 terminal close 通过既有 message 2100 发布精确 `RETIRED` tombstone；静默 gameplay connection 由 TLS/TCP heartbeat 保活，断线后只允许玩家显式提交有界 single-flight 恢复。上述路径都不使用延时猜测、tick 修正或客户端伪造权威状态。
 
+## 重构后的四条阅读路径
+
+下面的路径用于定位职责，不表示调用方可以跨层取得 concrete owner。
+
+### 启动
+
+```text
+AppBootstrap
+  -> AppComposition
+  -> seven module Compositions
+  -> RuntimeQualificationComposition
+  -> AppRoot.Initialize
+  -> AppLifetime ordered participants
+```
+
+从 `Core/Bootstrap/AppBootstrap.cs` 开始，只在需要理解某个 module 的对象创建时进入对应 Composition。业务初始化语义分别阅读 Application owner/flow；不要从 `AppCompositionResult` 反向搜索全部服务。
+
+### 登录并进入 OwnWorld
+
+```text
+Login page adapter
+  -> ClientPersonalWorldExperience.LoginAsync
+  -> SessionCoordinator / LoginSessionFlow
+  -> ClientControlChannelPort
+  -> EnterOwnWorldFlow
+  -> PersonalWorldProjectionReducer
+  -> WorldAdmissionCoordinator commit target generation
+  -> PersonalWorldSceneTransaction
+  -> ClientUiRouter commit Scene/HUD routes
+```
+
+页面只提交语义 action。Session、channel、world target、Scene 与 route 各自在自己的 owner 内提交，Experience 只在 generation 全部匹配后发布 View State。
+
+### 接受访问邀请
+
+```text
+WorldVisit page adapter selected inbox identity
+  -> ClientPersonalWorldExperience.AcceptInviteAsync
+  -> EnterVisitWorldFlow
+  -> HTTPS reservation/admission ports
+  -> Gameplay JOIN typed port
+  -> VisitSessionProjectionReducer + PersonalWorldProjectionReducer
+  -> WorldAdmissionCoordinator commit Visiting
+  -> Scene/route transaction
+```
+
+`VisitSessionID`、`InviteID` 与 expected revision 来自 current inbox，不提供自由协议输入；迟到响应必须同时通过 Session 和 target generation gate。
+
+### 断线恢复
+
+```text
+channel terminal event
+  -> ClientConnectionRecoveryCoordinator
+  -> ConnectionRecoveryStateMachine + plan builder
+  -> RecoverControlFlow or RecoverGameplayFlow
+  -> EnterOwnWorldFlow or ReconnectWorldTargetFlow
+  -> authoritative projections
+  -> RecoveryPresentationTransaction
+  -> new Scene/HUD generation commit
+```
+
+Control 与 Gameplay 独立恢复但共享唯一 Session authority。Session invalidation 会抢占恢复并通过 `SessionInvalidationPresentationTransaction` 清除 target、Scene 和 route，最终只保留 Login。
+
 ## 错误映射
 
 客户端必须区分：

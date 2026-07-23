@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using IHomeland.Client.Application.Session;
+using IHomeland.Client.Application.Contracts;
 using IHomeland.Client.Infrastructure.Http;
 
 namespace IHomeland.Client.Infrastructure.Security

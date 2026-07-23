@@ -1,14 +1,12 @@
 using System;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using IHomeland.Client.Application.Gameplay;
+using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Application.Session;
-using IHomeland.Client.Core.Lifetime;
-using IHomeland.Client.Infrastructure.Http;
-using IHomeland.Client.Infrastructure.Tcp;
-using IHomeland.Protocol.Visit.V1;
-using IHomeland.Protocol.World.V1;
+using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Application.World
 {
@@ -17,7 +15,8 @@ namespace IHomeland.Client.Application.World
     /// </summary>
     internal sealed class WorldAdmissionCoordinator :
         IAppLifetimeParticipant,
-        IClientConnectionRecoveryOperations
+        IClientConnectionRecoveryOperations,
+        IWorldAdmissionFlowCommitPort
     {
         /// <summary>限制失败 target 已线性化关闭后的 I/O owner 观察窗口。</summary>
         private static readonly TimeSpan FailedConnectionCleanupTimeout = TimeSpan.FromSeconds(5);
@@ -32,13 +31,33 @@ namespace IHomeland.Client.Application.World
         private readonly IClientClock _clock;
 
         /// <summary>拥有 TLS/TCP connection、admission credential 与首帧约束。</summary>
-        private readonly ClientGameplayChannel _gameplayChannel;
+        private readonly IClientGameplayChannelPort _gameplayChannel;
 
         /// <summary>拥有 primary/current PersonalWorld projection。</summary>
         private readonly PersonalWorldService _personalWorldService;
 
         /// <summary>拥有 VisitSession projection、commands 与 safe-return callback。</summary>
         private readonly VisitSessionService _visitSessionService;
+
+        /// <summary>纯计算合法 target 迁移与双 generation 提交 gate。</summary>
+        private readonly WorldTargetStateMachine _stateMachine =
+            new WorldTargetStateMachine();
+
+        /// <summary>统一 HTTP、Gameplay 与 recovery 的低敏失败分类。</summary>
+        private readonly WorldAdmissionFailureMapper _failureMapper =
+            new WorldAdmissionFailureMapper();
+
+        /// <summary>OwnWorld bootstrap/admission/connect use case。</summary>
+        private readonly EnterOwnWorldFlow _enterOwnWorldFlow;
+
+        /// <summary>Accept/JOIN VisitWorld use case。</summary>
+        private readonly EnterVisitWorldFlow _enterVisitWorldFlow;
+
+        /// <summary>Visitor leave 与 OwnWorld return use case。</summary>
+        private readonly ReturnToOwnWorldFlow _returnToOwnWorldFlow;
+
+        /// <summary>Visitor target admission/RECONNECT 恢复 use case。</summary>
+        private readonly ReconnectWorldTargetFlow _reconnectWorldTargetFlow;
 
         /// <summary>停止时撤销当前 flow 的根信号。</summary>
         private CancellationTokenSource _lifetimeCancellation;
@@ -69,7 +88,7 @@ namespace IHomeland.Client.Application.World
         internal WorldAdmissionCoordinator(
             SessionCoordinator sessionCoordinator,
             IClientClock clock,
-            ClientGameplayChannel gameplayChannel,
+            IClientGameplayChannelPort gameplayChannel,
             PersonalWorldService personalWorldService,
             VisitSessionService visitSessionService)
         {
@@ -78,6 +97,31 @@ namespace IHomeland.Client.Application.World
             _gameplayChannel = gameplayChannel ?? throw new ArgumentNullException(nameof(gameplayChannel));
             _personalWorldService = personalWorldService ?? throw new ArgumentNullException(nameof(personalWorldService));
             _visitSessionService = visitSessionService ?? throw new ArgumentNullException(nameof(visitSessionService));
+            _enterOwnWorldFlow = new EnterOwnWorldFlow(
+                _sessionCoordinator,
+                _gameplayChannel,
+                _personalWorldService,
+                _visitSessionService,
+                _failureMapper);
+            _enterVisitWorldFlow = new EnterVisitWorldFlow(
+                _sessionCoordinator,
+                _gameplayChannel,
+                _personalWorldService,
+                _visitSessionService,
+                _failureMapper);
+            _returnToOwnWorldFlow = new ReturnToOwnWorldFlow(
+                _gameplayChannel,
+                _personalWorldService,
+                _visitSessionService,
+                _enterOwnWorldFlow,
+                _failureMapper);
+            _reconnectWorldTargetFlow = new ReconnectWorldTargetFlow(
+                _clock,
+                _sessionCoordinator,
+                _gameplayChannel,
+                _personalWorldService,
+                _visitSessionService,
+                _failureMapper);
         }
 
         /// <summary>在低敏 flow snapshot 已提交后通知消费者。</summary>
@@ -143,7 +187,10 @@ namespace IHomeland.Client.Application.World
                 return false;
             }
 
-            return await ResolveOwnWorldAsync(intent, cancellationToken);
+            return await _enterOwnWorldFlow.ExecuteAsync(
+                this,
+                intent,
+                cancellationToken);
         }
 
         /// <summary>接受指定 inbox invite 并加入其 VisitSession。</summary>
@@ -172,122 +219,11 @@ namespace IHomeland.Client.Application.World
                 return false;
             }
 
-            var acceptKey = NewIdempotencyKey();
-            var admissionKey = NewIdempotencyKey();
-            using (var linked = Link(cancellationToken))
-            {
-                var accept = await _sessionCoordinator.AcceptVisitInviteAsync(
-                    new ClientVisitInviteAcceptRequest(
-                        invite.VisitSessionID,
-                        invite.InviteID,
-                        checked((long)invite.CreatedRevision)),
-                    acceptKey,
-                    linked.Token);
-                if (!IsCurrentAfterAuthorizedOperation(intent, accept.IsSuccess))
-                {
-                    return false;
-                }
-
-                if (!accept.IsSuccess)
-                {
-                    if (IsAuthoritativeInviteUnavailable(accept))
-                    {
-                        _visitSessionService.RetireRejectedInvite(
-                            invite.VisitSessionID,
-                            invite.InviteID);
-                        FinishJoinFailure(intent, ClientWorldFlowFailure.InviteUnavailable);
-                    }
-                    else
-                    {
-                        FinishJoinFailure(intent, MapAcceptFailure(accept));
-                    }
-
-                    return false;
-                }
-
-                var reservation = accept.Value;
-                if (!string.Equals(reservation.VisitSessionID, invite.VisitSessionID, StringComparison.Ordinal) ||
-                    reservation.Revision <= checked((long)invite.CreatedRevision))
-                {
-                    FinishJoinFailure(intent, ClientWorldFlowFailure.Protocol);
-                    return false;
-                }
-
-                // 成功 accept 已权威证明 pending invite 被消费；后续 admission/JOIN 即使失败也不能
-                // 让旧 identity 重新出现在可接受 inbox。Commit-unknown 路径不会到达这里。
-                _visitSessionService.RetireAcceptedInvite(invite.VisitSessionID, invite.InviteID);
-
-                var admission = await _sessionCoordinator.IssueWorldAdmissionAsync(
-                    ClientWorldAdmissionTarget.VisitWorld(reservation.VisitSessionID),
-                    admissionKey,
-                    linked.Token);
-                if (!IsCurrentAfterAuthorizedOperation(intent, admission.IsSuccess) ||
-                    !admission.IsSuccess ||
-                    admission.Value.Role != ClientWorldRole.Visitor ||
-                    admission.Value.Purpose != ClientWorldAdmissionPurpose.Join)
-                {
-                    FinishJoinFailure(intent, MapHttpFailure(admission));
-                    return false;
-                }
-
-                try
-                {
-                    await _gameplayChannel.CloseAsync(linked.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    FinishJoinFailure(intent, ClientWorldFlowFailure.CallerCancelled);
-                    return false;
-                }
-                _personalWorldService.ClearCurrentTarget();
-                if (!IsCurrent(intent) ||
-                    !await _gameplayChannel.ConnectAsync(admission.Value, linked.Token))
-                {
-                    BeginReturningAfterJoinFailure(intent, ClientWorldFlowFailure.Transport);
-                    return false;
-                }
-
-                _visitSessionService.SetTargetRole(ClientVisitRole.Visitor, reservation.VisitSessionID);
-                var join = await _gameplayChannel.JoinPendingVisitAsync(
-                    admission.Value.VisitRevision,
-                    linked.Token);
-                if (!IsCurrent(intent) || !join.IsSuccess || join.Value.Result?.Snapshot == null)
-                {
-                    BeginReturningAfterJoinFailure(intent, MapGameplayFailure(join));
-                    return false;
-                }
-
-                var visitApply = _visitSessionService.ApplySnapshot(
-                    join.Value.Result.Snapshot,
-                    ClientVisitRole.Visitor);
-                if (!IsApplySuccess(visitApply))
-                {
-                    BeginReturningAfterJoinFailure(intent, ClientWorldFlowFailure.Protocol);
-                    return false;
-                }
-
-                var world = await _gameplayChannel.SendAsync(
-                    ClientGameplayCatalog.WorldSnapshot,
-                    new WorldSnapshotRequest(),
-                    linked.Token);
-                var worldApplied = world.IsSuccess && world.Value.Snapshot != null &&
-                                   IsApplySuccess(_personalWorldService.ApplyWorldSnapshot(world.Value.Snapshot));
-                var currentWorld = _personalWorldService.Snapshot.CurrentWorld;
-                var currentVisit = _visitSessionService.Snapshot.Current;
-                if (!IsCurrent(intent) || !worldApplied ||
-                    currentWorld?.Assignment == null || currentVisit == null ||
-                    !currentWorld.Assignment.HasSameIdentity(currentVisit.Assignment))
-                {
-                    BeginReturningAfterJoinFailure(intent, MapGameplayFailure(world));
-                    return false;
-                }
-
-                return FinishSuccess(
-                    intent,
-                    ClientWorldFlowState.Visiting,
-                    reservation.VisitSessionID,
-                    null);
-            }
+            return await _enterVisitWorldFlow.ExecuteAsync(
+                this,
+                intent,
+                invite,
+                cancellationToken);
         }
 
         /// <summary>让 current Visitor 主动离开并进入 own-world 返回流程。</summary>
@@ -305,28 +241,10 @@ namespace IHomeland.Client.Application.World
                 return false;
             }
 
-            using (var linked = Link(cancellationToken))
-            {
-                var leave = await _visitSessionService.LeaveAsync(linked.Token);
-                if (!IsCurrent(intent) || !leave.IsSuccess)
-                {
-                    FinishReturnFailure(intent, MapGameplayFailure(leave));
-                    return false;
-                }
-
-                try
-                {
-                    await _gameplayChannel.CloseAsync(linked.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    FinishReturnFailure(intent, ClientWorldFlowFailure.CallerCancelled);
-                    return false;
-                }
-                _visitSessionService.ClearTargetRole();
-                _personalWorldService.ClearCurrentTarget();
-                return await ResolveOwnWorldAsync(intent, linked.Token);
-            }
+            return await _returnToOwnWorldFlow.ExecuteAsync(
+                this,
+                intent,
+                cancellationToken);
         }
 
         /// <summary>显式重试已关闭 Visitor target 后失败的 own-world 返回。</summary>
@@ -334,28 +252,35 @@ namespace IHomeland.Client.Application.World
         /// <returns>已重新进入 OwnWorld 时返回 true。</returns>
         internal async Task<bool> RetryReturnAsync(CancellationToken cancellationToken)
         {
-            WorldFlowIntent intent;
+            WorldTargetIntentLease intent;
             lock (_sync)
             {
-                if (_snapshot.State != ClientWorldFlowState.ReturningOwnWorld || _intentActive ||
-                    !TryCaptureSessionGeneration(out var sessionGeneration))
+                if (!TryCaptureSessionGeneration(out var sessionGeneration) ||
+                    !_stateMachine.TryBegin(
+                        _snapshot,
+                        _intentActive,
+                        ClientWorldFlowState.ReturningOwnWorld,
+                        ClientWorldFlowState.ReturningOwnWorld,
+                        sessionGeneration,
+                        out intent))
                 {
                     return false;
                 }
 
                 _intentActive = true;
-                var generation = _snapshot.TargetGeneration + 1;
-                intent = new WorldFlowIntent(generation, sessionGeneration);
                 SetSnapshotLocked(
                     ClientWorldFlowState.ReturningOwnWorld,
-                    generation,
+                    intent.TargetGeneration,
                     ClientWorldFlowFailure.None,
                     null,
                     _snapshot.SafeReturn);
             }
 
             Notify(Snapshot);
-            return await ResolveOwnWorldAsync(intent, cancellationToken);
+            return await _enterOwnWorldFlow.ExecuteAsync(
+                this,
+                intent,
+                cancellationToken);
         }
 
         /// <inheritdoc />
@@ -401,19 +326,16 @@ namespace IHomeland.Client.Application.World
                 CancellationToken cancellationToken)
         {
             if (descriptor == null ||
-                _gameplayChannel.Snapshot.State != ClientGameplayChannelState.Active)
+                !_gameplayChannel.Snapshot.Active)
             {
                 return ClientConnectionRecoveryResultKind.Policy;
             }
 
-            var world = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.WorldSnapshot,
-                new WorldSnapshotRequest(),
-                cancellationToken);
-            if (!world.IsSuccess || world.Value.Snapshot == null ||
-                !IsApplySuccess(_personalWorldService.ApplyWorldSnapshot(world.Value.Snapshot)))
+            var world = await _gameplayChannel.GetWorldSnapshotAsync(cancellationToken);
+            if (!world.IsSuccess || world.Value == null ||
+                !IsApplySuccess(_personalWorldService.ApplyWorldSnapshot(world.Value)))
             {
-                return MapRecoveryGameplayFailure(world);
+                return _failureMapper.MapRecoveryGameplay(world);
             }
 
             if (string.IsNullOrEmpty(descriptor.VisitSessionID))
@@ -423,17 +345,16 @@ namespace IHomeland.Client.Application.World
                     : ClientConnectionRecoveryResultKind.Protocol;
             }
 
-            var visit = await _gameplayChannel.SendAsync(
-                ClientGameplayCatalog.VisitSnapshot,
-                new VisitSnapshotRequest(),
-                cancellationToken);
             var role = descriptor.Kind == ClientRecoveryTargetKind.Visiting
                 ? ClientVisitRole.Visitor
                 : ClientVisitRole.Owner;
-            if (!visit.IsSuccess || visit.Value.Snapshot == null ||
-                !IsApplySuccess(_visitSessionService.ApplySnapshot(visit.Value.Snapshot, role)))
+            var visit = await _gameplayChannel.GetVisitSnapshotAsync(
+                role,
+                cancellationToken);
+            if (!visit.IsSuccess || visit.Value == null ||
+                !IsApplySuccess(_visitSessionService.ApplySnapshot(visit.Value, role)))
             {
-                return MapRecoveryGameplayFailure(visit);
+                return _failureMapper.MapRecoveryGameplay(visit);
             }
 
             return ValidateDescriptorAgainstCurrent(descriptor, requireNewTargetGeneration: false)
@@ -463,7 +384,11 @@ namespace IHomeland.Client.Application.World
 
             return currentDescriptor.Kind == ClientRecoveryTargetKind.OwnWorld
                 ? await RecoverOwnWorldAsync(intent, currentDescriptor, cancellationToken)
-                : await RecoverVisitAsync(intent, currentDescriptor, cancellationToken);
+                : await _reconnectWorldTargetFlow.ExecuteAsync(
+                    this,
+                    intent,
+                    currentDescriptor,
+                    cancellationToken);
         }
 
         /// <inheritdoc />
@@ -489,17 +414,18 @@ namespace IHomeland.Client.Application.World
         /// <param name="cancellationToken">恢复owner总deadline与停止信号。</param>
         /// <returns>世界与可选Owner VisitSession均完成权威收敛后的稳定结果。</returns>
         private async Task<ClientConnectionRecoveryResultKind> RecoverOwnWorldAsync(
-            WorldFlowIntent intent,
+            WorldTargetIntentLease intent,
             ClientRecoveryTargetDescriptor descriptor,
             CancellationToken cancellationToken)
         {
-            var recovered = await ResolveOwnWorldAsync(
+            var recovered = await _enterOwnWorldFlow.ExecuteAsync(
+                this,
                 intent,
                 cancellationToken,
                 descriptor);
             if (!recovered)
             {
-                return MapRecoveryFlowFailure(Snapshot.Failure);
+                return _failureMapper.MapRecoveryFlow(Snapshot.Failure);
             }
 
             if (!string.IsNullOrEmpty(descriptor.VisitSessionID))
@@ -522,95 +448,6 @@ namespace IHomeland.Client.Application.World
         }
 
         /// <summary>使用新admission与唯一typed RECONNECT首帧恢复Visitor membership。</summary>
-        private async Task<ClientConnectionRecoveryResultKind> RecoverVisitAsync(
-            WorldFlowIntent intent,
-            ClientRecoveryTargetDescriptor descriptor,
-            CancellationToken cancellationToken)
-        {
-            using (var linked = Link(cancellationToken))
-            {
-                if (_clock.UtcNowMilliseconds >= descriptor.ReconnectExpiresAtMilliseconds)
-                {
-                    return await ReturnOwnAfterRecoveryRejectionAsync(intent, linked.Token);
-                }
-
-                var admission = await _sessionCoordinator.IssueWorldAdmissionAsync(
-                    ClientWorldAdmissionTarget.VisitWorld(descriptor.VisitSessionID),
-                    NewIdempotencyKey(),
-                    linked.Token);
-                if (!IsCurrentAfterAuthorizedOperation(intent, admission.IsSuccess) ||
-                    !admission.IsSuccess ||
-                    admission.Value.Role != ClientWorldRole.Visitor ||
-                    admission.Value.Purpose != ClientWorldAdmissionPurpose.Reconnect)
-                {
-                    return await FinishRecoveryAdmissionFailureAsync(
-                        intent,
-                        admission,
-                        linked.Token);
-                }
-
-                if (!await _gameplayChannel.ConnectAsync(admission.Value, linked.Token))
-                {
-                    FinishFailure(
-                        intent,
-                        ClientWorldFlowState.ConnectionLost,
-                        ClientWorldFlowFailure.Transport,
-                        null);
-                    return ClientConnectionRecoveryResultKind.Transport;
-                }
-
-                _visitSessionService.SetTargetRole(
-                    ClientVisitRole.Visitor,
-                    descriptor.VisitSessionID);
-                var reconnect = await _gameplayChannel.ReconnectPendingVisitAsync(
-                    admission.Value.VisitRevision,
-                    linked.Token);
-                if (!IsCurrent(intent) || !reconnect.IsSuccess ||
-                    reconnect.Value.Result?.Snapshot == null ||
-                    !IsApplySuccess(_visitSessionService.ApplySnapshot(
-                        reconnect.Value.Result.Snapshot,
-                        ClientVisitRole.Visitor)))
-                {
-                    return await FinishReconnectFailureAsync(intent, reconnect, linked.Token);
-                }
-
-                var world = await _gameplayChannel.SendAsync(
-                    ClientGameplayCatalog.WorldSnapshot,
-                    new WorldSnapshotRequest(),
-                    linked.Token);
-                if (!IsCurrent(intent) || !world.IsSuccess || world.Value.Snapshot == null ||
-                    !IsApplySuccess(_personalWorldService.ApplyWorldSnapshot(world.Value.Snapshot)))
-                {
-                    await CloseFailedConnectionAsync();
-                    FinishFailure(
-                        intent,
-                        ClientWorldFlowState.ConnectionLost,
-                        MapGameplayFailure(world),
-                        null);
-                    return MapRecoveryGameplayFailure(world);
-                }
-
-                if (!ValidateRecoveredProjection(descriptor))
-                {
-                    await CloseFailedConnectionAsync();
-                    FinishFailure(
-                        intent,
-                        ClientWorldFlowState.ConnectionLost,
-                        ClientWorldFlowFailure.Protocol,
-                        null);
-                    return ClientConnectionRecoveryResultKind.Protocol;
-                }
-
-                return FinishSuccess(
-                    intent,
-                    ClientWorldFlowState.Visiting,
-                    descriptor.VisitSessionID,
-                    null)
-                    ? ClientConnectionRecoveryResultKind.Succeeded
-                    : ClientConnectionRecoveryResultKind.Protocol;
-            }
-        }
-
         /// <summary>
         /// 在唯一 Session lineage 失效后原子退役当前 world intent、target 与业务投影。
         /// </summary>
@@ -689,140 +526,6 @@ namespace IHomeland.Client.Application.World
             return Task.CompletedTask;
         }
 
-        /// <summary>执行 bootstrap、own admission、connect 与完整 snapshot 流程。</summary>
-        /// <param name="intent">已取得的唯一 flow intent。</param>
-        /// <param name="cancellationToken">Caller 或嵌套 return 信号。</param>
-        /// <param name="recoveryTarget">Gameplay恢复时冻结的target；普通进入OwnWorld时为空。</param>
-        /// <returns>进入 OwnWorld 时返回 true。</returns>
-        private async Task<bool> ResolveOwnWorldAsync(
-            WorldFlowIntent intent,
-            CancellationToken cancellationToken,
-            ClientRecoveryTargetDescriptor recoveryTarget = null)
-        {
-            using (var linked = Link(cancellationToken))
-            {
-                var bootstrap = await _sessionCoordinator.GetWorldBootstrapAsync(linked.Token);
-                if (!IsCurrentAfterAuthorizedOperation(intent, bootstrap.IsSuccess) ||
-                    !bootstrap.IsSuccess ||
-                    !IsApplySuccess(_personalWorldService.ApplyBootstrap(bootstrap.Value)))
-                {
-                    FinishOwnFailure(intent, MapHttpFailure(bootstrap));
-                    return false;
-                }
-
-                var admission = await _sessionCoordinator.IssueWorldAdmissionAsync(
-                    ClientWorldAdmissionTarget.OwnWorld(),
-                    NewIdempotencyKey(),
-                    linked.Token);
-                if (!IsCurrentAfterAuthorizedOperation(intent, admission.IsSuccess) ||
-                    !admission.IsSuccess ||
-                    admission.Value.Role != ClientWorldRole.Owner ||
-                    admission.Value.Purpose != ClientWorldAdmissionPurpose.OwnWorld)
-                {
-                    FinishOwnFailure(intent, MapHttpFailure(admission));
-                    return false;
-                }
-
-                var channelState = _gameplayChannel.Snapshot.State;
-                if (channelState == ClientGameplayChannelState.Active ||
-                    channelState == ClientGameplayChannelState.Pending ||
-                    channelState == ClientGameplayChannelState.Connecting)
-                {
-                    try
-                    {
-                        await _gameplayChannel.CloseAsync(linked.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        FinishOwnFailure(intent, ClientWorldFlowFailure.CallerCancelled);
-                        return false;
-                    }
-                }
-
-                if (!IsCurrent(intent) ||
-                    !await _gameplayChannel.ConnectAsync(admission.Value, linked.Token))
-                {
-                    FinishOwnFailure(intent, ClientWorldFlowFailure.Transport);
-                    return false;
-                }
-
-                _personalWorldService.ClearCurrentTarget();
-                _visitSessionService.SetTargetRole(ClientVisitRole.Owner, null);
-                var world = await _gameplayChannel.SendAsync(
-                    ClientGameplayCatalog.WorldSnapshot,
-                    new WorldSnapshotRequest(),
-                    linked.Token);
-                var worldApplied = world.IsSuccess && world.Value.Snapshot != null &&
-                                   IsApplySuccess(_personalWorldService.ApplyWorldSnapshot(world.Value.Snapshot));
-                if (!IsCurrent(intent) || !worldApplied ||
-                    _personalWorldService.Snapshot.CurrentWorld?.Assignment == null)
-                {
-                    await CloseFailedConnectionAsync();
-                    FinishOwnFailure(intent, MapGameplayFailure(world));
-                    return false;
-                }
-
-                if (recoveryTarget != null &&
-                    !string.IsNullOrEmpty(recoveryTarget.VisitSessionID))
-                {
-                    var visit = await _gameplayChannel.SendAsync(
-                        ClientGameplayCatalog.VisitSnapshot,
-                        new VisitSnapshotRequest(),
-                        linked.Token);
-                    if (visit?.ServerError != null &&
-                        IsAuthoritativeRecoveryUnavailable(visit.ServerError.Code))
-                    {
-                        // 该错误帧之后server会关闭携带旧访问target的connection。先退役旧投影，
-                        // 再在同一intent/deadline内建立一次不携带VisitSession的OwnWorld连接；
-                        // 这是由权威拒绝触发的单次状态迁移，不是按时间或次数猜测的重试。
-                        _visitSessionService.ClearTargetRole();
-                        _personalWorldService.ClearCurrentTarget();
-                        await CloseFailedConnectionAsync();
-                        return await ResolveOwnWorldAsync(
-                            intent,
-                            linked.Token,
-                            recoveryTarget: null);
-                    }
-                    else
-                    {
-                        var visitApplied = visit.IsSuccess && visit.Value.Snapshot != null &&
-                                           IsApplySuccess(_visitSessionService.ApplySnapshot(
-                                               visit.Value.Snapshot,
-                                               ClientVisitRole.Owner));
-                        var currentVisit = _visitSessionService.Snapshot.Current;
-                        var currentWorld = _personalWorldService.Snapshot.CurrentWorld;
-                        if (!IsCurrent(intent) || !visitApplied || currentVisit == null ||
-                            !string.Equals(
-                                currentVisit.VisitSessionID,
-                                recoveryTarget.VisitSessionID,
-                                StringComparison.Ordinal) ||
-                            currentVisit.Revision < recoveryTarget.VisitRevision ||
-                            currentWorld?.Assignment == null ||
-                            !currentVisit.Assignment.HasSameIdentity(currentWorld.Assignment))
-                        {
-                            await CloseFailedConnectionAsync();
-                            _visitSessionService.ClearTargetRole();
-                            _personalWorldService.ClearCurrentTarget();
-                            FinishOwnFailure(
-                                intent,
-                                visit.IsSuccess
-                                    ? ClientWorldFlowFailure.Protocol
-                                    : MapGameplayFailure(visit));
-                            return false;
-                        }
-                    }
-                }
-
-                var committed = FinishSuccess(intent, ClientWorldFlowState.OwnWorld, null, null);
-                if (!committed)
-                {
-                    await CloseFailedConnectionAsync();
-                }
-
-                return committed;
-            }
-        }
-
         /// <summary>关闭已建立但未提交 target 的 gameplay generation，并有界观察全部 owner 退出。</summary>
         /// <returns>Connection 已进入不可发送状态，或观察 deadline 到期时完成。</returns>
         private async Task CloseFailedConnectionAsync()
@@ -852,24 +555,28 @@ namespace IHomeland.Client.Application.World
             ClientWorldFlowState next,
             string visitSessionID,
             ClientSafeReturnProjection safeReturn,
-            out WorldFlowIntent intent)
+            out WorldTargetIntentLease intent)
         {
+            intent = null;
             ClientWorldFlowSnapshot committed;
             lock (_sync)
             {
-                if (_snapshot.State != required || _intentActive ||
-                    !TryCaptureSessionGeneration(out var sessionGeneration))
+                if (!TryCaptureSessionGeneration(out var sessionGeneration) ||
+                    !_stateMachine.TryBegin(
+                        _snapshot,
+                        _intentActive,
+                        required,
+                        next,
+                        sessionGeneration,
+                        out intent))
                 {
-                    intent = null;
                     return false;
                 }
 
                 _intentActive = true;
-                var targetGeneration = _snapshot.TargetGeneration + 1;
-                intent = new WorldFlowIntent(targetGeneration, sessionGeneration);
                 SetSnapshotLocked(
                     next,
-                    targetGeneration,
+                    intent.TargetGeneration,
                     ClientWorldFlowFailure.None,
                     visitSessionID,
                     safeReturn);
@@ -887,7 +594,7 @@ namespace IHomeland.Client.Application.World
         /// <param name="safeReturn">可选权威返回投影。</param>
         /// <returns>Intent 仍 current 且已提交时返回 true。</returns>
         private bool FinishSuccess(
-            WorldFlowIntent intent,
+            WorldTargetIntentLease intent,
             ClientWorldFlowState state,
             string visitSessionID,
             ClientSafeReturnProjection safeReturn)
@@ -927,7 +634,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>在 join 尚未关闭 own target 时恢复 OwnWorld。</summary>
         /// <param name="intent">Join intent。</param>
         /// <param name="failure">低敏失败。</param>
-        private void FinishJoinFailure(WorldFlowIntent intent, ClientWorldFlowFailure failure)
+        private void FinishJoinFailure(WorldTargetIntentLease intent, ClientWorldFlowFailure failure)
         {
             FinishFailure(intent, ClientWorldFlowState.OwnWorld, failure, null);
         }
@@ -962,7 +669,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>在旧 target 已关闭后保持 ReturningOwnWorld，绝不复活 Visiting。</summary>
         /// <param name="intent">Join intent。</param>
         /// <param name="failure">低敏失败。</param>
-        private void BeginReturningAfterJoinFailure(WorldFlowIntent intent, ClientWorldFlowFailure failure)
+        private void BeginReturningAfterJoinFailure(WorldTargetIntentLease intent, ClientWorldFlowFailure failure)
         {
             _visitSessionService.ClearTargetRole();
             FinishFailure(intent, ClientWorldFlowState.ReturningOwnWorld, failure, null);
@@ -971,7 +678,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>提交 own-world 解析失败；return flow 保持 ReturningOwnWorld。</summary>
         /// <param name="intent">Own-world intent。</param>
         /// <param name="failure">低敏失败。</param>
-        private void FinishOwnFailure(WorldFlowIntent intent, ClientWorldFlowFailure failure)
+        private void FinishOwnFailure(WorldTargetIntentLease intent, ClientWorldFlowFailure failure)
         {
             var current = Snapshot.State;
             var state = current == ClientWorldFlowState.ResolvingOwnWorld
@@ -985,7 +692,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>提交 return mutation/解析失败。</summary>
         /// <param name="intent">Return intent。</param>
         /// <param name="failure">低敏失败。</param>
-        private void FinishReturnFailure(WorldFlowIntent intent, ClientWorldFlowFailure failure)
+        private void FinishReturnFailure(WorldTargetIntentLease intent, ClientWorldFlowFailure failure)
         {
             FinishFailure(intent, ClientWorldFlowState.ReturningOwnWorld, failure, Snapshot.SafeReturn);
         }
@@ -996,7 +703,7 @@ namespace IHomeland.Client.Application.World
         /// <param name="failure">低敏失败。</param>
         /// <param name="safeReturn">可选权威返回投影。</param>
         private void FinishFailure(
-            WorldFlowIntent intent,
+            WorldTargetIntentLease intent,
             ClientWorldFlowState state,
             ClientWorldFlowFailure failure,
             ClientSafeReturnProjection safeReturn)
@@ -1055,7 +762,7 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>让 terminal world target 在 gameplay 非预期断开时立即进入不可交互失败态。</summary>
         /// <param name="channel">Gameplay owner 发布的 final Ready snapshot 与低敏关闭原因。</param>
-        private void OnGameplayUnexpectedDisconnect(ClientGameplayChannelSnapshot channel)
+        private void OnGameplayUnexpectedDisconnect(ClientGameplayHealthSnapshot channel)
         {
             RefreshRecoveryTargetIfStable();
             ClientWorldFlowSnapshot committed;
@@ -1071,7 +778,7 @@ namespace IHomeland.Client.Application.World
                 SetSnapshotLocked(
                     ClientWorldFlowState.ConnectionLost,
                     _snapshot.TargetGeneration + 1,
-                    channel.CloseReason == ClientGameplayCloseReason.Protocol
+                    channel.DisconnectKind == ClientGameplayDisconnectKind.Protocol
                         ? ClientWorldFlowFailure.Protocol
                         : ClientWorldFlowFailure.Transport,
                     null,
@@ -1143,7 +850,7 @@ namespace IHomeland.Client.Application.World
             if (!_sessionCoordinator.TryGetCurrent(out var session) ||
                 !TryBuildRecoveryTarget(
                     flow.State,
-                    new WorldFlowIntent(flow.TargetGeneration, session.Generation),
+                    new WorldTargetIntentLease(flow.TargetGeneration, session.Generation),
                     flow.VisitSessionID,
                     out var refreshed))
             {
@@ -1184,7 +891,10 @@ namespace IHomeland.Client.Application.World
                     await _gameplayChannel.CloseAsync(linked.Token);
                     _visitSessionService.ClearTargetRole();
                     _personalWorldService.ClearCurrentTarget();
-                    await ResolveOwnWorldAsync(intent, linked.Token);
+                    await _enterOwnWorldFlow.ExecuteAsync(
+                        this,
+                        intent,
+                        linked.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -1200,7 +910,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>从已提交projection构造无credential恢复descriptor。</summary>
         private bool TryBuildRecoveryTarget(
             ClientWorldFlowState state,
-            WorldFlowIntent intent,
+            WorldTargetIntentLease intent,
             string visitSessionID,
             out ClientRecoveryTargetDescriptor descriptor)
         {
@@ -1340,8 +1050,8 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>把权威Visitor失效转换为安全返回OwnWorld。</summary>
         private async Task<ClientConnectionRecoveryResultKind> FinishRecoveryAdmissionFailureAsync(
-            WorldFlowIntent intent,
-            ClientHttpResult<ClientWorldAdmissionLease> result,
+            WorldTargetIntentLease intent,
+            ClientGatewayResult<ClientWorldAdmissionLease> result,
             CancellationToken cancellationToken)
         {
             if (result?.ServerError != null &&
@@ -1350,7 +1060,7 @@ namespace IHomeland.Client.Application.World
                 return await ReturnOwnAfterRecoveryRejectionAsync(intent, cancellationToken);
             }
 
-            var mapped = MapRecoveryHttpFailure(result);
+            var mapped = _failureMapper.MapRecoveryGateway(result);
             FinishFailure(
                 intent,
                 ClientWorldFlowState.ConnectionLost,
@@ -1363,8 +1073,8 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>处理RECONNECT首帧的拒绝、断开或协议失败。</summary>
         private async Task<ClientConnectionRecoveryResultKind> FinishReconnectFailureAsync(
-            WorldFlowIntent intent,
-            ClientGameplayResult<VisitReconnectResponse> result,
+            WorldTargetIntentLease intent,
+            ClientGameplayResult<ClientVisitSessionProjection> result,
             CancellationToken cancellationToken)
         {
             await CloseFailedConnectionAsync();
@@ -1374,7 +1084,7 @@ namespace IHomeland.Client.Application.World
                 return await ReturnOwnAfterRecoveryRejectionAsync(intent, cancellationToken);
             }
 
-            var mapped = MapRecoveryGameplayFailure(result);
+            var mapped = _failureMapper.MapRecoveryGameplay(result);
             FinishFailure(
                 intent,
                 ClientWorldFlowState.ConnectionLost,
@@ -1387,7 +1097,7 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>退役无效Visitor target并在同一恢复预算内进入OwnWorld。</summary>
         private async Task<ClientConnectionRecoveryResultKind> ReturnOwnAfterRecoveryRejectionAsync(
-            WorldFlowIntent intent,
+            WorldTargetIntentLease intent,
             CancellationToken cancellationToken)
         {
             _visitSessionService.ClearTargetRole();
@@ -1399,7 +1109,7 @@ namespace IHomeland.Client.Application.World
                 null);
             if (!await RetryReturnAsync(cancellationToken))
             {
-                return MapRecoveryFlowFailure(Snapshot.Failure);
+                return _failureMapper.MapRecoveryFlow(Snapshot.Failure);
             }
 
             return ClientConnectionRecoveryResultKind.ReturningOwnWorld;
@@ -1410,74 +1120,6 @@ namespace IHomeland.Client.Application.World
         {
             return code == 2002 || code == 2100 || code == 2104 || code == 2107 ||
                    code == 2108 || code == 2109;
-        }
-
-        /// <summary>将HTTP恢复失败收敛为固定低敏分类。</summary>
-        private static ClientConnectionRecoveryResultKind MapRecoveryHttpFailure<T>(
-            ClientHttpResult<T> result)
-        {
-            if (result?.ServerError != null)
-            {
-                return result.ServerError.Category == ClientServerErrorCategory.Authentication
-                    ? ClientConnectionRecoveryResultKind.Authentication
-                    : ClientConnectionRecoveryResultKind.Policy;
-            }
-
-            switch (result?.Failure?.Kind)
-            {
-                case ClientHttpFailureKind.Timeout:
-                case ClientHttpFailureKind.Transport:
-                    return ClientConnectionRecoveryResultKind.Transport;
-                case ClientHttpFailureKind.MalformedResponse:
-                case ClientHttpFailureKind.ResponseTooLarge:
-                    return ClientConnectionRecoveryResultKind.Protocol;
-                case ClientHttpFailureKind.Stopped:
-                    return ClientConnectionRecoveryResultKind.Stopped;
-                default:
-                    return ClientConnectionRecoveryResultKind.Policy;
-            }
-        }
-
-        /// <summary>将gameplay恢复失败收敛为固定低敏分类。</summary>
-        private static ClientConnectionRecoveryResultKind MapRecoveryGameplayFailure<T>(
-            ClientGameplayResult<T> result)
-            where T : class
-        {
-            if (result?.ServerError != null)
-            {
-                return result.ServerError.Code >= 100 && result.ServerError.Code <= 103
-                    ? ClientConnectionRecoveryResultKind.Authentication
-                    : ClientConnectionRecoveryResultKind.Policy;
-            }
-
-            switch (result?.Failure)
-            {
-                case ClientGameplayFailureKind.Timeout:
-                case ClientGameplayFailureKind.Disconnected:
-                    return ClientConnectionRecoveryResultKind.Transport;
-                case ClientGameplayFailureKind.Protocol:
-                    return ClientConnectionRecoveryResultKind.Protocol;
-                default:
-                    return ClientConnectionRecoveryResultKind.Policy;
-            }
-        }
-
-        /// <summary>将world flow失败收敛为恢复分类。</summary>
-        private static ClientConnectionRecoveryResultKind MapRecoveryFlowFailure(
-            ClientWorldFlowFailure failure)
-        {
-            switch (failure)
-            {
-                case ClientWorldFlowFailure.Transport:
-                case ClientWorldFlowFailure.CommitUnknown:
-                    return ClientConnectionRecoveryResultKind.Transport;
-                case ClientWorldFlowFailure.Protocol:
-                    return ClientConnectionRecoveryResultKind.Protocol;
-                case ClientWorldFlowFailure.Stopped:
-                    return ClientConnectionRecoveryResultKind.Stopped;
-                default:
-                    return ClientConnectionRecoveryResultKind.Policy;
-            }
         }
 
         /// <summary>查找当前未过期 invite inbox 条目。</summary>
@@ -1518,6 +1160,120 @@ namespace IHomeland.Client.Application.World
             }
         }
 
+        /// <inheritdoc />
+        CancellationTokenSource IWorldAdmissionFlowCommitPort.LinkFlow(
+            CancellationToken caller)
+        {
+            return Link(caller);
+        }
+
+        /// <inheritdoc />
+        bool IWorldAdmissionFlowCommitPort.IsFlowCurrent(
+            WorldTargetIntentLease intent)
+        {
+            return IsCurrent(intent);
+        }
+
+        /// <inheritdoc />
+        bool IWorldAdmissionFlowCommitPort.IsFlowCurrentAfterAuthorizedOperation(
+            WorldTargetIntentLease intent,
+            bool operationSucceeded)
+        {
+            return IsCurrentAfterAuthorizedOperation(intent, operationSucceeded);
+        }
+
+        /// <inheritdoc />
+        void IWorldAdmissionFlowCommitPort.FinishOwnFlowFailure(
+            WorldTargetIntentLease intent,
+            ClientWorldFlowFailure failure)
+        {
+            FinishOwnFailure(intent, failure);
+        }
+
+        /// <inheritdoc />
+        void IWorldAdmissionFlowCommitPort.FinishJoinFlowFailure(
+            WorldTargetIntentLease intent,
+            ClientWorldFlowFailure failure)
+        {
+            FinishJoinFailure(intent, failure);
+        }
+
+        /// <inheritdoc />
+        void IWorldAdmissionFlowCommitPort.BeginReturningFlow(
+            WorldTargetIntentLease intent,
+            ClientWorldFlowFailure failure)
+        {
+            BeginReturningAfterJoinFailure(intent, failure);
+        }
+
+        /// <inheritdoc />
+        void IWorldAdmissionFlowCommitPort.FinishReturnFlowFailure(
+            WorldTargetIntentLease intent,
+            ClientWorldFlowFailure failure)
+        {
+            FinishReturnFailure(intent, failure);
+        }
+
+        /// <inheritdoc />
+        bool IWorldAdmissionFlowCommitPort.FinishFlowSuccess(
+            WorldTargetIntentLease intent,
+            ClientWorldFlowState state,
+            string visitSessionID)
+        {
+            return FinishSuccess(intent, state, visitSessionID, null);
+        }
+
+        /// <inheritdoc />
+        Task IWorldAdmissionFlowCommitPort.CloseFailedFlowConnectionAsync()
+        {
+            return CloseFailedConnectionAsync();
+        }
+
+        /// <inheritdoc />
+        void IWorldAdmissionFlowCommitPort.FinishRecoveryFlowFailure(
+            WorldTargetIntentLease intent,
+            ClientWorldFlowState state,
+            ClientWorldFlowFailure failure)
+        {
+            FinishFailure(intent, state, failure, null);
+        }
+
+        /// <inheritdoc />
+        bool IWorldAdmissionFlowCommitPort.ValidateRecoveredProjection(
+            ClientRecoveryTargetDescriptor descriptor)
+        {
+            return ValidateRecoveredProjection(descriptor);
+        }
+
+        /// <inheritdoc />
+        Task<ClientConnectionRecoveryResultKind>
+            IWorldAdmissionFlowCommitPort.HandleRecoveryAdmissionFailureAsync(
+                WorldTargetIntentLease intent,
+                ClientGatewayResult<ClientWorldAdmissionLease> result,
+                CancellationToken cancellationToken)
+        {
+            return FinishRecoveryAdmissionFailureAsync(intent, result, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        Task<ClientConnectionRecoveryResultKind>
+            IWorldAdmissionFlowCommitPort.HandleReconnectFailureAsync(
+                WorldTargetIntentLease intent,
+                ClientGameplayResult<ClientVisitSessionProjection> result,
+                CancellationToken cancellationToken)
+        {
+            return FinishReconnectFailureAsync(intent, result, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        Task<ClientConnectionRecoveryResultKind>
+            IWorldAdmissionFlowCommitPort.ReturnOwnAfterRecoveryRejectionAsync(
+                WorldTargetIntentLease intent,
+                CancellationToken cancellationToken)
+        {
+            return ReturnOwnAfterRecoveryRejectionAsync(intent, cancellationToken);
+        }
+
         /// <summary>捕获 current authenticated session generation。</summary>
         /// <param name="generation">成功时返回 generation。</param>
         /// <returns>Session current 时返回 true。</returns>
@@ -1536,7 +1292,7 @@ namespace IHomeland.Client.Application.World
         /// <summary>同时比较 target 与 session generation。</summary>
         /// <param name="intent">待验证 intent。</param>
         /// <returns>仍 current 时返回 true。</returns>
-        private bool IsCurrent(WorldFlowIntent intent)
+        private bool IsCurrent(WorldTargetIntentLease intent)
         {
             lock (_sync)
             {
@@ -1554,7 +1310,7 @@ namespace IHomeland.Client.Application.World
         /// 校验，不能借此跨账号或跨 lineage 继续 world flow。
         /// </remarks>
         private bool IsCurrentAfterAuthorizedOperation(
-            WorldFlowIntent intent,
+            WorldTargetIntentLease intent,
             bool operationSucceeded)
         {
             if (!operationSucceeded)
@@ -1580,13 +1336,14 @@ namespace IHomeland.Client.Application.World
         /// <summary>在 coordinator 锁内比较 target 与 session generation。</summary>
         /// <param name="intent">待验证 intent。</param>
         /// <returns>仍 current 时返回 true。</returns>
-        private bool IsCurrentLocked(WorldFlowIntent intent)
+        private bool IsCurrentLocked(WorldTargetIntentLease intent)
         {
-            return _snapshot.State != ClientWorldFlowState.Stopped &&
-                   _intentActive &&
-                   _snapshot.TargetGeneration == intent.TargetGeneration &&
-                   TryCaptureSessionGeneration(out var generation) &&
-                   generation == intent.SessionGeneration;
+            return TryCaptureSessionGeneration(out var generation) &&
+                   _stateMachine.CanCommit(
+                       _snapshot,
+                       _intentActive,
+                       intent,
+                       generation);
         }
 
         /// <summary>判断 projection gate 是否允许 flow 继续。</summary>
@@ -1596,106 +1353,6 @@ namespace IHomeland.Client.Application.World
         {
             return result == ClientProjectionApplyResult.Applied ||
                    result == ClientProjectionApplyResult.Duplicate;
-        }
-
-        /// <summary>把 accept 的取消/timeout/transport 映射为 commit-unknown。</summary>
-        /// <param name="result">Accept result。</param>
-        /// <returns>稳定 flow failure。</returns>
-        private static ClientWorldFlowFailure MapAcceptFailure(
-            ClientHttpResult<ClientVisitReservation> result)
-        {
-            if (result?.Failure != null &&
-                (result.Failure.Kind == ClientHttpFailureKind.CallerCancelled ||
-                 result.Failure.Kind == ClientHttpFailureKind.Timeout ||
-                 result.Failure.Kind == ClientHttpFailureKind.Transport))
-            {
-                return ClientWorldFlowFailure.CommitUnknown;
-            }
-
-            return MapHttpFailure(result);
-        }
-
-        /// <summary>识别足以证明指定 invite 已不可接受的服务端确定性拒绝。</summary>
-        /// <param name="result">Accept invite HTTP result。</param>
-        /// <returns>仅在错误码属于冻结退役白名单时返回 true。</returns>
-        private static bool IsAuthoritativeInviteUnavailable(
-            ClientHttpResult<ClientVisitReservation> result)
-        {
-            var code = result?.ServerError?.Code;
-            return code == 101 ||
-                   code == 200 ||
-                   code == 2100 ||
-                   code == 2101 ||
-                   code == 2102 ||
-                   code == 2104 ||
-                   code == 2105;
-        }
-
-        /// <summary>映射任意 HTTP result 为低敏 flow failure。</summary>
-        /// <typeparam name="T">HTTP success value。</typeparam>
-        /// <param name="result">HTTP result。</param>
-        /// <returns>稳定 flow failure。</returns>
-        private static ClientWorldFlowFailure MapHttpFailure<T>(ClientHttpResult<T> result)
-        {
-            if (result == null || result.IsSuccess)
-            {
-                return ClientWorldFlowFailure.Protocol;
-            }
-
-            if (result.ServerError != null)
-            {
-                return ClientWorldFlowFailure.Rejected;
-            }
-
-            return result.Failure.Kind == ClientHttpFailureKind.CallerCancelled
-                ? ClientWorldFlowFailure.CallerCancelled
-                : result.Failure.Kind == ClientHttpFailureKind.MalformedResponse ||
-                  result.Failure.Kind == ClientHttpFailureKind.ResponseTooLarge
-                    ? ClientWorldFlowFailure.Protocol
-                    : result.Failure.Kind == ClientHttpFailureKind.LocalPolicy ||
-                      result.Failure.Kind == ClientHttpFailureKind.SecureStorage ||
-                      result.Failure.Kind == ClientHttpFailureKind.Stopped
-                        ? ClientWorldFlowFailure.Policy
-                        : ClientWorldFlowFailure.Transport;
-        }
-
-        /// <summary>映射任意 gameplay result 为低敏 flow failure。</summary>
-        /// <typeparam name="T">Gameplay response type。</typeparam>
-        /// <param name="result">Gameplay result。</param>
-        /// <returns>稳定 flow failure。</returns>
-        private static ClientWorldFlowFailure MapGameplayFailure<T>(ClientGameplayResult<T> result)
-            where T : class
-        {
-            if (result == null || result.IsSuccess)
-            {
-                return ClientWorldFlowFailure.Protocol;
-            }
-
-            if (result.ServerError != null)
-            {
-                return ClientWorldFlowFailure.Rejected;
-            }
-
-            return result.Failure == ClientGameplayFailureKind.CallerCancelled
-                ? ClientWorldFlowFailure.CallerCancelled
-                : result.Failure == ClientGameplayFailureKind.Protocol
-                    ? ClientWorldFlowFailure.Protocol
-                    : result.Failure == ClientGameplayFailureKind.Policy
-                        ? ClientWorldFlowFailure.Policy
-                        : ClientWorldFlowFailure.Transport;
-        }
-
-        /// <summary>生成 128-bit CSPRNG 且符合 header grammar 的 intent identity。</summary>
-        /// <returns>32 字符小写十六进制 idempotency key。</returns>
-        private static string NewIdempotencyKey()
-        {
-            var bytes = new byte[16];
-            using (var random = RandomNumberGenerator.Create())
-            {
-                random.GetBytes(bytes);
-            }
-
-            return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
         }
 
         /// <summary>在锁内替换低敏 flow snapshot。</summary>
@@ -1726,35 +1383,5 @@ namespace IHomeland.Client.Application.World
             Changed?.Invoke(snapshot);
         }
 
-        /// <summary>保存一个 target/session 双 generation gate。</summary>
-        private sealed class WorldFlowIntent
-        {
-            /// <summary>创建不可变 intent gate。</summary>
-            /// <param name="targetGeneration">本地 target generation。</param>
-            /// <param name="sessionGeneration">Session owner generation。</param>
-            internal WorldFlowIntent(long targetGeneration, long sessionGeneration)
-            {
-                TargetGeneration = targetGeneration;
-                SessionGeneration = sessionGeneration;
-            }
-
-            /// <summary>获取本地 target generation。</summary>
-            internal long TargetGeneration { get; }
-
-            /// <summary>获取 Session owner generation。</summary>
-            internal long SessionGeneration { get; private set; }
-
-            /// <summary>把同一 refresh lineage 的 gate 单调推进到 Session owner 已提交 generation。</summary>
-            /// <param name="generation">不得小于 current gate 的 Session generation。</param>
-            internal void AdvanceSessionGeneration(long generation)
-            {
-                if (generation < SessionGeneration)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(generation));
-                }
-
-                SessionGeneration = generation;
-            }
-        }
     }
 }

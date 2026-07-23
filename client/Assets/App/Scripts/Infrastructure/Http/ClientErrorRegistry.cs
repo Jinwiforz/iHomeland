@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Infrastructure.Http
 {

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using IHomeland.Client.Infrastructure.Http;
+using IHomeland.Client.Application.Contracts;
 
 namespace IHomeland.Client.Application.Session
 {
