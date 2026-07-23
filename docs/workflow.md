@@ -24,6 +24,7 @@ Git 提交消息与提交粒度的唯一 owner 文档是 `docs/git-commit-conven
 - `README.md`：项目定位、阶段和入口。
 - `AGENTS.md`：必须遵守的硬规则。
 - `docs/architecture.md`：系统边界和状态所有权。
+- `docs/gameplay-simulation-architecture.md`：权威模拟、Tick/帧、ECS/GAS-like、历史和第三方 adapter 边界。
 - `docs/roadmap.md`：严格交付顺序与 changes。
 - `docs/network-transport-architecture.md`：通道、会话、安全和故障。
 - `docs/network-port-allocation.md`：默认端口、环境覆盖、映射和冲突处理。
@@ -84,7 +85,7 @@ PersonalWorld、WorldInstance、VisitSession 与 placement 构成第一业务里
 - PersonalWorld identity、immutable owner、持久 revision 和子领域 owner
 - WorldInstance assignment、lease/fencing、启动、休眠、重建和陈旧实例拒绝
 - VisitSession invite/admission、Owner/Visitor role、capacity、grace、expiry 和安全返回
-- PlayerState、PersonalWorldState、VisitSessionState 与 ActivityInstanceState 的 mutation/settlement owner
+- PlayerState、PersonalWorldState、VisitSessionState，以及未来 SimulationInstanceState/ActivityInstanceState 的独立 mutation/settlement owner；后两者不属于服务端 v1 实现
 - MySQL 持久事实、Redis 可失效运行态、幂等、事务、outbox、恢复和清理
 - Go test client 的 own-world、visit、disconnect、rebuild 和 stale-admission 验收
 

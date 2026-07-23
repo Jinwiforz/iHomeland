@@ -1,6 +1,6 @@
 # iHomeland
 
-iHomeland 是一个面向 PC 的在线游戏项目，使用 Go 服务端与 Unity 客户端。核心玩法采用个人持久世界：玩家默认进入自己的 PersonalWorld，并可通过 VisitSession 邀请其他玩家临时访问。
+iHomeland 是一个面向 PC 的在线游戏项目。当前运行基线由 Go Control/Data Plane 与 Unity 客户端组成；已批准的 gameplay 目标架构将增加独立 C++ Game Simulation Server。核心玩法采用个人持久世界：玩家默认进入自己的 PersonalWorld，并可通过 VisitSession 邀请其他玩家临时访问。
 
 ## 交付原则
 
@@ -15,21 +15,23 @@ iHomeland 是一个面向 PC 的在线游戏项目，使用 Go 服务端与 Unit
   -> HTTPS / WSS / TLS-TCP 与 Go 客户端资格验收
   -> Unity Composition Root 与 Network Services
   -> Own-world / Visit-world 双 UI vertical slice
+  -> C++ 权威 Gameplay：simulation model -> network profile -> 可玩战斗竖切
 ```
 
-服务端必须先通过 Go 协议测试客户端完成资格验收并冻结跨端契约，达到该门槛后才开始 Unity 运行时代码。严格顺序与每个 change 的完成条件见 `docs/roadmap.md`。
+Go 服务端 v1 与 Unity 客户端 v1 均已通过资格验收；这些门禁仍是后续变更必须保持的回归基线。Gameplay 的严格顺序与每个 change 的进入/完成条件只由 `docs/roadmap.md` 管理。
 
 ## 第一业务里程碑
 
-第一阶段交付可观测 Go 服务端、账号与统一会话、PersonalWorld、WorldInstance、VisitSession、MySQL/Redis、HTTPS/WSS/TLS-TCP、Go 协议测试客户端，以及契约冻结后的 Unity own-world/visit-world 客户端。ActivityInstance、Room、Party、匹配、正式战斗、battle server、UDP/KCP、观战、回放和完整经济系统不在第一阶段范围内。
+第一阶段已经交付并完成资格验收：可观测 Go 服务端、账号与统一会话、PersonalWorld、WorldInstance、VisitSession、MySQL/Redis、HTTPS/WSS/TLS-TCP、Go 协议测试客户端，以及 Unity own-world/visit-world 客户端。ActivityInstance、Room、Party、匹配、正式战斗、Game Simulation Server、UDP/KCP、观战、回放和完整经济系统不属于该已冻结里程碑。
 
-## 顶层目录
+## 顶层目录（当前与已批准目标）
 
 ```text
-client/      Unity 客户端版本入口；服务端 v1 冻结后创建工程
+client/      已落地的 Unity 客户端版本入口
 docs/        架构、协议、工程标准、路线和流程
 openspec/    长期规格与变更 artifacts
-server/      Go 服务端版本入口；实现从服务端阶段开始
+server/      已落地的 Go Control/Data Plane 版本入口
+simulation/  尚未创建；首个 C++ core implementation change 才建立
 shared/      跨端协议与契约
 tools/       生成、测试、构建和运维工具
 versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本目录
@@ -39,6 +41,7 @@ versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本�
 
 - `AGENTS.md`：协作与质量硬规则
 - `docs/architecture.md`：总体架构与状态所有权
+- `docs/gameplay-simulation-architecture.md`：权威状态同步、帧同步技术、ECS/GAS-like 与模拟边界
 - `docs/roadmap.md`：严格 change 路线与进入条件
 - `docs/network-transport-architecture.md`：五种通道与统一会话
 - `docs/network-port-allocation.md`：默认端口、环境覆盖与冲突处理
@@ -47,6 +50,7 @@ versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本�
 - `docs/client-ui-architecture.md`：UI Toolkit/uGUI 规则
 - `docs/client-integration.md`：服务端交付包与 Unity 接入验收
 - `docs/server-v1-qualification.md`：Q0 唯一入口、冻结摘要与长期 Go 资格客户端边界
+- `docs/client-v1-qualification.md`：C3 唯一入口、冻结摘要与 Unity 资格结论
 - `docs/file-structure.md`：目标目录与文件职责
 - `docs/engineering-standards.md`：工程与测试标准
 - `docs/code-comment-convention.md`：Go、C#/Unity 与协议注释规范

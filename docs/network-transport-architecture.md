@@ -34,34 +34,41 @@
               +------------------+
 
                   TLS/TCP
-        world / visit / reliable gameplay
+          world / visit reliable business
                        |
                        v
               +------------------+
               | Business Adapter |
               +------------------+
 
-        All adapters -> Auth Context -> Dispatcher
-                              |
-                    Application Services
+        Go adapters -> Auth Context -> Dispatcher
+                                  |
+                        Application Services
 
-Future battle endpoint:
+Gameplay target on C++ Game Simulation Server:
         one UDP socket -> authenticated multiplexer
                          |                    |
                      raw UDP               KCP
 ```
 
-个人世界阶段复用同一通道职责，不建立 P2P host：
+当前 v1 个人世界只使用：
 
 ```text
 HTTPS -> world bootstrap / invite accept / admission issue
 WSS   -> invite / owner availability / assignment / close notice
 TCP   -> PersonalWorld snapshot / VisitSession command / safe-return
-UDP   -> replaceable transform and presentation snapshots
-KCP   -> reliable low-latency combat input and events
 ```
 
-Owner 只拥有 PersonalWorld 业务事实；全部网络通道仍终止于服务端 adapter。一个 message id 只能选择表中一个通道，不能因为 Owner/Visitor 角色不同而在 WSS、TCP 或 KCP 双写。
+Gameplay 目标增加：
+
+```text
+UDP   -> replaceable continuous input bundles and authoritative snapshots
+KCP   -> registry-approved late-value discrete commands/events and resync
+```
+
+Owner 只拥有 PersonalWorld 业务事实，不是 P2P host。HTTPS/WSS/TLS-TCP 终止于 Go adapter，UDP/KCP 终止于 C++ Game Simulation Server adapter。一个 message id 只能选择一个登记通道，不能因为 Owner/Visitor 角色不同而跨 WSS、TCP、raw UDP 或 KCP 双写。
+
+现有代码中的 `tcpgameplay`/`ClientGameplayChannel` 是历史稳定名称，实际只承载可靠的 world/visit business contract；它不是未来 C++ battle simulation transport，后者由独立 `BattleNetworkClient` 与 UDP/KCP registry 拥有。
 
 ## 通道职责
 
@@ -153,28 +160,36 @@ preface 和后续业务 frame 都使用 4-byte unsigned big-endian 长度前缀�
 
 Active gameplay connection 使用 registry 登记的 common heartbeat `1/2` 保持应用层活性。客户端每 15 秒通过同一 writer/pending owner 发送一次 typed request；服务端返回精确 correlation 的空 response，合法 heartbeat 与其他合法 C2S frame 一样刷新 read idle deadline。单次 heartbeat 使用 10 秒 operation deadline；超时、错误 response、协议错误或 transport failure 都终结当前 connection generation，由产品层显示一次可重连终态。heartbeat 只证明已认证连接存活，不读取或修改 PersonalWorld、VisitSession 等业务事实。
 
-服务端仍保留 30 分钟 idle safety 上限，用于回收未实现 heartbeat、进程挂起或异常客户端，不把 OS TCP keepalive 当成应用层活性证明。上线顺序固定为服务端先识别并响应 `1/2`，客户端后启用发送；未完成服务端兼容部署前不得发布启用 heartbeat 的客户端。
+服务端和当前 Unity 客户端均已支持 heartbeat `1/2`。服务端仍保留 30 分钟 idle safety 上限，用于回收旧/异常客户端、进程挂起或应用 heartbeat 未能运行的连接；OS TCP keepalive 不替代该应用层活性证明。未来改变 heartbeat cadence、deadline 或消息语义仍必须先保证服务端向后兼容，再发布客户端。
 
 ### 裸 UDP 不可靠时序面
 
-只承载：
+初始 lane 分类如下；最终 message id、频率与大小由 battle network profile 和 registry 冻结：
 
-- latency/NAT/path probe
-- 晚到无价值的连续输入
-- 可由新数据覆盖的位置、朝向和表现快照
-- 允许丢失的观战或表现数据
+| 方向 | 初始消息类别 | 交付语义 |
+|---|---|---|
+| C2S/S2C | latency、NAT、path、cookie probe | 可丢失、严格限量，不进入 gameplay state |
+| C2S | 连续移动/视角等 `BattleInputBundle` | unreliable-sequenced；可冗余携带少量尚未确认 InputTick，过期即丢弃 |
+| S2C | full/delta `BattleSnapshot`、transform/presentation state | unreliable-sequenced；新 snapshot 覆盖旧 snapshot |
+| S2C | 允许丢失的 telemetry/presentation hint | unreliable-sequenced；不得成为伤害或结算事实 |
 
 设计思想是“丢失后等待更新包”，不能通过重试把旧数据变成可靠业务。数据包以不触发 IP 分片为目标，`1200 bytes` 只作为初始预算，最终值必须通过 MTU 测试确认。
 
+权威 full/delta snapshot 禁止进入 KCP。若客户端丢失 delta baseline，只能等待/请求按 profile 允许的后续 full baseline，不能可靠重传整条连续 snapshot 流。
+
 ### KCP 低延迟可靠战斗面
 
-只承载：
+初始只允许承载：
 
-- 丢失不可接受且晚到仍有意义的帧命令
-- 关键战斗事件
-- 玩法模型明确要求可靠交付的低延迟数据
+| 方向 | 初始消息类别 | 交付语义 |
+|---|---|---|
+| C2S | 经玩法模型确认“丢失不可接受且晚到仍有意义”的离散 ability/weapon command | reliable-ordered；必须含 InputTick、command sequence 与 expiry |
+| S2C | 必须可靠观察的实例内离散 lifecycle/ability result | reliable-ordered；必须可去重且不能替代 Go 结算事实 |
+| C2S/S2C | profile 明确登记的 resync/control message | reliable-ordered；有独立大小、频率与超时预算 |
 
 KCP 只提供 ARQ。握手、身份、加密、重放保护、拥塞预算、限流和 endpoint rebinding 仍由项目负责。应用层必须继续校验 tick、sequence、过期与合法性。
+
+同一 message id 只能登记 raw UDP 或 KCP 其中一个 lane，禁止为了“保险”双写。调用方不得运行时选择 lane，也不得在 raw 超时后把相同消息静默转入 KCP/TCP；改变 QoS 必须变更 registry、兼容性和网络资格基线。
 
 ## Message Route Registry
 
@@ -192,8 +207,22 @@ KCP 只提供 ARQ。握手、身份、加密、重放保护、拥塞预算、限
 | `rate_limit` | identity/connection/message 维度限制 |
 | `idempotency` | none、request id、command id、tick/sequence |
 | `timeout` | request 或 command 有效时间 |
+| `assignment_binding` | 是否必须绑定完整 AssignmentStamp、SimulationInstanceID 与 connection generation |
+| `tick_semantics` | `InputTick`/`ServerTick` 的产生者、单调范围、允许窗口与确认方式 |
+| `snapshot_policy` | none、full、delta；delta 的 `BaselineTick`、恢复路径和可覆盖规则 |
+| `input_ack` | 是否以及如何携带 `LastProcessedInputTick` |
+| `expiry` | 发送者时间不可直接受信；服务端映射、clamp 和过期处理 |
+| `history_policy` | none 或服务端内部 lag-compensation 查询；允许字段、最大窗口与过期语义 |
 
 服务端入口必须在 decode 后、业务执行前校验 route。错误通道消息只能产生结构化协议错误或安全关闭，不能进入 application service。
+
+Battle 输入、snapshot 与历史查询还必须遵守：
+
+- C2S input 含 `InputTick`、单调 command sequence、assignment/instance binding 和 expiry evidence，不含最终 transform、target hit、damage 或 reward。
+- S2C snapshot 含 `ServerTick`、`SnapshotSequence`、full/delta kind、适用时的 `BaselineTick`，以及本地 actor 的 `LastProcessedInputTick`。
+- 客户端缺少 baseline、跨 generation 或收到旧 sequence 时不得猜测合并；恢复路径由 registry 唯一定义。
+- history query 只由服务器 gameplay system 发起。客户端最多提供经 tick mapping 与 clamp 的观察 tick evidence，不能指定任意历史帧或读取历史状态。
+- Tick 宽度、wrap/epoch、tick duration、输入窗口、snapshot cadence、baseline 周期和 history window 必须由 simulation model/network profile 冻结后进入 schema。
 
 ## 统一会话
 

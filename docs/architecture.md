@@ -2,7 +2,7 @@
 
 ## 架构定位
 
-iHomeland 是 Go 服务端与 Unity PC 客户端组成的在线游戏项目。第一阶段使用单 Go 进程承载清晰的逻辑模块，通过 MySQL 保存持久事实、Redis 保存可恢复运行态；Unity 只在服务端 v1 契约冻结后开始实现。
+iHomeland 的当前运行基线由 Go Control/Data Plane 与 Unity PC 客户端组成，通过 MySQL 保存持久事实、Redis 保存可恢复运行态。目标 gameplay 架构在保持该基线的前提下增加独立 C++ Game Simulation Server，承载高频权威模拟。Unity 只消费已冻结契约，不成为在线最终事实 owner。
 
 核心原则：
 
@@ -15,7 +15,7 @@ iHomeland 是 Go 服务端与 Unity PC 客户端组成的在线游戏项目。�
 - 客户端应用作用域与场景作用域分离
 - 个人世界默认私有，访客访问必须显式授权
 
-## 目标拓扑
+## 当前 v1 拓扑
 
 ```text
                          +----------------------+
@@ -62,7 +62,7 @@ iHomeland 是 Go 服务端与 Unity PC 客户端组成的在线游戏项目。�
                        persistent facts runtime cache
 ```
 
-Unity 客户端在服务端 v1 资格验收后接入同一冻结契约，不参与服务端基础语义的试错。服务端 v1 的业务目标就是以下个人世界拓扑：
+Go 服务端 v1 与 Unity 客户端 v1 已按同一冻结契约完成资格验收。当前个人世界实例关系为：
 
 ```text
 PlayerID
@@ -71,11 +71,45 @@ PlayerID
             -> Owner connection
             -> VisitSession
                  -> Visitor connections
-            -> Activity admission
-                 -> ActivityInstance
 ```
 
-Owner 是 PersonalWorld 的领域所有者，不是 P2P 网络主机。PersonalWorld、WorldInstance、VisitSession 与 ActivityInstance 分别拥有持久世界、运行承载、访客资格和活动运行事实，不能由 Room 或 transport connection 代管。
+Owner 是 PersonalWorld 的领域所有者，不是 P2P 网络主机。PersonalWorld、WorldInstance 与 VisitSession 分别拥有持久世界、运行承载和访客资格，不能由 Room 或 transport connection 代管。未来 ActivityInstance 只拥有具备独立生命周期的活动运行事实，不进入 v1 实例链。
+
+## Gameplay 目标拓扑
+
+Gameplay 阶段在上述 v1 拓扑之外增加独立模拟进程，但不推翻现有 owner：
+
+```text
+Unity Client
+  ├─ HTTPS / WSS / TLS-TCP ──> Go Control & Data Plane
+  └─ secure UDP / KCP ───────> C++ Game Simulation Server
+
+Go Control & Data Plane
+  ├─ Account / Session / PersonalWorld / VisitSession
+  ├─ WorldInstance placement / AssignmentStamp / admission / ticket
+  ├─ MySQL persistent facts / Redis recoverable runtime facts
+  └─ settlement and durable-result owner
+
+C++ Game Simulation Server
+  ├─ SimulationNode / SimulationInstance lifecycle
+  ├─ fixed-tick movement / jump / physics / AI / navigation
+  ├─ ability / effect / damage / death
+  └─ realtime input, authoritative snapshot and bounded history
+```
+
+正式能力名为 `Game Simulation Server`，未来二进制名为 `ihomeland-sim-server`。“Battle Server”只作为讨论别名，不进入稳定协议类型或 owner 名称，因为该进程未来还可承载个人世界、ActivityInstance、战场等实时模拟。Go 通过经过认证、可幂等重试的内部控制契约分配、启动、准入、排空和停止 `SimulationInstance`；C++ 回报健康、租约、运行摘要及可持久化结果。内部 transport 必须由后续 change 基于扩缩容、故障隔离与运维证据选择，当前不预设 gRPC。
+
+唯一 owner 边界如下：
+
+| 事实或行为 | 唯一 owner |
+|---|---|
+| 账号、Session、PersonalWorld identity 与持久 revision | Go Control & Data Plane |
+| WorldInstance assignment、generation、lease/fencing 与 VisitSession | Go Control & Data Plane |
+| SimulationInstance 内移动、物理、AI、能力、伤害和实时复制 | C++ Game Simulation Server |
+| 输入意图、预测历史、远端插值和表现 | Unity Client；仅为副本，不是权威事实 |
+| 资产、奖励、持久世界 mutation 与结算提交 | 对应 Go domain owner |
+
+C++ 不直连账号、资产或奖励表，也不把内存 ECS snapshot 当作持久事实。它只提交带 `SimulationInstanceID`、完整 `AssignmentStamp`、tick/range、配置版本、幂等结果 ID 和证据摘要的 result proposal；Go 必须重新验证 current assignment、fence、actor 与结算策略后才能提交持久事实。响应丢失由同一结果 ID 重放，不能改 ID 重试制造双结算。
 
 ## 服务端 Composition Root
 
@@ -207,6 +241,18 @@ HTTPS credentials
 
 PersonalWorld 不是包含全部玩法的巨大 aggregate。任务、探索、家园、NPC 和世界资源由后续领域分别拥有，但每个世界事实必须关联明确 PersonalWorld owner、revision/transaction 边界和恢复来源。
 
+首个 gameplay 竖切直接在 Owner 当前 PersonalWorld 的 `WorldInstance` 上绑定一个 C++ `SimulationInstance`：
+
+```text
+PersonalWorldID (Go persistent identity)
+  -> AssignmentStamp (WorldInstanceID, generation, lease/fence, RuntimeNodeID)
+       -> SimulationInstanceID (C++ in-memory authoritative runtime)
+```
+
+现有 Go `placement.RuntimeController` 是迁移接缝：当前本地 `processWorldRuntime` 只提供逻辑运行 registry，后续 change 应以远程 C++ control adapter 替换其实现，而不是删除或复制 PersonalWorld、WorldInstance、VisitSession、admission 与持久化 owner。`RuntimeNodeID` 届时指向已注册且健康的 `SimulationNode`；C++ 必须绑定 Go 下发的完整 `AssignmentStamp`，不得自行创建另一套 PersonalWorld repository 或 assignment generation。
+
+PersonalWorld 中暂态生成的普通怪物、Boss 和战斗状态属于该 `SimulationInstance`，不要求先创建 ActivityInstance。只有副本、战场、剧情位面等拥有独立 lifecycle、admission、结果边界或匹配语义的玩法，才引入 ActivityInstance；它不是个人世界 gameplay 的前置条件。
+
 访客通过 VisitSession 加入 Owner 当前 WorldInstance：
 
 ```text
@@ -228,7 +274,8 @@ VisitSession 拥有 immutable owner、PersonalWorldID、Visitor membership、cap
 | 角色、装备、背包、技能和个人奖励 | PlayerState owner |
 | 世界环境、探索对象、世界任务和持久 revision | PersonalWorldState owner |
 | 邀请、Visitor、临时权限、连接和 expiry | VisitSession owner |
-| 副本、Boss、剧情位面或战斗运行状态 | ActivityInstance owner |
+| 当前 PersonalWorld 内移动、怪物、Boss 与战斗运行状态 | 绑定当前 AssignmentStamp 的 SimulationInstance owner |
+| 拥有独立生命周期、准入和结果边界的副本、战场或剧情位面 | ActivityInstance owner |
 
 Visitor 默认不能修改世界配置、推进 Owner 关键任务、消费不可恢复唯一资源、邀请更多玩家或提交奖励最终事实。每个开放交互必须登记 actor role、mutation owner、settlement owner、idempotency、revision/transaction 与失败语义；Visitor 奖励写入其自身 player ledger，世界 mutation 写入 Owner PersonalWorld，禁止 handler 顺序双写伪装原子成功。
 
@@ -277,9 +324,9 @@ Redis key 必须有 owner、TTL、value schema、恢复来源和清理触发。R
 
 Unity 使用 Composition Root + App Scope + Scene Scope：
 
-- App Scope：网络、账号、PersonalWorld、VisitSession、应用流程和持久 UI/Audio hosts
+- App Scope：网络、账号/session 投影、PersonalWorld、VisitSession、应用流程和持久 UI/Audio hosts；未来增加 generation-bound gameplay replica/prediction
 - Scene Scope：camera、lighting、地图、角色、场景型 UI
 - Application Services：纯 C# 状态与命令
 - Unity Hosts：主线程、Coroutine、UI、Audio 和 SceneContext adapter
 
-客户端不得把 Scene、Prefab 或 ScriptableObject 作为在线业务事实 owner。详细规则见 `docs/client-architecture.md`。
+客户端不得把 Scene、Prefab 或 ScriptableObject 作为在线业务事实 owner。Gameplay replica、预测、插值、HUD 与镜头的详细规则见 `docs/client-architecture.md` 和 `docs/gameplay-simulation-architecture.md`。

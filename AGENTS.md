@@ -10,18 +10,19 @@
 
 ## 项目边界
 
-iHomeland 使用 Go 服务端与 Unity PC 客户端。
+iHomeland 使用 Go Control/Data Plane、后续独立 C++ Game Simulation Server 与 Unity PC 客户端。
 
 长期技术栈：
 
 - Go、Gin、Protobuf
+- C++、CMake/CMake Presets（battle simulation model 与 network profile 完成后）
 - MySQL、Redis
 - HTTPS、WSS、TLS/TCP
 - 裸 UDP、KCP（战斗模型完成后）
 - Unity、Input System、UI Toolkit、uGUI
 - Docker、本地自动化与结构化日志
 
-第一业务里程碑固定为“进入自己的个人世界并支持受控访客联机”，包括 PersonalWorld、WorldInstance、VisitSession、MySQL/Redis、HTTPS/WSS/TLS-TCP 与 Go 协议测试客户端验收。ActivityInstance、Room、Party、匹配、正式战斗、battle server、跨服、观战、回放和完整经济系统不混入该阶段。
+第一业务里程碑固定为“进入自己的个人世界并支持受控访客联机”，包括 PersonalWorld、WorldInstance、VisitSession、MySQL/Redis、HTTPS/WSS/TLS-TCP 与 Go 协议测试客户端验收。ActivityInstance、Room、Party、匹配、正式战斗、Game Simulation Server、跨服、观战、回放和完整经济系统不混入该阶段。
 
 ## 交付顺序硬规则
 
@@ -36,6 +37,7 @@ iHomeland 使用 Go 服务端与 Unity PC 客户端。
 ## 必读文档
 
 - 总体架构：`docs/architecture.md`
+- Gameplay 模拟：`docs/gameplay-simulation-architecture.md`
 - 路线图：`docs/roadmap.md`
 - 网络传输：`docs/network-transport-architecture.md`
 - 网络端口：`docs/network-port-allocation.md`

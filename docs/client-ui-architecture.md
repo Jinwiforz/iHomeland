@@ -61,6 +61,31 @@ Route definition 不包含 UXML、Prefab 或资源地址。资源引用属于具
 - Login、Shell、WorldVisit 与 ConnectionLost 使用 UI Toolkit，WorldHud 使用 scene-bound uGUI。产品 UXML/USS、Prefab 与 Scene 必须由 Unity Editor 创建并以直接引用接线，不得把资源路径加入 route definition。
 - 首期只使用一个项目 USS 表达 color、typography、spacing、focus、disabled、loading 与 error 语义；当前不引入 Theme manager、Resources 或 Addressables。
 
+### Gameplay 阶段复用规则
+
+Gameplay 不建立第二个 Router、`UIManager`、输入总管或网络驱动 UI。既有 `ClientUiRouter`、`ClientUiHostRoot`、route/layer/input/lifecycle 规则继续作为唯一 UI 入口：
+
+- UI Toolkit 继续承载背包、武器/技能详情、设置、任务、访问管理、结算详情等完整 screen/overlay。
+- scene-bound uGUI 承载血量/资源、技能槽/cooldown、准星、锁定提示、Boss 血条、伤害反馈和世界空间血条。
+- 战斗 HUD 是既有 gameplay scene 的 scene-bound route/Host，不创建常驻第二份 HUD owner；Scene generation 变化时旧 HUD 必须 unbind/dispose。
+- 同一逻辑能力只能有一个交互 owner。例如武器切换由 gameplay input action 提交时，UI Toolkit 与 uGUI 不能同时各发一次 command。
+- UI Toolkit overlay 打开后由现有 Router/Input owner 决定 gameplay input、cursor、focus 和 raycast；HUD 不私自切 action map。
+
+数据流固定为：
+
+```text
+GameplayReplica / GameplayPrediction
+  -> GameplayPresentationProjector
+      -> immutable HudViewState / MenuViewState / GameplayCue
+          -> uGUI HUD Host / UI Toolkit page adapter
+
+UI semantic action
+  -> Experience/Presenter
+      -> gameplay Application command
+```
+
+View/Host 只接收不可变 View State 和窄语义 action。它们不得访问 `BattleNetworkClient`、HTTP、WebSocket、TCP、UDP/KCP socket、generated packet、ticket 或 AEAD session，不得自行计算 authoritative damage/cooldown，也不得因动画完成而提交命中事实。View 可以保存选中槽位、hover、动画进度等局部表现状态，但权威 attribute/tag/ability/effect 仍来自 gameplay replica。
+
 ## Router、Experience 与 View 的拆分
 
 ```text
@@ -98,7 +123,7 @@ Scene/route 收敛采用 transaction generation gate：旧 Scene 先失效，加
 - 多个 view 共享复杂派生数据时才引入纯 C# Presenter/View State。
 - View State 必须可从业务事实派生。
 - UI Toolkit view 与 uGUI view 不互相持有控件引用。
-- View 不直接访问 HTTP、WebSocket、TCP 或 generated transport client。
+- View 不直接访问 HTTP、WebSocket、TCP、UDP/KCP 或 generated transport client。
 
 ## Host 边界
 

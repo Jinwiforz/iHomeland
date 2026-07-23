@@ -114,7 +114,7 @@ Metrics label 必须来自稳定有限集合；禁止把 request URL、错误文
 - Redis 没有原生 COMMENT 时，已实现 value schema 必须在 `docs/redis-keys.md` 维护英文字段名、类型/编码、中文短注释与必填规则。
 - Redis 不保存唯一持久事实。
 - schema/key 变化必须更新文档和 integration tests。
-- 个人世界交互必须分别指定 PlayerState、PersonalWorldState、VisitSessionState 或 ActivityInstanceState owner；Visitor 奖励与 Owner 世界 mutation 不得通过跨存储顺序双写伪装原子提交。
+- 个人世界交互必须分别指定 PlayerState、PersonalWorldState、VisitSessionState 或 SimulationInstanceState owner；未来具有独立生命周期的活动才使用 ActivityInstanceState。Visitor 奖励与 Owner 世界 mutation 不得通过跨存储顺序双写伪装原子提交。
 - WorldInstance assignment、lease、presence、invite 和 admission 是可恢复或可失效运行态，不得进入 PlayerID/PersonalWorldID 主键或覆盖持久世界 owner。
 
 ## 协议规则

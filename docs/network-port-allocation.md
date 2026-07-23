@@ -22,8 +22,7 @@
 | Realtime | 本地 TLS/TCP | TCP | `8444` | 本机或开发网 | 仓库 local 配置的可覆盖推荐值，客户端仍以 endpoint/ticket 为准 |
 | Server Runtime | 健康、就绪、版本与 metrics | TCP | `8081` | 默认仅 loopback | 不承载公开业务；生产环境限制在管理网络 |
 | Realtime | 部署 TLS/TCP | TCP | 不预留固定值 | 按部署配置 | 由 endpoint/ticket 下发，客户端不得硬编码 |
-| Battle | 裸 UDP | UDP | 尚未分配 | 按部署配置 | 等 battle simulation model 与 network profile |
-| Battle | KCP | UDP | 尚未分配 | 按部署配置 | listener、ticket 与 QoS 关系由后续 change 决定 |
+| Game Simulation | raw UDP + KCP lanes | UDP | 尚未分配 | 按部署配置 | 默认复用一个 listener/安全 session；simulation model、network profile 与安全资格全部完成前不得分配 |
 | MySQL | 持久化数据库 | TCP | `3306` | 内网 | 实际连接端口可由环境配置或端口映射覆盖 |
 | Redis | 可恢复运行态 | TCP | `6379` | 内网 | 不得暴露公网 |
 | OpenTelemetry Collector | OTLP/gRPC | TCP | `4317` | 内网 | Collector 产品默认端口 |
@@ -37,6 +36,22 @@
 公开 HTTP 与 WSS control 复用同一个实际 listener：WSS 不是第二个端口，而是该入口的精确 `/v1/control` upgrade path。`publicApi.address` 决定进程 bind，`publicApi.endpoints.wss` 决定客户端可见且写入 ticket 的 advertised endpoint；两者可以因 ingress 或 port mapping 不同，但必须由部署配置显式对应，服务端不得从不受信 Host header 重建 advertised endpoint。
 
 Gameplay TLS/TCP 使用 `publicApi.gameplayTcp.address` 独立 bind，客户端只使用 `publicApi.endpoints.tlsTcp` 下发的 advertised endpoint。bind 与 advertised endpoint 可以因 NAT、ingress 或端口映射不同；Session ticket、WorldAdmission 和 TCP handshake 必须复用同一个受信 advertised 值。gameplay bind 端口不得与公开 HTTP/WSS 或 diagnostic 端口相同；明文本地模式要求 bind 与实际 remote 都是 loopback，production 必须使用 TLS 1.3。
+
+## UDP/KCP 分配门禁
+
+Game Simulation UDP production 端口、推荐本地端口和可部署 listener 配置必须保持“尚未分配”，直到 roadmap 中有序交付的一组 changes 提供以下证据，并由实际启用 listener 的 change 汇总验证：
+
+- 已批准的 battle simulation model，冻结 SimulationTick、input consumption、snapshot/baseline、历史帧和过载语义；
+- 基于实测的 network profile，冻结 MTU、tick/snapshot cadence、lane registry、KCP 参数、插值窗口和 per-player/per-instance 带宽预算；
+- HTTPS 签发的短期一次性 ticket，绑定 session epoch、PlayerID、完整 AssignmentStamp、SimulationInstanceID、audience/channel、受信 advertised endpoint 与绝对 expiry；
+- cookie challenge 与抗放大预算，在地址未验证前 response bytes/requests 严格受限；
+- AEAD algorithm/key derivation/key epoch/nonce discipline、replay window 与 endpoint binding/rebinding 验证；
+- per-IP、per-session、per-message、per-instance 限流，以及 malformed packet fast reject 和有界 queue/memory；
+- raw UDP 与 KCP 复用一个认证 multiplexer、listener 和安全 session 的设计与测试；如拆分 listener，必须有独立运维/安全证据；
+- 可重复网络模拟覆盖 latency、jitter、loss、reorder、duplicate、burst、pause、MTU、NAT/rebinding 和 forged/replay traffic；
+- qualification 证明 bandwidth、重传放大、CPU、内存、queue pressure、降级、重连和 shutdown 均在预算内。
+
+满足门禁后，环境实际 endpoint 仍由部署配置和 ticket 下发，Unity 不硬编码端口。仅在 loopback integration test 使用 `127.0.0.1:0` 不构成 production 端口分配。
 
 ## 覆盖与映射
 

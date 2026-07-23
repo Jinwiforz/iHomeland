@@ -111,8 +111,8 @@ Created -> Initializing -> Running -> Stopping -> Stopped
 - HTTP client
 - WSS control channel
 - TLS/TCP business channel
-- Message router、pending requests、push dispatcher
-- Account Service
+- channel-specific typed route、pending correlation 与 push handling
+- Session Coordinator 持有的 authenticated account/player projection
 - PersonalWorld Service、VisitSession Service 与 World Admission Coordinator
 - `ClientUiRouter`、`ClientUiHostRoot`、个人世界 production routes 与唯一 `ClientPersonalWorldExperience`
 - `ClientWorldSceneTransitionHost` 与 current `PersonalWorldSceneContext`
@@ -220,7 +220,7 @@ SessionCoordinator + ClientConfigurationStore
 ```
 
 - `ClientGameplayChannel` 初始化保持零网络副作用；显式 connect 原子消费同一 session generation 的 world admission lease，再签发并消费匹配 `TLS_TCP`/`GAMEPLAY` ticket。
-- Wire、TLS、明文例外与 credential 规则由[客户端接入规范](client-integration.md#4-tlstcp-business)统一拥有；channel 对任何不匹配的 preface、frame、sequence、route 或 correlation fail closed。
+- Wire、TLS、明文例外与 credential 规则由 [客户端接入规范](client-integration.md#4-tlstcp-business) 统一拥有；channel 对任何不匹配的 preface、frame、sequence、route 或 correlation fail closed。
 - 每个 connection generation 只有一个 reader 与一个 serialized writer；pending、writer item、writer encoded bytes 和主线程投递均有硬上限，断线或背压会恰好完成等待方并撤销 generation。
 - Active generation 由 channel 内唯一 heartbeat owner 每 15 秒提交 `GAMEPLAY_HEARTBEAT_REQUEST(1)`，并通过同一 correlation/pending、writer、codec 和 terminal close 路径等待 `GAMEPLAY_HEARTBEAT_RESPONSE(2)`；close、safe-return、session invalidation 或新 generation 建立后，旧 heartbeat 不得继续写入。
 - Caller cancel 只结束本地等待，仍保留有界 correlation 以安全消费迟到 response；JOIN/RECONNECT 只允许携带当前 admission 的首个匹配 command。
@@ -252,6 +252,55 @@ HTTP bootstrap/accept/admission + WSS control hints + TLS/TCP response/PUSH
 - Owner/Visitor command 使用 current role 与 revision 在写入前 fail closed。Caller cancel、commit-unknown 或 revision conflict 不触发隐式 mutation 重试。
 - App Scope 按安全存储、Session restore、channels/services、recovery、Scene/UI、Experience 的顺序初始化。启动存在合法 refresh lineage 时一次性轮换并直接进入 OwnWorld；无record/Unsupported才打开 Login。独立通道恢复已经由唯一 coordinator 接线；内容资源系统仍属于后续 change。
 
+### 后续权威 Gameplay 客户端边界
+
+服务端 simulation model、network profile 与安全 UDP/KCP 资格完成后，客户端通过一个 App Scope battle feature 接入 C++ Game Simulation Server：
+
+```text
+Input System / Scene Input Host
+  -> semantic InputIntent
+  -> GameplayPrediction (InputHistory + PredictedStateHistory)
+  -> BattleNetworkClient port
+      -> Infrastructure secure UDP/KCP adapter
+
+Authoritative Snapshot/Event
+  -> BattleNetworkClient
+  -> bounded MainThreadDispatcher
+  -> GameplayReplica + Reconciliation + Interpolation
+  -> immutable ActorViewState / HudViewState / CameraIntent
+  -> Scene Scope Actor/HUD/Camera Hosts
+```
+
+`BattleNetworkClient` 是 feature 名，不是第二个全局 network manager。Application 只定义连接 generation、input/snapshot contracts 和窄 port；Infrastructure adapter 独占平台 socket、与 C++ Asio/KCP adapter 对接的 wire、AEAD、replay window、endpoint/rebinding、packet codec 和 channel lifecycle。Unity 客户端不依赖 Asio。该 adapter 不能保存角色血量、ability 规则或 UI 状态，也不能把 UDP/KCP 消息转入现有 TLS/TCP `ClientGameplayChannel`。
+
+纯 C# gameplay owners：
+
+- `GameplayReplica`：保存 current assignment/instance generation 下的权威 actor、attribute、tag、ability/effect projection；不持有 GameObject。
+- `GameplayPrediction`：保存本地 actor 的有界 `InputHistory` 与 `PredictedStateHistory`，根据 `LastProcessedInputTick` 恢复确认状态并重演未确认输入。
+- `GameplayInterpolation`：保存远端 actor 的有界 snapshot samples，并以 profile 定义的 render delay 输出采样状态。
+- `GameplayPresentationProjector`：从 replica/prediction 派生不可变 `ActorViewState`、`HudViewState`、`GameplayCue` 和 `CameraIntent`。
+
+这些 owner 由 App Scope 装配，但其状态绑定 current target/assignment generation。离开世界、safe-return、assignment 更换、session invalidation 或 battle connection hard reset 时必须原子退役旧 generation 和 history。Scene 加载不能创建第二份 replica，Scene 卸载也不能伪造 disconnect/result。
+
+Scene Scope 只拥有玩家/怪物/Boss Actor Views、Animator、VFX、Audio、uGUI HUD、input host 与 camera host。View 通过 entity/view identity 绑定只读状态，并把语义输入交给 Application；它不能读取 socket、generated packet、ticket，不能提交最终 transform、命中、伤害、血量或 cooldown。
+
+客户端不实现完整 ECS 或完整 GAS。预测只覆盖 simulation model 明确允许的移动、跳跃和 ability 表现子集；服务器的 Attribute/Tag/Ability/Effect/Cooldown/Cost 权威结果被复制为 model，GameplayCue 被投影为表现。damage formula、effect stacking、target validation、AI 与 settlement 不进入客户端。
+
+### Cinemachine 与镜头意图
+
+Cinemachine 是 Scene Scope camera adapter，可用于探索跟随、近战锁定/构图、扇子远程瞄准和 Boss/剧情演出，但不是 gameplay authority。纯 C# projector 只发布封闭 `CameraIntent`：
+
+```text
+Exploration
+MeleeCombat(target_view_id?)
+RangedAim(aim_origin, aim_direction_hint)
+Cinematic(sequence_id)
+```
+
+Scene Scope `CinemachineCameraHost` 将 intent 映射到已直接引用的 Cinemachine camera/rig、blend 和 impulse。模式优先级、进入/退出、输入 ownership 与 scene generation 必须显式；演出结束或 target 消失时确定性回到合法模式。
+
+Camera transform、Cinemachine aim、Animator root motion、IK、VFX ray 和屏幕准星都只是表现/输入采样来源，不得覆盖权威 actor transform、服务器瞄准校验、hit result 或 damage。远程输入发送归一化 aim intent 与受限 origin evidence，服务器重新基于权威姿态、历史帧和碰撞层验证。
+
 ### 当前 UI routing/Host 边界
 
 ```text
@@ -277,11 +326,16 @@ AppBootstrap
 |---|---|
 | endpoint/config | Configuration Service |
 | token/session/tickets | Session Coordinator |
-| account/player | Account Service |
+| authenticated account/player projection | Session Coordinator |
 | PersonalWorld identity、owner 与最高 world revision | PersonalWorld Service |
 | VisitSession、Owner/Visitor role、membership 与 expiry | VisitSession Service |
 | current WorldInstance assignment | PersonalWorld Service |
 | current target、admission flow 与 target generation | World Admission Coordinator |
+| （Gameplay 目标）battle connection generation、UDP/KCP 安全 transport | BattleNetworkClient / Infrastructure battle adapter |
+| （Gameplay 目标）authoritative gameplay replica | GameplayReplica |
+| （Gameplay 目标）local input/predicted-state history 与 reconciliation | GameplayPrediction |
+| （Gameplay 目标）remote snapshot buffer 与插值采样 | GameplayInterpolation |
+| （Gameplay 目标）Actor/Animator/VFX/Audio/HUD/Camera 对象 | Scene Scope Hosts/Views |
 | active route、layer、input 与 focus generation | ClientUiRouter / ClientUiHostRoot |
 | camera/map/scene actors | SceneContext |
 | transient animation/focus | View/Host |

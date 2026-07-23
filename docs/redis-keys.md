@@ -179,9 +179,11 @@ grace 与 session 等于 deadline 即失效，即使 key 仍存在也不能延�
 Redis 进程重启时，adapter 可以从 Redis 自身仍保留的合法 Hash 恢复进程内投影。
 Redis flush、key miss 或 physical TTL 到期后，不从 MySQL、日志或 memory 补回旧
 VisitSession。当前不实现 `player` membership index：`VisitSessionStore` 没有该查询
-consumer，预建索引会引入无 owner 双写。Semantic expiry task、safe-return side effect 与
-admission credential 仍由后续独立 change 接线。在 cleanup owner 接线前，已过领域
-deadline 但仍在 physical retention 窗口内的 active index 会 fail closed，不得被 Create 直接覆盖。
+consumer，预建索引会引入无 owner 双写。Semantic expiry 与 safe-return side effect
+已由 `internal/app` 的唯一 coordinator/deadline owner 接线；admission credential 已由
+独立 `worldadmission` owner 和下文两类 key 接线，均不归 VisitSession storage adapter
+所有。已过领域 deadline 但仍在 physical retention 窗口内的 active index 必须 fail
+closed，并由 current snapshot/reconciliation 路径提交匹配 cleanup，不得被 Create 直接覆盖。
 
 `visitsession_active`：
 
@@ -296,7 +298,7 @@ deadline 但仍在 physical retention 窗口内的 active index 会 fail closed�
 - TTL：与对应 issue Hash 相同的业务 expiry 加 replay retention；physical TTL 只保留重放证据，不延长资格
 - 大小：Hash 全部 field/value 累计最多 8192 bytes，由 owner Lua 在消费和重放时强制校验
 - 写入触发：issue Lua 创建；consume Lua 在静态 binding 全部匹配时把 `issued` 原子改为 `consumed`
-- 重放：相同 `consume_id`/`consume_fp` 返回首次 binding；其他 identity 对 consumed record返回 replayed
+- 重放：相同 `consume_id`/`consume_fp` 返回首次 binding；其他 identity 对 consumed record 返回 replayed
 - 恢复：Redis restart 只读自身仍保留的合法值；flush/key miss 使旧 credential 永久失效
 - 故障：unknown/corrupt/oversized Hash、缺 TTL、role/purpose/visit 组合矛盾或时间/assignment 字段非法全部 fail closed
 

@@ -2,7 +2,7 @@
 
 ## 文档职责
 
-本文档定义 iHomeland 的严格交付顺序、OpenSpec change 边界、进入条件和完成条件。第一业务主线是个人持久世界与受控访客联机；Unity 必须等待服务端 v1 由 Go 协议测试客户端独立验收。
+本文档定义 iHomeland 的严格交付顺序、OpenSpec change 边界、进入条件和完成条件。第一业务主线的 Go/Unity v1 已完成资格验收；该门禁作为回归基线保留，当前后续主线是 PersonalWorld 内的服务器权威 gameplay。
 
 ## 全局依赖
 
@@ -27,13 +27,13 @@ A0 Project Baseline
   -> C2 Own-world + Visit-world Services / UI
   -> C3 Client Qualification
   |
-  +-> A1 ActivityInstance Model
-  |    -> optional Room / Party
+  +-> B0 Authoritative Gameplay Architecture
+  |    -> Simulation Model -> Network Profile
+  |    -> C++ Core -> Go/C++ Control -> Secure UDP/KCP
+  |    -> Network Qualification -> Unity Runtime -> Content Slice
   |
-  +-> B0 Battle Model / Network Profile
-       -> Server UDP / KCP
-       -> Client UDP / KCP
-       -> First Battle Slice
+  +-> optional A1 ActivityInstance Model
+       -> optional Room / Party
 ```
 
 ## A0：项目基线
@@ -349,13 +349,13 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 验证 clean install、token restore、WSS/TCP 独立恢复、双客户端 world visit、服务端重启、低/重复 revision、stale callback、Scene/UI 生命周期、Windows Development/Release build 和跨端 fixtures。
 
-**当前状态：**`qualify-client-v1` 已于 2026-07-22 完成并归档。Windows secure Session、一次性启动 restore、WSS/gameplay generation-bound recovery、产品恢复阶段、资格 manifest/入口、两种 Player smoke、Development-only 低敏诊断、五分钟恢复 soak、双 Player 产品与分通道故障矩阵、真实服务端同库重启和 store-owner cleanup 均已在同一冻结输入下通过，当前基线可以声明 client-v1 qualified；任一 contract 或 Player build digest 变化都必须重新运行完整资格链。
+**当前状态：**`qualify-client-v1` 已归档；`client-runtime-modularity` 完成后又于 2026-07-23 以当前源码重新通过全部 20 项 mandatory 资格。当前冻结 digest 和唯一资格结论只由 `docs/client-v1-qualification.md` 维护；任一 contract 或 Player build digest 变化都必须重新运行完整资格链。
 
 ## A1：活动实例与可选协作结构
 
 ### `establish-server-activity-instance`
 
-只有副本、Boss、剧情位面或战斗等活动规则冻结后，才建立 ActivityInstance lifecycle 与 admission owner。ActivityInstance 不接管 PersonalWorld、VisitSession、PlayerState 或奖励最终事实。
+只有副本、战场、剧情位面等拥有独立 lifecycle、admission、结果边界或匹配语义的活动规则冻结后，才建立 ActivityInstance owner。PersonalWorld 当前 WorldInstance 内暂态生成的普通怪物、Boss 与战斗由绑定 AssignmentStamp 的 SimulationInstance 承载，不要求 ActivityInstance。ActivityInstance 不接管 PersonalWorld、VisitSession、PlayerState 或奖励最终事实。
 
 ### 可选 `establish-server-room-domain`
 
@@ -365,10 +365,74 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 仅在跨场景持续队伍、队长、聊天或连续活动需求成立时提出；直接访问个人世界不要求 Party。
 
-## B0：战斗设计
+## B0：服务器权威 Gameplay
 
-依次推进 `define-battle-simulation-model`、`define-battle-network-profile`、server battle core、UDP/KCP 安全通道、网络资格验收和客户端战斗竖切。UDP/KCP 首次启用必须同时交付 ticket/cookie、AEAD、重放保护、限流、抗放大、网络模拟和带宽预算。
+`define-authoritative-gameplay-architecture` 只冻结本路线的边界，不安装依赖或实现 gameplay。后续一个 change 只解决一个阶段，并依次推进；前一项 completion evidence 是后一项 entry evidence。
+
+### B0.1 `define-battle-simulation-model`
+
+**进入条件：**权威 owner、首个 PersonalWorld gameplay 范围和 Go/C++/Unity 边界已由本架构 change strict 验证。
+
+**产出：**冻结 SimulationTick/InputTick 映射、输入命令、系统顺序、角色运动/跳跃、物理查询、ability/effect/damage/death、AI、历史帧、过载与可测试确定性边界；给出纯模型 fixtures 和预算假设，不开放 listener。
+
+**完成条件：**剑、扇子、普通怪物与 Boss 所需的全部权威行为可由无网络 simulation harness 验收；没有客户端权威命中/伤害，没有未定义 tick/expiry/rollback 语义。
+
+### B0.2 `define-battle-network-profile`
+
+**进入条件：**simulation model 已冻结消息类别、状态量、最大 actor 数、tick 消费和历史需求。
+
+**产出：**基于可重复网络模拟冻结 tick/snapshot cadence、full/delta baseline、MTU、InputBundle 冗余、raw/KCP lane registry、KCP 参数、插值/外推窗口、correction tolerance、历史窗口及 per-player/per-instance 带宽/CPU/queue 预算。
+
+**完成条件：**目标 latency、jitter、loss、reorder、duplicate 和 burst 矩阵有测量报告；每个 battle message 只有一个 channel，snapshot 不走 KCP，production UDP 端口仍未启用。
+
+### B0.3 `implement-game-simulation-core`
+
+**进入条件：**simulation model 与 network profile strict 通过，C++ compiler/CMake 和每个第三方依赖的精确版本、来源、checksum、许可证、adapter 与回滚方案获批。
+
+**产出：**`simulation/`、`ihomeland-sim-server` 离线/loopback harness、自研最小 ECS、固定单写 pipeline、GAS-like、Jolt physics adapter、Detour navigation adapter、有界 history/evidence 和 CMake Presets。
+
+**完成条件：**unit/benchmark/sanitizer/determinism/profile tests 通过；外部类型未扩散到 gameplay components/contracts；进程仍不开放 production UDP，也不写 Go 持久库。
+
+### B0.4 `establish-go-simulation-control`
+
+**进入条件：**C++ core 提供稳定、幂等、无公网依赖的 SimulationInstance lifecycle contract；现有 placement fencing/recovery 基线保持通过。
+
+**产出：**Go `placement.RuntimeController` 的远程 C++ adapter、SimulationNode registration/health/capacity、start/drain/stop、完整 AssignmentStamp binding、admission target、result proposal/ack/replay 和 shutdown ordering。具体内部 transport 由该 change 基于故障隔离证据选择。
+
+**完成条件：**own-world、visit-world、stale assignment、C++ crash/restart、Go restart、drain 和重复 result 的 contract/integration tests 通过；现有 PersonalWorld/VisitSession/Go v1 API 无双 owner 或回归。
+
+### B0.5 `establish-secure-battle-transport`
+
+**进入条件：**network profile、Go/C++ control、endpoint ownership 与 threat model 完成，端口分配 change 明确实际 listener。
+
+**产出：**Asio 单 UDP listener/authenticated multiplexer、raw/KCP lanes、HTTPS battle ticket、cookie challenge、AEAD/key epoch/nonce、replay window、endpoint binding/rebinding、限流、抗放大、有界 queue 和跨 C++/C#/Go wire fixtures。
+
+**完成条件：**伪造、重放、放大、乱序、重复、过期、MTU、backpressure、rebind、key rollover 和 shutdown tests 全部通过；账号凭据、资产、奖励与结算不进入 UDP。
+
+### B0.6 `qualify-battle-network`
+
+**进入条件：**真实 C++ 进程、安全 UDP/KCP 和测试 Unity/协议客户端可在隔离环境运行，profile 预算已机器可读。
+
+**产出：**`tools/battle-qualification/`、可重复 network fault matrix、带宽/CPU/内存/queue/KCP 重传放大报告、安全 negative corpus、重连/迁移/Visitor soak 和低敏 evidence。
+
+**完成条件：**目标网络矩阵在预算内通过，所有 run 可由 manifest 重放，失败能定位到 lane/session/assignment/tick，发布门可自动阻止 profile 漂移。
+
+### B0.7 `implement-unity-gameplay-runtime`
+
+**进入条件：**battle network qualification 通过，C++ 服务端先支持冻结 wire 与兼容策略；Unity package/版本和 Cinemachine 回归基线获批。
+
+**产出：**`BattleNetworkClient`、纯 C# GameplayReplica/InputHistory/PredictedStateHistory、reconciliation/interpolation、Actor Views、Input System actions、uGUI HUD、UI Toolkit 复用和 Cinemachine CameraIntent Host。
+
+**完成条件：**Owner/Visitor 在真实 C++ 服务上完成移动、跳跃、延迟预测/校正、远端插值、断线/assignment 切换和 Scene teardown；没有第二个 Router、完整客户端 GAS/ECS 或 View 直连 transport。
+
+### B0.8 `deliver-personal-world-combat-slice`
+
+**进入条件：**Unity gameplay runtime 和 battle network 发布门稳定，玩法配置最小治理方案已由独立 change 冻结。
+
+**产出：**一把近战剑、一把远程扇子、武器授予技能、少量怪物、一只 Boss、基础碰撞/导航/动画/VFX/Audio/HUD，以及 Owner 邀请 Visitor 协作的产品场景。
+
+**完成条件：**从登录进入自己的 PersonalWorld 到双人协作击败 Boss 的可重复 PC build 验收通过；伤害/死亡由服务器权威，异常网络可恢复或明确失败，内容与性能达到首个商业化 vertical slice 的冻结质量线。
 
 ## 条件路线
 
-gRPC、独立 gateway/game/battle server、跨地域运行路由、Addressables 和 DOTS/ECS 没有固定排期，只在扩缩容、故障隔离、资源分发、profile 或团队 ownership 证据成立后进入独立 OpenSpec change。
+额外 gateway、Go 微服务拆分、gRPC、跨地域运行路由、Addressables 和 Unity DOTS/ECS 没有固定排期，只在扩缩容、故障隔离、资源分发、profile 或团队 ownership 证据成立后进入独立 OpenSpec change。独立 C++ Game Simulation Server 已由 B0 路线确定，但它不自动证明还需要 gRPC、匹配服、Room、Party 或其他服务拆分。

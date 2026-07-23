@@ -78,6 +78,25 @@ loopback 随机固定端口和高熵 secret，并在清理前验证 run-id label
 
 临时 manifest、secret 与配置只写入已忽略的 `.local/storage/<run-id>/`。
 
+## 后续 C++ Gameplay 依赖
+
+`simulation/` 首个 implementation change 必须先扩展 `versions.yaml` 的明确类别，再创建 CMake target 或恢复第三方依赖。计划使用的能力及其治理 owner 为：
+
+| 能力 | 计划依赖 | 唯一版本 owner | 引入门禁 |
+|---|---|---|---|
+| 异步 UDP I/O | Asio | C++ network adapter | 精确 release/source/checksum、license、安全与取消/关闭语义评审 |
+| 服务端物理 | Jolt Physics | C++ physics adapter | 精确 release/source/checksum、license、编译选项、坐标/单位与确定性范围测试 |
+| 导航 | Recast/Detour | navigation asset/runtime adapters | 精确 commit/release、license、nav asset version 与离线/运行时边界 |
+| 可靠 ARQ | KCP core | C++ KCP adapter | 精确 source/checksum、license、项目 clock/output/session 包装与拥塞预算 |
+| 构建 | CMake + CMake Presets | C++ build owner | 最低精确版本、官方来源、toolchain matrix、development/test/sanitizer/CI presets |
+| 客户端镜头 | Cinemachine | Unity camera host | Unity Package Manager 精确版本、Unity 兼容矩阵、license 与 scene/prefab 回归 |
+
+本架构阶段不填写猜测版本，也不把依赖下载到仓库。首次引入 change 必须同时登记上游 URL、精确 tag/commit、SHA-256（适用时）、许可证与 notice、支持平台/编译器、传递依赖、项目补丁、升级/回滚步骤以及离线缓存位置。
+
+项目代码只能通过窄 adapter/port 使用第三方能力。业务 component、跨端 protocol、公开 application contract 和持久 schema 不得暴露 Asio、Jolt、Detour 或 KCP 类型。不得把上游源码片段改名复制进业务目录来规避版本和许可证治理；确需 vendoring 时必须保留上游身份、完整许可证和补丁清单。
+
+`CMakeLists.txt` 与 checked-in `CMakePresets.json` 是未来 C++ 构建源事实，本机 IDE project 和绝对路径不是。presets 不得包含密钥、用户目录或环境特定 endpoint。具体 adapter 职责和禁止扩散规则见 `docs/gameplay-simulation-architecture.md`。
+
 ## 升级流程
 
 1. 从官方发布页确认新的正式版本、支持窗口和安全公告。
