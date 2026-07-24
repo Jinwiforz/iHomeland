@@ -5,7 +5,7 @@
 ## 目标
 
 - 让阅读者不必逆向实现即可理解设计意图、调用约束和失败边界。
-- 让 IDE、Go doc、C# XML documentation 和协议文档能够提取稳定说明。
+- 让 IDE、Go doc、C++ Doxygen、C# XML documentation 和协议文档能够提取稳定说明。
 - 明确状态所有权、生命周期、并发、安全、兼容和单位等无法仅靠类型表达的信息。
 - 保持较高注释覆盖率，同时避免逐行翻译代码产生噪声。
 
@@ -55,6 +55,9 @@
 | Go 导出类型、函数、方法、变量、常量 | 必须有符合 Go doc 的注释 |
 | Go 非导出业务类型、函数、方法 | 必须注释职责以及存在原因 |
 | Go struct 字段、interface 方法 | 必须说明语义、所有权、约束、单位或失败行为 |
+| C++ namespace、class、struct、enum、alias、concept | 必须使用 `///` Doxygen documentation |
+| C++ 构造/析构、函数、方法、operator、模板、字段 | 无论访问级别都必须有声明级 `///` 注释 |
+| C++ enum 成员、业务常量、公开宏 | 必须说明语义；数值来源、单位或兼容约束不明显时必须解释 |
 | C# class、struct、interface、record、enum、delegate | 必须使用 XML documentation |
 | C# 构造函数、方法、属性、事件、字段 | 无论访问级别都必须有声明级注释 |
 | C# enum 成员、业务常量 | 必须说明业务语义；数值来源或兼容约束不明显时必须解释 |
@@ -189,6 +192,94 @@ Go 没有 `#region` 语言结构，禁止加入 `// region`、`//region` 或编�
 - 声明按类型、构造、公开行为、内部 helper 的阅读顺序排列。
 - 只有在一组声明共享重要约束时使用简短章节注释。
 - 文件需要大量章节才能阅读时，应按职责拆分文件或类型。
+
+## C++ 注释规则
+
+### Doxygen documentation
+
+所有手写 C++ 声明无论公开或私有都使用紧邻声明的 `///` Doxygen documentation：
+
+- namespace、class、struct、union、enum、type alias、concept。
+- constructor、destructor、function、method、operator、template。
+- const、static field、instance field 和 enum member。
+- 具有项目语义的宏；能用 `constexpr`、template 或 function 表达时不得创建宏。
+
+第一句直接说明符号职责；存在所有权、线程、容量、单位、数值范围、异常、安全或生命周期约束时继续说明原因和边界。普通实现块注释使用 `//`，不使用 `///` 注释局部变量，也不使用 `/** */` 混写另一套 API 风格。
+
+常用 Doxygen tag：
+
+| Tag | 使用要求 |
+|---|---|
+| `@param name` | 每个非显然参数说明来源、有效范围、单位、借用/转移所有权和保留期限 |
+| `@tparam name` | 每个 template 参数说明角色以及 concept/trait 约束原因 |
+| `@return` | 非 `void` 函数说明结果语义、所有权、有效期和 sentinel/empty 行为 |
+| `@throws Type` | 可预期异常说明准确触发条件；不得与 `noexcept` 冲突 |
+| `@note` | 补充调用顺序、复杂度或实现兼容信息，不承载核心前置条件 |
+| `@warning` | 标记误用会破坏安全、数据或生命周期的不变量，不代替类型约束 |
+| `@see` | 指向直接相关符号或 owner 契约，避免复制另一份规则 |
+
+`@brief` 不是必需项；`///` 的第一段即摘要。参数、返回值和异常已能由简单签名与正文完整表达时，不机械添加无信息 tag。重写方法只有在基类契约完全适用且没有额外异常、线程、复杂度或生命周期差异时，才允许使用 `/// @copydoc Base::Method`；存在任何差异必须写完整实现契约。
+
+```cpp
+/// BoundedInbox 在唯一 simulation worker 与异步 producer 之间传递有界 command。
+///
+/// producer 可并发调用 TryPush；只有绑定的 worker 可以调用 Drain。队列满时拒绝新
+/// command 并返回 Capacity，不扩容、不覆盖旧 command，也不记录 payload 内容。
+class BoundedInbox final {
+public:
+    /// TryPush 尝试转移一个已通过 assignment 和 payload 安全校验的 command。
+    ///
+    /// @param command 调用成功后所有权转入队列；失败时调用方仍持有原值。
+    /// @return Accepted 表示 command 已入队；Capacity 表示 hard limit 已达到。
+    [[nodiscard]] PushResult TryPush(Command command);
+
+private:
+    /// capacity_ 是实例创建时冻结的 hard limit，运行期间不可修改。
+    std::size_t capacity_;
+};
+```
+
+### 类型、字段与数值
+
+- value type 注释说明 identity 范围、零值是否有效、比较/排序语义和 generation 规则。
+- raw pointer、reference、`std::span` 与 `std::string_view` 必须说明借用对象至少存活多久、是否允许为空以及调用后是否保留。
+- `std::unique_ptr`、`std::shared_ptr`、handle 和 allocator 字段必须说明创建、转移、关闭与释放 owner；禁止只写“保存指针”。
+- container、ring buffer、queue 和 arena 必须说明 hard capacity、扩容策略、迭代失效条件和 mutation owner。
+- 整数单位写入字段或参数注释，例如 nanoseconds、millimeters、scaled attribute；checked arithmetic、rounding 和 overflow policy 不明显时必须说明。
+- adapter 内浮点值必须说明坐标系、量化点、非有限值处理和进入 core 前的规范排序。
+- hash、digest、seed、Tick、sequence 与 generation 必须说明绑定范围和是否能跨实例、assignment 或重启复用。
+
+### 函数、异常与资源
+
+- 构造函数说明对象成功构造后成立的不变量，以及失败是否留下外部资源。
+- 析构函数说明必须结束的 worker、handle、临时文件或 callback；默认析构且没有额外语义时可简明说明 owner 释放顺序。
+- `noexcept` 只能用于实现确实保证不传播异常的边界；注释不得声称比签名更强的失败保证。
+- 返回 `std::optional`、status enum 或 result type 时说明 empty/status 的业务语义，不能让调用者猜测是 EOF、missing、stale 还是 failure。
+- 可能抛异常的公开/跨模块方法说明稳定异常类型、是否产生部分 mutation，以及调用者是否可以重试。
+- RAII guard 注释说明获取顺序、释放顺序、move 后状态和禁止复制的原因。
+- callback、worker 和异步 producer 说明允许线程、重入性、关闭顺序以及对象销毁后的调用行为。
+
+### Template、override 与编译期契约
+
+- template/concept 注释解释抽象的真实项目用例；不得为没有第二个调用方的假想泛化创建空接口。
+- `static_assert` 前的注释说明被保护的 ABI、范围或确定性不变量；断言文本给出可行动诊断。
+- `override` 方法同时遵守 interface 契约；实现若增加容量、线程、异常或性能限制，必须写在实现声明上。
+- `constexpr` table、排序 tuple 和 enum-to-token mapping 说明为何顺序属于 canonical contract，禁止依赖声明顺序却不写明。
+
+### Header、source 与第三方边界
+
+- public header 只描述项目 value contract，不在注释中要求调用者理解 Jolt、Detour、JSON parser 或平台 handle。
+- adapter source 可引用外部 API 名称，但必须用中文说明量化、所有权、错误映射和 callback 排序对项目的影响。
+- 生成代码和第三方源码禁止手工补注释；问题必须在项目 wrapper、schema、生成器或上游补丁清单中处理。
+- C++ 不使用 `#pragma region`、`// region` 或分隔符横幅组织代码；按职责拆分 header/source，并按类型、构造、公开行为、内部 helper 排列。
+- `.cpp` 中已在 header 完整记录且实现没有附加约束的函数定义不重复一份相同 Doxygen；私有 helper 和只存在于 `.cpp` 的类型仍必须在定义处使用 `///`。
+
+### C++ 测试
+
+- test executable 的 `main`、test function、fixture owner、fake clock、recorded adapter 和故障注入点必须说明保护的契约或回归来源。
+- 固定 seed、迭代次数、容量、Tick 和容差说明来源；不得用 wall clock sleep 或未登记 entropy 掩盖竞态。
+- fuzz-like 测试必须保存可重演 seed，并在失败诊断中输出低敏 replay identity。
+- sanitizer、benchmark 或平台特定测试说明适用 preset 和未覆盖平台，不能把 Windows x64 结果描述为跨平台资格。
 
 ## C# 与 Unity 注释规则
 
@@ -371,12 +462,14 @@ TODO(owner): 原因；满足什么条件后处理；具体后续动作或跟踪�
 3. 参数、返回值、错误、单位和所有权是否与实现一致。
 4. 状态机、身份、安全、并发、生命周期和关闭语义是否足够明确。
 5. Go doc 是否以导出标识符开头，package comment 是否以 `Package <name>` 开头。
-6. C# XML 标签是否完整，`<inheritdoc />` 是否确实适用。
-7. `#region` 是否提升导航效率而没有掩盖类型过大。
-8. TODO 是否有 owner、原因、触发条件和后续动作。
-9. 生成代码是否只从源 schema 或模板获得注释。
-10. 修改行为时是否同步更新相关注释和 owner 文档。
+6. C++ Doxygen 是否覆盖 private 声明、参数/返回/异常、借用期限、容量、单位和关闭语义。
+7. C++ public header 是否保持项目 value contract，第三方类型和平台 handle 是否只存在于 adapter 实现。
+8. C# XML 标签是否完整，`<inheritdoc />` 是否确实适用。
+9. `#region` 是否提升导航效率而没有掩盖类型过大。
+10. TODO 是否有 owner、原因、触发条件和后续动作。
+11. 生成代码是否只从源 schema 或模板获得注释。
+12. 修改行为时是否同步更新相关注释和 owner 文档。
 
 ## 自动化质量门
 
-服务端代码阶段启用能够检查 exported comment、package comment 和无效 directive 的 Go lint 规则；客户端代码阶段启用 XML documentation 与 C# analyzer 检查。自动化只负责发现缺失和格式问题，注释是否准确、是否解释“为什么”仍必须由评审确认。
+服务端代码阶段启用能够检查 exported comment、package comment 和无效 directive 的 Go lint 规则；C++ 阶段当前用 tracked CMake scanner 检查手写 type/public field 的 `///` 覆盖、禁用 region/TODO 变体和敏感 public field，并由编译器 warnings-as-errors 约束声明一致性。项目尚未锁定 Doxygen 版本，因此不得声称已运行 Doxygen warning gate；若后续引入，必须先在 `versions.yaml` 登记版本、来源、checksum 与唯一入口。客户端代码阶段启用 XML documentation 与 C# analyzer 检查。自动化只负责发现缺失和格式问题，private/member 的完整覆盖、注释是否准确以及是否解释“为什么”仍必须由评审确认。

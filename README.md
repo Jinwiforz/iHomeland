@@ -15,7 +15,7 @@ iHomeland 是一个面向 PC 的在线游戏项目。当前运行基线由 Go Co
   -> HTTPS / WSS / TLS-TCP 与 Go 客户端资格验收
   -> Unity Composition Root 与 Network Services
   -> Own-world / Visit-world 双 UI vertical slice
-  -> C++ 权威 Gameplay：simulation model -> network profile -> 可玩战斗竖切
+  -> C++ 权威 Gameplay：simulation model -> network profile -> simulation core -> 可玩战斗竖切
 ```
 
 Go 服务端 v1 与 Unity 客户端 v1 均已通过资格验收；这些门禁仍是后续变更必须保持的回归基线。Gameplay 的严格顺序与每个 change 的进入/完成条件只由 `docs/roadmap.md` 管理。
@@ -31,7 +31,7 @@ client/      已落地的 Unity 客户端版本入口
 docs/        架构、协议、工程标准、路线和流程
 openspec/    长期规格与变更 artifacts
 server/      已落地的 Go Control/Data Plane 版本入口
-simulation/  尚未创建；首个 C++ core implementation change 才建立
+simulation/  已落地的无网络 C++20 Game Simulation Core、adapters 与资格工具
 shared/      跨端协议与契约
 tools/       生成、测试、构建和运维工具
 versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本目录
@@ -53,9 +53,26 @@ versions.yaml 协议、工具链、语言、基础设施与 Unity 技术版本�
 - `docs/client-v1-qualification.md`：C3 唯一入口、冻结摘要与 Unity 资格结论
 - `docs/file-structure.md`：目标目录与文件职责
 - `docs/engineering-standards.md`：工程与测试标准
-- `docs/code-comment-convention.md`：Go、C#/Unity 与协议注释规范
+- `docs/code-comment-convention.md`：Go、C++、C#/Unity 与协议注释规范
 - `docs/workflow.md`：OpenSpec 与交付流程
 - `docs/git-commit-convention.md`：Git 提交消息与提交粒度
 - `docs/redis-keys.md`：Redis owner、TTL 和恢复规则
 - `docs/technology-versions.md`：集中版本目录与升级规则
 - `openspec/specs/`：长期行为契约
+
+## C++ 本地环境与换机恢复
+
+新 Windows 电脑只需拉取仓库后运行：
+
+```powershell
+& .\tools\cpp\cpp.ps1 bootstrap
+& .\tools\cpp\cpp.ps1 verify
+```
+
+`bootstrap` 会按 `versions.yaml` 自动检测并恢复 `.local/cpp/` 下的精确 CMake、
+Jolt、Detour、JSON 与项目指定 Build Tools；缺少 MSVC/Windows SDK 时使用已锁定且
+验签的 Microsoft installer 安装。`.local/`、`simulation/out/` 和
+`simulation/reports/` 都是可重建的本机缓存/证据，不随 Git 复制；换电脑时由入口
+重新检测和下载。Build Tools 的英文 UI resource 也由 `bootstrap` 检测，构建入口
+据此统一 MSVC 日志编码，用户无需修改 Windows Terminal 或系统区域设置。详细边界见
+`docs/technology-versions.md`。

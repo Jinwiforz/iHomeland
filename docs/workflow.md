@@ -34,7 +34,7 @@ Git 提交消息与提交粒度的唯一 owner 文档是 `docs/git-commit-conven
 - `docs/client-integration.md`：服务端交付包与客户端接入。
 - `docs/file-structure.md`：目录 owner。
 - `docs/engineering-standards.md`：代码、数据、测试和质量。
-- `docs/code-comment-convention.md`：Go、C#/Unity、协议与测试注释。
+- `docs/code-comment-convention.md`：Go、C++、C#/Unity、协议与测试注释。
 - `docs/git-commit-convention.md`：提交消息、提交粒度和历史治理。
 - `docs/redis-keys.md`：Redis key registry。
 

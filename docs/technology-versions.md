@@ -78,24 +78,78 @@ loopback 随机固定端口和高熵 secret，并在清理前验证 run-id label
 
 临时 manifest、secret 与配置只写入已忽略的 `.local/storage/<run-id>/`。
 
-## 后续 C++ Gameplay 依赖
+## C++ Gameplay 工具链与依赖
 
-`simulation/` 首个 implementation change 必须先扩展 `versions.yaml` 的明确类别，再创建 CMake target 或恢复第三方依赖。计划使用的能力及其治理 owner 为：
+`implement-game-simulation-core` 首次建立 `simulation/`，并已在创建 CMake target 前于 `versions.yaml` 锁定以下 Windows x64 reference toolchain 与无网络 core 依赖：
+
+| 能力 | 精确版本 | 唯一 owner | 允许边界 |
+|---|---|---|---|
+| Build Tools | Visual Studio 2026 Build Tools 18.8.1 build 12021.73，`en-US` UI | `cpp-build` | 只允许显式 `bootstrap` 使用固定 installer/channel identity 安装；configure/build/test 不安装或升级系统软件 |
+| 编译器 | MSVC 14.50.35717 LTS，`_MSC_VER=1950` | `cpp-build` | `v145` x64 C++20；configure 必须验证 exact toolset，禁止回退默认 compiler |
+| Platform SDK | Windows SDK 10.0.26100.8876 | `cpp-build` | 锁定 26100 兼容系列的最新 servicing；仅 Windows x64 reference build，不代表 Linux production 已获资格 |
+| 构建 | CMake 4.4.0 | `cpp-build` | tracked CMake sources、NMake Presets、CTest 与 dependency provider；包装入口先加载锁定 `VsDevCmd` |
+| 服务端物理 | Jolt Physics 5.5.0 | `cpp-physics-adapter` | 只由 Jolt adapter 私有链接并实现项目 `PhysicsWorld` value contract |
+| 运行时导航 | Recast/Detour 1.6.0 | `cpp-navigation-adapter` | 只构建 Detour runtime modules；不建立 Recast 离线烘焙 target |
+| Fixture JSON | nlohmann/json 3.12.0 | `cpp-fixture-adapter` | 只在 fixture/config/evidence adapter 私有使用，不进入 gameplay public headers |
+
+Build Tools bootstrapper、Windows SDK installer、CMake ZIP 和三项 library source archive 均登记不可漂移 URL 与 SHA-256；GitHub source archive 还同时登记 full commit。两个 Microsoft installer 必须通过 SHA-256 与 Microsoft Authenticode；MSVC 和 Windows SDK 由固定 installer、component ID、安装目录版本和编译期或已安装产品 identity 共同证明。`versions.yaml` 的 `verified_at` 是本轮外部身份核验日期，不代表未执行的 C++ benchmark 已通过。
+
+### 本地恢复与离线构建
+
+唯一包装入口是：
+
+```powershell
+& .\tools\cpp\cpp.ps1 bootstrap
+& .\tools\cpp\cpp.ps1 restore
+& .\tools\cpp\cpp.ps1 configure
+& .\tools\cpp\cpp.ps1 build
+& .\tools\cpp\cpp.ps1 test
+& .\tools\cpp\cpp.ps1 verify
+```
+
+目录职责固定为：
+
+- `.local/cpp/downloads/`：下载完成且 SHA-256 已验证的 immutable archives。
+- `.local/cpp/toolchains/visual-studio/<version>/`：项目指定的 Build Tools 安装根；Visual Studio Installer metadata、系统 runtime 与 Windows SDK 仍按 Microsoft 支持边界注册到 Windows。
+- `.local/cpp/sources/<name>/<version>/`：经路径逃逸检查解压的只读第三方 source 与 license。
+- `.local/cpp/cmake/<version>/`：项目局部 CMake binary distribution。
+- `.local/cpp/evidence/`：本机 toolchain discovery 临时 evidence。
+- `simulation/out/build/<preset>/`：被忽略的 CMake binary tree、CTest 输出、build
+  manifest 与包含 source digest 的 build identity。
+- `simulation/reports/`：被忽略的 qualification、manifest 与 Release reference
+  benchmark 本机报告。
+
+`bootstrap` 是新机器的统一入口：它自动检测 exact Build Tools/MSVC/Windows SDK，缺失时下载固定 installer、校验 SHA-256 与 Microsoft Authenticode 后安装，并恢复 CMake 与第三方 source。Build Tools 文件使用 `.local/cpp/toolchains/` 作为安装根；由于 Microsoft installer、Windows SDK、UCRT 和系统注册组件不属于可复制 ZIP，少量 installer metadata 与 SDK 文件仍位于 Windows 管理的位置，首次安装可能触发 UAC。`restore` 只恢复项目局部依赖。普通 configure/build/test 必须使用 `FETCHCONTENT_FULLY_DISCONNECTED=ON` 和显式 local source directories；缺少缓存、checksum/commit/license 漂移或 partial marker 时 fail closed，不调用 package registry，不使用系统同名 Jolt/Detour/JSON，也不自动联网补齐。nlohmann/json 使用完整 tag source `tar.gz`，使 Windows PowerShell 5.1 无需 xz 仍能恢复 headers、CMake metadata 与 `LICENSE.MIT`。缓存全部被 Git 忽略，任何锁定信息、license notice、patch manifest、fixture 或 qualification freeze 仍必须进入 Git。
+
+Build Tools 同时固定 `en-US` product language。包装入口在加载 `VsDevCmd` 后，仅在
+受控 compiler/CMake 子动作期间设置 `VSLANG=1033` 与
+`PreferredUILang=en-US`，使 MSVC `/showIncludes` 和 diagnostics 使用
+ASCII/英文输出，避免中文系统代码页与 UTF-8 终端组合产生乱码；动作结束后恢复调用方环境。
+
+Jolt 使用 static target、关闭 samples/viewer/install、关闭 RTTI 与 exceptions，并由 adapter 固定坐标、单位、collision layer、solver 和量化排序。Detour 只构建 runtime adapter 实际使用的 `Detour` target；不构建 `DetourCrowd`、`DetourTileCache`、demo、tests 或 Recast builder，首个 core 只消费版本化 nav fixture。nlohmann/json 关闭 tests/install/implicit conversions，只解析 closed fixture/config/evidence schema。三项依赖当前无项目补丁；出现补丁时必须在 tracked patch manifest 中记录上游基线、原因、diff digest、移除条件和升级处理。
+
+`verify` 分别 clean 构建 Release CI 与 ASan preset。Debug/ASan 运行相同 workload
+的结构与内存安全 smoke，但不裁决 CPU target；reference benchmark 和最终
+qualification 只由 Release CI binary 生成，避免调试或 sanitizer instrumentation
+改变性能口径。资格报告同时绑定 build manifest 与
+`ihomeland-build-identity.json`，后者包含 source digest、preset 和完整依赖/编译策略。
+`verify` 还会在两套 CTest 都成功后写入同源
+`qualification-gate-receipt.json`；Release qualification binary 缺少该 receipt、receipt
+与当前 source/CI target 不一致或 ASan target identity 缺失时必须拒绝生成 qualified 报告。
+
+直接依赖 notice 与上游 license 必须由恢复测试验证存在，并由发布/资格 artifact 保留。升级任一版本时必须同时更新 URL、checksum、commit、notice、adapter parity、determinism、sanitizer 和 benchmark；回滚通过恢复 `versions.yaml` 与 CMake source 到前一提交并清除对应 `.local/cpp/` 版本目录完成，不能复用新版本 binary tree。
+
+### 后续仍未引入的依赖
 
 | 能力 | 计划依赖 | 唯一版本 owner | 引入门禁 |
 |---|---|---|---|
-| 异步 UDP I/O | Asio | C++ network adapter | 精确 release/source/checksum、license、安全与取消/关闭语义评审 |
-| 服务端物理 | Jolt Physics | C++ physics adapter | 精确 release/source/checksum、license、编译选项、坐标/单位与确定性范围测试 |
-| 导航 | Recast/Detour | navigation asset/runtime adapters | 精确 commit/release、license、nav asset version 与离线/运行时边界 |
-| 可靠 ARQ | KCP core | C++ KCP adapter | 精确 source/checksum、license、项目 clock/output/session 包装与拥塞预算 |
-| 构建 | CMake + CMake Presets | C++ build owner | 最低精确版本、官方来源、toolchain matrix、development/test/sanitizer/CI presets |
-| 客户端镜头 | Cinemachine | Unity camera host | Unity Package Manager 精确版本、Unity 兼容矩阵、license 与 scene/prefab 回归 |
-
-本架构阶段不填写猜测版本，也不把依赖下载到仓库。首次引入 change 必须同时登记上游 URL、精确 tag/commit、SHA-256（适用时）、许可证与 notice、支持平台/编译器、传递依赖、项目补丁、升级/回滚步骤以及离线缓存位置。
+| 异步 UDP I/O | Asio | C++ network adapter | Go/C++ control、端口 owner、精确 release/source/checksum、license、安全与取消/关闭语义评审 |
+| 可靠 ARQ | KCP core | C++ KCP adapter | 安全 transport change、精确 source/checksum、license、项目 clock/output/session 包装与拥塞预算 |
+| 客户端镜头 | Cinemachine | Unity camera host | Battle network qualification、Unity Package Manager 精确版本、兼容矩阵与 scene/prefab 回归 |
 
 项目代码只能通过窄 adapter/port 使用第三方能力。业务 component、跨端 protocol、公开 application contract 和持久 schema 不得暴露 Asio、Jolt、Detour 或 KCP 类型。不得把上游源码片段改名复制进业务目录来规避版本和许可证治理；确需 vendoring 时必须保留上游身份、完整许可证和补丁清单。
 
-`CMakeLists.txt` 与 checked-in `CMakePresets.json` 是未来 C++ 构建源事实，本机 IDE project 和绝对路径不是。presets 不得包含密钥、用户目录或环境特定 endpoint。具体 adapter 职责和禁止扩散规则见 `docs/gameplay-simulation-architecture.md`。
+`CMakeLists.txt` 与 checked-in `CMakePresets.json` 是 C++ 构建源事实，本机 IDE project 和绝对路径不是。presets 不得包含密钥、用户目录或环境特定 endpoint。具体 adapter 职责和禁止扩散规则见 `docs/gameplay-simulation-architecture.md`。
 
 ## 升级流程
 

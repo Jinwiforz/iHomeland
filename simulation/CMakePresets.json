@@ -1,0 +1,115 @@
+{
+  "version": 10,
+  "cmakeMinimumRequired": {
+    "major": 4,
+    "minor": 4,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-msvc-base",
+      "hidden": true,
+      "generator": "NMake Makefiles",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_VERSION": "10.0.26100.0",
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "BUILD_TESTING": "ON",
+        "IHOMELAND_WARNINGS_AS_ERRORS": "ON",
+        "IHOMELAND_VISUAL_STUDIO_VERSION": "18.8.1",
+        "IHOMELAND_MSVC_TOOLSET_VERSION": "14.50.35717",
+        "IHOMELAND_WINDOWS_SDK_PACKAGE_VERSION": "10.0.26100.8876",
+        "IHOMELAND_MSC_VER": "1950",
+        "IHOMELAND_JOLT_SOURCE": "${sourceDir}/../.local/cpp/sources/jolt/5.5.0",
+        "IHOMELAND_RECAST_SOURCE": "${sourceDir}/../.local/cpp/sources/recast/1.6.0",
+        "IHOMELAND_JSON_SOURCE": "${sourceDir}/../.local/cpp/sources/json/3.12.0"
+      }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "inherits": "windows-msvc-base",
+      "displayName": "Windows MSVC Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "inherits": "windows-msvc-base",
+      "displayName": "Windows MSVC Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-msvc-asan",
+      "inherits": "windows-msvc-base",
+      "displayName": "Windows MSVC AddressSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "IHOMELAND_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-ci",
+      "inherits": "windows-msvc-base",
+      "displayName": "Windows MSVC CI",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug"
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release"
+    },
+    {
+      "name": "windows-msvc-asan",
+      "configurePreset": "windows-msvc-asan"
+    },
+    {
+      "name": "windows-msvc-ci",
+      "configurePreset": "windows-msvc-ci"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-asan",
+      "configurePreset": "windows-msvc-asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-ci",
+      "configurePreset": "windows-msvc-ci",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

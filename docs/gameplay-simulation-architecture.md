@@ -326,7 +326,22 @@ Unity 不复制服务器完整 effect stacking、damage formula、target validat
 - license/security review、最小 smoke/contract test；
 - C++ 与 Unity/Go wire fixture 的兼容性门禁。
 
-本架构 change 不选择精确版本、不下载库、不创建 CMake 工程，也不开放 listener。
+B0.3 已按 `versions.yaml` 锁定 MSVC/CMake/Jolt/Detour/JSON 版本并创建真实
+`simulation/` 工程。当前只实现无 listener 的离线 core：
+
+- `SimulationInstance` 是 worker、50 ms Tick、输入 inbox、startup rollback 与 drain/stop 的 owner；
+- `ihomeland_sim_core` 拥有 ECS、固定 gameplay pipeline、history 与项目 value ports；
+- fixture/Jolt/Detour adapters 私有持有第三方类型，public headers 由 architecture test 扫描；
+- `ihomeland-sim-replay`、`ihomeland-sim-benchmark` 与 `ihomeland-sim-qualification`
+  只生成低敏本地 evidence，不写 MySQL/Redis，也不表达 settlement；
+- `tools/cpp/cpp.ps1 bootstrap` 在新 Windows 机器检测并恢复精确工具链，
+  `verify` 以离线 Release CI、独立 ASan、parity、benchmark 和资格报告收口；
+- qualification 只由 Release binary 在 ASan 全套通过后生成，并绑定含 source digest
+  的 build identity 和同源 CI/ASan gate receipt；Debug/ASan 只运行 workload smoke，
+  不产生性能资格。
+
+Asio、KCP、battle ticket、numeric battle wire、Go control 和 Unity gameplay runtime
+仍不在 B0.3 target 图中，只有后续 change 满足路线图进入条件后才能引入。
 
 ## 首个可玩竖切的完成定义
 

@@ -58,6 +58,15 @@
 
 .vscode/
 
+## C++ 模拟本机构建与资格证据
+# 第三方 source 与固定 CMake 包统一位于已忽略的 /.local/cpp/。
+/simulation/out/
+/simulation/build/
+/simulation/CMakeUserPresets.json
+/simulation/.vs/
+/simulation/compile_commands.json
+/simulation/reports/
+
 ## Windows 生成文件
 Thumbs.db
 Thumbs.db:encryptable

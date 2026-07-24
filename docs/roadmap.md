@@ -397,15 +397,30 @@ B0.2 完成只解锁 B0.3 的离线/loopback C++ core 提案；Go/C++ control、
 
 ### B0.3 `implement-game-simulation-core`
 
+**状态：**实现、归档前审计与主 specs 同步均已完成，change 已于 2026-07-24 归档；B0.4 进入条件已满足。
+
 **进入条件：**simulation model 与 network profile delta 已同步主 specs且 strict 通过；model/profile validator、失败回归和 canonical report 无漂移；C++ compiler/CMake 和每个第三方依赖的精确版本、来源、checksum、许可证、adapter 与回滚方案获批。C++ core 必须消费 50 ms SimulationTick、16-Tick history、8-actor profile cap 与 CPU/memory target budget，并保持所有 `implementation_required` 指标为待补证门。
 
 **产出：**`simulation/`、`ihomeland-sim-server` 离线/loopback harness、自研最小 ECS、固定单写 pipeline、GAS-like、Jolt physics adapter、Detour navigation adapter、有界 history/evidence 和 CMake Presets。
 
 **完成条件：**unit/benchmark/sanitizer/determinism/profile tests 通过；外部类型未扩散到 gameplay components/contracts；进程仍不开放 production UDP，也不写 Go 持久库。
 
+**完成 evidence：**`tools/cpp/cpp.ps1 bootstrap` 可在新 Windows 机器检测并恢复
+锁定的 VS Build Tools/MSVC/en-US compiler UI/SDK/CMake/Jolt/Detour/JSON；Debug CTest 聚合
+unit、contract、integration、negative、determinism、Jolt/Detour parity、replay、
+comprehensive、benchmark 与 architecture gates。1/5/8 actor reference workload
+验证 50 ms Tick、8-actor cap、2.5 ms/Tick、64 MiB instance、8 MiB history 和
+256 queue targets。固定 Release binary 只在同一 source identity 的 clean CI 与
+ASan、全部 model cases、连续确定性均通过后生成
+`implementation-qualified-windows-x64`，并验证同源 CI/ASan gate receipt；报告继续明确排除 Linux、Go control、
+socket/KCP/AEAD、production network 与 Unity runtime。
+
 ### B0.4 `establish-go-simulation-control`
 
-**进入条件：**C++ core 提供稳定、幂等、无公网依赖的 SimulationInstance lifecycle contract；现有 placement fencing/recovery 基线保持通过。
+**进入条件：**B0.3 的 10 个冻结 model cases、CI/ASan/parity/benchmark、连续
+determinism 与唯一 qualification report 全部通过，主 specs 已同步并归档；C++ core
+提供稳定、幂等、无公网依赖的 SimulationInstance lifecycle contract，现有 placement
+fencing/recovery 基线保持通过。
 
 **产出：**Go `placement.RuntimeController` 的远程 C++ adapter、SimulationNode registration/health/capacity、start/drain/stop、完整 AssignmentStamp binding、admission target、result proposal/ack/replay 和 shutdown ordering。具体内部 transport 由该 change 基于故障隔离证据选择。
 

@@ -76,7 +76,7 @@
 
 ### Requirement: 服务器权威 gameplay 必须按模型证据顺序交付
 
-服务器权威 gameplay MUST 在 `define-authoritative-gameplay-architecture` strict 验证和归档后，依次完成 battle simulation model、battle network profile、C++ simulation core、Go/C++ control、安全 battle transport、网络资格、Unity gameplay runtime 与 PersonalWorld combat slice。Simulation model MUST 先冻结 Tick/Input 映射、输入 vocabulary、pipeline、移动/跳跃、物理 port、Ability/Effect/Damage/Death、AI、history、overload、determinism、纯模型 fixtures 与预算假设；network profile MUST 绑定完整 model digest，以可重复 fault matrix 冻结 cadence、window、baseline、MTU、逻辑 lane、KCP、容量与网络预算，并显式区分 profile-qualified、target budget 和仍需真实实现补证的指标；C++ core MUST 以同一 model corpus 和 profile 参数进行无网络验收。前一阶段缺少 strict 规格、机器可读 evidence 或完成门时，后一阶段 MUST NOT 通过占位类型、隐藏默认值或临时 listener 绕过进入条件。
+服务器权威 gameplay MUST 在 `define-authoritative-gameplay-architecture` strict 验证和归档后，依次完成 battle simulation model、battle network profile、C++ simulation core、Go/C++ control、安全 battle transport、网络资格、Unity gameplay runtime 与 PersonalWorld combat slice。Simulation model MUST 先冻结 Tick/Input 映射、输入 vocabulary、pipeline、移动/跳跃、物理 port、Ability/Effect/Damage/Death、AI、history、overload、determinism、纯模型 fixtures 与预算假设；network profile MUST 绑定完整 model digest，以可重复 fault matrix 冻结 cadence、window、baseline、MTU、逻辑 lane、KCP、容量与网络预算，并显式区分 profile-qualified、target budget 和仍需真实实现补证的指标；C++ core MUST 以同一 model corpus 和 profile 参数进行无网络验收，并 MUST 通过精确 dependency/toolchain、全部 fixtures、Jolt/Detour parity、determinism、sanitizer 与 1/5/8 actor CPU/memory/history/queue evidence 后才能解锁 Go/C++ control。前一阶段缺少 strict 规格、机器可读 evidence 或完成门时，后一阶段 MUST NOT 通过占位类型、隐藏默认值、旧资格标签或临时 listener 绕过进入条件。
 
 #### Scenario: 在模型前定义网络参数
 
@@ -102,6 +102,21 @@
 
 - **WHEN** proposal 尝试安装 Jolt/Detour/Asio、创建 CMake simulation target 或实现 production gameplay loop，但 model corpus 或经测量 network profile 尚未完成
 - **THEN** 评审必须保持实现门关闭；只允许在 B0.1/B0.2 内提交无第三方、无 listener 的模型/profile 数据与校验工具
+
+#### Scenario: C++ core 只有 happy path
+
+- **WHEN** 离线 harness 能运行部分 model cases，但 exact toolchain/dependency、全量 fixture、negative、Jolt/Detour parity、sanitizer、连续 determinism 或 1/5/8 actor budget evidence 任一缺失/失败
+- **THEN** `implement-game-simulation-core` 不得完成，B0.4 Go/C++ control 进入门保持关闭
+
+#### Scenario: C++ core 完整资格通过
+
+- **WHEN** 同一 build/config/model/profile digest 下的全部离线 mandatory gates 通过，CPU/memory/history/queue 的 implementation evidence 与 owner docs 已同步且 strict 验证成功
+- **THEN** `establish-go-simulation-control` 可以消费冻结 `SimulationInstance` lifecycle contract，但不得重写 Tick owner、gameplay rules、assignment 或已验收预算
+
+#### Scenario: 离线 core 冒充 production battle runtime
+
+- **WHEN** B0.3 只具备 Windows x64 离线/loopback evidence，却声明 Linux production、Go control、真实 socket/KCP/AEAD、battle network 或 Unity runtime 已 qualified
+- **THEN** 资格结论失败；未交付能力继续由 B0.4 至 B0.7 的独立 changes 和 evidence 解锁
 
 #### Scenario: UDP listener 被提前开放
 

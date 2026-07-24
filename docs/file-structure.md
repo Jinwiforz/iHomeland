@@ -19,14 +19,17 @@ iHomeland/
   docs/
   openspec/
   server/
-  simulation/               # 后续 C++ Game Simulation Server；首个实现 change 才创建
+  simulation/               # 已落地的无网络 C++20 Game Simulation Core
   shared/
   tools/
   release.json
   versions.yaml
 ```
 
-`simulation/` 是未来 `ihomeland-sim-server` 的唯一工程根，不属于现有 Go `server/` 子目录，也不把第三方源码复制成业务代码。B0.1/B0.2 已交付共享 model/profile 数据与只读工具；只有首个 C++ core implementation change 的 dependency、compiler/CMake、adapter 和回滚方案获批后才能创建真实工程目录与 target，UDP listener 仍等待后续安全 transport。
+`simulation/` 是 `ihomeland-sim-server` 的唯一 C++ 工程根，不属于现有 Go
+`server/` 子目录，也不把第三方源码复制成业务代码。B0.3 已建立真实工程、
+exact toolchain bootstrap、离线 adapters、tests 与 qualification tools；UDP listener
+仍等待后续安全 transport。
 
 ## C++ Game Simulation Server 目标结构
 
@@ -35,23 +38,30 @@ simulation/
   CMakeLists.txt
   CMakePresets.json
   cmake/
+  apps/
+    sim_server/              # 无 listener smoke/composition 入口
+    replay/                  # 连续确定 replay evidence
+    benchmark/               # 1/5/8 actor reference workload
+    qualification/           # verify 成功后生成本地资格产物
+  include/ihomeland/sim/     # 只暴露项目 value contracts
   src/
-    app/                     # composition、进程 lifecycle、readiness
-    control/                 # Go↔C++ 内部控制契约 adapter
-    network/                 # Asio、UDP、KCP、安全 session 与 replication adapters
-    simulation/              # fixed-tick pipeline 与 SimulationInstance owner
-    ecs/                     # 项目自研最小 ECS；不拥有玩法规则
-    gameplay/                # movement、ability、effect、damage、death
-    physics/                 # Jolt port/adapter
-    navigation/              # Detour runtime port/adapter
-    history/                 # 有界历史帧与 replay evidence
+    core/                    # Tick、digest 与跨 adapter 规范 identity
+    simulation/              # SimulationInstance、输入映射与唯一 worker
+    ecs/                     # generation-safe registry/storage/commit barrier
+    gameplay/                # 固定 pipeline、movement、ability/effect/AI
+    history/                 # 16-Tick 有界 history
+    adapters/                # fixture、Jolt、Detour 与 evidence adapters
+    qualification/           # reference benchmark implementation
   tests/
-    unit/
-    integration/
-    contract/
+  out/                       # ignored build/install tree
+  reports/                   # ignored 本地 qualification evidence
 ```
 
-目录表达依赖方向：`gameplay` 只依赖项目定义的 ECS/physics/navigation ports，不能在 component 或公开 contract 中暴露 Asio、Jolt、Detour 或 KCP 类型；`network` 只能向 tick-boundary input queue 写入有界命令，不能直接修改 ECS/physics world。Recast 的离线导航构建工具只有在内容管线需求成立后才建立独立 target。
+目录表达依赖方向：`gameplay` 只依赖项目定义的 ECS/physics/navigation ports，
+不能在 component 或公开 contract 中暴露 Jolt、Detour 或 JSON 类型。当前没有
+`control/` 或 `network/` 目录；后续网络只能向 tick-boundary input queue 写入有界
+命令，不能直接修改 ECS/physics world。Recast 离线导航构建工具只有在内容管线
+需求成立后才建立独立 target。
 
 ## 当前 Go 服务端结构
 

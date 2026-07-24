@@ -29,6 +29,21 @@
 - 不使用静态 singleton 传播全部服务；Composition Root 显式注入窄接口。
 - Scene/Prefab/ScriptableObject 不保存在线业务最终事实。
 
+## C++ Game Simulation Core 规则
+
+- 语言基线为 C++20，唯一入口是 `tools/cpp/cpp.ps1` 与 tracked CMake Presets；
+  不接受系统默认 compiler、浮动依赖或手工 IDE project 作为构建事实。
+- `SimulationInstance` 唯一拥有 worker、Tick、inbox 与 startup/drain/stop 生命周期；
+  producer 只能提交 intent，不能在 Tick 中途写 ECS、adapter 或 history。
+- structural mutation 只在唯一 commit barrier 执行；component、query、history 和
+  evidence 均有 hard capacity，超限必须原子拒绝。
+- gameplay 只依赖项目 value ports；Jolt、Detour 与 JSON types 只能出现在 concrete
+  adapter translation units 或 adapter tests。
+- C++ 手写声明、成员、字段和关键不变量使用中文 `///` 文档注释，参数、返回值、
+  异常、ownership、单位与 lifetime 语法遵守 `docs/code-comment-convention.md`。
+- `windows-msvc-debug` 用于开发，`windows-msvc-ci` 用于 release-style clean gate，
+  `windows-msvc-asan` 用于项目与 Jolt 使用一致 sanitizer ABI 的内存安全门。
+
 ## 分层规则
 
 - Transport 不实现业务状态机。
@@ -168,6 +183,20 @@ Metrics label 必须来自稳定有限集合；禁止把 request URL、错误文
 - schema、manifest、case inventory、引用、稳定排序、单位、coverage 与 canonical digest 验证
 - 隔离临时副本上的 unknown field、duplicate ID、漂移、安全字段和缺失 coverage 失败回归
 - validator 连续运行输出一致且不修改 corpus；纯模型门不得启动网络、Docker 或 gameplay evaluator
+
+C++ simulation：
+
+- unit、contract、integration、negative、determinism、Jolt parity、Detour parity、
+  replay、comprehensive、benchmark、architecture 与 ASan labels 缺一不可；
+- reference benchmark 固定 1/5/8 actors、warmup/sample/statistics，并报告
+  median/p95/max Tick、Tick 热路径 allocation、显式 instance/history bytes 与真实
+  bounded queue high-watermark；
+- qualification 只能在 clean Release CI 和独立 ASan 全套成功后由 Release binary 生成，
+  并绑定含 source digest 的 build identity 与同源 CI/ASan gate receipt；
+  Debug/ASan benchmark smoke 不能替代 Release reference measurement；
+  qualification 必须声明
+  `implementation-qualified-windows-x64`，不得据此声称 Linux、Go control、网络或
+  Unity runtime 已获资格。
 
 Bug 修复优先增加可复现测试。无法运行测试时必须说明原因与剩余风险。
 
