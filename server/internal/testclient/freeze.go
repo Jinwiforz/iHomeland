@@ -98,7 +98,13 @@ func contractFreezePaths(repositoryRoot string) ([]string, error) {
 	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
 		path = filepath.ToSlash(filepath.Clean(path))
-		if path == "shared/contracts/fixtures/qualification/freeze.json" || strings.Contains(path, "/generated/") || strings.Contains(path, "/descriptor/") || strings.Contains(path, "/projection/") || strings.HasSuffix(path, "/report.json") {
+		if path == "shared/contracts/fixtures/qualification/freeze.json" ||
+			strings.HasPrefix(path, "shared/contracts/fixtures/battle/") ||
+			strings.HasPrefix(path, "shared/contracts/fixtures/simulation-control/") ||
+			strings.Contains(path, "/generated/") ||
+			strings.Contains(path, "/descriptor/") ||
+			strings.Contains(path, "/projection/") ||
+			strings.HasSuffix(path, "/report.json") {
 			continue
 		}
 		if _, exists := seen[path]; exists {

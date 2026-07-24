@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "caseId": "control-contract-rejections",
+  "category": "negative",
+  "mutations": [
+    {
+      "id": "unknown-field",
+      "expectedReason": "closed-schema"
+    },
+    {
+      "id": "duplicate-field",
+      "expectedReason": "duplicate-json-member"
+    },
+    {
+      "id": "noncanonical-decimal",
+      "expectedReason": "invalid-decimal"
+    },
+    {
+      "id": "wrong-session-nonce",
+      "expectedReason": "session-mismatch"
+    },
+    {
+      "id": "nonmonotonic-sequence",
+      "expectedReason": "sequence-mismatch"
+    },
+    {
+      "id": "oversize-frame",
+      "expectedReason": "frame-too-large"
+    },
+    {
+      "id": "stale-assignment",
+      "expectedReason": "assignment-stale"
+    },
+    {
+      "id": "result-id-conflict",
+      "expectedReason": "result-identity-conflict"
+    },
+    {
+      "id": "forbidden-network-scope",
+      "expectedReason": "scope-forbidden"
+    }
+  ]
+}

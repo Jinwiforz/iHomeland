@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "documentKind": "manifest",
+  "b03Binding": {
+    "qualificationConclusion": "implementation-qualified-windows-x64",
+    "releaseBuildIdentitySha256": "86861672c50e7d57f2744b56408f430638815bd08d3b668155aeec184bd607f6",
+    "asanBuildIdentitySha256": "4a5a65491bb17e6bd8b01c284026c681a73b4211e8d807f91a045a917357e2e2",
+    "qualificationGateReceiptSha256": "64ef4905e71852d731edc2f1115b9a255cb106b2c0ff55ddb9a8162ef76d540b",
+    "modelManifestSha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+    "profileManifestSha256": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+    "maximumActors": 8,
+    "simulationTickNs": 50000000
+  },
+  "files": [
+    {
+      "path": "schema/frame.schema.json",
+      "documentKind": "frame-schema",
+      "sha256": "26cebd50ead38f2238a6fcf26c7a8b124a3adef069ff417c4dff6b698b07949d"
+    },
+    {
+      "path": "message-inventory.json",
+      "documentKind": "message-inventory",
+      "sha256": "16dad2e0bacb8658c06a501bb911985b816d73c266089f7c0875c84df6c2fdbc"
+    },
+    {
+      "path": "canonical-golden.json",
+      "documentKind": "canonical-golden",
+      "sha256": "ef8dc71ecf5630a278701de3b21651526d360a124e6ce6cbe2974fb6ff6cad88"
+    },
+    {
+      "path": "runtime/config/control-baseline-v1.json",
+      "documentKind": "simulation-config",
+      "sha256": "da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381"
+    },
+    {
+      "path": "runtime/navigation/control-baseline-v1.json",
+      "documentKind": "navigation-binding",
+      "sha256": "3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd"
+    },
+    {
+      "path": "runtime/physics/control-baseline-v1.json",
+      "documentKind": "physics-binding",
+      "sha256": "ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98"
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "hello-compatible-node",
+      "path": "cases/hello.json",
+      "category": "hello",
+      "sha256": "601702f8c8ddeca8db06256df8d1b784da800a05a3b4f7bcd6e4add43ed6f966"
+    },
+    {
+      "caseId": "instance-lifecycle-replay",
+      "path": "cases/lifecycle.json",
+      "category": "lifecycle",
+      "sha256": "f0222bd35fb3fefbae3b4a773434598e8c0faef3840a318a8547600bad459af7"
+    },
+    {
+      "caseId": "control-contract-rejections",
+      "path": "cases/negative.json",
+      "category": "negative",
+      "sha256": "3aa0285ed44f2eb4791fb13c289636fbde2a4ce7e99d6d1c3840814d18e6ac36"
+    },
+    {
+      "caseId": "lifecycle-result-replay",
+      "path": "cases/result.json",
+      "category": "result",
+      "sha256": "821a08d024fb55c15dda2cf88b18dc8b9bae5f3888d98523466f8f38cb76bd9a"
+    }
+  ]
+}

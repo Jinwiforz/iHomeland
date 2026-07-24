@@ -64,6 +64,16 @@ func TestContractFreezeDigestDetectsContentAndSetDrift(t *testing.T) {
 	if err != nil || ignored != removed {
 		t.Fatalf("freeze record affected digest=%q want=%q err=%v", ignored, removed, err)
 	}
+	mustWriteFixture(t, root, "shared/contracts/fixtures/simulation-control/internal.json", "internal")
+	internal, _, err := ContractFreezeDigest(root)
+	if err != nil || internal != removed {
+		t.Fatalf("internal control fixture affected public digest=%q want=%q err=%v", internal, removed, err)
+	}
+	mustWriteFixture(t, root, "shared/contracts/fixtures/battle/model/internal.json", "internal")
+	battle, _, err := ContractFreezeDigest(root)
+	if err != nil || battle != removed {
+		t.Fatalf("internal battle fixture affected public digest=%q want=%q err=%v", battle, removed, err)
+	}
 }
 
 // TestLoadFreezeRecordRejectsInvalidInput 验证摘要格式、算法与额外字段不能静默通过。

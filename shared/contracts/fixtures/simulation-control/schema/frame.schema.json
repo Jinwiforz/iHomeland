@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.example/schema/simulation-control/frame-v1.json",
+  "title": "iHomeland Simulation Control Frame v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sessionNonce",
+    "sequence",
+    "requestId",
+    "kind",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "simulation-control-v1"
+    },
+    "sessionNonce": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sequence": {
+      "$ref": "#/$defs/decimal"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^sctl_[A-Za-z0-9_-]{16,80}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "instance.drain",
+        "instance.drained",
+        "instance.ready",
+        "instance.start",
+        "instance.status.query",
+        "instance.status.receipt",
+        "instance.stop",
+        "instance.stopped",
+        "node.health.query",
+        "node.health.receipt",
+        "node.hello.challenge",
+        "node.hello.receipt",
+        "node.shutdown",
+        "node.stopped",
+        "result.ack",
+        "result.proposal"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identity": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{3,95}$"
+    }
+  }
+}

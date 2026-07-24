@@ -67,8 +67,36 @@ func TestProductionStorageRequiresVerifiedTLS(t *testing.T) {
 	config.Storage.MySQL.TLS = StorageTLS{Enabled: true, ServerName: "mysql.internal", CAFile: `C:\certs\mysql-ca.pem`}
 	config.Storage.Redis.TLS = StorageTLS{Enabled: true, ServerName: "redis.internal", CAFile: `C:\certs\redis-ca.pem`}
 	config.PublicAPI.TLS = PublicTLS{Enabled: true, CertificateFile: `C:\certs\public.pem`, PrivateKeySecret: "env:PUBLIC_KEY"}
+	config.SimulationControl = validProductionSimulationControl()
 	if err := config.Validate(); err != nil {
 		t.Fatalf("production verified TLS 配置应有效：%v", err)
+	}
+}
+
+// validProductionSimulationControl 返回不访问文件系统的纯配置有效值。
+func validProductionSimulationControl() SimulationControl {
+	return SimulationControl{
+		Enabled:                    true,
+		BinaryPath:                 `C:\ihomeland\ihomeland-sim-server.exe`,
+		BinarySHA256:               strings.Repeat("1", 64),
+		QualificationReceiptPath:   `C:\ihomeland\qualification-gate-receipt.json`,
+		QualificationReceiptSHA256: strings.Repeat("2", 64),
+		BuildIdentity:              strings.Repeat("3", 64),
+		ModelManifest:              strings.Repeat("4", 64),
+		ProfileManifest:            strings.Repeat("5", 64),
+		ConfigIdentity:             strings.Repeat("6", 64),
+		NavigationIdentity:         strings.Repeat("7", 64),
+		PhysicsIdentity:            strings.Repeat("8", 64),
+		InstanceCapacity:           64,
+		ActorCapacity:              8,
+		FrameBytes:                 65_536,
+		PendingRequests:            256,
+		RequestTimeout:             time.Second,
+		HealthInterval:             2 * time.Second,
+		HealthTimeout:              time.Second,
+		DrainTimeout:               time.Second,
+		ShutdownTimeout:            time.Second,
+		StderrLineBytes:            1024,
 	}
 }
 

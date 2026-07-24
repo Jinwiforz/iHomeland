@@ -6,6 +6,16 @@ include(CTest)
 include(cmake/IHomelandBuild.cmake)
 include(cmake/Dependencies.cmake)
 
+set(IHOMELAND_CONTROL_BUILD_IDENTITY "" CACHE STRING
+    "Exact target identity embedded in the private control child")
+string(LENGTH "${IHOMELAND_CONTROL_BUILD_IDENTITY}"
+    IHOMELAND_CONTROL_BUILD_IDENTITY_LENGTH)
+if(NOT IHOMELAND_CONTROL_BUILD_IDENTITY_LENGTH EQUAL 64 OR
+   NOT IHOMELAND_CONTROL_BUILD_IDENTITY MATCHES "^[0-9a-f]+$")
+    message(FATAL_ERROR
+        "IHOMELAND_CONTROL_BUILD_IDENTITY must be a lowercase SHA-256")
+endif()
+
 add_library(ihomeland_sim_core STATIC
     src/core/fixed_tick.cpp
     src/core/navigation_world.cpp
@@ -71,14 +81,36 @@ target_link_libraries(ihomeland_sim_detour_adapter
 )
 ihomeland_configure_project_target(ihomeland_sim_detour_adapter)
 
+add_library(ihomeland_sim_control_adapter STATIC
+    src/control/control_frame.cpp
+    src/control/control_server.cpp
+    src/control/simulation_node.cpp
+)
+add_library(iHomeland::SimulationControl ALIAS ihomeland_sim_control_adapter)
+target_link_libraries(ihomeland_sim_control_adapter
+    PUBLIC iHomeland::SimulationCore
+    PRIVATE
+        ihomeland_sim_jolt_adapter
+        ihomeland_sim_detour_adapter
+        nlohmann_json::nlohmann_json
+        bcrypt
+)
+ihomeland_configure_project_target(ihomeland_sim_control_adapter)
+
 add_executable(ihomeland-sim-server
     apps/sim_server/main.cpp
 )
 target_link_libraries(ihomeland-sim-server
     PRIVATE
+        iHomeland::SimulationControl
         ihomeland_sim_fixture_adapter
         ihomeland_sim_jolt_adapter
         ihomeland_sim_detour_adapter
+)
+target_compile_definitions(ihomeland-sim-server PRIVATE
+    "IHOMELAND_CONTROL_BUILD_IDENTITY=\"${IHOMELAND_CONTROL_BUILD_IDENTITY}\""
+    "IHOMELAND_CONTROL_MODEL_MANIFEST=\"65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1\""
+    "IHOMELAND_CONTROL_PROFILE_MANIFEST=\"ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f\""
 )
 ihomeland_configure_project_target(ihomeland-sim-server)
 
@@ -259,6 +291,24 @@ if(BUILD_TESTING)
     ihomeland_configure_project_target(ihomeland_sim_detour_navigation_test)
     add_test(NAME simulation.navigation.detour-live COMMAND ihomeland_sim_detour_navigation_test)
     set_tests_properties(simulation.navigation.detour-live PROPERTIES LABELS "contract;negative;determinism;detour-parity")
+
+    add_executable(ihomeland_sim_control_frame_test tests/control_frame_test.cpp)
+    target_link_libraries(ihomeland_sim_control_frame_test PRIVATE iHomeland::SimulationControl)
+    ihomeland_configure_project_target(ihomeland_sim_control_frame_test)
+    add_test(NAME simulation.control.frame COMMAND ihomeland_sim_control_frame_test)
+    set_tests_properties(simulation.control.frame PROPERTIES LABELS "unit;contract;negative")
+
+    add_executable(ihomeland_sim_control_node_test tests/simulation_node_test.cpp)
+    target_link_libraries(ihomeland_sim_control_node_test PRIVATE iHomeland::SimulationControl)
+    ihomeland_configure_project_target(ihomeland_sim_control_node_test)
+    add_test(NAME simulation.control.node COMMAND ihomeland_sim_control_node_test)
+    set_tests_properties(simulation.control.node PROPERTIES LABELS "unit;integration;negative;determinism")
+
+    add_executable(ihomeland_sim_control_stdio_test tests/control_stdio_test.cpp)
+    target_link_libraries(ihomeland_sim_control_stdio_test PRIVATE iHomeland::SimulationControl)
+    ihomeland_configure_project_target(ihomeland_sim_control_stdio_test)
+    add_test(NAME simulation.control.stdio COMMAND ihomeland_sim_control_stdio_test)
+    set_tests_properties(simulation.control.stdio PROPERTIES LABELS "contract;integration;negative")
 
     add_test(
         NAME simulation.boundary.public_headers

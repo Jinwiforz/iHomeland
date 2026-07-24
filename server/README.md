@@ -4,7 +4,7 @@
 
 服务端严格按 `docs/roadmap.md` 的基础能力、个人世界、访客联机、公开通道和资格验收顺序实现。架构依赖由 `docs/architecture.md` 定义，目录归属由 `docs/file-structure.md` 定义，代码与测试要求由 `docs/engineering-standards.md` 定义。目录只在对应 change 实现真实行为时创建。
 
-当前 module 包含 world/visit Protobuf 与 HTTPS/WSS/TLS-TCP registry/fixture 契约、协议校验、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement、VisitSession 和 WorldAdmission core。公开 component 已用 production adapters 接线 10 个冻结 HTTP operation、认证 WSS control 和独立 gameplay TCP listener；TCP 使用固定 preface 依次消费一次性 GAMEPLAY ticket 与 WorldAdmission，并以有界 registry/queue/dispatcher 接入冻结的 world/visit route。进程内 WorldInstance runtime、assignment lease、VisitSession lifecycle、semantic deadline、跨通道通知与精确 safe-return 已形成完整服务端竖切；`internal/testclient` 与 `cmd/qualificationtool` 作为独立公开契约消费者，通过 `tools/qualification/qualification.ps1` 聚合 contract、fuzz/race、真实 storage、黑盒故障和清理门禁。
+当前 module 包含 world/visit Protobuf 与 HTTPS/WSS/TLS-TCP registry/fixture 契约、协议校验、唯一 `cmd/server`、Composition Root、独立诊断 listener、必需 MySQL/Redis storage runtime，以及 transport-independent session、account、PersonalWorld、WorldInstance placement、VisitSession、WorldAdmission 和 Go/C++ simulation control core。公开 component 已用 production adapters 接线 10 个冻结 HTTP operation、认证 WSS control 和独立 gameplay TCP listener；production `simulation_node` component 在 storage 后、public runtime 前启动无 listener C++ child，并以完整 AssignmentStamp 驱动 placement lifecycle。`internal/testclient` 与 `cmd/qualificationtool` 作为独立公开契约消费者，通过 `tools/qualification/qualification.ps1` 聚合 contract、fuzz/race、真实 storage、黑盒故障和清理门禁。
 
 完整 Q0 命令、冻结 digest、报告解释、证据层级和长期演进规则见 `../docs/server-v1-qualification.md`。资格客户端只承担服务端自动化外部回归，不是 Unity 替代品；新增公开 capability 时按 group 扩展并保留旧 mandatory 场景，纯内部重构不复制到客户端。
 
@@ -16,7 +16,14 @@ Account production package 只定义消费侧接口，reference adapters 仅存�
 
 PersonalWorld core 位于 `internal/personalworld/`。它建立独立 `PersonalWorldID`、不可变 `account.PlayerID` owner、primary world 原子 ensure、严格 snapshot hydration、持久 revision、`active -> archived` 生命周期，以及带 expected revision、Owner-scoped idempotency fingerprint 和 commit-unknown 的归档契约。并发 reference repository、fake clock/ID generator 与故障注入只存在于 `_test.go`，生产 package 不提供 memory fallback。
 
-WorldInstance placement core 位于 `internal/placement/`。它建立独立 `WorldInstanceID`、受信 `RuntimeNodeID`、单调 assignment generation/fencing token、`starting -> active` 发布、lease renew/write qualification，以及 revoke-before-stop、break-before-make 的休眠、重建和迁移编排。Composition Root 每次启动生成新的 `RuntimeNodeID`，由有容量上限的进程内 runtime controller 按完整 assignment stamp 启停承载，并由单 worker semantic deadline owner 续约或失效 lease。所有 store 条件操作绑定完整 assignment stamp；并发 reference store、fake runtime/clock/ID 与故障注入只存在于 `_test.go`，生产 package 不提供 memory fallback。
+WorldInstance placement core 位于 `internal/placement/`。它建立独立 `WorldInstanceID`、受信 `RuntimeNodeID`、单调 assignment generation/fencing token、`starting -> active` 发布、lease renew/write qualification，以及 bounded drain、revoke-before-stop、break-before-make 的休眠、重建和迁移编排。可执行 Composition Root 在 production/local/test 均使用 `internal/simulationcontrol` 的真实 C++ child adapter；进程内 runtime fake 只存在于 `_test.go`。所有 store 条件操作绑定完整 assignment stamp；并发 reference store、fake clock/ID 与故障注入只存在于 `_test.go`，生产 package 不提供 storage fallback。
+
+Simulation control 位于 `internal/simulationcontrol/`，进程 adapter 位于
+`internal/simulationcontrol/process/`。它们拥有 canonical JSON/frame、单 reader、
+serialized request turn、exact binary/receipt 校验、child process handle、health/capacity、
+SimulationTarget 与 ResultProposal coordinator；不创建 listener、端口、ticket 或第二套
+placement。`internal/storage/simulationresult` 通过 additive
+`simulation_result_receipts` migration 保存 immutable committed/rejected receipt。
 
 VisitSession core 位于 `internal/visitsession/`。它建立独立且默认脱敏的 session/invite/command/connection-binding identities，不可变绑定 Owner、PersonalWorld 与完整 current assignment stamp，并实现有界 invite、reservation、join、leave/kick、Owner/Visitor disconnect/reconnect/expiry、expected revision、command replay/commit-unknown 和确定性 safe-return。Invite 与 `AdmissionIntent` 都不是 gameplay credential；Join 与 VisitorReconnect 都要求由 worldadmission verifier hydration 的 purpose-scoped qualification，并继续二次验证 membership、lineage、deadline 与 current assignment。Visitor 对未登记 gameplay mutation 默认没有权限。
 
@@ -72,6 +79,21 @@ Storage contract 与真实 Docker integration 入口：
 
 `TimeoutSeconds` 同时约束 setup/tests 与每次 Docker CLI 调用；显式 `down` 也使用同一总预算。`verify` 的 `finally` cleanup 另有最多 60 秒预算，避免主阶段耗尽 deadline 后跳过回收。若 Docker daemon 失联使 ownership 无法确认，入口会终止挂起的 `docker.exe`、保留 `.local/storage/<run-id>/state.json` 并返回非零；Docker 恢复后使用日志中的 RunId 执行 `-Action down -RunId <run-id>`，不得手工删除未知 Docker resource。
 
+Go/C++ control 完整入口：
+
+```powershell
+& .\tools\simulation-control\simulation-control.ps1 -Action validate
+& .\tools\simulation-control\simulation-control.ps1 -Action test
+& .\tools\simulation-control\simulation-control.ps1 -Action verify `
+  -ServerQualificationReportPath <server-report.json> `
+  -ClientQualificationReportPath <client-report.json>
+```
+
+`verify` 聚合跨语言 fixture/canonical parity、Go format/test/race/fuzz、真实 MySQL、
+C++ Release/ASan/B0.3 regression、真实 child 无端口故障矩阵、当前 server/client v1 最终
+报告及其 contract/Player build digest、治理扫描与低敏 B0.4 report。缺少或过期的 v1
+报告不能产生 `qualified`；报告不会记录 binary 路径、nonce、stamp、payload、secret 或 endpoint。
+
 ## 本地启动
 
 从仓库根目录执行：
@@ -87,7 +109,9 @@ try {
     $env:IHOMELAND_MYSQL_PASSWORD = [IO.File]::ReadAllText(".local/storage/$runId/mysql-password")
     $env:IHOMELAND_REDIS_PASSWORD = [IO.File]::ReadAllText(".local/storage/$runId/redis-password")
     $env:IHOMELAND_WORLD_ADMISSION_KEY = "replace-with-local-random-material-at-least-32-bytes"
-    & .\tools\go\go.ps1 run ./cmd/server --config config/local.yaml
+    # 将 config/local.yaml 与按本机绝对 artifact 路径填写的 simulationControl block
+    # 合并到 ignored .local/server.yaml 后启动。
+    & .\tools\go\go.ps1 run ./cmd/server --config ../.local/server.yaml
 } finally {
     & .\tools\storage\storage.ps1 -Action down -RunId $runId
     Remove-Item Env:IHOMELAND_MYSQL_ADDRESS, Env:IHOMELAND_REDIS_ADDRESS, Env:IHOMELAND_MYSQL_PASSWORD, Env:IHOMELAND_REDIS_PASSWORD, Env:IHOMELAND_WORLD_ADMISSION_KEY -ErrorAction SilentlyContinue
@@ -95,6 +119,12 @@ try {
 ```
 
 `--config` 必须显式提供。配置优先级固定为安全默认值、YAML 文件、白名单 `IHOMELAND_` 环境覆盖；未知字段、非法覆盖、缺失 secret 或 production plaintext storage 会在创建 logger、listener、client 和 goroutine 前失败。仓库只提交包含 `env:` reference 的非敏感 `server/config/local.yaml`，进程不会自动读取 `.env`。本地 `up` 使用随机固定端口，需把 manifest 的 `mysqlPort`/`redisPort` 映射到 `IHOMELAND_MYSQL_ADDRESS`/`IHOMELAND_REDIS_ADDRESS`，并将两个 ignored password 文件内容仅注入当前进程环境；不得复制回 YAML。
+
+Production 必须启用 `simulationControl`；配置示例见
+`config/simulation-control.example.yaml`。Binary、B0.3 qualification receipt 必须使用
+绝对路径并提供精确 SHA-256，build/model/profile/config/navigation/physics identity、
+capacity 与全部 deadline 不允许 silent default。可执行服务端在 local/test 也不得禁用；
+无需 C++ 的隔离验证只能使用 `_test.go` fake，服务端/client v1 回归必须经过真实 child。
 
 推荐诊断默认地址为 `127.0.0.1:8081`：
 

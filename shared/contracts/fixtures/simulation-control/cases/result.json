@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "caseId": "lifecycle-result-replay",
+  "category": "result",
+  "proposal": {
+    "resultId": "sresult_fixture_1",
+    "resultKind": "simulation.lifecycle.summary.v1",
+    "assignmentFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "simulationInstanceId": "sinst_fixture_1",
+    "tickStart": "1",
+    "tickEnd": "20",
+    "payloadDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "evidenceDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "proposalFingerprint": "6922fb4d831fb15746d44a709079444d19e32f7db1d70007dda498c2ec0e25d6"
+  },
+  "expectedDispositions": [
+    "committed",
+    "replayed"
+  ]
+}

@@ -1,6 +1,11 @@
 #include "ihomeland/sim/core/adapter_smoke.hpp"
 #include "ihomeland/sim/core/fixed_tick.hpp"
+#include "ihomeland/sim/control/control_server.hpp"
 
+#include <fcntl.h>
+#include <io.h>
+
+#include <cstdio>
 #include <iostream>
 #include <string_view>
 
@@ -22,13 +27,37 @@ namespace {
     return 0;
 }
 
+/// ConfigureControlStdioBinary 禁止 Windows 文本模式改写 length prefix 中的 CR/LF 字节。
+[[nodiscard]] bool ConfigureControlStdioBinary() noexcept {
+    return _setmode(_fileno(stdin), _O_BINARY) != -1 &&
+           _setmode(_fileno(stdout), _O_BINARY) != -1;
+}
+
 }  // namespace
 
-/// main 只提供离线 smoke 入口，不创建 socket、listener 或 production port。
+/// main 提供离线 smoke 与私有继承 stdio control 入口，不创建 listener 或 production port。
 int main(const int argument_count, const char* const arguments[]) {
     if (argument_count == 2 && std::string_view{arguments[1]} == "--smoke") {
         return RunSmoke();
     }
-    std::cerr << "usage: ihomeland-sim-server --smoke\n";
+    if (argument_count == 2 &&
+        std::string_view{arguments[1]} == "--control-stdio") {
+        if (!ConfigureControlStdioBinary()) {
+            std::cerr << "simulation control stdio binary mode failed\n";
+            return 1;
+        }
+        return ihomeland::sim::RunControlStdio(
+            std::cin,
+            std::cout,
+            std::cerr,
+            ihomeland::sim::ControlBuildBinding{
+                .build_identity = IHOMELAND_CONTROL_BUILD_IDENTITY,
+                .model_manifest = IHOMELAND_CONTROL_MODEL_MANIFEST,
+                .profile_manifest = IHOMELAND_CONTROL_PROFILE_MANIFEST,
+                .platform_qualification =
+                    "implementation-qualified-windows-x64",
+            });
+    }
+    std::cerr << "usage: ihomeland-sim-server --smoke|--control-stdio\n";
     return 2;
 }

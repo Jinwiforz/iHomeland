@@ -471,6 +471,7 @@ function Invoke-StorageFault {
 function Invoke-IntegrationTests {
     param([object]$State, [string]$Directory, [DateTime]$Deadline)
     $env:IHOMELAND_STORAGE_INTEGRATION = "1"
+    $env:IHOMELAND_SIMULATION_REAL_CHILD = "1"
     $env:IHOMELAND_TEST_MYSQL_ADDRESS = "127.0.0.1:$($State.mysqlPort)"
     $env:IHOMELAND_TEST_MYSQL_PASSWORD_FILE = Join-Path $Directory "mysql-password"
     $env:IHOMELAND_TEST_MYSQL_ROOT_PASSWORD_FILE = Join-Path $Directory "mysql-root-password"

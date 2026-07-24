@@ -85,6 +85,41 @@ func TestPersonalWorldSliceMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveVisitDelivery("safe_return", "offline")
 }
 
+// TestSimulationControlMetricLabelsAcceptFixedVocabulary 保护 child control 全部指标只使用封闭枚举。
+func TestSimulationControlMetricLabelsAcceptFixedVocabulary(t *testing.T) {
+	t.Parallel()
+	metrics := NewMetrics()
+	metrics.RecordStorageOperation("simulationresult", "lookup", "found")
+	metrics.RecordStorageOperation("simulationresult", "decide", "owner_rejected")
+	metrics.SetSimulationNodeHealth("ready")
+	metrics.SetSimulationInstances(1)
+	metrics.SetSimulationCapacity("instances", 8)
+	metrics.SetSimulationCapacity("actors", 8)
+	metrics.ObserveSimulationControl("hello", "ok", time.Millisecond)
+	metrics.ObserveSimulationControl("health", "busy", time.Millisecond)
+	metrics.SetSimulationControlQueue(0)
+	metrics.ObserveSimulationDrain("drained")
+	metrics.ObserveSimulationResult("committed")
+	metrics.ObserveSimulationProcessExit("expected")
+	metrics.ObserveSimulationShutdown("clean")
+}
+
+// TestSimulationControlMetricLabelsRejectIdentity 防止 node、instance 或 stamp 成为 label。
+func TestSimulationControlMetricLabelsRejectIdentity(t *testing.T) {
+	t.Parallel()
+	const sensitive = "snode_sensitive-identity"
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("simulation metric identity label 应被拒绝")
+		}
+		if strings.Contains(fmt.Sprint(recovered), sensitive) {
+			t.Fatalf("metric label panic 泄露原值：%v", recovered)
+		}
+	}()
+	NewMetrics().ObserveSimulationControl(sensitive, "ok", time.Millisecond)
+}
+
 // TestTCPGameplayMetricLabelsRejectCredential 防止credential或动态target进入label。
 func TestTCPGameplayMetricLabelsRejectCredential(t *testing.T) {
 	t.Parallel()

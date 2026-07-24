@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -181,7 +182,7 @@ func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
 	accepted = requestIdempotent(http.MethodPost, acceptPath, fmt.Sprintf(`{"expectedRevision":%d}`, revision), visitorAuthorization, "integration-accept-key-02", http.StatusOK)
 	visitorTicket = request(http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
 	issuedAdmission = requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-2", http.StatusCreated)
-	gameplayConnection, revision = exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, accepted, visitID)
+	gameplayConnection, revision = exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, visitID)
 	revision = ownerGameplay.kick(t, visitorID, revision)
 	expectTCPSafeReturnAndClose(t, gameplayConnection, visitID, visitorID)
 
@@ -190,7 +191,7 @@ func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
 	accepted = requestIdempotent(http.MethodPost, acceptPath, fmt.Sprintf(`{"expectedRevision":%d}`, revision), visitorAuthorization, "integration-accept-key-03", http.StatusOK)
 	visitorTicket = request(http.MethodPost, baseURL+"/v1/session/tickets", `{"channel":"TLS_TCP"}`, visitorAuthorization, http.StatusCreated)
 	issuedAdmission = requestIdempotent(http.MethodPost, baseURL+"/v1/world/admissions", admissionBody, visitorAuthorization, "integration-admission-key-3", http.StatusCreated)
-	gameplayConnection, revision = exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, accepted, visitID)
+	gameplayConnection, revision = exerciseTCPJoin(t, gameplayTLS, visitorTicket, issuedAdmission, visitID)
 	ownerGameplay.closeVisit(t, revision)
 	expectTCPSafeReturnAndClose(t, gameplayConnection, visitID, visitorID)
 	_ = ownerGameplay.connection.Close()
@@ -969,10 +970,79 @@ storage:
       timeout: 50ms
       failureThreshold: 2
 `, diagnosticAddress, publicAddress, integrationPort(t, publicAddress), integrationPort(t, gameplayAddress), publicAddress, integrationPort(t, publicAddress), gameplayAddress, os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
+	body += integrationSimulationControl(t)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// integrationSimulationControl 在 B0.4 资格运行中把 production graph 接到真实 child。
+func integrationSimulationControl(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("IHOMELAND_SIMULATION_REAL_CHILD") != "1" {
+		return ""
+	}
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := filepath.Join(repositoryRoot, "simulation", "out", "build", "windows-msvc-ci", "ihomeland-sim-server.exe")
+	receiptPath := filepath.Join(repositoryRoot, "simulation", "out", "build", "windows-msvc-ci", "qualification-gate-receipt.json")
+	identityPath := filepath.Join(repositoryRoot, "simulation", "out", "build", "windows-msvc-ci", "ihomeland-build-identity.json")
+	return fmt.Sprintf(`simulationControl:
+  enabled: true
+  binaryPath: '%s'
+  binarySha256: %s
+  qualificationReceiptPath: '%s'
+  qualificationReceiptSha256: %s
+  buildIdentity: %s
+  modelManifest: 65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1
+  profileManifest: ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f
+  configIdentity: da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381
+  navigationIdentity: 3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd
+  physicsIdentity: ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98
+  instanceCapacity: 2
+  actorCapacity: 8
+  frameBytes: 65536
+  pendingRequests: 256
+  requestTimeout: 10s
+  healthInterval: 500ms
+  healthTimeout: 250ms
+  drainTimeout: 2s
+  shutdownTimeout: 3s
+  stderrLineBytes: 1024
+`, binaryPath, integrationArtifactDigest(t, binaryPath), receiptPath, integrationArtifactDigest(t, receiptPath), integrationBuildIdentity(t, identityPath))
+}
+
+// integrationBuildIdentity 读取由统一 C++ 入口计算并嵌入真实 child 的 target identity。
+func integrationBuildIdentity(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identity struct {
+		TargetIdentity string `json:"target_identity"`
+	}
+	if err := json.Unmarshal(content, &identity); err != nil {
+		t.Fatal(err)
+	}
+	if len(identity.TargetIdentity) != sha256.Size*2 {
+		t.Fatal("simulation target identity is invalid")
+	}
+	return identity.TargetIdentity
+}
+
+// integrationArtifactDigest 返回真实 child artifact 的小写 SHA-256。
+func integrationArtifactDigest(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
 }
 
 // integrationPort 返回临时listener端口，保证advertised WSS/TLS_TCP endpoint与实际入口一致。

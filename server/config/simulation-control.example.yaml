@@ -1,0 +1,23 @@
+# 本文件只示例私有 C++ child 配置；artifact 路径和 binary digest 必须按部署产物重算。
+simulationControl:
+  enabled: true
+  binaryPath: 'C:\ihomeland\artifacts\ihomeland-sim-server.exe'
+  binarySha256: d032be86ea7bd1185965f554fffb22adffa7895511cf262e797da306ec5664e8
+  qualificationReceiptPath: 'C:\ihomeland\artifacts\qualification-gate-receipt.json'
+  qualificationReceiptSha256: 64ef4905e71852d731edc2f1115b9a255cb106b2c0ff55ddb9a8162ef76d540b
+  buildIdentity: af433af8fe625d09d8a4d39fbe8e5e6524f006389ef3f921eb301bcc2038767d
+  modelManifest: 65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1
+  profileManifest: ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f
+  configIdentity: da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381
+  navigationIdentity: 3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd
+  physicsIdentity: ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98
+  instanceCapacity: 64
+  actorCapacity: 8
+  frameBytes: 65536
+  pendingRequests: 256
+  requestTimeout: 10s
+  healthInterval: 5s
+  healthTimeout: 1s
+  drainTimeout: 3s
+  shutdownTimeout: 5s
+  stderrLineBytes: 1024

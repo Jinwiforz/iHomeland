@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "documentKind": "canonical-golden",
+  "frames": [
+    {
+      "goldenId": "health-query",
+      "canonicalJson": "{\"kind\":\"node.health.query\",\"payload\":{\"simulationNodeId\":\"snode_fixture_1\"},\"requestId\":\"sctl_health0000000001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"3\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "payloadBytes": 250,
+      "lengthPrefixHex": "000000fa"
+    }
+  ]
+}

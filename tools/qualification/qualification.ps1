@@ -224,6 +224,22 @@ function Write-ServerConfig {
     $admissionKey = Join-Path $RunDirectory "admission-key"
     $mysqlPassword = Join-Path $storageDirectory "mysql-password"
     $redisPassword = Join-Path $storageDirectory "redis-password"
+    $simulationBinary = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\ihomeland-sim-server.exe"
+    $simulationReceipt = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\qualification-gate-receipt.json"
+    $simulationIdentity = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\ihomeland-build-identity.json"
+    if (-not (Test-Path -LiteralPath $simulationBinary -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $simulationReceipt -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $simulationIdentity -PathType Leaf)) {
+        throw "Qualified simulation artifacts are required before server v1 qualification"
+    }
+    $simulationBinaryDigest = (Get-FileHash -LiteralPath $simulationBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+    $simulationReceiptDigest = (Get-FileHash -LiteralPath $simulationReceipt -Algorithm SHA256).Hash.ToLowerInvariant()
+    $simulationIdentityDocument = Get-Content -LiteralPath $simulationIdentity -Raw -Encoding UTF8 |
+        ConvertFrom-Json
+    $simulationBuildIdentity = [string]$simulationIdentityDocument.target_identity
+    if ($simulationBuildIdentity -notmatch '^[0-9a-f]{64}$') {
+        throw "Qualified simulation target identity is invalid"
+    }
     $body = @"
 environment: local
 runtime:
@@ -291,6 +307,28 @@ publicApi:
     preAuthRate: { requests: 10000, window: 1m, burst: 10000 }
     closeTimeout: 500ms
     shutdownTimeout: 3s
+simulationControl:
+  enabled: true
+  binaryPath: $(Quote-YamlSingle $simulationBinary)
+  binarySha256: $simulationBinaryDigest
+  qualificationReceiptPath: $(Quote-YamlSingle $simulationReceipt)
+  qualificationReceiptSha256: $simulationReceiptDigest
+  buildIdentity: $simulationBuildIdentity
+  modelManifest: 65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1
+  profileManifest: ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f
+  configIdentity: da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381
+  navigationIdentity: 3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd
+  physicsIdentity: ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98
+  instanceCapacity: 64
+  actorCapacity: 8
+  frameBytes: 65536
+  pendingRequests: 256
+  requestTimeout: 10s
+  healthInterval: 5s
+  healthTimeout: 1s
+  drainTimeout: 3s
+  shutdownTimeout: 5s
+  stderrLineBytes: 1024
 storage:
   mysql:
     address: 127.0.0.1:$($StorageState.mysqlPort)

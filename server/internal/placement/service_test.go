@@ -264,6 +264,23 @@ func TestSleepStopFailureDoesNotRestoreFence(t *testing.T) {
 	}
 }
 
+// TestSleepDrainFailureStillRevokesAndStops 验证 bounded drain 失败不延长旧 fence。
+func TestSleepDrainFailureStillRevokesAndStops(t *testing.T) {
+	t.Parallel()
+	service, store, runtime, _, _ := newTestService(t)
+	active, err := service.EnsureActive(context.Background(), mustPersonalWorldID(t, "pworld_drainfail"), mustRuntimeNodeID(t, "rnode_alpha"))
+	if err != nil {
+		t.Fatalf("EnsureActive: %v", err)
+	}
+	runtime.setDrainError(context.DeadlineExceeded)
+	result, err := service.Sleep(context.Background(), active.Assignment().Stamp())
+	if !result.Valid() || !result.DrainFailed() || result.CleanupFailed() ||
+		ErrorKindOf(err) != ErrorKindCleanupFailed || store.currentCount() != 0 ||
+		runtime.runningCount() != 0 {
+		t.Fatalf("Sleep result=%#v err=%v", result, err)
+	}
+}
+
 // TestSleepCommitUnknownCanReplay 验证 revoke 响应丢失后相同 stamp 重试会清理原 runtime。
 func TestSleepCommitUnknownCanReplay(t *testing.T) {
 	t.Parallel()
@@ -390,6 +407,28 @@ func TestReplaceStopFailureReturnsActiveSuccessor(t *testing.T) {
 	}
 }
 
+// TestReplaceDrainFailureStillCutsOver 验证 predecessor drain 失败后仍先推进 fence 再启动 successor。
+func TestReplaceDrainFailureStillCutsOver(t *testing.T) {
+	t.Parallel()
+	service, store, runtime, _, _ := newTestService(t)
+	predecessor, err := service.EnsureActive(context.Background(), mustPersonalWorldID(t, "pworld_replacedrain"), mustRuntimeNodeID(t, "rnode_alpha"))
+	if err != nil {
+		t.Fatalf("EnsureActive: %v", err)
+	}
+	runtime.setDrainError(context.DeadlineExceeded)
+	command := mustReplaceCommand(t, predecessor.Assignment().Stamp(), "winst_replacedrain", "rnode_beta")
+	successor, err := service.Replace(context.Background(), command)
+	if !successor.Valid() || !successor.CleanupFailed() ||
+		ErrorKindOf(err) != ErrorKindCleanupFailed ||
+		runtime.drainCount(predecessor.Assignment().InstanceID()) != 1 {
+		t.Fatalf("Replace result=%#v err=%v", successor, err)
+	}
+	current, found := store.currentSnapshot(predecessor.Assignment().WorldID())
+	if !found || !current.Stamp().Equal(successor.Assignment().Stamp()) {
+		t.Fatal("drain failure prevented successor cutover")
+	}
+}
+
 // TestStaleSleepCannotRevokeSuccessor 验证 delayed predecessor sleep 与新 current 冲突。
 func TestStaleSleepCannotRevokeSuccessor(t *testing.T) {
 	t.Parallel()
@@ -508,6 +547,67 @@ func TestMalformedStoreResultsFailClosed(t *testing.T) {
 		_, err = service.QualifyWrite(context.Background(), active.Assignment().Stamp())
 		if ErrorKindOf(err) != ErrorKindDependencyUnavailable || CommitPhaseOf(err) != CommitPhaseNone || !errors.Is(err, cause) {
 			t.Fatalf("qualification contradictory success error=%v", err)
+		}
+	})
+}
+
+// FuzzPlacementDrainReplaceTransitions 验证 drain、commit-unknown 与 cleanup 组合不产生双 current 或恢复旧 fence。
+func FuzzPlacementDrainReplaceTransitions(f *testing.F) {
+	for mode := byte(0); mode < 8; mode++ {
+		f.Add(mode)
+	}
+	f.Fuzz(func(t *testing.T, mode byte) {
+		service, store, runtime, _, _ := newTestService(t)
+		worldID := mustPersonalWorldID(t, "pworld_fuzzlifecycle")
+		predecessor, err := service.EnsureActive(context.Background(), worldID, mustRuntimeNodeID(t, "rnode_alpha"))
+		if err != nil {
+			t.Fatalf("EnsureActive: %v", err)
+		}
+		mode %= 8
+		switch mode {
+		case 0:
+			_, _ = service.Sleep(context.Background(), predecessor.Assignment().Stamp())
+		case 1:
+			runtime.setDrainError(context.DeadlineExceeded)
+			_, _ = service.Sleep(context.Background(), predecessor.Assignment().Stamp())
+		case 2:
+			runtime.setStopError(errors.New("stop failed"))
+			_, _ = service.Sleep(context.Background(), predecessor.Assignment().Stamp())
+		case 3:
+			store.setRevokeCommitUnknown()
+			_, _ = service.Sleep(context.Background(), predecessor.Assignment().Stamp())
+			_, _ = service.Sleep(context.Background(), predecessor.Assignment().Stamp())
+		default:
+			if mode == 6 {
+				store.setReplaceCommitUnknown()
+			}
+			if mode == 7 {
+				runtime.setDrainError(context.DeadlineExceeded)
+			}
+			targetNode := "rnode_alpha"
+			if mode == 5 || mode == 6 || mode == 7 {
+				targetNode = "rnode_beta"
+			}
+			command := mustReplaceCommand(t, predecessor.Assignment().Stamp(), "winst_fuzzsuccessor", targetNode)
+			_, _ = service.Replace(context.Background(), command)
+		}
+		if store.currentCount() > 1 {
+			t.Fatal("lifecycle transition published multiple current assignments")
+		}
+		if runtime.runningCount() > 2 {
+			t.Fatal("lifecycle transition leaked unbounded runtimes")
+		}
+		current, found := store.currentSnapshot(worldID)
+		if found {
+			if _, err := service.QualifyWrite(context.Background(), current.Stamp()); err != nil {
+				t.Fatalf("current assignment lost write qualification: %v", err)
+			}
+			if current.Stamp().Equal(predecessor.Assignment().Stamp()) {
+				return
+			}
+		}
+		if _, err := service.QualifyWrite(context.Background(), predecessor.Assignment().Stamp()); err == nil {
+			t.Fatal("completed transition restored predecessor write qualification")
 		}
 	})
 }

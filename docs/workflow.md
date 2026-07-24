@@ -91,7 +91,7 @@ PersonalWorld、WorldInstance、VisitSession 与 placement 构成第一业务里
 
 对应 Unity change 必须等待上述服务端能力和跨端契约冻结，并按 PersonalWorld/VisitSession pure C# Service、WorldAdmission、SceneContext adapter、UI 的顺序接入。Room/Party 只有活动准备或连续组队需求成立时才进入独立 change，不作为访问个人世界的前置条件。
 
-客户端 C3 资格只能由 `tools/client-qualification/client-qualification.ps1` 聚合。缺陷开发可使用同一入口的`diagnose -Scenario`定向运行相关Unity fixture并构建Development Player；服务端进程替换可使用同目录的`server-restart-recovery.ps1`驱动真实Player、精确listener owner和同一storage run。两类独立diagnostics目录都永远不是资格证据。局部 Unity 绿色、单一Development build、旧exe、截图或口头结果都不能替代完整资格；全部mandatory自动/人工记录必须绑定同一contract与Development/Release build digest，missing、skipped、stale、cleanup failure或contract漂移一律保持not-qualified。完整规则见 `docs/client-v1-qualification.md`。
+客户端 C3 资格只能由 `tools/client-qualification/client-qualification.ps1` 聚合。缺陷开发可使用同一入口的`diagnose -Scenario`定向运行相关Unity fixture并构建Development Player；服务端进程替换可使用同目录的`server-restart-recovery.ps1`驱动真实Player、精确listener owner和同一storage run。两类独立diagnostics目录都永远不是资格证据。局部 Unity 绿色、单一Development build、旧exe、截图或口头结果都不能替代完整资格；全部mandatory自动/operator记录必须绑定同一contract与Development/Release build digest，missing、skipped、stale、cleanup failure或contract漂移一律保持not-qualified。Operator 可由人或受控自动化代理执行，但必须操作真实 Player/server/storage、消费固定低敏完成信号并只终止其精确持有的PID，不能直接合成 evidence。完整规则见 `docs/client-v1-qualification.md`。
 
 C3固定分阶段执行 `validate`、`automatic`、`soak`、`prepare-manual` 与 `finalize`。除首次动作外都必须显式携带同一run-id；soak凭据只从当前PowerShell进程环境继承并在运行后移除，不得出现在命令行或证据。Release smoke必须使用没有产品default secure record的干净Windows用户；工具不得为通过门禁而删除或轮换日常lineage。
 

@@ -26,7 +26,7 @@ type IDGenerator interface {
 	NewID() (string, error)
 }
 
-// RuntimeController 启动和停止由 assignment identity 指定的服务端运行承载。
+// RuntimeController 启动、排空和停止由 assignment identity 指定的服务端运行承载。
 //
 // 实现必须以 WorldInstanceID 幂等：重复 Start 不能创建第二个 runtime，重复 Stop 不能停止
 // 较新 instance。Start 返回 nil 只表示 runtime ready，不授予 active 或写资格；这些事实仍
@@ -34,6 +34,8 @@ type IDGenerator interface {
 type RuntimeController interface {
 	// Start 启动 snapshot 指定的 starting runtime 并等待 ready；实现不得自行发布 active。
 	Start(ctx context.Context, snapshot AssignmentSnapshot) error
+	// Drain 有界关闭完整 stamp 指定 runtime 的新输入并完成已接纳工作。
+	Drain(ctx context.Context, stamp AssignmentStamp) error
 	// Stop 停止完整 stamp 指定的 runtime；实现必须拒绝用旧 instance identity 停止 successor。
 	Stop(ctx context.Context, stamp AssignmentStamp) error
 }
@@ -94,16 +96,18 @@ type LifecycleResult struct {
 	predecessor AssignmentSnapshot
 	// placementCommitted 表示 revoke 已明确提交或被 replay 证明。
 	placementCommitted bool
+	// drainFailed 表示 revoke 前的 best-effort runtime drain 未成功。
+	drainFailed bool
 	// cleanupFailed 表示 runtime Stop 返回错误，不能据此恢复 predecessor fence。
 	cleanupFailed bool
 }
 
-// NewLifecycleResult 构造 sleep 的 placement/cleanup 双阶段结果。
-func NewLifecycleResult(predecessor AssignmentSnapshot, placementCommitted bool, cleanupFailed bool) (LifecycleResult, error) {
+// NewLifecycleResult 构造 sleep 的 drain/placement/cleanup 三阶段结果。
+func NewLifecycleResult(predecessor AssignmentSnapshot, placementCommitted bool, drainFailed bool, cleanupFailed bool) (LifecycleResult, error) {
 	if !predecessor.Valid() || !placementCommitted {
 		return LifecycleResult{}, errors.New("lifecycle result is incomplete")
 	}
-	return LifecycleResult{predecessor: predecessor, placementCommitted: placementCommitted, cleanupFailed: cleanupFailed}, nil
+	return LifecycleResult{predecessor: predecessor, placementCommitted: placementCommitted, drainFailed: drainFailed, cleanupFailed: cleanupFailed}, nil
 }
 
 // Predecessor 返回已失去 current 资格的 assignment 值副本。
@@ -111,6 +115,9 @@ func (result LifecycleResult) Predecessor() AssignmentSnapshot { return result.p
 
 // PlacementCommitted 报告 revoke 是否已被明确提交或 replay 证明。
 func (result LifecycleResult) PlacementCommitted() bool { return result.placementCommitted }
+
+// DrainFailed 报告 revoke 前的 bounded drain 是否失败或取消。
+func (result LifecycleResult) DrainFailed() bool { return result.drainFailed }
 
 // CleanupFailed 报告 runtime Stop 是否仍需 reconciliation 重试。
 func (result LifecycleResult) CleanupFailed() bool { return result.cleanupFailed }

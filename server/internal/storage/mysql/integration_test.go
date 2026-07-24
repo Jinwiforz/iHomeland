@@ -59,7 +59,7 @@ func TestMySQLIntegrationRuntimeMigrationAndRecovery(t *testing.T) {
 	}()
 	resetIntegrationSchema(t, ctx, db)
 	result, err := Migrate(ctx, db, "ihomeland", 10*time.Second)
-	if err != nil || result.Applied != 6 || result.CurrentVersion != 6 {
+	if err != nil || result.Applied != 7 || result.CurrentVersion != 7 {
 		t.Fatalf("empty migration = %+v, %v", result, err)
 	}
 	assertBusinessSchema(t, ctx, db)
@@ -70,7 +70,7 @@ func TestMySQLIntegrationRuntimeMigrationAndRecovery(t *testing.T) {
 	resetIntegrationSchema(t, ctx, db)
 	seedD0MigrationHistory(t, ctx, db)
 	result, err = Migrate(ctx, db, "ihomeland", 10*time.Second)
-	if err != nil || result.Applied != 5 || result.CurrentVersion != 6 {
+	if err != nil || result.Applied != 6 || result.CurrentVersion != 7 {
 		t.Fatalf("D0 history upgrade = %+v, %v", result, err)
 	}
 	assertBusinessSchema(t, ctx, db)
@@ -120,7 +120,7 @@ func TestMySQLIntegrationRuntimeMigrationAndRecovery(t *testing.T) {
 	for value := range results {
 		totalApplied += value.Applied
 	}
-	if totalApplied != 6 {
+	if totalApplied != 7 {
 		t.Fatalf("concurrent applied total = %d", totalApplied)
 	}
 
@@ -181,6 +181,7 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 		"placement_sequences":        "实例放置序列(owner=storage/placement)",
 		"placement_allocations":      "实例放置分配(owner=storage/placement)",
 		"accounts":                   "账号(owner=storage/account)",
+		"simulation_result_receipts": "模拟结果不可变回执(owner=storage/simulationresult)",
 	} {
 		var comment string
 		if err := db.QueryRowContext(ctx, `SELECT table_comment FROM information_schema.tables
@@ -230,6 +231,18 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 		"accounts.credential_hash":                          "凭据哈希(PHC)",
 		"accounts.status":                                   "账号状态",
 		"accounts.created_at":                               "创建时间(UTC,微秒)",
+		"simulation_result_receipts.result_id":              "模拟结果ID",
+		"simulation_result_receipts.proposal_fingerprint":   "提案指纹(SHA-256,32字节)",
+		"simulation_result_receipts.assignment_fingerprint": "放置指纹(SHA-256,32字节)",
+		"simulation_result_receipts.simulation_instance_id": "模拟实例ID",
+		"simulation_result_receipts.result_kind":            "模拟结果类型",
+		"simulation_result_receipts.tick_start":             "摘要起始Tick",
+		"simulation_result_receipts.tick_end":               "摘要结束Tick",
+		"simulation_result_receipts.payload_digest":         "低敏载荷摘要(SHA-256,32字节)",
+		"simulation_result_receipts.evidence_digest":        "回放证据摘要(SHA-256,32字节)",
+		"simulation_result_receipts.disposition":            "持久裁决结果",
+		"simulation_result_receipts.reason":                 "稳定裁决原因",
+		"simulation_result_receipts.decided_at":             "裁决时间(UTC,微秒)",
 	}
 	rows, err := db.QueryContext(ctx, `SELECT table_name, column_name, data_type, column_comment
 		FROM information_schema.columns WHERE table_schema = DATABASE()`)
@@ -271,6 +284,7 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 		"uq_placement_allocations_generation", "uq_placement_allocations_fence", "fk_placement_allocations_world",
 		"chk_placement_allocations_generation", "chk_placement_allocations_fence", "chk_placement_allocations_lease",
 		"uq_accounts_player", "uq_accounts_username",
+		"chk_simulation_result_tick_range",
 	} {
 		var count int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.table_constraints
@@ -280,6 +294,7 @@ func assertBusinessSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 	}
 	for table, column := range map[string]string{
 		"personal_worlds": "revision", "placement_sequences": "generation_high", "placement_allocations": "fencing_token",
+		"simulation_result_receipts": "tick_start",
 	} {
 		var columnType string
 		if err := db.QueryRowContext(ctx, `SELECT column_type FROM information_schema.columns
@@ -304,7 +319,7 @@ func containsHan(value string) bool {
 // 该 helper 只供 migration recovery 测试模拟空库；生产 migrator 永不执行 down 或删除数据。
 func resetIntegrationSchema(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
-	for _, table := range []string{"accounts", "placement_allocations", "placement_sequences", "personal_world_idempotency", "personal_worlds", "ih_schema_migrations"} {
+	for _, table := range []string{"simulation_result_receipts", "accounts", "placement_allocations", "placement_sequences", "personal_world_idempotency", "personal_worlds", "ih_schema_migrations"} {
 		if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatalf("reset integration table failed: %v", err)
 		}

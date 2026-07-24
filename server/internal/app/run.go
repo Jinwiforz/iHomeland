@@ -45,6 +45,9 @@ func Run(ctx context.Context, options Options) Result {
 	if err := options.BuildInfo.Validate(); err != nil {
 		return Result{Kind: ResultStartupError, Err: err}
 	}
+	if !settings.SimulationControl.Enabled {
+		return Result{Kind: ResultConfigError, Err: errors.New("simulationControl.enabled is required by the server runtime")}
+	}
 	secretProvider := options.SecretProvider
 	if secretProvider == nil {
 		secretProvider = secret.NewEnvironmentFileProvider()
@@ -107,6 +110,11 @@ func Run(ctx context.Context, options Options) Result {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
+	simulationTasks, err := tasks.NewOwner(componentContext, "simulation_node")
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
 	publicTasks, err := tasks.NewOwner(componentContext, "public_http")
 	if err != nil {
 		cancelStartup()
@@ -138,8 +146,22 @@ func Run(ctx context.Context, options Options) Result {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}
 	}
-	publicComponent := &publicRuntimeComponent{settings: settings, prepared: preparedPublic, mysql: mysqlComponent, redis: redisComponent, clock: clock, ids: ids, info: options.BuildInfo, readiness: readiness, metrics: metrics, tasks: publicTasks, websocketTasks: websocketTasks, tcpTasks: tcpTasks, sliceTasks: sliceTasks, logger: logger.With("component", "public_http")}
-	lifecycle, err := NewLifecycle([]Component{diagnosticServer, mysqlComponent, redisComponent, publicComponent}, clock, logger, metrics)
+	simulationComponent, err := newSimulationNodeComponent(
+		settings.SimulationControl,
+		mysqlComponent,
+		simulationTasks,
+		clock,
+		ids,
+		metrics,
+		logger.With("component", "simulation_node"),
+	)
+	if err != nil {
+		cancelStartup()
+		return Result{Kind: ResultStartupError, Err: err}
+	}
+	publicComponent := &publicRuntimeComponent{settings: settings, prepared: preparedPublic, mysql: mysqlComponent, redis: redisComponent, clock: clock, ids: ids, info: options.BuildInfo, readiness: readiness, metrics: metrics, tasks: publicTasks, websocketTasks: websocketTasks, tcpTasks: tcpTasks, sliceTasks: sliceTasks, logger: logger.With("component", "public_http"), simulation: simulationComponent}
+	components := []Component{diagnosticServer, mysqlComponent, redisComponent, simulationComponent, publicComponent}
+	lifecycle, err := NewLifecycle(components, clock, logger, metrics)
 	if err != nil {
 		cancelStartup()
 		return Result{Kind: ResultStartupError, Err: err}

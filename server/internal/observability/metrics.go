@@ -102,56 +102,86 @@ type Metrics struct {
 	visitLifecycles *prometheus.CounterVec
 	// visitDeliveries 记录跨通道副作用投递结果。
 	visitDeliveries *prometheus.CounterVec
+	// simulationNodeHealth 观察当前 child node 的封闭健康状态。
+	simulationNodeHealth *prometheus.GaugeVec
+	// simulationInstances 观察 C++ child 当前 instance 数量。
+	simulationInstances prometheus.Gauge
+	// simulationCapacity 观察配置与 child receipt 共同收紧后的容量。
+	simulationCapacity *prometheus.GaugeVec
+	// simulationControlRequests 记录固定 control operation 的稳定结果。
+	simulationControlRequests *prometheus.CounterVec
+	// simulationControlSeconds 记录固定 control operation 的请求耗时。
+	simulationControlSeconds *prometheus.HistogramVec
+	// simulationControlQueue 观察有界 control reader queue 深度。
+	simulationControlQueue prometheus.Gauge
+	// simulationDrains 记录 instance drain 结果。
+	simulationDrains *prometheus.CounterVec
+	// simulationResults 记录 ResultProposal 裁决结果。
+	simulationResults *prometheus.CounterVec
+	// simulationProcessExits 记录 child process 退出类别。
+	simulationProcessExits *prometheus.CounterVec
+	// simulationShutdowns 记录 simulation component 关闭结果。
+	simulationShutdowns *prometheus.CounterVec
 }
 
 // NewMetrics 注册运行时固定指标集合；私有 registry 使重复构造不会污染 package global 状态。
 func NewMetrics() *Metrics {
 	metrics := &Metrics{
-		registry:               prometheus.NewRegistry(),
-		startupTotal:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_startup_total", Help: "Server startup results."}, []string{"result"}),
-		shutdownTotal:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_shutdown_total", Help: "Server shutdown results."}, []string{"reason", "result"}),
-		taskFailuresTotal:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_task_failures_total", Help: "Supervised task failures."}, []string{"task", "kind"}),
-		diagnosticRequests:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_diagnostic_requests_total", Help: "Diagnostic HTTP requests."}, []string{"path", "status"}),
-		lifecycleSeconds:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_lifecycle_seconds", Help: "Lifecycle component duration.", Buckets: prometheus.DefBuckets}, []string{"phase", "component"}),
-		storagePool:            prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_storage_pool_connections", Help: "Storage pool connection states."}, []string{"dependency", "state"}),
-		storageProbeTotal:      prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_probe_total", Help: "Required storage probe results."}, []string{"dependency", "outcome"}),
-		storageProbeSeconds:    prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_storage_probe_seconds", Help: "Required storage probe duration.", Buckets: prometheus.DefBuckets}, []string{"dependency", "outcome"}),
-		storageMigrationTotal:  prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_migration_total", Help: "MySQL migration results."}, []string{"outcome"}),
-		storageOperationTotal:  prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_operation_total", Help: "Storage transaction and command results."}, []string{"dependency", "operation", "outcome"}),
-		publicRequestsTotal:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_public_http_requests_total", Help: "Public HTTP requests by bounded operation and outcome."}, []string{"operation", "status_class", "outcome"}),
-		publicRequestSeconds:   prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_public_http_request_seconds", Help: "Public HTTP request duration.", Buckets: prometheus.DefBuckets}, []string{"operation", "status_class", "outcome"}),
-		publicResponseBytes:    prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_public_http_response_bytes", Help: "Public HTTP response bytes.", Buckets: prometheus.ExponentialBuckets(128, 2, 10)}, []string{"operation", "status_class"}),
-		websocketHandshakes:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_handshakes_total", Help: "WebSocket control handshake results."}, []string{"outcome"}),
-		websocketConnections:   prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_websocket_control_connections", Help: "Active WebSocket control connections."}),
-		websocketPushes:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_pushes_total", Help: "WebSocket control push results."}, []string{"message_id", "outcome"}),
-		websocketPushBytes:     prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_websocket_control_push_bytes", Help: "Encoded WebSocket control push bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 12)}, []string{"message_id", "outcome"}),
-		websocketQueues:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_queue_total", Help: "WebSocket control queue results."}, []string{"outcome"}),
-		websocketQueueItems:    prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_websocket_control_queue_items", Help: "WebSocket control queued items.", Buckets: prometheus.ExponentialBuckets(1, 2, 8)}),
-		websocketQueueBytes:    prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_websocket_control_queue_bytes", Help: "WebSocket control queued bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 16)}),
-		websocketHeartbeats:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_heartbeats_total", Help: "WebSocket control heartbeat results."}, []string{"outcome"}),
-		websocketCloses:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_closes_total", Help: "WebSocket control close reasons."}, []string{"reason"}),
-		websocketInvalidations: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_invalidations_total", Help: "WebSocket control invalidation results."}, []string{"outcome"}),
-		tcpHandshakes:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_handshakes_total", Help: "TLS/TCP gameplay handshake results."}, []string{"stage", "outcome"}),
-		tcpConnections:         prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_tcp_gameplay_connections", Help: "TLS/TCP gameplay connections by transport state."}, []string{"state"}),
-		tcpFrames:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_frames_total", Help: "TLS/TCP gameplay frame results."}, []string{"direction", "outcome"}),
-		tcpFrameBytes:          prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_frame_bytes", Help: "TLS/TCP gameplay complete frame bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 15)}, []string{"direction", "outcome"}),
-		tcpDispatches:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_dispatches_total", Help: "TLS/TCP gameplay dispatch results."}, []string{"message_id", "outcome"}),
-		tcpDispatchSeconds:     prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_dispatch_seconds", Help: "TLS/TCP gameplay dispatch duration.", Buckets: prometheus.DefBuckets}, []string{"message_id", "outcome"}),
-		tcpInFlight:            prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_tcp_gameplay_in_flight", Help: "TLS/TCP gameplay operations currently in flight."}),
-		tcpQueues:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_queue_total", Help: "TLS/TCP gameplay queue results."}, []string{"outcome"}),
-		tcpQueueItems:          prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_queue_items", Help: "TLS/TCP gameplay queued items.", Buckets: prometheus.ExponentialBuckets(1, 2, 8)}),
-		tcpQueueBytes:          prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_queue_bytes", Help: "TLS/TCP gameplay queued bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 16)}),
-		tcpPushes:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_pushes_total", Help: "TLS/TCP gameplay push results."}, []string{"message_id", "outcome"}),
-		tcpCloses:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_closes_total", Help: "TLS/TCP gameplay close reasons."}, []string{"reason"}),
-		tcpInvalidations:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_invalidations_total", Help: "TLS/TCP gameplay invalidation results."}, []string{"outcome"}),
-		worldRuntimes:          prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_world_runtimes", Help: "Process-local logical WorldInstance runtimes."}),
-		semanticDeadlines:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_semantic_deadlines", Help: "Scheduled semantic deadline entries."}),
-		worldLeases:            prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_world_lease_total", Help: "World assignment lease outcomes."}, []string{"outcome"}),
-		deadlineRuns:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_semantic_deadline_total", Help: "Semantic deadline execution outcomes."}, []string{"kind", "outcome"}),
-		visitLifecycles:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_visit_lifecycle_total", Help: "Visit connection lifecycle outcomes."}, []string{"operation", "outcome"}),
-		visitDeliveries:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_visit_delivery_total", Help: "Visit cross-channel delivery outcomes."}, []string{"kind", "outcome"}),
+		registry:                  prometheus.NewRegistry(),
+		startupTotal:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_startup_total", Help: "Server startup results."}, []string{"result"}),
+		shutdownTotal:             prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_shutdown_total", Help: "Server shutdown results."}, []string{"reason", "result"}),
+		taskFailuresTotal:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_task_failures_total", Help: "Supervised task failures."}, []string{"task", "kind"}),
+		diagnosticRequests:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_diagnostic_requests_total", Help: "Diagnostic HTTP requests."}, []string{"path", "status"}),
+		lifecycleSeconds:          prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_lifecycle_seconds", Help: "Lifecycle component duration.", Buckets: prometheus.DefBuckets}, []string{"phase", "component"}),
+		storagePool:               prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_storage_pool_connections", Help: "Storage pool connection states."}, []string{"dependency", "state"}),
+		storageProbeTotal:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_probe_total", Help: "Required storage probe results."}, []string{"dependency", "outcome"}),
+		storageProbeSeconds:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_storage_probe_seconds", Help: "Required storage probe duration.", Buckets: prometheus.DefBuckets}, []string{"dependency", "outcome"}),
+		storageMigrationTotal:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_migration_total", Help: "MySQL migration results."}, []string{"outcome"}),
+		storageOperationTotal:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_storage_operation_total", Help: "Storage transaction and command results."}, []string{"dependency", "operation", "outcome"}),
+		publicRequestsTotal:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_public_http_requests_total", Help: "Public HTTP requests by bounded operation and outcome."}, []string{"operation", "status_class", "outcome"}),
+		publicRequestSeconds:      prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_public_http_request_seconds", Help: "Public HTTP request duration.", Buckets: prometheus.DefBuckets}, []string{"operation", "status_class", "outcome"}),
+		publicResponseBytes:       prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_public_http_response_bytes", Help: "Public HTTP response bytes.", Buckets: prometheus.ExponentialBuckets(128, 2, 10)}, []string{"operation", "status_class"}),
+		websocketHandshakes:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_handshakes_total", Help: "WebSocket control handshake results."}, []string{"outcome"}),
+		websocketConnections:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_websocket_control_connections", Help: "Active WebSocket control connections."}),
+		websocketPushes:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_pushes_total", Help: "WebSocket control push results."}, []string{"message_id", "outcome"}),
+		websocketPushBytes:        prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_websocket_control_push_bytes", Help: "Encoded WebSocket control push bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 12)}, []string{"message_id", "outcome"}),
+		websocketQueues:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_queue_total", Help: "WebSocket control queue results."}, []string{"outcome"}),
+		websocketQueueItems:       prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_websocket_control_queue_items", Help: "WebSocket control queued items.", Buckets: prometheus.ExponentialBuckets(1, 2, 8)}),
+		websocketQueueBytes:       prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_websocket_control_queue_bytes", Help: "WebSocket control queued bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 16)}),
+		websocketHeartbeats:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_heartbeats_total", Help: "WebSocket control heartbeat results."}, []string{"outcome"}),
+		websocketCloses:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_closes_total", Help: "WebSocket control close reasons."}, []string{"reason"}),
+		websocketInvalidations:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_websocket_control_invalidations_total", Help: "WebSocket control invalidation results."}, []string{"outcome"}),
+		tcpHandshakes:             prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_handshakes_total", Help: "TLS/TCP gameplay handshake results."}, []string{"stage", "outcome"}),
+		tcpConnections:            prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_tcp_gameplay_connections", Help: "TLS/TCP gameplay connections by transport state."}, []string{"state"}),
+		tcpFrames:                 prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_frames_total", Help: "TLS/TCP gameplay frame results."}, []string{"direction", "outcome"}),
+		tcpFrameBytes:             prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_frame_bytes", Help: "TLS/TCP gameplay complete frame bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 15)}, []string{"direction", "outcome"}),
+		tcpDispatches:             prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_dispatches_total", Help: "TLS/TCP gameplay dispatch results."}, []string{"message_id", "outcome"}),
+		tcpDispatchSeconds:        prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_dispatch_seconds", Help: "TLS/TCP gameplay dispatch duration.", Buckets: prometheus.DefBuckets}, []string{"message_id", "outcome"}),
+		tcpInFlight:               prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_tcp_gameplay_in_flight", Help: "TLS/TCP gameplay operations currently in flight."}),
+		tcpQueues:                 prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_queue_total", Help: "TLS/TCP gameplay queue results."}, []string{"outcome"}),
+		tcpQueueItems:             prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_queue_items", Help: "TLS/TCP gameplay queued items.", Buckets: prometheus.ExponentialBuckets(1, 2, 8)}),
+		tcpQueueBytes:             prometheus.NewHistogram(prometheus.HistogramOpts{Name: "ihomeland_server_tcp_gameplay_queue_bytes", Help: "TLS/TCP gameplay queued bytes.", Buckets: prometheus.ExponentialBuckets(64, 2, 16)}),
+		tcpPushes:                 prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_pushes_total", Help: "TLS/TCP gameplay push results."}, []string{"message_id", "outcome"}),
+		tcpCloses:                 prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_closes_total", Help: "TLS/TCP gameplay close reasons."}, []string{"reason"}),
+		tcpInvalidations:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_tcp_gameplay_invalidations_total", Help: "TLS/TCP gameplay invalidation results."}, []string{"outcome"}),
+		worldRuntimes:             prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_world_runtimes", Help: "Process-local logical WorldInstance runtimes."}),
+		semanticDeadlines:         prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_semantic_deadlines", Help: "Scheduled semantic deadline entries."}),
+		worldLeases:               prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_world_lease_total", Help: "World assignment lease outcomes."}, []string{"outcome"}),
+		deadlineRuns:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_semantic_deadline_total", Help: "Semantic deadline execution outcomes."}, []string{"kind", "outcome"}),
+		visitLifecycles:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_visit_lifecycle_total", Help: "Visit connection lifecycle outcomes."}, []string{"operation", "outcome"}),
+		visitDeliveries:           prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_visit_delivery_total", Help: "Visit cross-channel delivery outcomes."}, []string{"kind", "outcome"}),
+		simulationNodeHealth:      prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_simulation_node_health", Help: "Current simulation child health state."}, []string{"state"}),
+		simulationInstances:       prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_simulation_instances", Help: "Current simulation instances owned by the child."}),
+		simulationCapacity:        prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_simulation_capacity", Help: "Qualified simulation node capacity."}, []string{"resource"}),
+		simulationControlRequests: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_control_requests_total", Help: "Simulation control request results."}, []string{"operation", "outcome"}),
+		simulationControlSeconds:  prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_simulation_control_request_seconds", Help: "Simulation control request duration.", Buckets: prometheus.DefBuckets}, []string{"operation", "outcome"}),
+		simulationControlQueue:    prometheus.NewGauge(prometheus.GaugeOpts{Name: "ihomeland_server_simulation_control_queue", Help: "Simulation control reader queue depth."}),
+		simulationDrains:          prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_drain_total", Help: "Simulation instance drain results."}, []string{"outcome"}),
+		simulationResults:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_result_total", Help: "Simulation result decision results."}, []string{"outcome"}),
+		simulationProcessExits:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_process_exit_total", Help: "Simulation child process exit results."}, []string{"outcome"}),
+		simulationShutdowns:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_shutdown_total", Help: "Simulation component shutdown results."}, []string{"outcome"}),
 	}
-	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries)
+	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries, metrics.simulationNodeHealth, metrics.simulationInstances, metrics.simulationCapacity, metrics.simulationControlRequests, metrics.simulationControlSeconds, metrics.simulationControlQueue, metrics.simulationDrains, metrics.simulationResults, metrics.simulationProcessExits, metrics.simulationShutdowns)
 	return metrics
 }
 
@@ -211,20 +241,92 @@ func (metrics *Metrics) ObserveMigration(outcome string, count int) {
 // PersonalWorld/placement adapter 只上报此处枚举的流程结果；identity、SQL、key、fence、
 // idempotency material 与原始错误永远不能成为 label。
 func (metrics *Metrics) RecordStorageOperation(adapter string, operation string, outcome string) {
-	requireMetricLabel(adapter, "mysql", "redis", "account", "session", "personalworld", "placement", "visitsession", "worldadmission")
+	requireMetricLabel(adapter, "mysql", "redis", "account", "session", "personalworld", "placement", "visitsession", "worldadmission", "simulationresult")
 	requireMetricLabel(operation,
 		"transaction", "command", "script", "ensure_primary", "find_by_id", "archive", "allocation",
 		"resolve", "acquire", "activate", "renew", "revoke", "replace", "qualify_write", "create",
 		"find_for_authentication", "resolve_access", "rotate_refresh", "issue_ticket", "consume_ticket",
-		"invalidate_session", "invalidate_principal", "resolve_active", "resolve_invitable_player", "commit", "issue", "consume")
+		"invalidate_session", "invalidate_principal", "resolve_active", "resolve_invitable_player", "commit", "issue", "consume",
+		"lookup", "decide")
 	requireMetricLabel(outcome,
 		"ok", "failed", "invalid", "defect", "dependency_defect", "codec_failed", "key_failed", "read_failed",
 		"current_read_failed", "replay_read_failed", "allocation_read_failed", "not_committed", "pre_commit_transient",
 		"commit_unknown", "allocation_not_committed", "allocation_commit_unknown", "not_applied", "created", "existing",
 		"applied", "replay", "in_progress", "not_found", "conflict", "expired", "revision_conflict",
 		"idempotency_conflict", "invalid_state", "found", "burned", "username_conflict", "replayed",
-		"invalidated", "epoch_mismatch", "consumed", "binding_mismatch", "available", "unavailable", "corrupt", "stale")
+		"invalidated", "epoch_mismatch", "consumed", "binding_mismatch", "available", "unavailable", "corrupt", "stale",
+		"begin_failed", "owner_rejected", "insert_failed", "duplicate_unknown")
 	metrics.storageOperationTotal.WithLabelValues(adapter, operation, outcome).Inc()
+}
+
+// SetSimulationNodeHealth 更新唯一 child node 的封闭状态；调用方不得传入 node identity。
+func (metrics *Metrics) SetSimulationNodeHealth(state string) {
+	requireMetricLabel(state, "starting", "ready", "unhealthy", "draining", "stopped")
+	for _, candidate := range []string{"starting", "ready", "unhealthy", "draining", "stopped"} {
+		value := 0.0
+		if candidate == state {
+			value = 1
+		}
+		metrics.simulationNodeHealth.WithLabelValues(candidate).Set(value)
+	}
+}
+
+// SetSimulationInstances 更新当前 child 拥有的 instance 数量。
+func (metrics *Metrics) SetSimulationInstances(value int) {
+	if value < 0 {
+		panic("invalid simulation instance count")
+	}
+	metrics.simulationInstances.Set(float64(value))
+}
+
+// SetSimulationCapacity 更新实例或 actor 的资格容量。
+func (metrics *Metrics) SetSimulationCapacity(resource string, value int) {
+	requireMetricLabel(resource, "instances", "actors")
+	if value < 0 {
+		panic("invalid simulation capacity")
+	}
+	metrics.simulationCapacity.WithLabelValues(resource).Set(float64(value))
+}
+
+// ObserveSimulationControl 记录固定 control operation 的结果与耗时。
+func (metrics *Metrics) ObserveSimulationControl(operation string, outcome string, duration time.Duration) {
+	requireMetricLabel(operation, "hello", "start", "status", "health", "drain", "stop", "result_ack", "shutdown")
+	requireMetricLabel(outcome, "ok", "busy", "failed", "cancelled", "deadline", "protocol", "transport")
+	seconds := duration.Seconds()
+	metrics.simulationControlRequests.WithLabelValues(operation, outcome).Inc()
+	metrics.simulationControlSeconds.WithLabelValues(operation, outcome).Observe(seconds)
+}
+
+// SetSimulationControlQueue 更新有界 reader queue 深度。
+func (metrics *Metrics) SetSimulationControlQueue(value int) {
+	if value < 0 {
+		panic("invalid simulation control queue")
+	}
+	metrics.simulationControlQueue.Set(float64(value))
+}
+
+// ObserveSimulationDrain 记录 drain 稳定结果。
+func (metrics *Metrics) ObserveSimulationDrain(outcome string) {
+	requireMetricLabel(outcome, "drained", "failed", "deadline", "cancelled")
+	metrics.simulationDrains.WithLabelValues(outcome).Inc()
+}
+
+// ObserveSimulationResult 记录 proposal 的持久裁决结果。
+func (metrics *Metrics) ObserveSimulationResult(outcome string) {
+	requireMetricLabel(outcome, "committed", "rejected", "replayed", "failed")
+	metrics.simulationResults.WithLabelValues(outcome).Inc()
+}
+
+// ObserveSimulationProcessExit 记录 child 退出稳定类别。
+func (metrics *Metrics) ObserveSimulationProcessExit(outcome string) {
+	requireMetricLabel(outcome, "expected", "unexpected", "failed", "terminated")
+	metrics.simulationProcessExits.WithLabelValues(outcome).Inc()
+}
+
+// ObserveSimulationShutdown 记录 simulation component 最终关闭结果。
+func (metrics *Metrics) ObserveSimulationShutdown(outcome string) {
+	requireMetricLabel(outcome, "clean", "failed", "timeout")
+	metrics.simulationShutdowns.WithLabelValues(outcome).Inc()
 }
 
 // ObservePublicHTTP 记录固定operation、status class与三值outcome，不接受URL、identity或错误文本。

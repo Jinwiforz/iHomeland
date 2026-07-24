@@ -170,6 +170,20 @@ Profile 的 6 个 cases、12 个场景和 24 个 canonical 结果由 `tools/batt
 
 模型与 profile fixture 都不是 wire contract：B0.2 的 logical kind 不等于 numeric message ID，也不创建 `.proto`、framing、endpoint、ticket、packet layout、listener、推荐端口、第三方 C++ dependency 或 generated code。所有 production wire、安全和 listener 决策继续等待对应 OpenSpec change。
 
+### Go/C++ control 与 battle transport 的边界
+
+B0.4 使用 Go parent 与本机 `ihomeland-sim-server --control-stdio` child 之间的继承
+stdin/stdout pipe。其 canonical JSON frame、bootstrap nonce、request/receipt sequence、
+AssignmentStamp、health/capacity 与 ResultProposal 只属于内部生命周期控制，不进入
+HTTPS/WSS/TLS-TCP registry，也不占用 production 端口或 battle numeric message ID。
+Control payload 不携带 account credential、battle ticket、客户端 endpoint 或 raw gameplay
+input。
+
+该本机 pipe 选择只证明当前单机故障边界；未来若扩缩容或独立部署证明确需远程 control，
+必须另提 change，重新冻结 authentication、mTLS/authorization、discovery、backpressure、
+兼容性和故障恢复，不能把当前 JSON frame 直接暴露为公网 API。B0.5 仍须独立交付 Asio
+UDP listener、ticket、cookie/AEAD/replay protection、raw/KCP wire 与端口 owner。
+
 ### 裸 UDP 不可靠时序面
 
 B0.2 已对以下 logical kind 冻结 raw lane、频率、大小、expiry 与恢复语义；numeric message ID 和最终 wire route 仍等待安全 transport registry：

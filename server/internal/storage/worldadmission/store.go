@@ -78,7 +78,7 @@ func (store *Store) ResolveIssue(ctx context.Context, issueID domain.IssueID) (d
 		store.observer.RecordStorageOperation("worldadmission", "issue", "not_found")
 		return domain.IssueSnapshot{}, domain.IssueResolveOutcomeNotFound, nil
 	case "found":
-		if len(items) != 20 {
+		if len(items) != 21 {
 			return domain.IssueSnapshot{}, domain.IssueResolveOutcomeUnspecified, store.failure("issue", "defect", errors.New("world admission issue resolve shape is invalid"))
 		}
 		fingerprint, fingerprintErr := domain.ParseDigestHex(items[1])

@@ -509,10 +509,14 @@ type fakeRuntimeController struct {
 	running map[WorldInstanceID]AssignmentStamp
 	// startCalls 记录每个 instance 的 Start 调用次数，便于并发断言。
 	startCalls map[WorldInstanceID]int
+	// drainCalls 记录每个 instance 的 Drain 调用次数。
+	drainCalls map[WorldInstanceID]int
 	// stopCalls 记录每个 instance 的 Stop 调用次数。
 	stopCalls map[WorldInstanceID]int
 	// startErr 让 Start 在不改变 running map 时失败。
 	startErr error
+	// drainErr 让 Drain 在不改变 running map 时失败。
+	drainErr error
 	// stopErr 让 Stop 在不删除 runtime 时失败。
 	stopErr error
 	// startEntered 在 Start 取得输入后通知并发测试。
@@ -526,8 +530,16 @@ func newFakeRuntimeController() *fakeRuntimeController {
 	return &fakeRuntimeController{
 		running:    make(map[WorldInstanceID]AssignmentStamp),
 		startCalls: make(map[WorldInstanceID]int),
+		drainCalls: make(map[WorldInstanceID]int),
 		stopCalls:  make(map[WorldInstanceID]int),
 	}
+}
+
+// setDrainError 并发安全地配置后续 Drain 故障。
+func (controller *fakeRuntimeController) setDrainError(err error) {
+	controller.mutex.Lock()
+	defer controller.mutex.Unlock()
+	controller.drainErr = err
 }
 
 // setStartError 并发安全地配置后续 Start 故障。
@@ -579,6 +591,37 @@ func (controller *fakeRuntimeController) Start(ctx context.Context, snapshot Ass
 	defer controller.mutex.Unlock()
 	controller.running[snapshot.InstanceID()] = snapshot.Stamp()
 	return nil
+}
+
+// Drain 验证 exact runtime 仍存在；fake 没有异步 input queue。
+func (controller *fakeRuntimeController) Drain(ctx context.Context, stamp AssignmentStamp) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !stamp.Valid() {
+		return errors.New("runtime drain stamp is invalid")
+	}
+	controller.mutex.Lock()
+	defer controller.mutex.Unlock()
+	controller.drainCalls[stamp.InstanceID()]++
+	if controller.drainErr != nil {
+		return controller.drainErr
+	}
+	existing, exists := controller.running[stamp.InstanceID()]
+	if !exists {
+		return errors.New("runtime drain target is missing")
+	}
+	if !existing.Equal(stamp) {
+		return errors.New("runtime drain stamp conflicts with running instance")
+	}
+	return nil
+}
+
+// drainCount 返回指定 instance 的 Drain 调用次数。
+func (controller *fakeRuntimeController) drainCount(instanceID WorldInstanceID) int {
+	controller.mutex.Lock()
+	defer controller.mutex.Unlock()
+	return controller.drainCalls[instanceID]
 }
 
 // Stop 只删除完整 stamp 匹配的 runtime，stale instance 不能停止 successor。

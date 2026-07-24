@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "simulation-control-runtime-v1",
+  "documentKind": "simulation-config",
+  "configId": "control-baseline-v1",
+  "tickStepMilliseconds": 50,
+  "inputInboxEntries": 256,
+  "hardTickDebt": 4
+}

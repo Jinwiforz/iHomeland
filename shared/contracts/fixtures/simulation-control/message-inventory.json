@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "documentKind": "message-inventory",
+  "frameMaxBytes": 65536,
+  "pendingRequestLimit": 256,
+  "resultOutboxLimit": 256,
+  "messages": [
+    {
+      "kind": "node.hello.challenge",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "startup",
+      "replayIdentity": "requestId"
+    },
+    {
+      "kind": "node.hello.receipt",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "startup",
+      "replayIdentity": "requestId"
+    },
+    {
+      "kind": "node.health.query",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 1024,
+      "deadlineClass": "health",
+      "replayIdentity": "requestId"
+    },
+    {
+      "kind": "node.health.receipt",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 2048,
+      "deadlineClass": "health",
+      "replayIdentity": "requestId"
+    },
+    {
+      "kind": "instance.start",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 16384,
+      "deadlineClass": "lifecycle",
+      "replayIdentity": "startRequestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.ready",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "lifecycle",
+      "replayIdentity": "startRequestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.drain",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "drain",
+      "replayIdentity": "requestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.drained",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "drain",
+      "replayIdentity": "requestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.stop",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "shutdown",
+      "replayIdentity": "requestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.stopped",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "shutdown",
+      "replayIdentity": "requestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.status.query",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "health",
+      "replayIdentity": "requestId+assignmentFingerprint"
+    },
+    {
+      "kind": "instance.status.receipt",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "health",
+      "replayIdentity": "requestId+assignmentFingerprint"
+    },
+    {
+      "kind": "result.proposal",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 16384,
+      "deadlineClass": "result",
+      "replayIdentity": "resultId+proposalFingerprint"
+    },
+    {
+      "kind": "result.ack",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 2048,
+      "deadlineClass": "result",
+      "replayIdentity": "resultId+proposalFingerprint"
+    },
+    {
+      "kind": "node.shutdown",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 1024,
+      "deadlineClass": "shutdown",
+      "replayIdentity": "requestId"
+    },
+    {
+      "kind": "node.stopped",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 2048,
+      "deadlineClass": "shutdown",
+      "replayIdentity": "requestId"
+    }
+  ]
+}

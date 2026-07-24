@@ -128,6 +128,12 @@ ASCII/英文输出，避免中文系统代码页与 UTF-8 终端组合产生乱�
 
 Jolt 使用 static target、关闭 samples/viewer/install、关闭 RTTI 与 exceptions，并由 adapter 固定坐标、单位、collision layer、solver 和量化排序。Detour 只构建 runtime adapter 实际使用的 `Detour` target；不构建 `DetourCrowd`、`DetourTileCache`、demo、tests 或 Recast builder，首个 core 只消费版本化 nav fixture。nlohmann/json 关闭 tests/install/implicit conversions，只解析 closed fixture/config/evidence schema。三项依赖当前无项目补丁；出现补丁时必须在 tracked patch manifest 中记录上游基线、原因、diff digest、移除条件和升级处理。
 
+B0.4 control codec 继续复用 B0.3 锁定的 nlohmann/json，不新增 Asio、KCP、gRPC、
+Protobuf runtime 或 JSON 依赖。C++ 只通过私有 `ihomeland_sim_control_adapter` target
+解析 closed canonical JSON；Go 使用标准库 `encoding/json` 并在业务 codec 层执行重复字段、
+规范整数、UTF-8、64 KiB 与 closed payload 校验。任一方升级 JSON/toolchain 或改变
+canonical 规则都必须重跑跨语言 golden、Release/ASan 和 real-child qualification。
+
 `verify` 分别 clean 构建 Release CI 与 ASan preset。Debug/ASan 运行相同 workload
 的结构与内存安全 smoke，但不裁决 CPU target；reference benchmark 和最终
 qualification 只由 Release CI binary 生成，避免调试或 sanitizer instrumentation

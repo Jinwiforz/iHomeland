@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "simulation-control-runtime-v1",
+  "documentKind": "physics-binding",
+  "physicsId": "control-baseline-v1",
+  "adapter": "jolt",
+  "sceneMode": "registered-smoke-fixture",
+  "productScene": false
+}

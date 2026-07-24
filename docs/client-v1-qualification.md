@@ -6,7 +6,7 @@
 
 - 场景契约：`shared/contracts/fixtures/client-qualification/manifest.json`
 - manifest 闭合 schema：`manifest.schema.json`
-- 人工/自动证据闭合 schema：`evidence.schema.json`
+- operator/自动证据闭合 schema：`evidence.schema.json`
 - 人工清单闭合 schema：`manual-checklist.schema.json`
 - 最终机器报告闭合 schema：`report.schema.json`
 - 自动 runner 双向登记：`automatic-registry.json`
@@ -56,7 +56,7 @@ Remove-Item Env:IHOMELAND_QUALIFICATION_USERNAME -ErrorAction SilentlyContinue
 Remove-Item Env:IHOMELAND_QUALIFICATION_PASSWORD -ErrorAction SilentlyContinue
 ```
 
-工具默认保留 replacement server 供后续诊断；传入 `-StopReplacementServer` 才在成功后停止它。它只终止精确 listener owner 和自己启动的 Player/server，不按进程名批量结束，也不创建或删除 storage run。该入口用于缺陷回归，不能替代 manifest 中要求的正式双 Player 人工证据。
+工具默认保留 replacement server 供后续诊断；传入 `-StopReplacementServer` 才在成功后停止它。它只终止精确 listener owner 和自己启动的 Player/server，不按进程名批量结束，也不创建或删除 storage run。该入口用于缺陷回归，不能替代 manifest 中要求的正式双 Player operator 证据。
 
 ## 执行顺序
 
@@ -93,7 +93,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   -Action prepare-manual -RunId '<run-id>'
 ```
 
-`prepare-manual` 只有在同一 run 的五分钟 soak 证据已经通过后才生成 `manual-checklist.json` 与 `evidence.json`。清单只保存固定步骤代码、`qualification-owner`/`qualification-visitor` 隔离 profile 和相对 artifact 名；账号、密码与运行 identity 仍由操作者在 Player 中输入。完成三个人工场景后，在该 run 的 `evidence.json` 中只追加对应记录，再执行：
+`prepare-manual` 只有在同一 run 的五分钟 soak 证据已经通过后才生成 `manual-checklist.json` 与 `evidence.json`。清单只保存固定步骤代码、`qualification-owner`/`qualification-visitor` 隔离 profile 和相对 artifact 名；账号、密码与运行 identity 仍只存在于 operator 运行环境。Operator 可以是人，也可以是受控自动化代理，但必须真实启动本次 Development Player、两个隔离 profile 和独立服务端/storage，按低敏进程间信号观察完成条件，并且只终止自己持有的精确 PID；不得直接调用测试替身、伪造信号或仅根据进程存活追加记录。完成三项 operator 场景后，在该 run 的 `evidence.json` 中只追加对应记录，再执行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
@@ -123,9 +123,9 @@ EditMode 必须覆盖：
 
 PlayMode 必须覆盖真实 UI Toolkit/uGUI Host、focus/cursor、Scene replacement、HUD/modal 所有权与 teardown。生产代码不得使用 frame tick、真实 sleep、任意延时或页面缓存去修正权威状态。
 
-## 真实双 Player 场景
+## 真实双 Player operator 场景
 
-人工证据必须使用本次 Development build、两个隔离 data profile、独立服务端/storage run 与至少两个真实账号。账号与 runtime identity 只在人工运行环境中存在，不写入 evidence。
+Operator 证据必须使用本次 Development build、两个隔离 data profile、独立服务端/storage run 与至少两个真实账号。账号与 runtime identity 只在运行环境中存在，不写入 evidence。后台或隐藏窗口不降低证据等级：判断依据仍是两个真实 Player 的产品对象图、真实 socket、服务端持久事实、固定低敏 pass/fail marker 和精确进程退出状态。
 
 1. 两端从 clean client state 登录并进入各自 OwnWorld。
 2. Owner Open、create invite；Visitor 接受并以 Visitor role 进入 Owner target。
@@ -153,4 +153,16 @@ Soak 不是 31 分钟 idle、性能排名或容量测试。`five-minute-recovery
 
 ## 当前资格状态
 
-`client-runtime-modularity` 重构完成后，`client-v1` 已在 2026-07-23 以当前源码重新完成同一冻结输入下的全部 20 项 mandatory 资格：contract digest 为 `9f57410066bd9747330300240144fa0984026d7447c9b6afee95731b8bc3468d`，Development build digest 为 `a8c9458d9adf50c8d5b3c85d1269b7e710be1748e3e0cbe6a554001f7411d9a5`，Release build digest 为 `1772ca2eee344271d8b7b0e7e77c642e2184e186b45cbbebfd44f77c0d84948c`。自动门、五分钟真实 Player soak、双 Player 产品/分通道故障、Owner/Visitor 进程恢复、Session 失效、真实服务端停止与同库重启、redaction、governance 和 cleanup 均通过，最终报告得到 `qualified=true`、`cleanup=pass`。因此当前冻结输入的结论是 **client-v1 qualified**；任一 contract 或 Player build digest 变化都会使该结论失效并要求重新运行完整资格链。
+`establish-go-simulation-control` 接入 production C++ child 后，`client-v1` 已在
+2026-07-24 以当前源码重新完成同一冻结输入下的全部 20 项 mandatory 资格：
+contract digest 为
+`541c50c6f24f8da6bd4878d328c86f5e9eff631d4e3786eca57415fb30d26ec5`，
+Development build digest 为
+`badaaa358119447b9f92368ea1163b90f4378fd0e7fdb49d880e15ee7d6db21e`，
+Release build digest 为
+`d1e8b6bb750acf486a6999d8ad1f91c73d52c1e793489d64dc9273e8e6419336`。
+自动门、五分钟真实 Player soak、双 Player 产品/分通道故障、Owner/Visitor 进程恢复、
+Session 失效、真实服务端停止与同库重启、redaction、governance 和 cleanup 均通过，
+最终报告得到 `qualified=true`、`cleanup=pass`。因此当前冻结输入的结论是
+**client-v1 qualified**；任一 contract 或 Player build digest 变化都会使该结论失效并
+要求重新运行完整资格链。

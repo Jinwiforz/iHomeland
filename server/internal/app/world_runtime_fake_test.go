@@ -3,13 +3,14 @@ package app
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
 )
 
-// processWorldRuntime 是单进程逻辑WorldInstance的唯一资源owner。
+// processWorldRuntime 是 placement/application 单元测试使用的确定性进程内 fake。
 //
 // 它不保存PersonalWorld内容、VisitSession或socket；PlacementStore仍是current assignment
 // 的唯一线性化点。registry只证明本进程已为完整stamp准备好承载既有gameplay入口。
@@ -92,6 +93,26 @@ func (runtime *processWorldRuntime) Start(ctx context.Context, snapshot placemen
 	return nil
 }
 
+// Drain 验证 exact stamp 仍由本进程承载；旧逻辑 runtime 没有额外输入队列可排空。
+func (runtime *processWorldRuntime) Drain(ctx context.Context, stamp placement.AssignmentStamp) error {
+	if runtime == nil || ctx == nil || !stamp.Valid() {
+		return errors.New("process world runtime drain input is invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	runtime.mutex.Lock()
+	defer runtime.mutex.Unlock()
+	existing, exists := runtime.instances[stamp.InstanceID().String()]
+	if !exists {
+		return errors.New("process world runtime drain target is missing")
+	}
+	if !existing.Equal(stamp) {
+		return errors.New("process world runtime drain stamp is stale")
+	}
+	return nil
+}
+
 // Stop 只移除完整stamp匹配的predecessor；missing表示先前清理已完成。
 func (runtime *processWorldRuntime) Stop(ctx context.Context, stamp placement.AssignmentStamp) error {
 	if runtime == nil || ctx == nil || !stamp.Valid() {
@@ -161,6 +182,11 @@ func (runtime *processWorldRuntime) contains(stamp placement.AssignmentStamp) bo
 	return exists && existing.Equal(stamp)
 }
 
+// Contains 报告精确 stamp 是否仍由本进程承载。
+func (runtime *processWorldRuntime) Contains(stamp placement.AssignmentStamp) bool {
+	return runtime.contains(stamp)
+}
+
 // count 返回当前逻辑runtime数量，不暴露identity或assignment内容。
 func (runtime *processWorldRuntime) count() int {
 	if runtime == nil {
@@ -184,6 +210,28 @@ func (runtime *processWorldRuntime) stampsForWorld(worldID personalworld.Persona
 			stamps = append(stamps, stamp)
 		}
 	}
+	return stamps
+}
+
+// StampsForWorld 返回指定 PersonalWorld 的本进程完整 stamps 副本。
+func (runtime *processWorldRuntime) StampsForWorld(worldID personalworld.PersonalWorldID) []placement.AssignmentStamp {
+	return runtime.stampsForWorld(worldID)
+}
+
+// Stamps 返回 fake 当前全部 runtime stamps 的稳定副本。
+func (runtime *processWorldRuntime) Stamps() []placement.AssignmentStamp {
+	if runtime == nil {
+		return nil
+	}
+	runtime.mutex.Lock()
+	defer runtime.mutex.Unlock()
+	stamps := make([]placement.AssignmentStamp, 0, len(runtime.instances))
+	for _, stamp := range runtime.instances {
+		stamps = append(stamps, stamp)
+	}
+	sort.Slice(stamps, func(first int, second int) bool {
+		return stamps[first].InstanceID().String() < stamps[second].InstanceID().String()
+	})
 	return stamps
 }
 

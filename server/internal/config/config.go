@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +48,8 @@ type Config struct {
 	PublicAPI PublicAPI `yaml:"publicApi"`
 	// Storage 定义 MySQL 与 Redis 的非敏感连接、资源和探针策略。
 	Storage Storage `yaml:"storage"`
+	// SimulationControl 定义必需本机 C++ child 的精确 artifact 与有界 control policy。
+	SimulationControl SimulationControl `yaml:"simulationControl"`
 }
 
 // Runtime 保存所有组件共享的启动与关闭总预算。
@@ -80,6 +84,52 @@ type Diagnostic struct {
 	MaxHeaderBytes int `yaml:"maxHeaderBytes"`
 }
 
+// SimulationControl 定义无 endpoint、无 credential 的私有 child control 配置。
+type SimulationControl struct {
+	// Enabled 必须为 true；false 只允许纯配置/单元测试构造安全零值。
+	Enabled bool `yaml:"enabled"`
+	// BinaryPath 是 ihomeland-sim-server 的绝对路径。
+	BinaryPath string `yaml:"binaryPath"`
+	// BinarySHA256 是 binary 内容 SHA-256。
+	BinarySHA256 string `yaml:"binarySha256"`
+	// QualificationReceiptPath 是 B0.3 gate receipt 绝对路径。
+	QualificationReceiptPath string `yaml:"qualificationReceiptPath"`
+	// QualificationReceiptSHA256 是 receipt 内容 SHA-256。
+	QualificationReceiptSHA256 string `yaml:"qualificationReceiptSha256"`
+	// BuildIdentity 是 hello 绑定的 B0.3 Release identity。
+	BuildIdentity string `yaml:"buildIdentity"`
+	// ModelManifest 是冻结 battle model manifest digest。
+	ModelManifest string `yaml:"modelManifest"`
+	// ProfileManifest 是冻结 network profile manifest digest。
+	ProfileManifest string `yaml:"profileManifest"`
+	// ConfigIdentity 是 control-baseline-v1 config digest。
+	ConfigIdentity string `yaml:"configIdentity"`
+	// NavigationIdentity 是 nav asset/config digest。
+	NavigationIdentity string `yaml:"navigationIdentity"`
+	// PhysicsIdentity 是 physics adapter/config digest。
+	PhysicsIdentity string `yaml:"physicsIdentity"`
+	// InstanceCapacity 是 child hard slots。
+	InstanceCapacity int `yaml:"instanceCapacity"`
+	// ActorCapacity 是每 instance B0.3 qualified actor cap。
+	ActorCapacity int `yaml:"actorCapacity"`
+	// FrameBytes 必须精确等于冻结 64 KiB limit。
+	FrameBytes int `yaml:"frameBytes"`
+	// PendingRequests 限制 session correlation queue。
+	PendingRequests int `yaml:"pendingRequests"`
+	// RequestTimeout 是已发送 request turn 的 hard deadline。
+	RequestTimeout time.Duration `yaml:"requestTimeout"`
+	// HealthInterval 是 node health 采样间隔。
+	HealthInterval time.Duration `yaml:"healthInterval"`
+	// HealthTimeout 是单次 health receipt deadline。
+	HealthTimeout time.Duration `yaml:"healthTimeout"`
+	// DrainTimeout 是 instance drain budget。
+	DrainTimeout time.Duration `yaml:"drainTimeout"`
+	// ShutdownTimeout 是 instance/node/process 关闭 budget。
+	ShutdownTimeout time.Duration `yaml:"shutdownTimeout"`
+	// StderrLineBytes 是低敏 child diagnostic 单行上限。
+	StderrLineBytes int `yaml:"stderrLineBytes"`
+}
+
 // Default 返回只适合本地启动且默认不暴露到外部网卡的安全配置。
 func Default() Config {
 	return Config{
@@ -96,6 +146,9 @@ func Default() Config {
 		},
 		PublicAPI: DefaultPublicAPI(),
 		Storage:   DefaultStorage(),
+		SimulationControl: SimulationControl{
+			Enabled: false,
+		},
 	}
 }
 
@@ -176,6 +229,61 @@ func (config Config) Validate() error {
 	}
 	if err := config.Storage.validate(config.Environment); err != nil {
 		return err
+	}
+	if err := config.SimulationControl.validate(config.Environment); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validate 在 enabled 时拒绝相对路径、digest 漂移、超资格容量与 silent budget。
+func (config SimulationControl) validate(environment string) error {
+	if !config.Enabled {
+		if environment == "production" {
+			return errors.New("simulationControl.enabled is required in production")
+		}
+		return nil
+	}
+	if !filepath.IsAbs(config.BinaryPath) || !filepath.IsAbs(config.QualificationReceiptPath) {
+		return errors.New("simulationControl artifact paths must be absolute")
+	}
+	digestPattern := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for key, value := range map[string]string{
+		"binarySha256":               config.BinarySHA256,
+		"qualificationReceiptSha256": config.QualificationReceiptSHA256,
+		"buildIdentity":              config.BuildIdentity,
+		"modelManifest":              config.ModelManifest,
+		"profileManifest":            config.ProfileManifest,
+		"configIdentity":             config.ConfigIdentity,
+		"navigationIdentity":         config.NavigationIdentity,
+		"physicsIdentity":            config.PhysicsIdentity,
+	} {
+		if !digestPattern.MatchString(value) {
+			return fmt.Errorf("simulationControl.%s must be lowercase SHA-256", key)
+		}
+	}
+	if config.InstanceCapacity < 1 || config.InstanceCapacity > 256 ||
+		config.ActorCapacity < 1 || config.ActorCapacity > 8 {
+		return errors.New("simulationControl capacity exceeds qualified limits")
+	}
+	if config.FrameBytes != 65_536 || config.PendingRequests < 1 ||
+		config.PendingRequests > 256 {
+		return errors.New("simulationControl frame or pending request limit is invalid")
+	}
+	for key, value := range map[string]time.Duration{
+		"requestTimeout":  config.RequestTimeout,
+		"healthInterval":  config.HealthInterval,
+		"healthTimeout":   config.HealthTimeout,
+		"drainTimeout":    config.DrainTimeout,
+		"shutdownTimeout": config.ShutdownTimeout,
+	} {
+		if err := validateDuration("simulationControl."+key, value); err != nil {
+			return err
+		}
+	}
+	if config.HealthTimeout >= config.HealthInterval ||
+		config.StderrLineBytes < 64 || config.StderrLineBytes > 4096 {
+		return errors.New("simulationControl health or stderr policy is invalid")
 	}
 	return nil
 }

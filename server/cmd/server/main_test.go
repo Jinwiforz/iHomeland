@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -190,11 +193,80 @@ func writeProcessConfigWithTimeouts(t *testing.T, shutdownTimeout time.Duration,
 	if os.Getenv("IHOMELAND_STORAGE_INTEGRATION") == "1" {
 		contents += fmt.Sprintf("storage:\n  mysql:\n    address: %s\n    passwordSecret: 'file:%s'\n  redis:\n    address: %s\n    passwordSecret: 'file:%s'\n", os.Getenv("IHOMELAND_TEST_MYSQL_ADDRESS"), os.Getenv("IHOMELAND_TEST_MYSQL_PASSWORD_FILE"), os.Getenv("IHOMELAND_TEST_REDIS_ADDRESS"), os.Getenv("IHOMELAND_TEST_REDIS_PASSWORD_FILE"))
 	}
+	if os.Getenv("IHOMELAND_SIMULATION_REAL_CHILD") == "1" {
+		contents += processSimulationControl(t)
+	}
 	path := filepath.Join(t.TempDir(), "server.yaml")
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path, address
+}
+
+// processSimulationControl 将 cmd/server 真实进程测试接到当前 CI child，不保留独立身份常量。
+func processSimulationControl(t *testing.T) string {
+	t.Helper()
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildRoot := filepath.Join(repositoryRoot, "simulation", "out", "build", "windows-msvc-ci")
+	binaryPath := filepath.Join(buildRoot, "ihomeland-sim-server.exe")
+	receiptPath := filepath.Join(buildRoot, "qualification-gate-receipt.json")
+	identityPath := filepath.Join(buildRoot, "ihomeland-build-identity.json")
+	return fmt.Sprintf(`simulationControl:
+  enabled: true
+  binaryPath: '%s'
+  binarySha256: %s
+  qualificationReceiptPath: '%s'
+  qualificationReceiptSha256: %s
+  buildIdentity: %s
+  modelManifest: 65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1
+  profileManifest: ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f
+  configIdentity: da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381
+  navigationIdentity: 3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd
+  physicsIdentity: ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98
+  instanceCapacity: 2
+  actorCapacity: 8
+  frameBytes: 65536
+  pendingRequests: 256
+  requestTimeout: 10s
+  healthInterval: 500ms
+  healthTimeout: 250ms
+  drainTimeout: 2s
+  shutdownTimeout: 3s
+  stderrLineBytes: 1024
+`, binaryPath, processArtifactDigest(t, binaryPath), receiptPath, processArtifactDigest(t, receiptPath), processBuildIdentity(t, identityPath))
+}
+
+// processArtifactDigest 返回当前真实 child artifact 的小写 SHA-256。
+func processArtifactDigest(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+// processBuildIdentity 读取由统一 C++ 入口嵌入 CI child 的 target identity。
+func processBuildIdentity(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identity struct {
+		TargetIdentity string `json:"target_identity"`
+	}
+	if err := json.Unmarshal(content, &identity); err != nil {
+		t.Fatal(err)
+	}
+	if len(identity.TargetIdentity) != sha256.Size*2 {
+		t.Fatal("simulation target identity is invalid")
+	}
+	return identity.TargetIdentity
 }
 
 // reserveProcessAddress 让OS选择并释放独立loopback端口，避免诊断与公开listener冲突。

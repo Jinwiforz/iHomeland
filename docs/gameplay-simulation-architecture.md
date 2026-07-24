@@ -29,8 +29,9 @@ PersonalWorldID
 - `RuntimeNodeID` 在 C++ 模拟服落地后指向已注册、健康且可承载的 `SimulationNode`。
 - `SimulationInstanceID` 是 C++ 内存实例身份，重启、迁移或 generation 变化时必须更换。
 - 同一 PersonalWorld 最多一个 current writable `AssignmentStamp`；旧 generation 的 input、snapshot 与 result 全部 fail closed。
+- Control lifecycle request 必须串行；空闲健康探针不得排在正在执行的 start、drain 或 stop 后面等待。lane 繁忙时跳过本轮探针，由 lifecycle receipt、进程存活与 session hard deadline 继续监督，避免把正常长操作误判为 node failure。
 
-当前 Go `placement.RuntimeController` 是迁移接缝。后续 control change 以远程 adapter 替换本地 `processWorldRuntime`，不得删除 PersonalWorld/VisitSession owner，不得让 C++ 直连现有 repository，也不得在两端各自生成 assignment。
+Go `placement.RuntimeController` 是迁移接缝。当前 production/local/test 可执行服务端均使用本机 C++ child adapter；进程内 fake 只服务 `_test.go` 单元测试。该接缝不得删除 PersonalWorld/VisitSession owner，不得让 C++ 直连现有 repository，也不得在两端各自生成 assignment。
 
 PersonalWorld 内暂态怪物、Boss 和战斗属于绑定当前 assignment 的 `SimulationInstance`。ActivityInstance 只在玩法拥有独立 lifecycle、admission、结果边界或匹配语义时出现，不是个人世界 gameplay 的前置条件。
 
@@ -340,8 +341,27 @@ B0.3 已按 `versions.yaml` 锁定 MSVC/CMake/Jolt/Detour/JSON 版本并创建�
   的 build identity 和同源 CI/ASan gate receipt；Debug/ASan 只运行 workload smoke，
   不产生性能资格。
 
-Asio、KCP、battle ticket、numeric battle wire、Go control 和 Unity gameplay runtime
-仍不在 B0.3 target 图中，只有后续 change 满足路线图进入条件后才能引入。
+Asio、KCP、battle ticket、numeric battle wire 和 Unity gameplay runtime 仍不在
+B0.3/B0.4 target 图中，只有后续 change 满足路线图进入条件后才能引入。
+
+### B0.4 Go/C++ 本机 control
+
+B0.4 在 Go Composition Root 内新增 `simulation_node` component，并以精确 binary SHA-256、
+B0.3 qualification receipt SHA-256、build/model/profile/config identity 和一次性 bootstrap
+nonce 启动 `ihomeland-sim-server --control-stdio`。Control channel 只使用继承 pipe：
+stdout 只能包含 canonical frame，stderr 只能包含截断、去控制字符的低敏诊断，child
+不创建 listener、endpoint、ticket 或外部 storage connection。
+
+一个 `SimulationNode` 可承载多个不可复活 `SimulationInstance`，但每个 instance 仍只有
+一个 simulation worker。Go start/drain/stop 请求与 C++ receipt 全量绑定
+`AssignmentStamp`、node incarnation、instance identity、mapping generation、model/profile/config/nav/physics identity、deterministic seed、actor capacity 和稳定 request identity；C++ 会重算 stamp fingerprint，响应丢失
+只能以完全相同的 start binding 重试。容量由 Go 配置和 C++ hello receipt 共同收紧，当前资格上限
+固定为 8 actors，超过上限只拒绝未来 battle admission，不改变 VisitSession 的 33-actor
+兼容行为。
+
+C++ drain 先为 node-global、最多 256 entries 的 immutable outbox 预留容量，再关闭新输入、完成有限 Tick、写入 `ResultProposal` 并返回 drained；容量满时保持本次 drain 未完成，不能在重试时伪装成功。Go 先重算 proposal fingerprint，再执行 receipt-first 裁决并持久化到
+MySQL；只有 committed/rejected/replayed receipt 确定后才 ack。该 control target 不是
+battle wire target：它不包含 UDP endpoint、credential、numeric message ID 或客户端字段。
 
 ## 首个可玩竖切的完成定义
 

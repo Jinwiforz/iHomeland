@@ -97,7 +97,9 @@ C++ Game Simulation Server
   └─ realtime input, authoritative snapshot and bounded history
 ```
 
-正式能力名为 `Game Simulation Server`，未来二进制名为 `ihomeland-sim-server`。“Battle Server”只作为讨论别名，不进入稳定协议类型或 owner 名称，因为该进程未来还可承载个人世界、ActivityInstance、战场等实时模拟。Go 通过经过认证、可幂等重试的内部控制契约分配、启动、准入、排空和停止 `SimulationInstance`；C++ 回报健康、租约、运行摘要及可持久化结果。内部 transport 必须由后续 change 基于扩缩容、故障隔离与运维证据选择，当前不预设 gRPC。
+正式能力名为 `Game Simulation Server`，二进制名为 `ihomeland-sim-server`。“Battle Server”只作为讨论别名，不进入稳定协议类型或 owner 名称，因为该进程未来还可承载个人世界、ActivityInstance、战场等实时模拟。B0.4 在同一 Go OS process 下启动一个无 listener 的 C++ child，以继承的 stdin/stdout 传输 4-byte big-endian length-prefixed canonical JSON control frame；Windows child 在读取任何 frame 前把 stdin/stdout 显式切换为 binary mode，禁止文本模式把 length prefix 中的 `0x0A` 改写为 CRLF。256-bit bootstrap nonce、共享单调 sequence、exact binary/qualification digest 与 OS process handle 共同完成本机 control authentication。Windows child 另建 process group，使发送给 Go 服务端的 Ctrl-Break 只能由 parent 转换为协议化 drain/shutdown，不能提前杀死 child。该拓扑不开放端口、不引入 gRPC，也不构成后续远程 control transport 的兼容承诺。
+
+Go `simulation_node` lifecycle component 在 MySQL/Redis 之后、公开 listener 之前启动 child，完成 hello/build receipt、健康和容量登记，再通过 `placement.RuntimeController` adapter 执行幂等 start/status、bounded drain 与 exact stop。同一 PersonalWorld 的完整 resolve/orphan-cleanup/activate 收敛过程使用可取消的临时 lane 串行，其他 world 仍可并行；最后一个 owner/waiter 离开即删除 lane。该边界防止并发 bootstrap 的 stale `not-found` 读取把另一请求刚启动、尚未发布 active 的 runtime 当作 orphan 停止。Control lifecycle turn 在 Go 侧串行化；定时 `node.health` 只在该 lane 空闲时发送，若 start/drain/stop 正占用 lane 则把本轮记录为 `busy` 并跳过，不能排队到 lifecycle 后再用过期 deadline 误判 node。正在执行的 lifecycle receipt、child process liveness 和 session hard deadline 共同提供监督证据；真正的 EOF、deadline 或协议错误仍是 terminal failure。Go 按 result kind 重算 payload/evidence digest；proposal inbox 按 ResultID 对 exact replay 去重、拒绝冲突，并只有在 receipt 与 ack 均成功后才释放队首；C++ 用有界 ack replay cache 接受相同 fingerprint 的重复 ack。公开输入先停止，随后 result flush、placement revoke/instance stop、child shutdown，最后释放 storage；child 意外退出、EOF 或协议错误会撤销 readiness 并触发非零受控关闭，同一 Go process 不静默 respawn 新 incarnation。
 
 唯一 owner 边界如下：
 
@@ -249,7 +251,13 @@ PersonalWorldID (Go persistent identity)
        -> SimulationInstanceID (C++ in-memory authoritative runtime)
 ```
 
-现有 Go `placement.RuntimeController` 是迁移接缝：当前本地 `processWorldRuntime` 只提供逻辑运行 registry，后续 change 应以远程 C++ control adapter 替换其实现，而不是删除或复制 PersonalWorld、WorldInstance、VisitSession、admission 与持久化 owner。`RuntimeNodeID` 届时指向已注册且健康的 `SimulationNode`；C++ 必须绑定 Go 下发的完整 `AssignmentStamp`，不得自行创建另一套 PersonalWorld repository 或 assignment generation。
+Go `placement.RuntimeController` 是迁移接缝：可执行服务端在 production/local/test 均必须接入本机 C++ child adapter；进程内 fake 只存在于 `_test.go` 的 domain/application unit tests，不能被 Composition Root 选择。`RuntimeNodeID` 指向本次 Go 进程登记、健康且具备容量的 `SimulationNode`；C++ 会重算 Go 定义的完整 `AssignmentStamp` fingerprint，并只接受完整 start binding 一致的请求，不得自行创建另一套 PersonalWorld repository 或 assignment generation。
+
+内部 `SimulationTarget` 只在 assignment current/active、lease 有效、node healthy 且 instance ready 时解析，包含完整 stamp fingerprint、`RuntimeNodeID`、node/instance identity、mapping generation、model/profile/config identity 与 8-actor qualification cap，不包含 credential、endpoint 或 PlayerID 覆盖字段。replacement、lease expiry、drain、stop 或 node loss会使旧 target 失效；它不改变客户端可见 assignment 投影，也不把 33-actor VisitSession 兼容上限改写为 battle 容量。
+
+`ResultProposal` 由 C++ node-global、最多 256 entries 的有界 outbox 产生；该边界覆盖 child 总内存，并允许 instance stop 后继续等待 ack。Go 在接受 child 提供的 fingerprint 前先按全部 immutable 字段重算，再查询 immutable MySQL receipt、验证 result catalog、完整 assignment/current fence、instance 与 kind-specific Tick range，最后在 owner transaction 内保存 committed/rejected 裁决后才发送 ack。当前只登记 `simulation.lifecycle.summary.v1`；未知 kind、stale assignment、伪造 fingerprint 和同 ResultID 非完全相同 proposal 均 fail closed。MySQL 是裁决事实 owner，C++ outbox 与 Go inbox 都不是持久数据库。
+
+正常关闭先停止 HTTP/WSS/TLS-TCP 与 semantic deadline worker，再通过 placement `Sleep` 对本 node 的 exact stamps 执行 drain/result、assignment revoke 和 instance stop；随后 `simulation_node` component 只清理残留 binding 并关闭 child，最后才关闭 Redis/MySQL。关闭超时不能恢复旧 fence。
 
 PersonalWorld 中暂态生成的普通怪物、Boss 和战斗状态属于该 `SimulationInstance`，不要求先创建 ActivityInstance。只有副本、战场、剧情位面等拥有独立 lifecycle、admission、结果边界或匹配语义的玩法，才引入 ActivityInstance；它不是个人世界 gameplay 的前置条件。
 

@@ -267,7 +267,13 @@ function Invoke-CMakeAction {
         Push-Location $simulationRoot
         try {
             switch ($Action) {
-                "configure" { & $environment.CMake --preset $SelectedPreset --fresh }
+                "configure" {
+                    # 首次 configure 只生成已锁定 toolchain manifest；真实 target identity
+                    # 在 source+manifest 摘要完成后立即通过同一 build tree 二次 configure 嵌入。
+                    $bootstrapIdentity = "0" * 64
+                    & $environment.CMake --preset $SelectedPreset --fresh `
+                        "-DIHOMELAND_CONTROL_BUILD_IDENTITY=$bootstrapIdentity"
+                }
                 "build" { & $environment.CMake --build --preset $SelectedPreset }
                 "test" { & (Join-Path (Split-Path $environment.CMake -Parent) "ctest.exe") --preset $SelectedPreset }
             }
@@ -275,8 +281,14 @@ function Invoke-CMakeAction {
                 throw "CMake $Action ($SelectedPreset) 失败，退出码 $LASTEXITCODE"
             }
             if ($Action -eq "configure") {
-                Assert-CMakeMsvcEnglishShowIncludesPrefix (Join-Path $simulationRoot "out\build\$SelectedPreset")
-                Write-CppBuildIdentity $SelectedPreset | Out-Null
+                $buildRoot = Join-Path $simulationRoot "out\build\$SelectedPreset"
+                Assert-CMakeMsvcEnglishShowIncludesPrefix $buildRoot
+                $identity = Write-CppBuildIdentity $SelectedPreset
+                & $environment.CMake -S $simulationRoot -B $buildRoot `
+                    "-DIHOMELAND_CONTROL_BUILD_IDENTITY=$($identity.target_identity)"
+                if ($LASTEXITCODE -ne 0) {
+                    throw "CMake control identity configure ($SelectedPreset) 失败，退出码 $LASTEXITCODE"
+                }
             }
         }
         finally {

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "simulation-control-runtime-v1",
+  "documentKind": "navigation-binding",
+  "navigationId": "control-baseline-v1",
+  "adapter": "detour",
+  "assetMode": "registered-smoke-fixture",
+  "productAsset": false
+}

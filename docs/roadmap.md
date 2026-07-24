@@ -417,18 +417,43 @@ socket/KCP/AEAD、production network 与 Unity runtime。
 
 ### B0.4 `establish-go-simulation-control`
 
+**状态：**实现、主 specs 同步、server v1 完整回归、client v1 全部 20 项 mandatory
+资格与 B0.4 完整资格均已通过；连续两份低敏 B0.4 report 字节一致并得到
+`control-qualified-windows-x64`。change 已于 2026-07-24 完成归档，B0.5 的提案进入条件
+已经满足；battle wire、UDP/KCP/AEAD 与 Unity battle runtime 仍须由独立 OpenSpec
+change 冻结并验收，不能直接开始实现。
+
 **进入条件：**B0.3 的 10 个冻结 model cases、CI/ASan/parity/benchmark、连续
 determinism 与唯一 qualification report 全部通过，主 specs 已同步并归档；C++ core
 提供稳定、幂等、无公网依赖的 SimulationInstance lifecycle contract，现有 placement
 fencing/recovery 基线保持通过。
 
-**产出：**Go `placement.RuntimeController` 的远程 C++ adapter、SimulationNode registration/health/capacity、start/drain/stop、完整 AssignmentStamp binding、admission target、result proposal/ack/replay 和 shutdown ordering。具体内部 transport 由该 change 基于故障隔离证据选择。
+**产出：**Go `placement.RuntimeController` 的本机 C++ child adapter、SimulationNode registration/health/capacity、start/drain/stop、完整 AssignmentStamp binding、内部 SimulationTarget、result proposal/ack/replay 和 shutdown ordering。Control transport 固定为继承 stdin/stdout 上的 canonical JSON frame，不创建 listener、端口或 gRPC surface。
 
 **完成条件：**own-world、visit-world、stale assignment、C++ crash/restart、Go restart、drain 和重复 result 的 contract/integration tests 通过；现有 PersonalWorld/VisitSession/Go v1 API 无双 owner 或回归。
 
+**实现 evidence：**`shared/contracts/fixtures/simulation-control/` 与
+`tools/simulation-control/` 冻结 16 种双向 frame、64 KiB frame、256 pending/outbox
+上限和 B0.3 identity；C++ `ihomeland_sim_control_adapter`/`--control-stdio` 与 Go
+`internal/simulationcontrol`/`simulation_node` 已接线 exact process、health/capacity、
+placement、target 和 receipt-first MySQL result coordinator。Release 31/31、ASan
+32/32、Go unit/race/fuzz、真实 child 无端口、真实 MySQL restart/replay/rollback 与
+server v1 26/26 均通过；client v1 重新完成五分钟真实 Player soak、三项双 Player
+operator 场景与 cleanup，绑定 contract/Development/Release digest
+`541c50c6f24f8da6bd4878d328c86f5e9eff631d4e3786eca57415fb30d26ec5`、
+`badaaa358119447b9f92368ea1163b90f4378fd0e7fdb49d880e15ee7d6db21e`、
+`d1e8b6bb750acf486a6999d8ad1f91c73d52c1e793489d64dc9273e8e6419336`。
+连续两份低敏 B0.4 report 的 SHA-256 均为
+`2ec8d7461c04c0808922e6fee89c1366ee62efb1a15a5021f26261b07da7ed92`。
+
 ### B0.5 `establish-secure-battle-transport`
 
-**进入条件：**network profile、Go/C++ control、endpoint ownership 与 threat model 完成，端口分配 change 明确实际 listener。
+**进入条件：**B0.4 主 specs 已同步并归档，连续资格报告为 qualified，且
+SimulationTarget/8-actor gate、child crash/restart、result replay 和现有 world/visit 回归
+均有证据；随后必须由独立 change 冻结 battle endpoint ownership、threat model、numeric
+message registry、ticket/cookie/AEAD/replay/anti-amplification 与实际 UDP listener/端口。
+在该 change 获批前 Asio/KCP、UDP 配置、network qualification 和 Unity battle runtime
+继续关闭。
 
 **产出：**Asio 单 UDP listener/authenticated multiplexer、raw/KCP lanes、HTTPS battle ticket、cookie challenge、AEAD/key epoch/nonce、replay window、endpoint binding/rebinding、限流、抗放大、有界 queue 和跨 C++/C#/Go wire fixtures。
 

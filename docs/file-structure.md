@@ -19,7 +19,7 @@ iHomeland/
   docs/
   openspec/
   server/
-  simulation/               # 已落地的无网络 C++20 Game Simulation Core
+  simulation/               # 无网络 C++20 core 与 stdio control child
   shared/
   tools/
   release.json
@@ -28,8 +28,8 @@ iHomeland/
 
 `simulation/` 是 `ihomeland-sim-server` 的唯一 C++ 工程根，不属于现有 Go
 `server/` 子目录，也不把第三方源码复制成业务代码。B0.3 已建立真实工程、
-exact toolchain bootstrap、离线 adapters、tests 与 qualification tools；UDP listener
-仍等待后续安全 transport。
+exact toolchain bootstrap、离线 adapters、stdio control、tests 与 qualification tools；
+UDP listener 仍等待后续安全 transport。
 
 ## C++ Game Simulation Server 目标结构
 
@@ -39,7 +39,7 @@ simulation/
   CMakePresets.json
   cmake/
   apps/
-    sim_server/              # 无 listener smoke/composition 入口
+    sim_server/              # 无 listener smoke 与 --control-stdio child
     replay/                  # 连续确定 replay evidence
     benchmark/               # 1/5/8 actor reference workload
     qualification/           # verify 成功后生成本地资格产物
@@ -51,6 +51,7 @@ simulation/
     gameplay/                # 固定 pipeline、movement、ability/effect/AI
     history/                 # 16-Tick 有界 history
     adapters/                # fixture、Jolt、Detour 与 evidence adapters
+    control/                 # canonical frame、SimulationNode 与多实例 lifecycle
     qualification/           # reference benchmark implementation
   tests/
   out/                       # ignored build/install tree
@@ -58,8 +59,8 @@ simulation/
 ```
 
 目录表达依赖方向：`gameplay` 只依赖项目定义的 ECS/physics/navigation ports，
-不能在 component 或公开 contract 中暴露 Jolt、Detour 或 JSON 类型。当前没有
-`control/` 或 `network/` 目录；后续网络只能向 tick-boundary input queue 写入有界
+不能在 component 或公开 contract 中暴露 Jolt、Detour 或 JSON 类型。`control/` 只持有
+本机 stdio frame 与 node/instance lifecycle，仍没有 `network/` 目录；后续网络只能向 tick-boundary input queue 写入有界
 命令，不能直接修改 ECS/physics world。Recast 离线导航构建工具只有在内容管线
 需求成立后才建立独立 target。
 
@@ -94,6 +95,8 @@ server/
     account/
     personalworld/
     placement/
+    simulationcontrol/
+      process/
     visitsession/
     worldadmission/
     worldentry/
@@ -109,6 +112,7 @@ server/
       session/
       personalworld/
       placement/
+      simulationresult/
       visitsession/
       worldadmission/
       redis/
@@ -130,6 +134,20 @@ server/
 创建 concrete dependencies、初始化顺序、ready 状态和关闭流程。它是唯一允许了解全部 concrete types 的包。
 
 Lifecycle component 只用于真实持有资源或后台任务的对象；成功启动栈同时是唯一逆序关闭顺序源。所有长生命周期 goroutine 必须向受控 task group 登记，并由 root 或 component context 明确拥有。
+
+`simulation_node` component 在 storage 后、public runtime 前启动精确 C++ child，拥有
+process handle、pipe session、health task、node registry 与 result inbox。Production
+placement 使用其 `RuntimeController` adapter；unexpected child exit 是 root task failure。
+`internal/app` 的进程内 runtime fake 只允许位于 `_test.go`；可执行 graph 不提供
+`simulationControl` disabled fallback。
+
+### `internal/simulationcontrol`
+
+拥有 closed control value contracts、canonical JSON/frame codec、serialized session、
+SimulationNode/instance registry、capacity selector、`SimulationTarget` 与 result coordinator。
+`process/` 只负责 exact artifact 校验、child handle、继承 pipe 和低敏 stderr；它不拥有
+placement、MySQL、listener 或 respawn policy。`internal/storage/simulationresult` 借用共享
+MySQL pool，保存 immutable receipt 并在 owner transaction 中裁决已登记结果。
 
 ### `internal/config`、`secret`、`logging`、`observability` 与 `buildinfo`
 

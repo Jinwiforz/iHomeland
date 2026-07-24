@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "caseId": "instance-lifecycle-replay",
+  "category": "lifecycle",
+  "assignment": {
+    "personalWorldId": "pworld_fixture_1",
+    "worldInstanceId": "winst_fixture_1",
+    "runtimeNodeId": "rnode_fixture_1",
+    "generation": "7",
+    "fencingToken": "11",
+    "assignmentFingerprint": "f738a66f9e13bf4a180972aac6153abf151b414aa524491eb75bcd92ad3ae357"
+  },
+  "mappingGeneration": "7",
+  "seed": "7603613487413837767",
+  "configIdentity": "da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381",
+  "navigationIdentity": "3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd",
+  "physicsIdentity": "ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98",
+  "actorCapacity": 8,
+  "expectations": [
+    "exact-start-returns-one-simulation-instance",
+    "duplicate-start-replays-ready",
+    "start-replay-compares-all-immutable-fields",
+    "drain-precedes-revoke",
+    "stop-rejects-stale-stamp"
+  ]
+}

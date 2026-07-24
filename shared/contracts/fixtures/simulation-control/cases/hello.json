@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "caseId": "hello-compatible-node",
+  "category": "hello",
+  "frames": [
+    {
+      "schemaVersion": "simulation-control-v1",
+      "sessionNonce": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sequence": "1",
+      "requestId": "sctl_hello00000000001",
+      "kind": "node.hello.challenge",
+      "payload": {
+        "simulationNodeId": "snode_fixture_1",
+        "runtimeNodeId": "rnode_fixture_1",
+        "expectedBuildIdentity": "af433af8fe625d09d8a4d39fbe8e5e6524f006389ef3f921eb301bcc2038767d",
+        "expectedModelManifest": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+        "expectedProfileManifest": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+        "instanceCapacity": 4,
+        "actorCapacity": 8
+      }
+    },
+    {
+      "schemaVersion": "simulation-control-v1",
+      "sessionNonce": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sequence": "2",
+      "requestId": "sctl_hello00000000001",
+      "kind": "node.hello.receipt",
+      "payload": {
+        "simulationNodeId": "snode_fixture_1",
+        "runtimeNodeId": "rnode_fixture_1",
+        "buildIdentity": "af433af8fe625d09d8a4d39fbe8e5e6524f006389ef3f921eb301bcc2038767d",
+        "modelManifest": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+        "profileManifest": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+        "platformQualification": "implementation-qualified-windows-x64",
+        "instanceCapacity": 4,
+        "actorCapacity": 8
+      }
+    }
+  ]
+}

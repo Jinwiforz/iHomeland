@@ -191,11 +191,26 @@ func (service *Service) Sleep(ctx context.Context, expected AssignmentStamp) (Li
 	if err != nil {
 		return LifecycleResult{}, err
 	}
+	current, found, err := service.resolveCurrent(ctx, expected.WorldID(), now, OperationSleep, CommitPhaseNone)
+	if err != nil {
+		return LifecycleResult{}, err
+	}
+	if found && !current.Stamp().Equal(expected) {
+		return LifecycleResult{}, newError(ErrorKindConflict, OperationSleep, CommitPhaseNone, nil)
+	}
+	var drainErr error
+	if found {
+		drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), service.leaseTTL)
+		drainErr = service.runtime.Drain(drainCtx, expected)
+		cancelDrain()
+	}
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), service.leaseTTL)
+	defer cancelCleanup()
 	request, err := NewStampRequest(expected, now)
 	if err != nil {
 		return LifecycleResult{}, newError(ErrorKindDependencyUnavailable, OperationSleep, CommitPhaseNone, err)
 	}
-	predecessor, outcome, storeErr := service.store.Revoke(ctx, request)
+	predecessor, outcome, storeErr := service.store.Revoke(cleanupCtx, request)
 	if storeErr != nil {
 		return LifecycleResult{}, storeFailure(OperationSleep, outcome, storeErr)
 	}
@@ -208,13 +223,13 @@ func (service *Service) Sleep(ctx context.Context, expected AssignmentStamp) (Li
 	if !predecessor.Valid() || !predecessor.Stamp().Equal(expected) {
 		return LifecycleResult{}, newError(ErrorKindDependencyUnavailable, OperationSleep, CommitPhaseCommitted, errors.New("store returned malformed revoked predecessor"))
 	}
-	stopErr := service.runtime.Stop(ctx, expected)
-	result, resultErr := NewLifecycleResult(predecessor, true, stopErr != nil)
+	stopErr := service.runtime.Stop(cleanupCtx, expected)
+	result, resultErr := NewLifecycleResult(predecessor, true, drainErr != nil, stopErr != nil)
 	if resultErr != nil {
 		return LifecycleResult{}, newError(ErrorKindDependencyUnavailable, OperationSleep, CommitPhaseCommitted, resultErr)
 	}
-	if stopErr != nil {
-		return result, newError(ErrorKindCleanupFailed, OperationSleep, CommitPhaseCommitted, stopErr)
+	if drainErr != nil || stopErr != nil {
+		return result, newError(ErrorKindCleanupFailed, OperationSleep, CommitPhaseCommitted, errors.Join(drainErr, stopErr))
 	}
 	return result, nil
 }
@@ -233,6 +248,26 @@ func (service *Service) Replace(ctx context.Context, command ReplaceCommand) (As
 	if err != nil {
 		return AssignmentResult{}, err
 	}
+	current, found, err := service.resolveCurrent(ctx, command.Expected().WorldID(), now, OperationReplace, CommitPhaseNone)
+	if err != nil {
+		return AssignmentResult{}, err
+	}
+	var drainErr error
+	if found {
+		switch {
+		case current.Stamp().Equal(command.Expected()) && current.ValidAt(now):
+			drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), service.leaseTTL)
+			drainErr = service.runtime.Drain(drainCtx, command.Expected())
+			cancelDrain()
+		case validateReplacementSnapshot(current, command, now) == nil:
+			// Matching successor 表示不确定结果重试；不得向 successor 发送 predecessor drain。
+		default:
+			return AssignmentResult{}, newError(ErrorKindConflict, OperationReplace, CommitPhaseNone, nil)
+		}
+	}
+	operationCtx, cancelOperation := context.WithTimeout(context.WithoutCancel(ctx), service.leaseTTL)
+	defer cancelOperation()
+	ctx = operationCtx
 	candidate, err := service.newCandidate(command.Expected().WorldID(), command.SuccessorID(), command.TargetNodeID(), now)
 	if err != nil {
 		return AssignmentResult{}, newError(ErrorKindDependencyUnavailable, OperationReplace, CommitPhaseNone, err)
@@ -275,23 +310,24 @@ func (service *Service) Replace(ctx context.Context, command ReplaceCommand) (As
 		}
 	}
 	stopErr := service.runtime.Stop(ctx, command.Expected())
+	cleanupErr := errors.Join(drainErr, stopErr)
 	var result AssignmentResult
 	if successor.Phase() == PhaseActive {
-		result, err = assignmentResult(successor, disposition, stopErr != nil, OperationReplace, CommitPhaseCommitted)
+		result, err = assignmentResult(successor, disposition, cleanupErr != nil, OperationReplace, CommitPhaseCommitted)
 	} else {
 		result, err = service.startAndActivate(ctx, successor, disposition, OperationReplace)
-		if err == nil && stopErr != nil {
+		if err == nil && cleanupErr != nil {
 			result, err = assignmentResult(result.Assignment(), result.Disposition(), true, OperationReplace, CommitPhaseCommitted)
 		}
 	}
 	if err != nil {
-		if stopErr != nil {
-			return result, newError(ErrorKindRuntimeUnavailable, OperationReplace, CommitPhaseCommitted, errors.Join(err, stopErr))
+		if cleanupErr != nil {
+			return result, newError(ErrorKindRuntimeUnavailable, OperationReplace, CommitPhaseCommitted, errors.Join(err, cleanupErr))
 		}
 		return result, err
 	}
-	if stopErr != nil {
-		return result, newError(ErrorKindCleanupFailed, OperationReplace, CommitPhaseCommitted, stopErr)
+	if cleanupErr != nil {
+		return result, newError(ErrorKindCleanupFailed, OperationReplace, CommitPhaseCommitted, cleanupErr)
 	}
 	return result, nil
 }
