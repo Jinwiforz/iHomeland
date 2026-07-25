@@ -173,7 +173,7 @@ TLS/TCP gameplay 在 `ReliableEnvelope` stream 前使用版本化 `IHTP` authent
 
 B0.2 的 `message-inventory.json` 使用 `battle.input.bundle`、`battle.snapshot.full`、`battle.snapshot.delta`、`battle.probe`、`battle.entity.lifecycle`、`battle.ability.reliable-event`、`battle.resync.request` 和 `battle.resync.response` 等 logical kind 冻结 direction、raw/KCP lane、QoS、最大 logical payload、rate、expiry、Tick/sequence、idempotency、baseline 和 recovery。Logical kind 不占用 Message ID 范围，不创建 `ihomeland/battle/v1` schema，也不能进入现有 WSS/TLS-TCP registry。
 
-安全 battle transport change 必须为每个 logical kind 分配唯一 numeric message ID 和 generated payload，登记唯一 UDP/KCP route，并证明真实 encoded datagram 加 future secure session header、AEAD tag 与 lane header 后不超过 1200 bytes。拆分、合并、lane 变化或超出 profile budget 必须先更新 OpenSpec/profile；禁止临时编号、同一 command 跨 transport 双写、移除安全字段或依赖 IP 分片。
+安全 battle transport 必须为每个 logical kind 保持唯一 numeric message ID 和 generated payload，登记唯一 UDP/KCP route，并证明真实 encoded datagram 加 48-byte secure header、AEAD tag 与 lane header 后不超过 1200 bytes。拆分、合并、lane 变化或超出 profile budget 必须先更新 OpenSpec/profile；禁止临时编号、同一 command 跨 transport 双写、移除安全字段或依赖 IP 分片。
 
 ## World/Visit 公开投影与 credential 分层
 
@@ -238,3 +238,10 @@ CI 必须拒绝：
 6. 完成客户端与服务端切换后保留旧编号为 reserved。
 
 基础契约未冻结的业务区间不得预留占位消息；进入 `qualify-server-v1` 后的 world/visit artifacts 也不得无记录地改变。
+
+## Battle wire v1
+
+Battle message owner range 为 `3000-3199`，当前只登记 `3000-3007`。每个 message
+只有一个 UDP lane、direction、QoS、size/rate/expiry、baseline/recovery 与 binding
+policy。三端 generated code 由统一 proto 入口重建，canonical wire、malformed corpus
+和 simulation-control golden 必须通过 B0.5 唯一 verify 入口；旧 evidence 不得复用。

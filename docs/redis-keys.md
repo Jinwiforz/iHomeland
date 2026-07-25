@@ -326,6 +326,52 @@ closed，并由 current snapshot/reconciliation 路径提交匹配 cleanup，不
 | `issued_us` | canonical decimal `int64` | 签发时间(UTC Unix微秒) | 必须早于expiry |
 | `expires_us` | canonical decimal `int64` | 凭据到期时间(UTC Unix微秒) | 等于即失效 |
 
+`battleticket_issue`：
+
+- Pattern：`ih:<env>:battleticket:issue:<issueIdDigest>`
+- Owner：`internal/storage/battleticket`
+- Identity：`issueIdDigest` 是 application 派生 IssueID 的 SHA-256 前 128 bit lowercase hex；不保存原始 `Idempotency-Key`
+- TTL：ticket 业务 expiry 加有界 response-loss retention，使用绝对 `PEXPIREAT`
+- 大小：Hash 全部 field/value 累计最多 8192 bytes，由 owner Lua 在创建与读取时强制校验
+- 写入/读取：issue Lua 原子创建首次 record；相同 IssueID 必须全部字段相同才返回 replay，任一漂移返回 conflict
+- 恢复：仅重读 Redis 自身仍保留的合法 Hash；flush、key miss 或 TTL 到期后不从 memory、MySQL、日志或 C++ child 补回旧资格
+- 清理：physical TTL 到期自然删除；该 TTL 不延长 ticket 业务 expiry
+- 故障：unknown version、字段缺失/多余、缺 TTL、oversized、非法 role/target/slot/identity/time 或 fingerprint 不匹配全部 fail closed
+- 指标：固定 `battleticket` adapter、`issue|resolve` operation 与低基数 outcome；key、IssueID、TicketID、digest、binding 与 Redis error 不进入 label
+
+| Field | 类型/编码 | 中文短注释 | 规则 |
+|---|---|---|---|
+| `v` | canonical decimal `uint16` | Schema版本号 | 必填，固定为`1` |
+| `fingerprint` | lowercase hex | 完整ticket绑定摘要 | 必填，SHA-256；由Go重新计算并与hydrated binding交叉检查 |
+| `secret_digest` | lowercase hex | TicketSecret摘要 | 必填，SHA-256；不保存raw secret |
+| `proof_digest` | lowercase hex | ProofKey摘要 | 必填，SHA-256；不保存raw proof key |
+| `ticket_id` | versioned base64url string | UDP查询handle | 必填，`btk1_`；非secret但默认日志不输出 |
+| `player` | string | 权威玩家ID | 必填，来自HTTPS AuthContext |
+| `session` | string | 认证会话ID | 必填，绑定session lineage |
+| `epoch` | canonical decimal `uint64` | 会话世代 | 必填，正整数 |
+| `role` | enum string | Battle角色 | `owner`或`visitor` |
+| `world` | string | 个人世界ID | 必填，必须等于assignment world |
+| `visit` | string/`none` | 访客会话ID | Owner为`none`；Visitor必填 |
+| `assignment_instance` | string | Placement实例ID | 完整AssignmentStamp字段 |
+| `assignment_node` | string | Placement运行节点ID | 必须等于`runtime_node` |
+| `assignment_generation` | canonical decimal `uint64` | Placement分配世代 | 正整数 |
+| `assignment_fence` | canonical decimal `uint64` | Placement隔离令牌 | 正整数，默认日志禁止输出 |
+| `assignment_fingerprint` | lowercase hex | SimulationTarget绑定的Assignment摘要 | 必填，SHA-256 |
+| `runtime_node` | string | Go运行节点ID | 必填，合法`rnode_` identity |
+| `simulation_node` | string | C++ child代际ID | 必填，合法`snode_` identity |
+| `simulation_instance` | string | C++ worker timeline ID | 必填，合法`sinst_` identity |
+| `mapping_generation` | canonical decimal `uint64` | InputTick映射代际 | 正整数 |
+| `target_revision` | canonical decimal `uint64` | SimulationTarget版本 | 正整数，replacement后变化 |
+| `model_identity` | lowercase hex | Battle model manifest摘要 | 必填，SHA-256 |
+| `profile_identity` | lowercase hex | Network profile manifest摘要 | 必填，SHA-256 |
+| `config_identity` | lowercase hex | Runtime config摘要 | 必填，SHA-256 |
+| `wire_identity` | lowercase hex | Battle wire corpus摘要 | 必填，SHA-256 |
+| `actor_slot` | canonical decimal `uint8` | C++ actor槽位 | 必填，`0..7` |
+| `host` | lowercase DNS/IP | 受信advertised UDP host | 必填，不含scheme/path/通配推导 |
+| `port` | canonical decimal `uint16` | 受信advertised UDP port | 必填，`1..65535` |
+| `issued_us` | canonical decimal `int64` | 签发时间(UTC Unix微秒) | 必须早于`expires_us` |
+| `expires_us` | canonical decimal `int64` | Ticket业务到期时间(UTC Unix微秒) | 等于即失效 |
+
 `placement_transition`：
 
 - Pattern：`ih:<env>:placement:transition:<transitionDigest>`

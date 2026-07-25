@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "simulation-control-v1",
+  "caseId": "battle-listener-ticket-session-control",
+  "category": "battle-control",
+  "listenerStatus": {
+    "states": [
+      "starting",
+      "ready",
+      "failed",
+      "stopped"
+    ],
+    "identityFields": [
+      "simulationNodeId",
+      "listenerGeneration",
+      "bindHost",
+      "bindPort",
+      "advertisedHost",
+      "advertisedPort",
+      "wireIdentity",
+      "cryptoIdentity"
+    ]
+  },
+  "ticketLifecycle": {
+    "states": [
+      "installed",
+      "consumed",
+      "revoked",
+      "expired",
+      "missing"
+    ],
+    "installRequiredFields": [
+      "installRequestId",
+      "ticketId",
+      "bindingFingerprint",
+      "binding",
+      "proofKey"
+    ],
+    "proofKeyRule": "runtime-only-secret-redacted-in-fixtures-logs-reports-and-storage",
+    "replayRule": "same-request-and-binding-replays-original-state-and-slot",
+    "conflictRule": "same-request-or-ticket-with-field-drift-is-rejected"
+  },
+  "sessionLifecycle": {
+    "requestKind": "battle.session.revoke",
+    "receiptKind": "battle.session.closed",
+    "identityFields": [
+      "revokeRequestId",
+      "battleSessionId",
+      "sessionGeneration",
+      "simulationInstanceId",
+      "assignmentFingerprint"
+    ],
+    "closedRequiredFields": [
+      "closeReason",
+      "packetDispatchStopped"
+    ]
+  },
+  "expectations": [
+    "frame-size-at-most-65536",
+    "nonce-and-sequence-validated-before-dispatch",
+    "all-payloads-closed",
+    "request-replay-compares-all-immutable-fields",
+    "proof-key-only-on-ticket-install",
+    "secret-never-in-fixture-log-report-or-storage"
+  ]
+}

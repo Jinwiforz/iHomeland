@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,6 +47,18 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	// StderrLineLimit 是单条低敏诊断最大 bytes。
 	StderrLineLimit int
+	// BattleUDPEnabled 要求 child 在 hello receipt 前绑定唯一 production listener。
+	BattleUDPEnabled bool
+	// BattleUDPBindHost 是显式数字 bind IP。
+	BattleUDPBindHost string
+	// BattleUDPBindPort 是禁止自动递增的实际端口。
+	BattleUDPBindPort uint16
+	// BattleUDPAdvertisedHost 是 ticket 使用的受信地址。
+	BattleUDPAdvertisedHost string
+	// BattleUDPAdvertisedPort 是 ticket 使用的受信端口。
+	BattleUDPAdvertisedPort uint16
+	// BattleListenerIdentity 是不可复活 node 的 128-bit lowercase hex identity。
+	BattleListenerIdentity string
 }
 
 // Validate 拒绝相对路径、缺失 digest 和 silent deadline defaults。
@@ -56,6 +70,13 @@ func (config Config) Validate() error {
 		config.RequestTimeout <= 0 || config.ShutdownTimeout <= 0 ||
 		config.StderrLineLimit < 64 || config.StderrLineLimit > 4096 {
 		return errors.New("simulation process config is invalid")
+	}
+	if config.BattleUDPEnabled &&
+		(net.ParseIP(config.BattleUDPBindHost) == nil ||
+			net.ParseIP(config.BattleUDPAdvertisedHost) == nil ||
+			config.BattleUDPBindPort == 0 || config.BattleUDPAdvertisedPort == 0 ||
+			len(config.BattleListenerIdentity) != 32) {
+		return errors.New("simulation battle UDP process config is invalid")
 	}
 	return nil
 }
@@ -78,7 +99,7 @@ type Owner struct {
 	shutdownTimeout time.Duration
 }
 
-// Start 校验 binary/receipt digest 后创建无 listener 的继承 stdio child。
+// Start 校验 binary/receipt digest 后创建继承 stdio child，并显式传入唯一 UDP listener 配置。
 func Start(config Config, nonce simulationcontrol.Digest, proposals simulationcontrol.ProposalHandler, diagnostics DiagnosticSink) (*Owner, error) {
 	if config.Validate() != nil || !nonce.Valid() || proposals == nil || diagnostics == nil {
 		return nil, errors.New("simulation process start input is invalid")
@@ -89,7 +110,17 @@ func Start(config Config, nonce simulationcontrol.Digest, proposals simulationco
 	if err := verifyFile(config.QualificationReceiptPath, config.QualificationReceiptSHA256); err != nil {
 		return nil, fmt.Errorf("simulation qualification verification failed: %w", err)
 	}
-	command := exec.Command(config.BinaryPath, "--control-stdio")
+	arguments := []string{"--control-stdio"}
+	if config.BattleUDPEnabled {
+		arguments = append(arguments,
+			"--battle-udp-bind-host", config.BattleUDPBindHost,
+			"--battle-udp-bind-port", strconv.FormatUint(uint64(config.BattleUDPBindPort), 10),
+			"--battle-udp-advertised-host", config.BattleUDPAdvertisedHost,
+			"--battle-udp-advertised-port", strconv.FormatUint(uint64(config.BattleUDPAdvertisedPort), 10),
+			"--battle-listener-identity", config.BattleListenerIdentity,
+		)
+	}
+	command := exec.Command(config.BinaryPath, arguments...)
 	command.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: createNewProcessGroup,

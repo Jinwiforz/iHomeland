@@ -5,6 +5,10 @@
 
 #include <nlohmann/json.hpp>
 
+#define NOMINMAX
+#include <windows.h>
+
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -70,6 +74,88 @@ void RequireFields(
     return result;
 }
 
+/// ReadActorSlot 读取 0..7 的规范 actor slot。
+[[nodiscard]] std::uint8_t ReadActorSlot(
+    const Json& value,
+    const char* context) {
+    const auto slot = ReadDecimal(value, context);
+    if (slot > 7) {
+        throw std::invalid_argument(
+            std::string(context) + " exceeds qualified capacity");
+    }
+    return static_cast<std::uint8_t>(slot);
+}
+
+/// ReadProofKey 解码固定 32-byte lowercase hex secret。
+[[nodiscard]] std::array<std::uint8_t, 32> ReadProofKey(
+    const Json& value) {
+    if (!value.is_string()) {
+        throw std::invalid_argument("ticket proof key must be string");
+    }
+    const auto& encoded = value.get_ref<const std::string&>();
+    if (encoded.size() != 64) {
+        throw std::invalid_argument("ticket proof key size is invalid");
+    }
+    std::array<std::uint8_t, 32> result{};
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        const auto high = encoded[index * 2];
+        const auto low = encoded[index * 2 + 1];
+        const auto nibble = [](const char value) -> std::uint8_t {
+            if (value >= '0' && value <= '9') {
+                return static_cast<std::uint8_t>(value - '0');
+            }
+            if (value >= 'a' && value <= 'f') {
+                return static_cast<std::uint8_t>(value - 'a' + 10);
+            }
+            throw std::invalid_argument(
+                "ticket proof key is not lowercase hex");
+        };
+        result[index] = static_cast<std::uint8_t>(
+            (nibble(high) << 4U) | nibble(low));
+    }
+    return result;
+}
+
+/// ObservedUnixMilliseconds 返回 ticket expiry 使用的 UTC 毫秒快照。
+[[nodiscard]] std::uint64_t ObservedUnixMilliseconds() {
+    const auto value = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::system_clock::now()
+                               .time_since_epoch())
+                           .count();
+    if (value <= 0) {
+        throw std::runtime_error("system clock is invalid");
+    }
+    return static_cast<std::uint64_t>(value);
+}
+
+/// TicketStateName 返回 control schema 固定的小写 lifecycle。
+[[nodiscard]] const char* TicketStateName(
+    const BattleTicketState state) {
+    switch (state) {
+        case BattleTicketState::Installed:
+            return "installed";
+        case BattleTicketState::Consumed:
+            return "consumed";
+        case BattleTicketState::Revoked:
+            return "revoked";
+        case BattleTicketState::Expired:
+            return "expired";
+    }
+    throw std::runtime_error("battle ticket state is invalid");
+}
+
+/// TicketReceiptPayload 生成 install/status 共用的 closed receipt。
+[[nodiscard]] Json TicketReceiptPayload(
+    const BattleTicketReceipt& receipt) {
+    return Json{
+        {"actorSlot", std::to_string(receipt.actor_slot)},
+        {"bindingFingerprint", receipt.binding_fingerprint},
+        {"simulationInstanceId", receipt.simulation_instance_id},
+        {"state", TicketStateName(receipt.state)},
+        {"ticketId", receipt.ticket_id},
+    };
+}
+
 /// StatusPayload 生成 instance status receipt 的 canonical payload。
 [[nodiscard]] std::string StatusPayload(const InstanceStatusReceipt& status) {
     return Json{
@@ -118,7 +204,8 @@ int RunControlStdio(
     std::istream& input,
     std::ostream& output,
     std::ostream& diagnostics,
-    const ControlBuildBinding& build) {
+    const ControlBuildBinding& build,
+    const BattleUdpListenerConfig* battle_listener) {
     try {
         ControlFrame hello_frame;
         if (!ControlFrameCodec::Read(input, hello_frame)) {
@@ -162,6 +249,15 @@ int RunControlStdio(
                 hello.at("instanceCapacity").get<std::size_t>(),
             .actor_capacity = hello.at("actorCapacity").get<std::size_t>(),
         });
+        if (battle_listener != nullptr) {
+            node->StartBattleUdpListener(
+                *battle_listener,
+                [](const std::span<const std::uint8_t>,
+                   const BattleRemoteEndpoint&) {
+                    // 完整 fixed-header 验证后由后续 authenticated session owner 消费；
+                    // bootstrap listener 不保存 payload 或 remote identity。
+                });
+        }
         const auto hello_receipt = Json{
             {"actorCapacity", node->Config().actor_capacity},
             {"buildIdentity", build.build_identity},
@@ -182,7 +278,7 @@ int RunControlStdio(
         ControlFrame frame;
         while (ControlFrameCodec::Read(input, frame)) {
             sequence.AcceptInbound(frame);
-            const auto payload = ParseObject(frame.payload_json);
+            auto payload = ParseObject(frame.payload_json);
             if (frame.kind == "node.health.query") {
                 RequireFields(payload, {"simulationNodeId"}, "health query");
                 if (payload.at("simulationNodeId").get<std::string>() !=
@@ -349,6 +445,285 @@ int RunControlStdio(
                             "instance.stopped",
                             receipt));
                 }
+            } else if (frame.kind == "battle.ticket.install") {
+                RequireFields(
+                    payload,
+                    {
+                        "binding",
+                        "bindingFingerprint",
+                        "installRequestId",
+                        "proofKey",
+                        "ticketId",
+                    },
+                    "battle ticket install");
+                const auto& binding = payload.at("binding");
+                RequireFields(
+                    binding,
+                    {
+                        "actorSlot",
+                        "advertisedHost",
+                        "advertisedPort",
+                        "assignmentFingerprint",
+                        "assignmentGeneration",
+                        "configIdentity",
+                        "expiresAtUnixMs",
+                        "fencingToken",
+                        "issueId",
+                        "issuedAtUnixMs",
+                        "mappingGeneration",
+                        "modelIdentity",
+                        "personalWorldId",
+                        "playerId",
+                        "profileIdentity",
+                        "role",
+                        "runtimeNodeId",
+                        "sessionEpoch",
+                        "sessionId",
+                        "simulationInstanceId",
+                        "simulationNodeId",
+                        "targetRevision",
+                        "visitSessionId",
+                        "wireIdentity",
+                        "worldInstanceId",
+                    },
+                    "battle ticket binding");
+                const auto install_request_id =
+                    payload.at("installRequestId").get<std::string>();
+                if (install_request_id != frame.request_id) {
+                    throw std::runtime_error(
+                        "ticket install request identity mismatch");
+                }
+                auto proof_key = ReadProofKey(payload.at("proofKey"));
+                auto& proof_text =
+                    payload.at("proofKey")
+                        .get_ref<std::string&>();
+                SecureZeroMemory(
+                    proof_text.data(),
+                    proof_text.size());
+                proof_text.clear();
+                SecureZeroMemory(
+                    frame.payload_json.data(),
+                    frame.payload_json.size());
+                frame.payload_json.clear();
+                auto command = BattleTicketInstallCommand{
+                    .install_request_id = install_request_id,
+                    .ticket_id =
+                        payload.at("ticketId").get<std::string>(),
+                    .binding_fingerprint =
+                        payload.at("bindingFingerprint")
+                            .get<std::string>(),
+                    .binding =
+                        BattleTicketBinding{
+                            .player_id =
+                                binding.at("playerId")
+                                    .get<std::string>(),
+                            .session_id =
+                                binding.at("sessionId")
+                                    .get<std::string>(),
+                            .session_epoch =
+                                ReadDecimal(
+                                    binding.at("sessionEpoch"),
+                                    "ticket session epoch"),
+                            .role =
+                                binding.at("role")
+                                    .get<std::string>(),
+                            .personal_world_id =
+                                binding.at("personalWorldId")
+                                    .get<std::string>(),
+                            .visit_session_id =
+                                binding.at("visitSessionId")
+                                    .get<std::string>(),
+                            .world_instance_id =
+                                binding.at("worldInstanceId")
+                                    .get<std::string>(),
+                            .runtime_node_id =
+                                binding.at("runtimeNodeId")
+                                    .get<std::string>(),
+                            .assignment_generation =
+                                ReadDecimal(
+                                    binding.at(
+                                        "assignmentGeneration"),
+                                    "ticket assignment generation"),
+                            .fencing_token =
+                                ReadDecimal(
+                                    binding.at("fencingToken"),
+                                    "ticket fencing token"),
+                            .assignment_fingerprint =
+                                binding.at(
+                                    "assignmentFingerprint")
+                                    .get<std::string>(),
+                            .simulation_node_id =
+                                binding.at("simulationNodeId")
+                                    .get<std::string>(),
+                            .simulation_instance_id =
+                                binding.at(
+                                    "simulationInstanceId")
+                                    .get<std::string>(),
+                            .mapping_generation =
+                                ReadDecimal(
+                                    binding.at(
+                                        "mappingGeneration"),
+                                    "ticket mapping generation"),
+                            .target_revision =
+                                ReadDecimal(
+                                    binding.at("targetRevision"),
+                                    "ticket target revision"),
+                            .model_identity =
+                                binding.at("modelIdentity")
+                                    .get<std::string>(),
+                            .profile_identity =
+                                binding.at("profileIdentity")
+                                    .get<std::string>(),
+                            .config_identity =
+                                binding.at("configIdentity")
+                                    .get<std::string>(),
+                            .wire_identity =
+                                binding.at("wireIdentity")
+                                    .get<std::string>(),
+                            .actor_slot =
+                                ReadActorSlot(
+                                    binding.at("actorSlot"),
+                                    "ticket actor slot"),
+                            .advertised_host =
+                                binding.at("advertisedHost")
+                                    .get<std::string>(),
+                            .advertised_port =
+                                static_cast<std::uint16_t>(
+                                    ReadDecimal(
+                                        binding.at(
+                                            "advertisedPort"),
+                                        "ticket advertised port")),
+                            .issue_id =
+                                binding.at("issueId")
+                                    .get<std::string>(),
+                            .issued_at_unix_ms =
+                                ReadDecimal(
+                                    binding.at(
+                                        "issuedAtUnixMs"),
+                                    "ticket issued time"),
+                            .expires_at_unix_ms =
+                                ReadDecimal(
+                                    binding.at(
+                                        "expiresAtUnixMs"),
+                                    "ticket expiry time"),
+                        },
+                    .proof_key = proof_key,
+                };
+                SecureZeroMemory(
+                    proof_key.data(),
+                    proof_key.size());
+                BattleTicketReceipt installed;
+                try {
+                    installed = node->InstallBattleTicket(
+                        command,
+                        ObservedUnixMilliseconds());
+                } catch (...) {
+                    SecureZeroMemory(
+                        command.proof_key.data(),
+                        command.proof_key.size());
+                    throw;
+                }
+                SecureZeroMemory(
+                    command.proof_key.data(),
+                    command.proof_key.size());
+                auto receipt = TicketReceiptPayload(installed);
+                receipt["installRequestId"] = install_request_id;
+                ControlFrameCodec::Write(
+                    output,
+                    sequence.MakeOutbound(
+                        frame.request_id,
+                        "battle.ticket.installed",
+                        receipt.dump()));
+            } else if (
+                frame.kind == "battle.ticket.status.query") {
+                RequireFields(
+                    payload,
+                    {
+                        "bindingFingerprint",
+                        "simulationInstanceId",
+                        "ticketId",
+                    },
+                    "battle ticket status query");
+                const auto ticket_id =
+                    payload.at("ticketId").get<std::string>();
+                const auto binding_fingerprint =
+                    payload.at("bindingFingerprint")
+                        .get<std::string>();
+                const auto simulation_instance_id =
+                    payload.at("simulationInstanceId")
+                        .get<std::string>();
+                Json receipt;
+                try {
+                    const auto status =
+                        node->BattleTicketStatus(
+                            ticket_id,
+                            binding_fingerprint,
+                            ObservedUnixMilliseconds());
+                    if (status.simulation_instance_id !=
+                        simulation_instance_id) {
+                        throw std::runtime_error(
+                            "ticket status instance is stale");
+                    }
+                    receipt = TicketReceiptPayload(status);
+                } catch (const std::runtime_error&) {
+                    receipt = Json{
+                        {"bindingFingerprint",
+                         binding_fingerprint},
+                        {"simulationInstanceId",
+                         simulation_instance_id},
+                        {"state", "missing"},
+                        {"ticketId", ticket_id},
+                    };
+                }
+                ControlFrameCodec::Write(
+                    output,
+                    sequence.MakeOutbound(
+                        frame.request_id,
+                        "battle.ticket.status.receipt",
+                        receipt.dump()));
+            } else if (frame.kind == "battle.ticket.revoke") {
+                RequireFields(
+                    payload,
+                    {
+                        "actorSlot",
+                        "bindingFingerprint",
+                        "revokeRequestId",
+                        "simulationInstanceId",
+                        "ticketId",
+                    },
+                    "battle ticket revoke");
+                const auto revoke_request_id =
+                    payload.at("revokeRequestId")
+                        .get<std::string>();
+                if (revoke_request_id != frame.request_id) {
+                    throw std::runtime_error(
+                        "ticket revoke request identity mismatch");
+                }
+                const auto revoked = node->RevokeBattleTicket(
+                    revoke_request_id,
+                    payload.at("ticketId").get<std::string>(),
+                    payload.at("bindingFingerprint")
+                        .get<std::string>(),
+                    payload.at("simulationInstanceId")
+                        .get<std::string>(),
+                    ReadActorSlot(
+                        payload.at("actorSlot"),
+                        "ticket revoke actor slot"));
+                const auto receipt = Json{
+                    {"bindingFingerprint",
+                     revoked.binding_fingerprint},
+                    {"revokeRequestId", revoke_request_id},
+                    {"simulationInstanceId",
+                     revoked.simulation_instance_id},
+                    {"state", "revoked"},
+                    {"ticketId", revoked.ticket_id},
+                }.dump();
+                ControlFrameCodec::Write(
+                    output,
+                    sequence.MakeOutbound(
+                        frame.request_id,
+                        "battle.ticket.revoked",
+                        receipt));
             } else if (frame.kind == "result.ack") {
                 RequireFields(
                     payload,

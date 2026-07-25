@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ihomeland/sim/transport/udp_listener.hpp"
+
 #include <iosfwd>
 #include <string>
 
@@ -24,6 +26,7 @@ struct ControlBuildBinding final {
     std::istream& input,
     std::ostream& output,
     std::ostream& diagnostics,
-    const ControlBuildBinding& build);
+    const ControlBuildBinding& build,
+    const BattleUdpListenerConfig* battle_listener = nullptr);
 
 }  // namespace ihomeland::sim

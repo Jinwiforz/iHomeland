@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jinwiforz/ihomeland/server/internal/account"
+	"github.com/jinwiforz/ihomeland/server/internal/battleentry"
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 	"github.com/jinwiforz/ihomeland/server/internal/worldentry"
 )
@@ -81,6 +82,57 @@ type worldAdmissionRequest struct {
 	Kind string `json:"kind"`
 	// VisitSessionID 只在VISIT_WORLD时标识待解析的权威membership。
 	VisitSessionID string `json:"visitSessionId,omitempty"`
+}
+
+// battleTicketRequest 是 issueBattleTicket 唯一允许的 closed JSON object。
+// Actor、role、endpoint、assignment、node、instance 与 capacity 均必须由 application owner 派生。
+type battleTicketRequest struct {
+	// Kind 选择 OWN_WORLD 或 VISIT_WORLD 权威 target 解析路径。
+	Kind string `json:"kind"`
+	// VisitSessionID 只在 VISIT_WORLD 时标识待解析的权威 membership。
+	VisitSessionID string `json:"visitSessionId,omitempty"`
+}
+
+// battleEndpointResponse 是 BattleTicket 唯一允许发布的 UDP endpoint 投影。
+type battleEndpointResponse struct {
+	// Transport 固定为 UDP，禁止与 WSS/TLS-TCP ticket 互换。
+	Transport string `json:"transport"`
+	// Host 来自 trusted BattleEndpointProvider。
+	Host string `json:"host"`
+	// Port 来自 trusted BattleEndpointProvider。
+	Port uint16 `json:"port"`
+}
+
+// battleWireSuiteResponse 是冻结 wire 与 crypto algorithm projection。
+type battleWireSuiteResponse struct {
+	// WireVersion 是 binary envelope 代际。
+	WireVersion uint8 `json:"wireVersion"`
+	// KeyAgreement 固定 X25519。
+	KeyAgreement string `json:"keyAgreement"`
+	// KDF 固定 HKDF-SHA-256。
+	KDF string `json:"kdf"`
+	// AEAD 固定 ChaCha20-Poly1305。
+	AEAD string `json:"aead"`
+}
+
+// battleTicketResponse 是 OpenAPI BattleTicketResponse 的集中 versioned codec。
+type battleTicketResponse struct {
+	// TicketID 是 UDP ClientHello 可发送的非秘密 lookup identity。
+	TicketID string `json:"ticketId"`
+	// TicketSecret 是只经本次 HTTPS response 交付的 bearer。
+	TicketSecret string `json:"ticketSecret"`
+	// Endpoint 是 trusted advertised UDP target。
+	Endpoint battleEndpointResponse `json:"endpoint"`
+	// WireSuite 是客户端必须精确支持的算法集合。
+	WireSuite battleWireSuiteResponse `json:"wireSuite"`
+	// Role 只来自权威 world/visit policy。
+	Role string `json:"role"`
+	// TargetKind 是 closed request selector 的规范枚举。
+	TargetKind string `json:"targetKind"`
+	// TargetRevision 是签发时冻结的 current SimulationTarget revision。
+	TargetRevision uint64 `json:"targetRevision"`
+	// ExpiresAtMS 是等于即失效的 Unix milliseconds。
+	ExpiresAtMS int64 `json:"expiresAtMs"`
 }
 
 // decodeJSON 强制media type、上限、closed object、单值JSON与重复key拒绝。
@@ -311,6 +363,21 @@ func reservationProjection(result worldentry.ReservationResult) map[string]any {
 // admissionProjection 省略binding、assignment、session lineage与幂等identity。
 func admissionProjection(result worldentry.AdmissionResult) map[string]any {
 	return map[string]any{"credential": result.Credential.Value(), "endpoint": endpointProjection(result.Endpoint), "role": strings.ToUpper(result.Role.String()), "purpose": strings.ToUpper(result.Purpose.String()), "visitRevision": uint64(result.VisitRevision), "expiresAtMs": unixMilliseconds(result.ExpiresAt)}
+}
+
+// battleTicketProjection 只读取 application 明确允许公开的 credential 与低敏 binding。
+func battleTicketProjection(result battleentry.Result) battleTicketResponse {
+	suite := result.WireSuite
+	return battleTicketResponse{
+		TicketID: result.TicketID.Value(), TicketSecret: result.TicketSecret.Value(),
+		Endpoint: battleEndpointResponse{Transport: "UDP", Host: result.Endpoint.Host(), Port: result.Endpoint.Port()},
+		WireSuite: battleWireSuiteResponse{
+			WireVersion: suite.WireVersion, KeyAgreement: suite.KeyAgreement,
+			KDF: suite.KDF, AEAD: suite.AEAD,
+		},
+		Role: strings.ToUpper(result.Role.String()), TargetKind: result.TargetKind.String(),
+		TargetRevision: result.TargetRevision, ExpiresAtMS: unixMilliseconds(result.ExpiresAt),
+	}
 }
 
 // unixMilliseconds 按协议要求确定性向下转换UTC微秒时间。

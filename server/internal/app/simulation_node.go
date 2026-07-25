@@ -2,8 +2,12 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -63,7 +67,7 @@ type simulationNodeComponent struct {
 }
 
 // newSimulationNodeComponent 解析配置并生成不可复活 node identities，不启动进程。
-func newSimulationNodeComponent(settings config.SimulationControl, mysql *storagemysql.Component, tasks *TaskOwner, clock Clock, ids IDGenerator, metrics simulationNodeObserver, logger *slog.Logger) (*simulationNodeComponent, error) {
+func newSimulationNodeComponent(settings config.SimulationControl, battle config.BattleUDPPolicy, mysql *storagemysql.Component, tasks *TaskOwner, clock Clock, ids IDGenerator, metrics simulationNodeObserver, logger *slog.Logger) (*simulationNodeComponent, error) {
 	if !settings.Enabled || mysql == nil || tasks == nil || clock == nil ||
 		ids == nil || metrics == nil || logger == nil {
 		return nil, errors.New("simulation node component dependencies are invalid")
@@ -119,6 +123,15 @@ func newSimulationNodeComponent(settings config.SimulationControl, mysql *storag
 	if err != nil {
 		return nil, err
 	}
+	bindHost, bindPortText, err := net.SplitHostPort(battle.BindAddress)
+	if err != nil {
+		return nil, err
+	}
+	bindPort, err := strconv.ParseUint(bindPortText, 10, 16)
+	if err != nil || bindPort == 0 || battle.Advertised.Port <= 0 || battle.Advertised.Port > 65535 {
+		return nil, errors.New("battle UDP production endpoint is invalid")
+	}
+	listenerDigest := sha256.Sum256([]byte("ihomeland/battle-listener/v1|" + nodeID.String() + "|" + battle.WireIdentity))
 	return &simulationNodeComponent{
 		settings: settings,
 		mysql:    mysql,
@@ -153,6 +166,12 @@ func newSimulationNodeComponent(settings config.SimulationControl, mysql *storag
 			RequestTimeout:             settings.RequestTimeout,
 			ShutdownTimeout:            settings.ShutdownTimeout,
 			StderrLineLimit:            settings.StderrLineBytes,
+			BattleUDPEnabled:           true,
+			BattleUDPBindHost:          bindHost,
+			BattleUDPBindPort:          uint16(bindPort),
+			BattleUDPAdvertisedHost:    battle.Advertised.Host,
+			BattleUDPAdvertisedPort:    uint16(battle.Advertised.Port),
+			BattleListenerIdentity:     hex.EncodeToString(listenerDigest[:16]),
 		},
 		inbox: simulationcontrol.NewProposalInbox(),
 	}, nil
@@ -312,6 +331,23 @@ func (component *simulationNodeComponent) TargetResolver() *simulationcontrol.Ta
 		return nil
 	}
 	return component.targets
+}
+
+// ControlSession 返回 exact child 的私有 control session；未 ready 时返回 nil。
+func (component *simulationNodeComponent) ControlSession() *simulationcontrol.Session {
+	if component == nil || component.owner == nil {
+		return nil
+	}
+	return component.owner.Session()
+}
+
+// SimulationNodeID 返回本次不可复活 child identity。
+func (component *simulationNodeComponent) SimulationNodeID() simulationcontrol.SimulationNodeID {
+	if component == nil {
+		var empty simulationcontrol.SimulationNodeID
+		return empty
+	}
+	return component.controllerConfig.NodeID
 }
 
 // Stop 先取消监督任务，再 drain/result/stop instances，最后 shutdown child。

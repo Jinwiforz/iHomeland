@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/account/v1"
+	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/battle/v1"
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/common/v1"
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/control/v1"
 	_ "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/session/v1"
@@ -26,6 +27,10 @@ import (
 // maximumFrameSize 使 registry 的单消息上限不可能绕过 TLS/TCP codec 的 1 MiB 硬边界。
 // 两处保持同值是跨层防御：契约验证阻止错误配置，frame codec 阻止不可信网络输入。
 const maximumFrameSize = 1 << 20
+
+// maximumBattleDatagramSize 固定安全 battle transport 的非分片 UDP 上限。
+// MaxPayloadSize 还必须为 secure header、lane header 与 AEAD tag 留出精确预算。
+const maximumBattleDatagramSize uint32 = 1200
 
 // registrySchemaVersion 是当前 validator 唯一理解的 registry 结构代际，未知版本不得猜测解析。
 const registrySchemaVersion uint32 = 1
@@ -54,6 +59,9 @@ const safeASCIIIdentityPattern = `^[A-Za-z0-9._:-]+$`
 
 // safeOpaqueCredentialPattern 限制 opaque credential 使用无需二次编码的安全 ASCII token 字符。
 const safeOpaqueCredentialPattern = `^[A-Za-z0-9._~-]+$`
+
+// safeBase64URLPattern 限制 BattleTicket secret 使用无 padding 的 URL-safe alphabet。
+const safeBase64URLPattern = `^[A-Za-z0-9_-]+$`
 
 // Validate 联合检查 registry 唯一性、descriptor 引用、路由策略、身份边界与 OpenAPI 语义。
 //
@@ -135,6 +143,15 @@ var worldVisitErrorProfiles = map[uint32]ErrorEntry{
 	2109: {Code: 2109, Name: "VISIT_RECONNECT_EXPIRED", Owner: "visit", Category: "CONFLICT", MessageKey: "error.visit.reconnect_expired", Retryable: false, HTTPStatus: 410},
 }
 
+// battleErrorProfiles 固定 BattleTicket 公开 admission 的稳定恢复语义。
+// Wire/crypto/session close reason 属于私有 transport corpus，不扩张为可枚举的 HTTP 错误。
+var battleErrorProfiles = map[uint32]ErrorEntry{
+	3000: {Code: 3000, Name: "BATTLE_TARGET_NOT_READY", Owner: "battle", Category: "DEPENDENCY", MessageKey: "error.battle.target_not_ready", Retryable: true, HTTPStatus: 503},
+	3001: {Code: 3001, Name: "BATTLE_CAPACITY_EXCEEDED", Owner: "battle", Category: "CONFLICT", MessageKey: "error.battle.capacity_exceeded", Retryable: false, HTTPStatus: 409},
+	3002: {Code: 3002, Name: "BATTLE_TARGET_STALE", Owner: "battle", Category: "CONFLICT", MessageKey: "error.battle.target_stale", Retryable: false, HTTPStatus: 409},
+	3003: {Code: 3003, Name: "BATTLE_IDEMPOTENCY_CONFLICT", Owner: "battle", Category: "CONFLICT", MessageKey: "error.battle.idempotency_conflict", Retryable: false, HTTPStatus: 409},
+}
+
 // tlsGameplayErrorRegistry 按错误码升序构造TLS/TCP运行时允许公开的冻结错误投影。
 // 固定code缺少profile属于不可恢复的编程错误，因此构造阶段立即panic，禁止服务带着不完整目录启动。
 func tlsGameplayErrorRegistry() ErrorRegistry {
@@ -172,6 +189,25 @@ func validateWorldVisitErrors(entries []ErrorEntry) error {
 	}
 	if len(seen) != len(worldVisitErrorProfiles) {
 		return errors.New("world/visit error registry is incomplete")
+	}
+	return nil
+}
+
+// validateBattleErrors 要求 BattleTicket 的 capacity、target 与幂等结果保持完整稳定。
+func validateBattleErrors(entries []ErrorEntry) error {
+	seen := make(map[uint32]struct{}, len(battleErrorProfiles))
+	for _, entry := range entries {
+		if entry.Owner != "battle" {
+			continue
+		}
+		expected, ok := battleErrorProfiles[entry.Code]
+		if !ok || entry != expected {
+			return fmt.Errorf("battle error %d does not match its reviewed profile", entry.Code)
+		}
+		seen[entry.Code] = struct{}{}
+	}
+	if len(seen) != len(battleErrorProfiles) {
+		return errors.New("battle error registry is incomplete")
 	}
 	return nil
 }
@@ -353,6 +389,12 @@ func validateRouteSemantics(message MessageEntry, route RouteEntry) error {
 	if !validDirection(message.Direction) {
 		return fmt.Errorf("message %d has invalid direction %s", message.ID, message.Direction)
 	}
+	if message.Owner == "battle" {
+		return validateBattleRoute(message, route)
+	}
+	if message.Kind == "DATAGRAM" || hasBattleRouteFields(route) {
+		return fmt.Errorf("non-battle message %d cannot declare battle datagram semantics", message.ID)
+	}
 	if route.Channel != "WSS" && route.Channel != "TLS_TCP" {
 		return fmt.Errorf("message %d has invalid channel %s", message.ID, route.Channel)
 	}
@@ -393,6 +435,77 @@ func validateRouteSemantics(message MessageEntry, route RouteEntry) error {
 		return fmt.Errorf("message %d requires a positive timeout", message.ID)
 	}
 	return validateWorldVisitRoute(message, route)
+}
+
+// hasBattleRouteFields 判断 route 是否携带只属于 secure battle transport 的扩展策略。
+// 非 battle route 必须保持这些字段为零值，避免既有 WSS/TLS-TCP adapter 被意外重解释。
+func hasBattleRouteFields(route RouteEntry) bool {
+	return route.Lane != "" ||
+		route.HandlerOwner != "" ||
+		route.MaxPayloadSize != 0 ||
+		route.MaxRatePerSecond != 0 ||
+		route.ExpiryMS != 0 ||
+		route.TickPolicy != "" ||
+		route.SequencePolicy != "" ||
+		route.BaselinePolicy != "" ||
+		route.RecoveryPolicy != "" ||
+		route.SplitPolicy != "" ||
+		route.BindingPolicy != ""
+}
+
+// validateBattleRoute 固定 UDP battle route 的编号、lane、安全 binding 与资源字段完整性。
+// 精确 logical kind 参数由 network profile 与 registry parity gate 交叉验证；本函数防止
+// runtime catalog 接受第二通道、缺失预算或无法在 application expiry 内终结的 route。
+func validateBattleRoute(message MessageEntry, route RouteEntry) error {
+	expectedMessages := map[uint32]MessageEntry{
+		3000: {ID: 3000, Name: "BATTLE_INPUT_BUNDLE", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleInputBundle", Kind: "DATAGRAM", Direction: "CLIENT_TO_SERVER"},
+		3001: {ID: 3001, Name: "BATTLE_PROBE", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleProbe", Kind: "DATAGRAM", Direction: "CLIENT_TO_SERVER"},
+		3002: {ID: 3002, Name: "BATTLE_FULL_SNAPSHOT", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleFullSnapshot", Kind: "DATAGRAM", Direction: "SERVER_TO_CLIENT"},
+		3003: {ID: 3003, Name: "BATTLE_DELTA_SNAPSHOT", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleDeltaSnapshot", Kind: "DATAGRAM", Direction: "SERVER_TO_CLIENT"},
+		3004: {ID: 3004, Name: "BATTLE_ABILITY_RELIABLE_EVENT", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleAbilityReliableEvent", Kind: "DATAGRAM", Direction: "SERVER_TO_CLIENT"},
+		3005: {ID: 3005, Name: "BATTLE_ENTITY_LIFECYCLE", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleEntityLifecycle", Kind: "DATAGRAM", Direction: "SERVER_TO_CLIENT"},
+		3006: {ID: 3006, Name: "BATTLE_RESYNC_REQUEST", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleResyncRequest", Kind: "DATAGRAM", Direction: "CLIENT_TO_SERVER"},
+		3007: {ID: 3007, Name: "BATTLE_RESYNC_RESPONSE", Owner: "battle", Protobuf: "ihomeland.battle.v1.BattleResyncResponse", Kind: "DATAGRAM", Direction: "SERVER_TO_CLIENT"},
+	}
+	expectedMessage, exists := expectedMessages[message.ID]
+	if !exists || message != expectedMessage {
+		return fmt.Errorf("battle message %d does not match its reviewed identity", message.ID)
+	}
+	if route.MessageID != message.ID ||
+		route.Channel != "UDP" ||
+		(route.Lane != "RAW" && route.Lane != "KCP") ||
+		route.HandlerOwner == "" ||
+		route.AuthScope != "BATTLE" ||
+		route.MaxSize != maximumBattleDatagramSize ||
+		route.MaxPayloadSize == 0 ||
+		route.MaxPayloadSize >= route.MaxSize ||
+		route.MaxRatePerSecond == 0 ||
+		route.ExpiryMS == 0 ||
+		route.TimeoutMS != 0 ||
+		route.TickPolicy == "" ||
+		route.SequencePolicy == "" ||
+		route.BaselinePolicy == "" ||
+		route.RecoveryPolicy == "" ||
+		route.SplitPolicy == "" ||
+		route.BindingPolicy != "SESSION_ENDPOINT_TARGET_GENERATION" {
+		return fmt.Errorf("battle message %d has incomplete UDP route policy", message.ID)
+	}
+	switch route.Lane {
+	case "RAW":
+		if route.QoS != "UNRELIABLE_SEQUENCED_EXPIRING" &&
+			route.QoS != "UNRELIABLE_SEQUENCED_REPLACEABLE" {
+			return fmt.Errorf("battle raw message %d has invalid QoS %s", message.ID, route.QoS)
+		}
+	case "KCP":
+		if route.QoS != "RELIABLE_ORDERED_EXPIRING" {
+			return fmt.Errorf("battle KCP message %d has invalid QoS %s", message.ID, route.QoS)
+		}
+	}
+	if (route.Lane == "RAW" && route.MaxPayloadSize+48+16+16 > route.MaxSize) ||
+		(route.Lane == "KCP" && route.MaxPayloadSize+48+24+16 > route.MaxSize) {
+		return fmt.Errorf("battle message %d exceeds secure datagram budget", message.ID)
+	}
+	return nil
 }
 
 // worldVisitRouteProfile 保存已评审 world/visit 消息不可漂移的完整路由策略。
@@ -462,7 +575,7 @@ func worldVisitProfile(messageID uint32) (worldVisitRouteProfile, bool) {
 // validMessageKind 限定 registry 可表达的可靠 envelope 语义。
 func validMessageKind(kind string) bool {
 	switch kind {
-	case "REQUEST", "RESPONSE", "COMMAND", "PUSH", "ERROR":
+	case "REQUEST", "RESPONSE", "COMMAND", "PUSH", "ERROR", "DATAGRAM":
 		return true
 	default:
 		return false
@@ -477,7 +590,7 @@ func validDirection(direction string) bool {
 // validAuthScope 防止拼写错误的 scope 进入 dispatcher projection 后永久拒绝合法连接。
 func validAuthScope(scope string) bool {
 	switch scope {
-	case "CONTROL", "GAMEPLAY":
+	case "CONTROL", "GAMEPLAY", "BATTLE":
 		return true
 	default:
 		return false
@@ -525,13 +638,16 @@ func validateErrors(registry ErrorRegistry) error {
 		names[entry.Name] = struct{}{}
 		keys[entry.MessageKey] = struct{}{}
 	}
-	return validateWorldVisitErrors(registry.Errors)
+	if err := validateWorldVisitErrors(registry.Errors); err != nil {
+		return err
+	}
+	return validateBattleErrors(registry.Errors)
 }
 
 // validErrorOwner 限定基础契约中可以发布稳定错误语义的 capability。
 func validErrorOwner(owner string) bool {
 	switch owner {
-	case "common", "session", "account", "world", "visit":
+	case "common", "session", "account", "world", "visit", "battle":
 		return true
 	default:
 		return false
@@ -595,6 +711,7 @@ func validateOpenAPI(root string, schemaPath string) error {
 		"GET /v1/world/bootstrap":  "getWorldBootstrap",
 		"POST /v1/visits/{visitSessionId}/invites/{inviteId}/accept": "acceptVisitInvite",
 		"POST /v1/world/admissions":                                  "issueWorldAdmission",
+		"POST /v1/battle/tickets":                                    "issueBattleTicket",
 	}
 	seenOperations := make(map[string]string, len(requiredOperations))
 	for route, rawPath := range paths {
@@ -639,6 +756,9 @@ func validateOpenAPI(root string, schemaPath string) error {
 		return err
 	}
 	if err := validateWorldHTTPSchemas(rootMap, paths); err != nil {
+		return err
+	}
+	if err := validateBattleHTTPSchemas(rootMap, paths); err != nil {
 		return err
 	}
 	return validateHTTPFixtureRoutes(root, paths)
@@ -792,6 +912,94 @@ func validateWorldHTTPSchemas(root map[string]any, paths map[string]any) error {
 		if !ok || !hasParameterRef(operation, "#/components/parameters/IdempotencyKey") {
 			return fmt.Errorf("OpenAPI operation POST %s requires Idempotency-Key", route)
 		}
+	}
+	return nil
+}
+
+// validateBattleHTTPSchemas 冻结 BattleTicket 的 closed target selector 与最小 client-safe response。
+// Assignment、node、instance、actor slot、proof key 与 credential claims 均不得进入公开 schema。
+func validateBattleHTTPSchemas(root map[string]any, paths map[string]any) error {
+	components, ok := root["components"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI components must be an object")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI component schemas must be an object")
+	}
+	if err := requireExactSchema(schemas, "OwnWorldBattleTarget", []string{"kind"}, []string{"kind"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "VisitWorldBattleTarget", []string{"kind", "visitSessionId"}, []string{"kind", "visitSessionId"}); err != nil {
+		return err
+	}
+	responseFields := []string{"ticketId", "ticketSecret", "endpoint", "wireSuite", "role", "targetKind", "targetRevision", "expiresAtMs"}
+	if err := requireExactSchema(schemas, "BattleTicketResponse", responseFields, responseFields); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "BattleEndpoint", []string{"transport", "host", "port"}, []string{"transport", "host", "port"}); err != nil {
+		return err
+	}
+	if err := requireExactSchema(schemas, "BattleWireSuite", []string{"wireVersion", "keyAgreement", "kdf", "aead"}, []string{"wireVersion", "keyAgreement", "kdf", "aead"}); err != nil {
+		return err
+	}
+	request, ok := schemas["BattleTicketRequest"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI requires BattleTicketRequest")
+	}
+	oneOf, ok := request["oneOf"].([]any)
+	if !ok || len(oneOf) != 2 ||
+		schemaRef(oneOf[0]) != "#/components/schemas/OwnWorldBattleTarget" ||
+		schemaRef(oneOf[1]) != "#/components/schemas/VisitWorldBattleTarget" {
+		return errors.New("OpenAPI BattleTicketRequest must use the fixed target one-of")
+	}
+	ownTarget := schemas["OwnWorldBattleTarget"].(map[string]any)["properties"].(map[string]any)
+	visitTarget := schemas["VisitWorldBattleTarget"].(map[string]any)["properties"].(map[string]any)
+	if !exactStringEnum(ownTarget["kind"], []string{"OWN_WORLD"}) ||
+		!exactStringEnum(visitTarget["kind"], []string{"VISIT_WORLD"}) {
+		return errors.New("OpenAPI battle target kinds must remain closed")
+	}
+	response := schemas["BattleTicketResponse"].(map[string]any)["properties"].(map[string]any)
+	ticketID, idOK := response["ticketId"].(map[string]any)
+	ticketSecret, secretOK := response["ticketSecret"].(map[string]any)
+	idDescription, idHasDescription := ticketID["description"].(string)
+	secretDescription, secretHasDescription := ticketSecret["description"].(string)
+	if !idOK || ticketID["type"] != "string" || ticketID["minLength"] != 32 ||
+		ticketID["maxLength"] != 128 || ticketID["pattern"] != safeOpaqueCredentialPattern ||
+		!idHasDescription || strings.TrimSpace(idDescription) == "" {
+		return errors.New("OpenAPI battle ticketId must remain bounded, opaque, and documented")
+	}
+	if !secretOK || ticketSecret["type"] != "string" || ticketSecret["minLength"] != 43 ||
+		ticketSecret["maxLength"] != 128 || ticketSecret["pattern"] != safeBase64URLPattern ||
+		!secretHasDescription || strings.TrimSpace(secretDescription) == "" {
+		return errors.New("OpenAPI battle ticketSecret must remain bounded base64url credential")
+	}
+	if schemaRef(response["endpoint"]) != "#/components/schemas/BattleEndpoint" ||
+		schemaRef(response["wireSuite"]) != "#/components/schemas/BattleWireSuite" {
+		return errors.New("OpenAPI BattleTicketResponse must use reviewed endpoint and wire suite")
+	}
+	if !exactStringEnum(response["role"], []string{"OWNER", "VISITOR"}) ||
+		!exactStringEnum(response["targetKind"], []string{"OWN_WORLD", "VISIT_WORLD"}) {
+		return errors.New("OpenAPI battle role and targetKind must remain closed")
+	}
+	endpoint := schemas["BattleEndpoint"].(map[string]any)["properties"].(map[string]any)
+	if !exactStringEnum(endpoint["transport"], []string{"UDP"}) {
+		return errors.New("OpenAPI BattleEndpoint must use UDP")
+	}
+	suite := schemas["BattleWireSuite"].(map[string]any)["properties"].(map[string]any)
+	if !exactStringEnum(suite["keyAgreement"], []string{"X25519"}) ||
+		!exactStringEnum(suite["kdf"], []string{"HKDF-SHA-256"}) ||
+		!exactStringEnum(suite["aead"], []string{"ChaCha20-Poly1305"}) {
+		return errors.New("OpenAPI battle wire suite must use the reviewed algorithms")
+	}
+	pathItem, ok := paths["/v1/battle/tickets"].(map[string]any)
+	if !ok {
+		return errors.New("OpenAPI requires path /v1/battle/tickets")
+	}
+	operation, ok := pathItem["post"].(map[string]any)
+	if !ok || !hasParameterRef(operation, "#/components/parameters/IdempotencyKey") ||
+		operation["operationId"] != "issueBattleTicket" {
+		return errors.New("OpenAPI issueBattleTicket requires reviewed identity and Idempotency-Key")
 	}
 	return nil
 }
@@ -1136,6 +1344,9 @@ func ValidateVersions(root string) error {
 		{filepath.Join(root, "tools", "proto", "buf.gen.csharp.yaml"), "- protoc_builtin: csharp"},
 		{filepath.Join(root, "tools", "proto", "buf.gen.csharp.yaml"), "protoc_path: .local/protoc/" + versions.Toolchains.Protoc.Version + "/bin/protoc.exe"},
 		{filepath.Join(root, "tools", "proto", "buf.gen.csharp.yaml"), "out: .tmp/client-protocol-stage/Protocol/Sources"},
+		{filepath.Join(root, "tools", "proto", "buf.gen.cpp.yaml"), "- protoc_builtin: cpp"},
+		{filepath.Join(root, "tools", "proto", "buf.gen.cpp.yaml"), "protoc_path: .local/protoc/" + versions.Toolchains.Protoc.Version + "/bin/protoc.exe"},
+		{filepath.Join(root, "tools", "proto", "buf.gen.cpp.yaml"), "out: .tmp/simulation-protocol-stage"},
 		{filepath.Join(root, "shared", "contracts", "http", "v1", "openapi.yaml"), "openapi: " + versions.Protocols.OpenAPI.Version},
 		{filepath.Join(root, "server", "go.mod"), "go " + versions.Languages.Go.Version},
 		{filepath.Join(root, "server", "go.mod"), "google.golang.org/protobuf v" + versions.Toolchains.ProtobufGoGenerator.Version},
@@ -1190,6 +1401,7 @@ func ValidateVersions(root string) error {
 		"ihomeland/control/v1": "ihomeland.control.v1",
 		"ihomeland/world/v1":   "ihomeland.world.v1",
 		"ihomeland/visit/v1":   "ihomeland.visit.v1",
+		"ihomeland/battle/v1":  "ihomeland.battle.v1",
 	}
 	protoRoot := filepath.Join(root, "shared", "proto")
 	return filepath.WalkDir(protoRoot, func(path string, entry os.DirEntry, walkErr error) error {
@@ -1214,6 +1426,10 @@ func ValidateVersions(root string) error {
 		}
 		if !containsExactLine(data, "package "+expectedPackage+";") {
 			return fmt.Errorf("%s does not declare expected package %s", path, expectedPackage)
+		}
+		if relativeDirectory == "ihomeland/battle/v1" &&
+			!containsExactLine(data, "option optimize_for = LITE_RUNTIME;") {
+			return fmt.Errorf("%s must generate against C++ Protobuf lite runtime", path)
 		}
 		return nil
 	})

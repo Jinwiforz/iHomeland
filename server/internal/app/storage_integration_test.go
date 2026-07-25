@@ -50,6 +50,7 @@ func TestStorageRequiredReadinessDrainingAndProcessRecovery(t *testing.T) {
 		t.Skip("storage integration harness is required")
 	}
 	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "storage-integration-admission-key-material")
+	t.Setenv("IHOMELAND_BATTLE_DERIVATION_KEY", "0123456789abcdef0123456789abcdef")
 	diagnosticAddress := reserveAddress(t)
 	publicAddress := reserveAddress(t)
 	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
@@ -100,6 +101,7 @@ func TestPublicHTTPProductionGraphHitsAllOperations(t *testing.T) {
 		t.Skip("storage integration harness is required")
 	}
 	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "http-integration-admission-key-material")
+	t.Setenv("IHOMELAND_BATTLE_DERIVATION_KEY", "0123456789abcdef0123456789abcdef")
 	diagnosticAddress, publicAddress := reserveAddress(t), reserveAddress(t)
 	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
 	certificatePath, privateKey := writeTestCertificate(t)
@@ -636,6 +638,7 @@ func TestPublicWebSocketControlConsumesTicketAndInvalidates(t *testing.T) {
 		t.Skip("storage integration harness is required")
 	}
 	t.Setenv("IHOMELAND_WORLD_ADMISSION_KEY", "wss-integration-admission-key-material")
+	t.Setenv("IHOMELAND_BATTLE_DERIVATION_KEY", "0123456789abcdef0123456789abcdef")
 	diagnosticAddress, publicAddress := reserveAddress(t), reserveAddress(t)
 	configPath := writeIntegrationConfig(t, diagnosticAddress, publicAddress)
 	certificatePath, privateKey := writeTestCertificate(t)

@@ -148,6 +148,7 @@ func Run(ctx context.Context, options Options) Result {
 	}
 	simulationComponent, err := newSimulationNodeComponent(
 		settings.SimulationControl,
+		settings.PublicAPI.BattleUDP,
 		mysqlComponent,
 		simulationTasks,
 		clock,

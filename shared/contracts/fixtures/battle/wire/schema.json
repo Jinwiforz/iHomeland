@@ -1,0 +1,727 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-wire-v1.json",
+  "title": "iHomeland Secure Battle Wire Source Corpus",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/manifest"
+    },
+    {
+      "$ref": "#/$defs/binding"
+    },
+    {
+      "$ref": "#/$defs/limits"
+    },
+    {
+      "$ref": "#/$defs/wire_suite"
+    },
+    {
+      "$ref": "#/$defs/secret_policy"
+    },
+    {
+      "$ref": "#/$defs/wire_layout"
+    },
+    {
+      "$ref": "#/$defs/canonical_golden"
+    },
+    {
+      "$ref": "#/$defs/malformed_corpus"
+    },
+    {
+      "$ref": "#/$defs/crypto_vectors"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relative_json_path": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9./-]*\\.json$"
+    },
+    "identity": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "base": {
+      "type": "object",
+      "required": [
+        "format_version",
+        "corpus_version",
+        "document_kind"
+      ],
+      "properties": {
+        "format_version": {
+          "const": "1"
+        },
+        "corpus_version": {
+          "const": "battle-wire-v1"
+        },
+        "document_kind": {
+          "type": "string"
+        }
+      }
+    },
+    "manifest_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "document_kind",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relative_json_path"
+        },
+        "document_kind": {
+          "$ref": "#/$defs/identity"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "manifest": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "schema_path",
+            "schema_sha256",
+            "required_domains",
+            "files"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "manifest"
+            },
+            "schema_path": {
+              "const": "schema.json"
+            },
+            "schema_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "required_domains": {
+              "type": "array",
+              "minItems": 7,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/identity"
+              }
+            },
+            "files": {
+              "type": "array",
+              "minItems": 4,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/manifest_file"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "binding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "sources",
+            "invariants"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "model-profile-control-binding"
+            },
+            "sources": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "owner",
+                  "manifest_path",
+                  "manifest_sha256"
+                ],
+                "properties": {
+                  "owner": {
+                    "$ref": "#/$defs/identity"
+                  },
+                  "manifest_path": {
+                    "type": "string",
+                    "pattern": "^\\.\\./"
+                  },
+                  "manifest_sha256": {
+                    "$ref": "#/$defs/sha256"
+                  }
+                }
+              }
+            },
+            "invariants": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "maximum_actors",
+                "simulation_tick_ns",
+                "source_corpus_mode",
+                "qualification_boundary"
+              ],
+              "properties": {
+                "maximum_actors": {
+                  "const": 8
+                },
+                "simulation_tick_ns": {
+                  "const": 50000000
+                },
+                "source_corpus_mode": {
+                  "const": "immutable"
+                },
+                "qualification_boundary": {
+                  "const": "b0.5-implementation-only"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "limits": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "wire",
+            "handshake",
+            "crypto",
+            "replay",
+            "kcp",
+            "resources"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "limits"
+            },
+            "wire": {
+              "type": "object"
+            },
+            "handshake": {
+              "type": "object"
+            },
+            "crypto": {
+              "type": "object"
+            },
+            "replay": {
+              "type": "object"
+            },
+            "kcp": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "wire_suite": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "canonical_encoding",
+            "suites"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "wire-suite"
+            },
+            "canonical_encoding": {
+              "type": "object"
+            },
+            "suites": {
+              "type": "array",
+              "minItems": 8,
+              "items": {
+                "type": "object",
+                "required": [
+                  "suite_id",
+                  "domain",
+                  "cases"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "secret_policy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "classification",
+            "source_rules",
+            "output_rules",
+            "forbidden_property_names",
+            "forbidden_patterns",
+            "allowed_placeholders"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "secret-policy"
+            },
+            "classification": {
+              "const": "low-sensitivity"
+            },
+            "source_rules": {
+              "type": "array",
+              "minItems": 3
+            },
+            "output_rules": {
+              "type": "array",
+              "minItems": 3
+            },
+            "forbidden_property_names": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true
+            },
+            "forbidden_patterns": {
+              "type": "array",
+              "minItems": 3,
+              "uniqueItems": true
+            },
+            "allowed_placeholders": {
+              "type": "array",
+              "minItems": 3,
+              "uniqueItems": true
+            }
+          }
+        }
+      ]
+    },
+    "wire_layout": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "secure_header",
+            "raw_route_header",
+            "kcp_segment_header",
+            "kcp_route_envelope",
+            "datagram_equation"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "wire-layout"
+            },
+            "secure_header": {
+              "type": "object"
+            },
+            "raw_route_header": {
+              "type": "object"
+            },
+            "kcp_segment_header": {
+              "type": "object"
+            },
+            "kcp_route_envelope": {
+              "type": "object"
+            },
+            "datagram_equation": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "canonical_golden": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "encoding",
+            "vectors",
+            "parity_matrix"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "canonical-golden"
+            },
+            "encoding": {
+              "const": "lowercase-hex"
+            },
+            "vectors": {
+              "type": "array",
+              "minItems": 7,
+              "items": {
+                "type": "object",
+                "required": [
+                  "vector_id",
+                  "layer",
+                  "bytes_hex",
+                  "byte_count",
+                  "sha256",
+                  "decoded"
+                ]
+              }
+            },
+            "parity_matrix": {
+              "type": "array",
+              "minItems": 3
+            }
+          }
+        }
+      ]
+    },
+    "crypto_vectors": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "x25519",
+            "hkdf_sha256",
+            "hmac_sha256",
+            "chacha20_poly1305",
+            "parity_implementations"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "crypto-vectors"
+            },
+            "x25519": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "alice_private_hex",
+                "alice_public_hex",
+                "bob_private_hex",
+                "bob_public_hex",
+                "shared_secret_hex"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "alice_private_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "alice_public_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "bob_private_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "bob_public_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "shared_secret_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "hkdf_sha256": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "ikm_hex",
+                "salt_hex",
+                "info_hex",
+                "output_bytes",
+                "prk_hex",
+                "okm_hex"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "ikm_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "salt_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "info_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "output_bytes": {
+                  "const": 42
+                },
+                "prk_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "okm_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{84}$"
+                }
+              }
+            },
+            "hmac_sha256": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "key_hex",
+                "data_hex",
+                "tag_hex"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "key_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "data_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "tag_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            },
+            "chacha20_poly1305": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "key_hex",
+                "nonce_hex",
+                "aad_hex",
+                "plaintext_hex",
+                "ciphertext_hex",
+                "tag_hex"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "key_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "nonce_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{24}$"
+                },
+                "aad_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "plaintext_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "ciphertext_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]+$"
+                },
+                "tag_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              }
+            },
+            "parity_implementations": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "go-stdlib-xcrypto"
+                },
+                {
+                  "const": "cpp-libsodium-1.0.22"
+                }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        }
+      ]
+    },
+    "malformed_corpus": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format_version",
+            "corpus_version",
+            "document_kind",
+            "cases",
+            "policy"
+          ],
+          "properties": {
+            "format_version": {
+              "const": "1"
+            },
+            "corpus_version": {
+              "const": "battle-wire-v1"
+            },
+            "document_kind": {
+              "const": "malformed-corpus"
+            },
+            "cases": {
+              "type": "array",
+              "minItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "case_id",
+                  "layer",
+                  "mutation",
+                  "expected_reason"
+                ],
+                "properties": {
+                  "case_id": {
+                    "$ref": "#/$defs/identity"
+                  },
+                  "layer": {
+                    "$ref": "#/$defs/identity"
+                  },
+                  "mutation": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expected_reason": {
+                    "type": "string",
+                    "pattern": "^BATTLE_[A-Z0-9_]+$"
+                  }
+                }
+              }
+            },
+            "policy": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "manifest",
+  "schema_path": "schema.json",
+  "schema_sha256": "bacfb4650c5378236de74c870940a8ae9725467624a720a437c969cb48b43cae",
+  "required_domains": [
+    "binding",
+    "crypto",
+    "handshake",
+    "limits",
+    "rebind",
+    "replay",
+    "resource",
+    "secret",
+    "wire"
+  ],
+  "files": [
+    {
+      "path": "crypto-vectors.json",
+      "document_kind": "crypto-vectors",
+      "sha256": "a81f574fd41e8f3047f570982b6d5f155cef1ee889abfca3c9fc36e56dd9d32f"
+    },
+    {
+      "path": "canonical-golden.json",
+      "document_kind": "canonical-golden",
+      "sha256": "27f3ca871b078f478fde9e482061539dd52d2760058a1c5bc35ed46e84abfeb7"
+    },
+    {
+      "path": "limits.json",
+      "document_kind": "limits",
+      "sha256": "8e8c56aa536ef42b687ca011d534b906726979aec03624e85339246789105026"
+    },
+    {
+      "path": "malformed-corpus.json",
+      "document_kind": "malformed-corpus",
+      "sha256": "e74000fcda934299da3d377d100f8f8f147aa9e6839e4c750ddc95bcf149ed9e"
+    },
+    {
+      "path": "model-profile-control-binding.json",
+      "document_kind": "model-profile-control-binding",
+      "sha256": "dedbd125e63fa3a95293ceb8568d9c1cd3b1f1c5412e067d45834c1bc4cd488a"
+    },
+    {
+      "path": "secret-policy.json",
+      "document_kind": "secret-policy",
+      "sha256": "36e170deade12bf2ef815e3f5948b357d6d20fd279bf085d1afcd3c4adc06acf"
+    },
+    {
+      "path": "wire-layout.json",
+      "document_kind": "wire-layout",
+      "sha256": "81c3470122c5c34237d111768b08df71989532cee99b7fb3715e8ff86caba01a"
+    },
+    {
+      "path": "wire-suite.json",
+      "document_kind": "wire-suite",
+      "sha256": "84a6cc59d0e8b6932be8b6bfca7971d6ddf147ab9027fc2695ce5e3ebece859b"
+    }
+  ]
+}

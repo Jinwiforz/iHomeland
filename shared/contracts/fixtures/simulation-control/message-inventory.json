@@ -4,7 +4,90 @@
   "frameMaxBytes": 65536,
   "pendingRequestLimit": 256,
   "resultOutboxLimit": 256,
+  "ticketRequestQueueLimit": 64,
+  "priorityPolicy": {
+    "highDeadlineClasses": [
+      "startup",
+      "health",
+      "lifecycle",
+      "drain",
+      "shutdown",
+      "result",
+      "revoke"
+    ],
+    "lowDeadlineClasses": [
+      "ticket"
+    ],
+    "selection": "high-first-after-active-turn",
+    "activeTurn": "non-preemptive"
+  },
+  "secretPolicy": {
+    "secretFields": [
+      "battle.ticket.install.payload.proofKey"
+    ],
+    "allowedDirection": "go-to-cpp",
+    "fixtureValue": "[REDACTED]",
+    "logging": "forbidden",
+    "reporting": "forbidden",
+    "storage": "forbidden"
+  },
   "messages": [
+    {
+      "kind": "battle.session.closed",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "revoke",
+      "replayIdentity": "revokeRequestId+battleSessionId+sessionGeneration"
+    },
+    {
+      "kind": "battle.session.revoke",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "revoke",
+      "replayIdentity": "revokeRequestId+battleSessionId+sessionGeneration"
+    },
+    {
+      "kind": "battle.ticket.install",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 32768,
+      "deadlineClass": "ticket",
+      "replayIdentity": "installRequestId+ticketId+bindingFingerprint"
+    },
+    {
+      "kind": "battle.ticket.installed",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "ticket",
+      "replayIdentity": "installRequestId+ticketId+bindingFingerprint"
+    },
+    {
+      "kind": "battle.ticket.revoke",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "revoke",
+      "replayIdentity": "revokeRequestId+ticketId+bindingFingerprint"
+    },
+    {
+      "kind": "battle.ticket.revoked",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "revoke",
+      "replayIdentity": "revokeRequestId+ticketId+bindingFingerprint"
+    },
+    {
+      "kind": "battle.ticket.status.query",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "ticket",
+      "replayIdentity": "statusRequestId+ticketId+bindingFingerprint"
+    },
+    {
+      "kind": "battle.ticket.status.receipt",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "ticket",
+      "replayIdentity": "statusRequestId+ticketId+bindingFingerprint"
+    },
     {
       "kind": "node.hello.challenge",
       "direction": "go-to-cpp",
@@ -18,6 +101,20 @@
       "maxPayloadBytes": 4096,
       "deadlineClass": "startup",
       "replayIdentity": "requestId"
+    },
+    {
+      "kind": "node.listener.status.query",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 2048,
+      "deadlineClass": "health",
+      "replayIdentity": "requestId+simulationNodeId"
+    },
+    {
+      "kind": "node.listener.status.receipt",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "health",
+      "replayIdentity": "requestId+simulationNodeId+listenerGeneration"
     },
     {
       "kind": "node.health.query",

@@ -23,6 +23,10 @@ enum class GameplayCommandKind : std::uint8_t {
     ActivateAbility = 3,
     /// LifecycleDirective 只允许受信离线 harness/control owner 提交。
     LifecycleDirective = 4,
+    /// AimIntent 请求更新量化瞄准方向，不携带最终Transform。
+    AimIntent = 5,
+    /// InteractSlot 请求使用受限交互槽，不携带entity identity。
+    InteractSlot = 6,
 };
 
 /// ContinuousIntentPayload 使用整数千分比轴值，不携带最终 Transform。
@@ -48,6 +52,20 @@ struct ActivateAbilityPayload final {
     std::uint32_t ability_id;
 };
 
+/// AimIntentPayload 只携带量化yaw/pitch请求。
+struct AimIntentPayload final {
+    /// yaw_millidegrees 是[-180000, 180000]范围内请求值。
+    std::int32_t yaw_millidegrees;
+    /// pitch_millidegrees 是[-90000, 90000]范围内请求值。
+    std::int32_t pitch_millidegrees;
+};
+
+/// InteractSlotPayload 只选择1..16受限槽位。
+struct InteractSlotPayload final {
+    /// interaction_slot 由simulation映射合法目标，不是entity identity。
+    std::uint8_t interaction_slot;
+};
+
 /// LifecycleDirectivePayload 只允许受信 source 表达登记 directive token。
 struct LifecycleDirectivePayload final {
     /// directive 是闭合 lifecycle token，零值无效。
@@ -62,7 +80,9 @@ using GameplayCommandPayload = std::variant<
     JumpPressedPayload,
     SwitchWeaponPayload,
     ActivateAbilityPayload,
-    LifecycleDirectivePayload>;
+    LifecycleDirectivePayload,
+    AimIntentPayload,
+    InteractSlotPayload>;
 
 /// GameplayCommand 绑定 assignment/mapping/actor/Tick/sequence 与 intent payload。
 struct GameplayCommand final {

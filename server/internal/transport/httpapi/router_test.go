@@ -14,6 +14,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jinwiforz/ihomeland/server/internal/account"
+	"github.com/jinwiforz/ihomeland/server/internal/battleentry"
+	"github.com/jinwiforz/ihomeland/server/internal/battleticket"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
@@ -198,6 +200,9 @@ func (*fakeSessionApplication) IssueTicket(context.Context, session.AuthContext,
 // fakeWorldApplication 保证无认证测试不会进入world application。
 type fakeWorldApplication struct{}
 
+// fakeBattleApplication 保证无认证测试不会进入 battle application。
+type fakeBattleApplication struct{}
+
 // noopHTTPObserver 接受测试中的低基数测量。
 type noopHTTPObserver struct{}
 
@@ -219,6 +224,13 @@ func (*fakeWorldApplication) IssueWorldAdmission(context.Context, session.Authen
 	return worldentry.AdmissionResult{}, errors.New("unused admission")
 }
 
+// Issue 在意外调用时以 target-not-ready fail closed。
+func (*fakeBattleApplication) Issue(context.Context, session.AuthenticatedSession, battleentry.Target, string) (battleentry.Result, error) {
+	return battleentry.Result{}, battleticket.NewAdmissionError(
+		"test", battleticket.ErrorCodeTargetNotReady, nil,
+	)
+}
+
 // newTestRouter 构造完整operation policy与受信endpoint manifest。
 func newTestRouter(t *testing.T, ready *bool, burst int) *Router {
 	t.Helper()
@@ -234,7 +246,7 @@ func newTestRouterWithAccounts(t *testing.T, ready *bool, burst int, accounts Ac
 	for _, operation := range operations {
 		rates[operation.ID] = config.RatePolicy{Requests: burst, Window: time.Minute, Burst: burst}
 	}
-	router, err := NewRouter(accounts, &fakeSessionApplication{}, &fakeWorldApplication{}, RouterConfig{ServerVersion: "0.1.0", ProtocolVersion: 1, MinimumClientVersion: "0.1.0", Endpoints: []session.Endpoint{wss, tcp}, HTTPBodyBytes: 4096, RealtimeFrameBytes: 65536, Ready: func() bool { return *ready }, Rates: rates, RateMaxEntries: 64, RateIdleTTL: time.Minute, Observer: noopHTTPObserver{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	router, err := NewRouter(accounts, &fakeSessionApplication{}, &fakeWorldApplication{}, &fakeBattleApplication{}, RouterConfig{ServerVersion: "0.1.0", ProtocolVersion: 1, MinimumClientVersion: "0.1.0", Endpoints: []session.Endpoint{wss, tcp}, HTTPBodyBytes: 4096, RealtimeFrameBytes: 65536, Ready: func() bool { return *ready }, Rates: rates, RateMaxEntries: 64, RateIdleTTL: time.Minute, Observer: noopHTTPObserver{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +259,11 @@ func performRequest(handler http.Handler, method string, path string, body strin
 	request.RemoteAddr = "192.0.2.1:12345"
 	request.Header.Set("X-Request-ID", "fixture-request-id")
 	for name, value := range headers {
-		request.Header.Set(name, value)
+		if strings.EqualFold(name, "Host") {
+			request.Host = value
+		} else {
+			request.Header.Set(name, value)
+		}
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

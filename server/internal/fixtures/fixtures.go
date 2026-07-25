@@ -184,12 +184,38 @@ func buildHTTPFixtures() HTTPManifest {
 		{Name: "visit-accept-same-key-replay", Request: HTTPRequest{Method: "POST", Path: "/v1/visits/{visitSessionId}/invites/{inviteId}/accept", Headers: map[string]string{"Idempotency-Key": "fixture-accept-key-0001"}, Body: map[string]any{"expectedRevision": 4}}, Response: HTTPResponse{Status: 200, Body: map[string]any{"reservation": map[string]any{"visitSessionId": "visit_fixture_one", "revision": 5, "reservationExpiresAtMs": 1_700_000_060_000}}}},
 		{Name: "own-world-admission-success", Request: HTTPRequest{Method: "POST", Path: "/v1/world/admissions", Headers: map[string]string{"Idempotency-Key": "fixture-own-admission-01"}, Body: map[string]any{"kind": "OWN_WORLD"}}, Response: HTTPResponse{Status: 201, Body: map[string]any{"credential": "fixture-own-world-admission-value-not-valid", "endpoint": map[string]any{"channel": "TLS_TCP", "host": "game.example.invalid", "port": 4433}, "role": "OWNER", "purpose": "OWN_WORLD", "visitRevision": 0, "expiresAtMs": 1_700_000_030_000}}},
 		{Name: "visit-world-admission-success", Request: HTTPRequest{Method: "POST", Path: "/v1/world/admissions", Headers: map[string]string{"Idempotency-Key": "fixture-visit-admission-1"}, Body: map[string]any{"kind": "VISIT_WORLD", "visitSessionId": "visit_fixture_one"}}, Response: HTTPResponse{Status: 201, Body: map[string]any{"credential": "fixture-visit-world-admission-value-not-valid", "endpoint": map[string]any{"channel": "TLS_TCP", "host": "game.example.invalid", "port": 4433}, "role": "VISITOR", "purpose": "JOIN", "visitRevision": 5, "expiresAtMs": 1_700_000_030_000}}},
+		{Name: "battle-ticket-own-world-success", Request: HTTPRequest{Method: "POST", Path: "/v1/battle/tickets", Headers: map[string]string{"Idempotency-Key": "fixture-battle-own-0001"}, Body: map[string]any{"kind": "OWN_WORLD"}}, Response: HTTPResponse{Status: 201, Body: battleTicketFixtureResponse("battle_ticket_fixture_owner_00000001", "fixture_battle_secret_owner_00000000000000000000", "OWNER", "OWN_WORLD", 11)}},
+		{Name: "battle-ticket-eighth-visit-actor-success", Request: HTTPRequest{Method: "POST", Path: "/v1/battle/tickets", Headers: map[string]string{"Idempotency-Key": "fixture-battle-visit-008"}, Body: map[string]any{"kind": "VISIT_WORLD", "visitSessionId": "visit_fixture_eighth"}}, Response: HTTPResponse{Status: 201, Body: battleTicketFixtureResponse("battle_ticket_fixture_visit8_00000001", "fixture_battle_secret_visit8_000000000000000000", "VISITOR", "VISIT_WORLD", 12)}},
+		{Name: "battle-ticket-ninth-actor-capacity", Request: HTTPRequest{Method: "POST", Path: "/v1/battle/tickets", Headers: map[string]string{"Idempotency-Key": "fixture-battle-visit-009"}, Body: map[string]any{"kind": "VISIT_WORLD", "visitSessionId": "visit_fixture_ninth"}}, Response: HTTPResponse{Status: 409, Body: map[string]any{"code": 3001, "messageKey": "error.battle.capacity_exceeded", "requestId": "fixture-request-id", "retryable": false}}},
+		{Name: "battle-ticket-stale-target", Request: HTTPRequest{Method: "POST", Path: "/v1/battle/tickets", Headers: map[string]string{"Idempotency-Key": "fixture-battle-stale-01"}, Body: map[string]any{"kind": "OWN_WORLD"}}, Response: HTTPResponse{Status: 409, Body: map[string]any{"code": 3002, "messageKey": "error.battle.target_stale", "requestId": "fixture-request-id", "retryable": false}}},
+		{Name: "battle-ticket-response-loss-replay", Request: HTTPRequest{Method: "POST", Path: "/v1/battle/tickets", Headers: map[string]string{"Idempotency-Key": "fixture-battle-own-0001"}, Body: map[string]any{"kind": "OWN_WORLD"}}, Response: HTTPResponse{Status: 201, Body: battleTicketFixtureResponse("battle_ticket_fixture_owner_00000001", "fixture_battle_secret_owner_00000000000000000000", "OWNER", "OWN_WORLD", 11)}},
+		{Name: "battle-ticket-credential-field-rejected", Request: HTTPRequest{Method: "POST", Path: "/v1/battle/tickets", Headers: map[string]string{"Idempotency-Key": "fixture-battle-redact-01"}, Body: map[string]any{"kind": "OWN_WORLD", "ticketSecret": "fixture_secret_must_not_be_echoed_00000000000000000"}}, Response: HTTPResponse{Status: 400, Body: map[string]any{"code": 200, "messageKey": "error.validation.failed", "requestId": "fixture-request-id", "retryable": false}}},
 		{Name: "world-admission-idempotency-conflict", Request: HTTPRequest{Method: "POST", Path: "/v1/world/admissions", Headers: map[string]string{"Idempotency-Key": "fixture-own-admission-01"}, Body: map[string]any{"kind": "VISIT_WORLD", "visitSessionId": "visit_fixture_two"}}, Response: HTTPResponse{Status: 409, Body: map[string]any{"code": 2006, "messageKey": "error.world.idempotency_conflict", "requestId": "fixture-request-id", "retryable": false}}},
 		{Name: "visit-accept-stale-revision", Request: HTTPRequest{Method: "POST", Path: "/v1/visits/{visitSessionId}/invites/{inviteId}/accept", Headers: map[string]string{"Idempotency-Key": "fixture-accept-stale-01"}, Body: map[string]any{"expectedRevision": 3}}, Response: HTTPResponse{Status: 409, Body: map[string]any{"code": 2105, "messageKey": "error.visit.revision_conflict", "requestId": "fixture-request-id", "retryable": false}}},
 		{Name: "world-admission-forbidden-actor-field", Request: HTTPRequest{Method: "POST", Path: "/v1/world/admissions", Headers: map[string]string{"Idempotency-Key": "fixture-forbidden-actor1"}, Body: map[string]any{"kind": "OWN_WORLD", "playerId": "player_attacker"}}, Response: HTTPResponse{Status: 400, Body: map[string]any{"code": 200, "messageKey": "error.validation.failed", "requestId": "fixture-request-id", "retryable": false}}},
 		{Name: "visit-admission-membership-required", Request: HTTPRequest{Method: "POST", Path: "/v1/world/admissions", Headers: map[string]string{"Idempotency-Key": "fixture-membership-none1"}, Body: map[string]any{"kind": "VISIT_WORLD", "visitSessionId": "visit_fixture_missing"}}, Response: HTTPResponse{Status: 403, Body: map[string]any{"code": 2107, "messageKey": "error.visit.membership_required", "requestId": "fixture-request-id", "retryable": false}}},
 		{Name: "world-bootstrap-dependency-unavailable", Request: HTTPRequest{Method: "GET", Path: "/v1/world/bootstrap"}, Response: HTTPResponse{Status: 503, Body: map[string]any{"code": 500, "messageKey": "error.dependency.unavailable", "requestId": "fixture-request-id", "retryable": true}}},
 	}}
+}
+
+// battleTicketFixtureResponse 构造只含 client-safe 字段的确定性 BattleTicket 成功响应。
+// Fixture credential 是不可用占位文本，不包含 proof key、binding claims、node、instance 或 actor slot。
+func battleTicketFixtureResponse(ticketID, ticketSecret, role, targetKind string, targetRevision uint64) map[string]any {
+	return map[string]any{
+		"ticketId":     ticketID,
+		"ticketSecret": ticketSecret,
+		"endpoint":     map[string]any{"transport": "UDP", "host": "battle.example.invalid", "port": 58445},
+		"wireSuite": map[string]any{
+			"wireVersion":  1,
+			"keyAgreement": "X25519",
+			"kdf":          "HKDF-SHA-256",
+			"aead":         "ChaCha20-Poly1305",
+		},
+		"role":           role,
+		"targetKind":     targetKind,
+		"targetRevision": targetRevision,
+		"expiresAtMs":    1_700_000_030_000,
+	}
 }
 
 // buildNegativeManifest 返回必须由对应 contract/codec 测试持续执行的拒绝原因目录。

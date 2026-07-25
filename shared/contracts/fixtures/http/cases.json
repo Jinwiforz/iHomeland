@@ -216,6 +216,180 @@
       }
     },
     {
+      "name": "battle-ticket-own-world-success",
+      "request": {
+        "method": "POST",
+        "path": "/v1/battle/tickets",
+        "headers": {
+          "Idempotency-Key": "fixture-battle-own-0001"
+        },
+        "body": {
+          "kind": "OWN_WORLD"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "endpoint": {
+            "host": "battle.example.invalid",
+            "port": 58445,
+            "transport": "UDP"
+          },
+          "expiresAtMs": 1700000030000,
+          "role": "OWNER",
+          "targetKind": "OWN_WORLD",
+          "targetRevision": 11,
+          "ticketId": "battle_ticket_fixture_owner_00000001",
+          "ticketSecret": "fixture_battle_secret_owner_00000000000000000000",
+          "wireSuite": {
+            "aead": "ChaCha20-Poly1305",
+            "kdf": "HKDF-SHA-256",
+            "keyAgreement": "X25519",
+            "wireVersion": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "battle-ticket-eighth-visit-actor-success",
+      "request": {
+        "method": "POST",
+        "path": "/v1/battle/tickets",
+        "headers": {
+          "Idempotency-Key": "fixture-battle-visit-008"
+        },
+        "body": {
+          "kind": "VISIT_WORLD",
+          "visitSessionId": "visit_fixture_eighth"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "endpoint": {
+            "host": "battle.example.invalid",
+            "port": 58445,
+            "transport": "UDP"
+          },
+          "expiresAtMs": 1700000030000,
+          "role": "VISITOR",
+          "targetKind": "VISIT_WORLD",
+          "targetRevision": 12,
+          "ticketId": "battle_ticket_fixture_visit8_00000001",
+          "ticketSecret": "fixture_battle_secret_visit8_000000000000000000",
+          "wireSuite": {
+            "aead": "ChaCha20-Poly1305",
+            "kdf": "HKDF-SHA-256",
+            "keyAgreement": "X25519",
+            "wireVersion": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "battle-ticket-ninth-actor-capacity",
+      "request": {
+        "method": "POST",
+        "path": "/v1/battle/tickets",
+        "headers": {
+          "Idempotency-Key": "fixture-battle-visit-009"
+        },
+        "body": {
+          "kind": "VISIT_WORLD",
+          "visitSessionId": "visit_fixture_ninth"
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": 3001,
+          "messageKey": "error.battle.capacity_exceeded",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "battle-ticket-stale-target",
+      "request": {
+        "method": "POST",
+        "path": "/v1/battle/tickets",
+        "headers": {
+          "Idempotency-Key": "fixture-battle-stale-01"
+        },
+        "body": {
+          "kind": "OWN_WORLD"
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": 3002,
+          "messageKey": "error.battle.target_stale",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "name": "battle-ticket-response-loss-replay",
+      "request": {
+        "method": "POST",
+        "path": "/v1/battle/tickets",
+        "headers": {
+          "Idempotency-Key": "fixture-battle-own-0001"
+        },
+        "body": {
+          "kind": "OWN_WORLD"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "endpoint": {
+            "host": "battle.example.invalid",
+            "port": 58445,
+            "transport": "UDP"
+          },
+          "expiresAtMs": 1700000030000,
+          "role": "OWNER",
+          "targetKind": "OWN_WORLD",
+          "targetRevision": 11,
+          "ticketId": "battle_ticket_fixture_owner_00000001",
+          "ticketSecret": "fixture_battle_secret_owner_00000000000000000000",
+          "wireSuite": {
+            "aead": "ChaCha20-Poly1305",
+            "kdf": "HKDF-SHA-256",
+            "keyAgreement": "X25519",
+            "wireVersion": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "battle-ticket-credential-field-rejected",
+      "request": {
+        "method": "POST",
+        "path": "/v1/battle/tickets",
+        "headers": {
+          "Idempotency-Key": "fixture-battle-redact-01"
+        },
+        "body": {
+          "kind": "OWN_WORLD",
+          "ticketSecret": "fixture_secret_must_not_be_echoed_00000000000000000"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "code": 200,
+          "messageKey": "error.validation.failed",
+          "requestId": "fixture-request-id",
+          "retryable": false
+        }
+      }
+    },
+    {
       "name": "world-admission-idempotency-conflict",
       "request": {
         "method": "POST",

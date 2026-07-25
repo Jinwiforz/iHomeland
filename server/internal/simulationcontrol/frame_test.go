@@ -21,6 +21,7 @@ func TestCanonicalGolden(t *testing.T) {
 	}
 	var document struct {
 		Frames []struct {
+			GoldenID        string `json:"goldenId"`
 			CanonicalJSON   string `json:"canonicalJson"`
 			LengthPrefixHex string `json:"lengthPrefixHex"`
 		} `json:"frames"`
@@ -28,39 +29,29 @@ func TestCanonicalGolden(t *testing.T) {
 	if err := json.Unmarshal(content, &document); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if len(document.Frames) != 1 {
+	if len(document.Frames) < 4 {
 		t.Fatalf("golden frame count = %d", len(document.Frames))
 	}
-	requestID, _ := NewRequestID("sctl_health0000000001")
-	nonce, _ := NewDigest(strings.Repeat("1", 64))
-	frame, err := NewFrame(
-		"node.health.query",
-		struct {
-			SimulationNodeID string `json:"simulationNodeId"`
-		}{SimulationNodeID: "snode_fixture_1"},
-		requestID,
-		3,
-		nonce,
-	)
-	if err != nil {
-		t.Fatalf("NewFrame: %v", err)
-	}
-	encoded, err := EncodeFrame(frame)
-	if err != nil {
-		t.Fatalf("EncodeFrame: %v", err)
-	}
-	if got := string(encoded[4:]); got != document.Frames[0].CanonicalJSON {
-		t.Fatalf("canonical JSON drifted:\n%s", got)
-	}
-	if got := hex.EncodeToString(encoded[:4]); got != document.Frames[0].LengthPrefixHex {
-		t.Fatalf("length prefix = %s", got)
-	}
-	decoded, err := DecodeFrame(bufio.NewReader(bytes.NewReader(encoded)))
-	if err != nil {
-		t.Fatalf("DecodeFrame: %v", err)
-	}
-	if decoded.Sequence != 3 || decoded.Kind != "node.health.query" {
-		t.Fatalf("decoded frame = %#v", decoded)
+	for _, golden := range document.Frames {
+		golden := golden
+		t.Run(golden.GoldenID, func(t *testing.T) {
+			length, err := hex.DecodeString(golden.LengthPrefixHex)
+			if err != nil || len(length) != 4 {
+				t.Fatalf("decode length prefix: %v", err)
+			}
+			encoded := append(length, []byte(golden.CanonicalJSON)...)
+			decoded, err := DecodeFrame(bufio.NewReader(bytes.NewReader(encoded)))
+			if err != nil {
+				t.Fatalf("DecodeFrame: %v", err)
+			}
+			reencoded, err := EncodeFrame(decoded)
+			if err != nil {
+				t.Fatalf("EncodeFrame: %v", err)
+			}
+			if !bytes.Equal(reencoded, encoded) {
+				t.Fatal("Go control frame codec drifted from canonical golden")
+			}
+		})
 	}
 }
 

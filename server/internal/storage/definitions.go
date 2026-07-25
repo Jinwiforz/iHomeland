@@ -2,6 +2,7 @@
 package storage
 
 import (
+	storagebattleticket "github.com/jinwiforz/ihomeland/server/internal/storage/battleticket"
 	storageplacement "github.com/jinwiforz/ihomeland/server/internal/storage/placement"
 	storageredis "github.com/jinwiforz/ihomeland/server/internal/storage/redis"
 	storagesession "github.com/jinwiforz/ihomeland/server/internal/storage/session"
@@ -17,11 +18,13 @@ func RedisDefinitions() []storageredis.Definition {
 	placementDefinitions := storageplacement.Definitions()
 	visitDefinitions := storagevisit.Definitions()
 	admissionDefinitions := storageadmission.Definitions()
-	definitions := make([]storageredis.Definition, 0, len(sessionDefinitions)+len(placementDefinitions)+len(visitDefinitions)+len(admissionDefinitions))
+	battleTicketDefinitions := storagebattleticket.Definitions()
+	definitions := make([]storageredis.Definition, 0, len(sessionDefinitions)+len(placementDefinitions)+len(visitDefinitions)+len(admissionDefinitions)+len(battleTicketDefinitions))
 	definitions = append(definitions, sessionDefinitions...)
 	definitions = append(definitions, placementDefinitions...)
 	definitions = append(definitions, visitDefinitions...)
 	definitions = append(definitions, admissionDefinitions...)
+	definitions = append(definitions, battleTicketDefinitions...)
 	return definitions
 }
 

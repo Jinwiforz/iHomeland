@@ -19,7 +19,7 @@ iHomeland/
   docs/
   openspec/
   server/
-  simulation/               # 无网络 C++20 core 与 stdio control child
+  simulation/               # C++20 core、stdio control 与安全 UDP/KCP child
   shared/
   tools/
   release.json
@@ -29,7 +29,7 @@ iHomeland/
 `simulation/` 是 `ihomeland-sim-server` 的唯一 C++ 工程根，不属于现有 Go
 `server/` 子目录，也不把第三方源码复制成业务代码。B0.3 已建立真实工程、
 exact toolchain bootstrap、离线 adapters、stdio control、tests 与 qualification tools；
-UDP listener 仍等待后续安全 transport。
+B0.5 在同一工程内增加唯一安全 UDP/KCP adapter，不改变 stdio control 的私有边界。
 
 ## C++ Game Simulation Server 目标结构
 
@@ -39,7 +39,7 @@ simulation/
   CMakePresets.json
   cmake/
   apps/
-    sim_server/              # 无 listener smoke 与 --control-stdio child
+    sim_server/              # --control-stdio child 与 node-global UDP listener
     replay/                  # 连续确定 replay evidence
     benchmark/               # 1/5/8 actor reference workload
     qualification/           # verify 成功后生成本地资格产物
@@ -52,6 +52,7 @@ simulation/
     history/                 # 16-Tick 有界 history
     adapters/                # fixture、Jolt、Detour 与 evidence adapters
     control/                 # canonical frame、SimulationNode 与多实例 lifecycle
+    transport/               # UDP、crypto、raw/KCP、BattleSession 与资源治理
     qualification/           # reference benchmark implementation
   tests/
   out/                       # ignored build/install tree
@@ -60,8 +61,9 @@ simulation/
 
 目录表达依赖方向：`gameplay` 只依赖项目定义的 ECS/physics/navigation ports，
 不能在 component 或公开 contract 中暴露 Jolt、Detour 或 JSON 类型。`control/` 只持有
-本机 stdio frame 与 node/instance lifecycle，仍没有 `network/` 目录；后续网络只能向 tick-boundary input queue 写入有界
-命令，不能直接修改 ECS/physics world。Recast 离线导航构建工具只有在内容管线
+本机 stdio frame 与 node/instance lifecycle；`transport/` 独占 UDP/crypto/raw/KCP，
+并且只能向 tick-boundary input queue 写入有界命令，不能直接修改 ECS/physics world。
+Recast 离线导航构建工具只有在内容管线
 需求成立后才建立独立 target。
 
 ## 当前 Go 服务端结构
@@ -93,6 +95,9 @@ server/
     identity/
     session/
     account/
+    battleentry/
+    battleticket/
+    battleticketcontrol/
     personalworld/
     placement/
     simulationcontrol/
@@ -109,6 +114,7 @@ server/
       mysql/
         migrations/
       account/
+      battleticket/
       session/
       personalworld/
       placement/
@@ -163,7 +169,7 @@ MySQL pool，保存 immutable receipt 并在 owner transaction 中裁决已登�
 
 ### `internal/worldentry`、`internal/transport/httpapi`、`internal/transport/wscontrol` 与 `internal/transport/tcpgameplay`
 
-`worldentry` 是 transport-independent 的窄用例协调器，只编排 own-world bootstrap、invite accept 与 world admission issue；账号和 Session 用例仍由各自 owner 直接提供。`transport/httpapi` 是公开 HTTP adapter，集中拥有 10 个冻结 operation 的 route metadata、closed-schema codec、稳定错误映射、认证/限流/deadline middleware 及独立 listener 生命周期。只有该 package 可以导入 Gin；它不保存账号、world、visit 或 credential 事实。
+`worldentry` 是 transport-independent 的窄用例协调器，只编排 own-world bootstrap、invite accept 与 world admission issue；`battleentry`、`battleticket` 与 `battleticketcontrol` 分别拥有 battle admission 编排、ticket policy/value 和 exact child install/revoke control。账号和 Session 用例仍由各自 owner 直接提供。`transport/httpapi` 是公开 HTTP adapter，集中拥有 11 个冻结 operation 的 route metadata、closed-schema codec、稳定错误映射、认证/限流/deadline middleware 及独立 listener 生命周期。只有该 package 可以导入 Gin；它不保存账号、world、visit、battle 或 credential 事实。
 
 `transport/wscontrol` 拥有精确握手、typed PUSH codec、双重有界队列、单 reader/writer、心跳、connection/session/player 索引和 Session 失效关闭。它不依赖业务 storage package，不保存领域事实，不接收客户端 mutation，也不注册 TLS/TCP route。HTTP 与 WSS 共享公开 listener，但两个 adapter 保持独立路由与职责。
 
@@ -263,7 +269,7 @@ shared/
       control/v1/
       world/v1/            # PersonalWorld 公开投影与 snapshot
       visit/v1/            # VisitSession 控制、snapshot 与 safe-return
-      battle/v1/           # 后续 battle input/snapshot/control wire contract
+      battle/v1/           # B0.5 battle input/snapshot/control wire source
   contracts/
     http/v1/openapi.yaml
     registry/
@@ -275,7 +281,7 @@ shared/
       battle/
         model/             # B0.1 纯模型 schema、manifest、assumptions 与 cases
         network-profile/   # B0.2 cadence、lane、MTU、fault matrix、budget 与 canonical report
-        wire/              # 后续安全 transport change 才创建的跨端 wire golden
+        wire/              # B0.5 跨端 canonical wire、crypto/KCP 与 malformed corpus
       http/
       realtime/
       qualification/       # Q0 scenario/evidence manifest、endpoint 示例与 contract freeze digest
@@ -286,6 +292,7 @@ shared/
 - HTTP fixtures、realtime golden packets、negative coverage manifest 与 admission semantic corpus 是兼容性基线，必须版本化并由统一工具重复生成和验证。
 - `contracts/fixtures/battle/model/` 是权威 gameplay 模型数据的唯一 owner；B0.2 profile 和后续 C++ harness 只消费其版本化数据，不在网络、C++ 或 Unity 目录复制规则。
 - `contracts/fixtures/battle/network-profile/` 是网络 profile 的唯一 owner；它绑定完整 model digest，冻结 logical kind/lane 和 target budget，但不分配 numeric message ID、wire、listener 或端口。
+- `contracts/fixtures/battle/wire/` 是 B0.5 wire corpus 的唯一 owner；它冻结 `3000-3007`、header/AAD、crypto/KCP vectors 与 negative cases，资格工具只读消费。
 - `descriptor.bin` 与 registry projection 不落盘；validator 使用刚生成的 Go descriptor registry，并在内存构建路由投影。
 - 不放服务端 domain model 或 Unity 类型。
 
@@ -429,6 +436,8 @@ HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第
 ```text
 docs/
   architecture.md
+  battle-transport-threat-model.md
+  deployment-secure-battle-transport.md
   gameplay-simulation-architecture.md
   roadmap.md
   network-transport-architecture.md
@@ -447,18 +456,19 @@ docs/
   technology-versions.md
 ```
 
-战斗模型与后续网络资格资产按以下归属演进：
+战斗模型、安全传输与后续网络资格资产按以下归属演进：
 
 ```text
 shared/contracts/fixtures/battle/model/  # B0.1 无网络模型 source of truth
 tools/battle-model/                      # 只读格式/引用/coverage/digest validator
 shared/contracts/fixtures/battle/network-profile/ # B0.2 profile、fault matrix 与低敏 report
 tools/battle-network-profile/            # 只读 validator、整数离散事件 simulator 与失败回归
-shared/contracts/fixtures/battle/wire/   # 安全 transport change 才创建
+shared/contracts/fixtures/battle/wire/   # B0.5 canonical wire 与 malformed corpus
+tools/secure-battle-transport/            # B0.5 verify/finalize 与失败回归
 tools/battle-qualification/               # 后续真实进程、故障注入、重连与安全验收
 ```
 
-`battle-model` validator 只验证纯 gameplay JSON；`battle-network-profile` 在此基础上只重放 logical byte/event、fault、queue 与 deadline，不实现 gameplay evaluator、真实 KCP、socket 或 listener。两个工具都不启动 Docker/Go/Unity/C++、不安装第三方依赖、不写 source corpus，也不依赖 generated code或本机绝对路径。B0.2 仍不创建 `battle/wire/`、numeric message ID、listener 或端口。后续资格工具只经公开或受控测试契约驱动真实进程，不导入 C++/Go 内部 gameplay 类型；运行日志、抓包和报告进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence。
+`battle-model` validator 只验证纯 gameplay JSON；`battle-network-profile` 在此基础上只重放 logical byte/event、fault、queue 与 deadline，不实现 gameplay evaluator、真实 KCP、socket 或 listener。两个工具都不启动 Docker/Go/Unity/C++、不安装第三方依赖、不写 source corpus，也不依赖 generated code 或本机绝对路径。B0.5 的 `battle/wire/`、numeric registry、listener 与安全 transport 是独立 source/adapter，不反向写入 B0.1/B0.2 corpus。后续资格工具只经公开或受控测试契约驱动真实进程，不导入 C++/Go 内部 gameplay 类型；运行日志、抓包和报告进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence。
 
 ## OpenSpec 结构
 

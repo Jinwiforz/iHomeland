@@ -44,6 +44,7 @@ publicApi:
     getWorldBootstrap: { requests: 120, window: 1m, burst: 20 }
     acceptVisitInvite: { requests: 120, window: 1m, burst: 20 }
     issueWorldAdmission: { requests: 120, window: 1m, burst: 20 }
+    issueBattleTicket: { requests: 60, window: 1m, burst: 8 }
   rateMaxEntries: 4096
   rateIdleTtl: 10m
   account:
@@ -70,6 +71,22 @@ publicApi:
     maximumLifetime: 30s
     replayRetention: 5m
     derivationKeySecret: env:IHOMELAND_WORLD_ADMISSION_KEY
+  battleUdp:
+    bindAddress: 127.0.0.1:58445
+    advertised: { host: 127.0.0.1, port: 58445 }
+    derivationKeySecret: env:IHOMELAND_BATTLE_DERIVATION_KEY
+    wireIdentity: 3d0505f82dcfacec3b296e0a089ce58db2338a59b45e65c87ae6f1dddf47c2b1
+    maximumTicketLifetime: 30s
+    replayRetention: 5m
+    cookieRotation: 30s
+    rekeyInterval: 10m
+    previousEpochOverlap: 3s
+    preAuthRate: { requests: 60, window: 1m, burst: 10 }
+    nodeQueueItems: 256
+    sessionQueueItems: 256
+    kcpQueueItems: 64
+    messageExpiry: 500ms
+    drainTimeout: 3s
   websocketControl:
     path: /v1/control
     subprotocol: ihomeland.control.v1

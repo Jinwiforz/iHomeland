@@ -13,6 +13,12 @@ set(IHOMELAND_MSVC_TOOLSET_VERSION "" CACHE STRING "锁定的 MSVC toolset 文�
 set(IHOMELAND_WINDOWS_SDK_PACKAGE_VERSION "" CACHE STRING "锁定的 Windows SDK 包版本。")
 set(IHOMELAND_MSC_VER "" CACHE STRING "锁定的 _MSC_VER。")
 
+if(IHOMELAND_ENABLE_ASAN)
+    # Protobuf/Abseil 与项目 target 必须使用相同的 MSVC STL annotation ABI。
+    # ASan 仍覆盖 heap/stack/global；这里只关闭无法跨未注解静态库混用的容器 annotation。
+    add_compile_definitions(_DISABLE_VECTOR_ANNOTATION _DISABLE_STRING_ANNOTATION)
+endif()
+
 if(NOT MSVC OR NOT MSVC_VERSION EQUAL IHOMELAND_MSC_VER)
     message(FATAL_ERROR "CMake 实际 compiler 不符合锁定的 _MSC_VER=${IHOMELAND_MSC_VER}")
 endif()
@@ -76,7 +82,12 @@ function(ihomeland_write_build_manifest)
   \"dependencies\": {
     \"jolt\": \"5.5.0\",
     \"recast_detour\": \"1.6.0\",
-    \"nlohmann_json\": \"3.12.0\"
+    \"nlohmann_json\": \"3.12.0\",
+    \"asio\": \"1.38.2\",
+    \"kcp\": \"2.1.1\",
+    \"libsodium\": \"1.0.22\",
+    \"abseil\": \"20250512.1\",
+    \"protobuf\": \"35.0\"
   }
 }
 ")

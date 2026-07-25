@@ -18,10 +18,11 @@ func TestRunRejectsMissingStorageSecretBeforeLoggingOrNetwork(t *testing.T) {
 	directory := t.TempDir()
 	configPath := filepath.Join(directory, "server.yaml")
 	admissionKeyPath := filepath.Join(directory, "admission-key")
-	if err := os.WriteFile(admissionKeyPath, []byte("test-world-admission-key-material-32-bytes"), 0o600); err != nil {
+	if err := os.WriteFile(admissionKeyPath, []byte("0123456789abcdef0123456789abcdef"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	configBody := "environment: local\npublicApi:\n  worldAdmission:\n    derivationKeySecret: 'file:" +
+		strings.ReplaceAll(admissionKeyPath, "'", "''") + "'\n  battleUdp:\n    derivationKeySecret: 'file:" +
 		strings.ReplaceAll(admissionKeyPath, "'", "''") + "'\n" + testSimulationControlYAML() +
 		"storage:\n  mysql:\n    passwordSecret: env:DEFINITELY_MISSING_STORAGE_SECRET\n"
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {

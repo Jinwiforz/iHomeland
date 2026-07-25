@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/jinwiforz/ihomeland/server/internal/account"
+	"github.com/jinwiforz/ihomeland/server/internal/battleentry"
+	"github.com/jinwiforz/ihomeland/server/internal/battleticket"
+	"github.com/jinwiforz/ihomeland/server/internal/battleticketcontrol"
 	"github.com/jinwiforz/ihomeland/server/internal/buildinfo"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
 	"github.com/jinwiforz/ihomeland/server/internal/contract"
@@ -18,6 +21,7 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 	storageall "github.com/jinwiforz/ihomeland/server/internal/storage"
 	storageaccount "github.com/jinwiforz/ihomeland/server/internal/storage/account"
+	storagebattleticket "github.com/jinwiforz/ihomeland/server/internal/storage/battleticket"
 	storagemysql "github.com/jinwiforz/ihomeland/server/internal/storage/mysql"
 	storagepersonalworld "github.com/jinwiforz/ihomeland/server/internal/storage/personalworld"
 	storageplacement "github.com/jinwiforz/ihomeland/server/internal/storage/placement"
@@ -324,7 +328,48 @@ func (component *publicRuntimeComponent) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("construct tcp gameplay server: %w", err)
 	}
-	router, err := httpapi.NewRouter(accountService, sessionService, worldEntry, httpapi.RouterConfig{
+	battleStore, err := storagebattleticket.New(client, keyspace, component.metrics)
+	if err != nil {
+		return fmt.Errorf("construct battle ticket store: %w", err)
+	}
+	battlePolicy, err := battleticket.NewPolicy(component.settings.PublicAPI.BattleUDP.MaximumTicketLifetime, component.settings.PublicAPI.BattleUDP.ReplayRetention)
+	if err != nil {
+		return fmt.Errorf("construct battle ticket policy: %w", err)
+	}
+	battleDeriver, err := battleticket.NewDeriver(component.prepared.battleDerivationKey)
+	if err != nil {
+		return fmt.Errorf("construct battle ticket deriver: %w", err)
+	}
+	battleIssuer, err := battleticket.NewIssuer(battleStore, battleDeriver, battlePolicy)
+	if err != nil {
+		return fmt.Errorf("construct battle ticket issuer: %w", err)
+	}
+	battleVisits, err := battleentry.NewVisitSessionServiceAdapter(visitService)
+	if err != nil {
+		return fmt.Errorf("construct battle visit adapter: %w", err)
+	}
+	battleEndpoint, err := configuredBattleEndpoint(component.settings.PublicAPI.BattleUDP)
+	if err != nil {
+		return fmt.Errorf("construct battle endpoint: %w", err)
+	}
+	battleChild, err := battleticketcontrol.NewRegistry(component.simulation.ControlSession(), component.simulation.SimulationNodeID())
+	if err != nil {
+		return fmt.Errorf("construct battle child registry: %w", err)
+	}
+	wireIdentity, err := battleticket.ParseDigestHex(component.settings.PublicAPI.BattleUDP.WireIdentity)
+	if err != nil {
+		return fmt.Errorf("construct battle wire identity: %w", err)
+	}
+	battleApplication, err := battleentry.NewService(
+		worldAdapter, placementStore, battleVisits, battleTargetResolver{resolver: component.simulation.TargetResolver()},
+		battleEndpointProvider{component: component.simulation, endpoint: battleEndpoint},
+		newBattleActorCapacity(), battleIssuer, battleChild, component.clock,
+		component.settings.PublicAPI.BattleUDP.MaximumTicketLifetime, wireIdentity,
+	)
+	if err != nil {
+		return fmt.Errorf("construct battle ticket application: %w", err)
+	}
+	router, err := httpapi.NewRouter(accountService, sessionService, worldEntry, battleApplication, httpapi.RouterConfig{
 		ServerVersion:        component.info.Version,
 		ProtocolVersion:      publicProtocolVersion,
 		MinimumClientVersion: minimumPublicClientVersion,

@@ -1,0 +1,69 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "limits",
+  "wire": {
+    "byte_order": "network-big-endian",
+    "kcp_segment_byte_order": "little-endian",
+    "maximum_datagram_bytes": 1200,
+    "secure_header_bytes": 48,
+    "raw_route_header_bytes": 16,
+    "kcp_segment_header_bytes": 24,
+    "aead_tag_bytes": 16,
+    "maximum_raw_payload_bytes": 1120,
+    "maximum_kcp_segment_payload_bytes": 1000,
+    "ip_fragmentation": "forbidden",
+    "unknown_flags": "reject"
+  },
+  "handshake": {
+    "ticket_identifier_bytes": 16,
+    "client_nonce_bytes": 32,
+    "ephemeral_public_key_bytes": 32,
+    "cookie_bytes": 16,
+    "transcript_proof_bytes": 32,
+    "pre_cookie_ticket_lookup": "forbidden",
+    "pre_cookie_asymmetric_work": "forbidden",
+    "pre_cookie_dynamic_session_allocation": "forbidden",
+    "retry_response_budget": "not-greater-than-request"
+  },
+  "crypto": {
+    "key_exchange": "X25519",
+    "key_derivation": "HKDF-SHA-256",
+    "transcript_authentication": "HMAC-SHA-256",
+    "packet_aead": "ChaCha20-Poly1305",
+    "nonce_layout": "epoch-u32-be||packet-sequence-u64-be",
+    "directional_keys": "required",
+    "rekey_interval_ms": 600000,
+    "rekey_packet_limit": 1048576,
+    "previous_epoch_overlap_ms": 3000
+  },
+  "replay": {
+    "window_packets": 256,
+    "duplicate": "drop",
+    "too_old": "drop",
+    "future_jump": "close",
+    "sequence_exhaustion": "close-before-wrap"
+  },
+  "kcp": {
+    "update_interval_ms": 10,
+    "send_window_segments": 64,
+    "receive_window_segments": 64,
+    "fast_resend": 2,
+    "minimum_rto_ms": 30,
+    "maximum_rto_ms": 200,
+    "dead_link_retransmits": 10,
+    "message_queue_items": 64,
+    "message_expiry_ms": 500
+  },
+  "resources": {
+    "maximum_actors_per_instance": 8,
+    "node_queue_items": 256,
+    "session_queue_items": 256,
+    "pre_auth_session_state": 0,
+    "udp_listeners_per_node": 1,
+    "active_endpoints_per_session": 1,
+    "production_ephemeral_port": "forbidden",
+    "test_bind_endpoint": "127.0.0.1:0",
+    "local_recommended_udp_port": 58445
+  }
+}

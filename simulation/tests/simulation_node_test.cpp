@@ -2,6 +2,7 @@
 #include "ihomeland/sim/core/sha256.hpp"
 
 #include <chrono>
+#include <array>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -77,6 +78,251 @@ void RequireFailure(Action action, const char* message) {
     append(std::to_string(command.assignment.fencing_token));
     command.assignment.fingerprint = ihomeland::sim::Sha256Text(material);
     return command;
+}
+
+/// TestTicketCommand 返回指向 exact runtime 的完整 ticket install 输入。
+[[nodiscard]] ihomeland::sim::BattleTicketInstallCommand TestTicketCommand(
+    const ihomeland::sim::InstanceStartCommand& start,
+    const ihomeland::sim::InstanceReadyReceipt& ready,
+    const std::size_t index,
+    const std::uint64_t expires_at_unix_ms = 4000) {
+    std::ostringstream suffix;
+    suffix << std::setw(4) << std::setfill('0') << index;
+    auto command = ihomeland::sim::BattleTicketInstallCommand{
+        .install_request_id = "sctl_install_ticket_" + suffix.str(),
+        .ticket_id = "btk1_ticket_" + suffix.str(),
+        .binding_fingerprint =
+            ihomeland::sim::Sha256Text("ticket-binding|" + suffix.str()),
+        .binding =
+            {
+                .player_id = "ply_ticket_" + suffix.str(),
+                .session_id = "ses_ticket_" + suffix.str(),
+                .session_epoch = 3,
+                .role = "owner",
+                .personal_world_id =
+                    start.assignment.personal_world_id,
+                .visit_session_id = "",
+                .world_instance_id =
+                    start.assignment.world_instance_id,
+                .runtime_node_id =
+                    start.assignment.runtime_node_id,
+                .assignment_generation =
+                    start.assignment.generation,
+                .fencing_token =
+                    start.assignment.fencing_token,
+                .assignment_fingerprint =
+                    start.assignment.fingerprint,
+                .simulation_node_id = "snode_control_test",
+                .simulation_instance_id =
+                    ready.simulation_instance_id,
+                .mapping_generation = start.mapping_generation,
+                .target_revision = 5,
+                .model_identity = std::string(64, 'b'),
+                .profile_identity = std::string(64, 'c'),
+                .config_identity = start.config_identity,
+                .wire_identity = std::string(64, '1'),
+                .actor_slot = static_cast<std::uint8_t>(index),
+                .advertised_host = "127.0.0.1",
+                .advertised_port = 58445,
+                .issue_id = "biss_ticket_" + suffix.str(),
+                .issued_at_unix_ms = 1000,
+                .expires_at_unix_ms = expires_at_unix_ms,
+            },
+        .proof_key = {},
+    };
+    command.proof_key.fill(static_cast<std::uint8_t>(index + 1));
+    return command;
+}
+
+/// TestBattleTicketRegistry 验证 exact replay、不可逆状态与 instance 8/9 hard cap。
+void TestBattleTicketRegistry() {
+    constexpr std::uint64_t observed_unix_ms = 2000;
+    ihomeland::sim::SimulationNode node(TestConfig());
+    const auto start = TestCommand("ticket_registry_0001");
+    const auto ready = node.Start(start);
+    std::array<ihomeland::sim::BattleTicketInstallCommand, 8> commands;
+    for (std::size_t index = 0; index < commands.size(); ++index) {
+        commands[index] = TestTicketCommand(start, ready, index);
+        const auto receipt =
+            node.InstallBattleTicket(commands[index], observed_unix_ms);
+        Require(
+            receipt.state ==
+                    ihomeland::sim::BattleTicketState::Installed &&
+                receipt.actor_slot == index && !receipt.replayed,
+            "ticket install receipt drifted");
+    }
+    Require(
+        node.InstalledOrActiveActors(
+            ready.simulation_instance_id,
+            observed_unix_ms) == 8,
+        "eight installed actors were not reserved");
+
+    const auto replay =
+        node.InstallBattleTicket(commands.front(), observed_unix_ms);
+    Require(
+        replay.replayed &&
+            replay.state == ihomeland::sim::BattleTicketState::Installed,
+        "exact ticket install did not replay");
+    auto binding_drift = commands.front();
+    ++binding_drift.binding.target_revision;
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.InstallBattleTicket(binding_drift, observed_unix_ms));
+        },
+        "ticket install binding drift was accepted");
+    auto proof_drift = commands.front();
+    ++proof_drift.proof_key.front();
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.InstallBattleTicket(proof_drift, observed_unix_ms));
+        },
+        "ticket install proof drift was accepted");
+
+    auto ninth = TestTicketCommand(start, ready, 8);
+    ninth.binding.actor_slot = 7;
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.InstallBattleTicket(ninth, observed_unix_ms));
+        },
+        "ninth installed actor bypassed instance hard cap");
+    Require(
+        node.InstalledOrActiveActors(
+            ready.simulation_instance_id,
+            observed_unix_ms) == 8,
+        "rejected ninth actor changed capacity");
+
+    const auto consumed = node.ConsumeBattleTicket(
+        commands[0].ticket_id,
+        commands[0].binding_fingerprint,
+        observed_unix_ms);
+    Require(
+        consumed.state == ihomeland::sim::BattleTicketState::Consumed &&
+            !consumed.replayed,
+        "installed ticket was not consumed");
+    const auto consume_replay = node.ConsumeBattleTicket(
+        commands[0].ticket_id,
+        commands[0].binding_fingerprint,
+        observed_unix_ms);
+    Require(
+        consume_replay.state ==
+                ihomeland::sim::BattleTicketState::Consumed &&
+            consume_replay.replayed,
+        "ticket consume was not idempotent");
+
+    const auto revoked = node.RevokeBattleTicket(
+        "sctl_revoke_ticket_0000",
+        commands[0].ticket_id,
+        commands[0].binding_fingerprint,
+        commands[0].binding.simulation_instance_id,
+        commands[0].binding.actor_slot);
+    Require(
+        revoked.state == ihomeland::sim::BattleTicketState::Revoked &&
+            !revoked.replayed,
+        "consumed ticket was not revoked");
+    const auto revoke_replay = node.RevokeBattleTicket(
+        "sctl_revoke_ticket_0000",
+        commands[0].ticket_id,
+        commands[0].binding_fingerprint,
+        commands[0].binding.simulation_instance_id,
+        commands[0].binding.actor_slot);
+    Require(revoke_replay.replayed, "ticket revoke was not idempotent");
+    RequireFailure(
+        [&] {
+            static_cast<void>(node.RevokeBattleTicket(
+                "sctl_revoke_ticket_conflict",
+                commands[0].ticket_id,
+                commands[0].binding_fingerprint,
+                commands[0].binding.simulation_instance_id,
+                commands[0].binding.actor_slot));
+        },
+        "ticket revoke request drift was accepted");
+    const auto terminal_install_replay =
+        node.InstallBattleTicket(commands[0], observed_unix_ms);
+    Require(
+        terminal_install_replay.replayed &&
+            terminal_install_replay.state ==
+                ihomeland::sim::BattleTicketState::Revoked,
+        "terminal ticket install replay lost its tombstone");
+
+    auto replacement = TestTicketCommand(start, ready, 8, 5000);
+    replacement.binding.actor_slot = 0;
+    static_cast<void>(
+        node.InstallBattleTicket(replacement, observed_unix_ms));
+    Require(
+        node.InstalledOrActiveActors(
+            ready.simulation_instance_id,
+            observed_unix_ms) == 8,
+        "revoked actor slot was not reusable");
+
+    const auto expired = node.BattleTicketStatus(
+        commands[1].ticket_id,
+        commands[1].binding_fingerprint,
+        commands[1].binding.expires_at_unix_ms);
+    Require(
+        expired.state == ihomeland::sim::BattleTicketState::Expired,
+        "ticket did not expire at its absolute deadline");
+    RequireFailure(
+        [&] {
+            static_cast<void>(node.ConsumeBattleTicket(
+                commands[1].ticket_id,
+                commands[1].binding_fingerprint,
+                commands[1].binding.expires_at_unix_ms));
+        },
+        "expired ticket was consumed");
+    auto expiry_replacement = TestTicketCommand(start, ready, 9, 5000);
+    expiry_replacement.binding.actor_slot = 1;
+    static_cast<void>(
+        node.InstallBattleTicket(expiry_replacement, observed_unix_ms));
+
+    auto stale_target = TestTicketCommand(start, ready, 10, 5000);
+    ++stale_target.binding.mapping_generation;
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.InstallBattleTicket(stale_target, observed_unix_ms));
+        },
+        "stale ticket target was accepted");
+
+    auto cancelled_before_install =
+        TestTicketCommand(start, ready, 11, 5000);
+    cancelled_before_install.binding.actor_slot = 3;
+    static_cast<void>(node.RevokeBattleTicket(
+        "sctl_revoke_ticket_0011",
+        cancelled_before_install.ticket_id,
+        cancelled_before_install.binding_fingerprint,
+        cancelled_before_install.binding.simulation_instance_id,
+        cancelled_before_install.binding.actor_slot));
+    const auto cancelled_replay =
+        node.InstallBattleTicket(
+            cancelled_before_install,
+            observed_unix_ms);
+    Require(
+        cancelled_replay.state ==
+                ihomeland::sim::BattleTicketState::Revoked &&
+            cancelled_replay.replayed,
+        "pre-install revoke allowed delayed install to restore eligibility");
+
+    node.Stop(
+        start.assignment.world_instance_id,
+        start.assignment.fingerprint,
+        1000ms);
+    const auto stopped = node.BattleTicketStatus(
+        commands[2].ticket_id,
+        commands[2].binding_fingerprint,
+        observed_unix_ms);
+    Require(
+        stopped.state == ihomeland::sim::BattleTicketState::Revoked,
+        "instance stop did not revoke installed ticket");
+    const auto replay_after_stop =
+        node.InstallBattleTicket(commands[2], 5000);
+    Require(
+        replay_after_stop.replayed &&
+            replay_after_stop.state ==
+                ihomeland::sim::BattleTicketState::Revoked,
+        "stopped target lost exact terminal install replay");
 }
 
 /// TestLifecycle 验证 start replay、capacity、drain、result ack 与 stop replay。
@@ -236,6 +482,7 @@ int main() {
     try {
         TestLifecycle();
         TestActorQualificationCap();
+        TestBattleTicketRegistry();
         TestResultOutboxCapacity();
         return 0;
     } catch (const std::exception&) {

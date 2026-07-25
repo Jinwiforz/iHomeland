@@ -291,7 +291,11 @@ func startReadyProcess(t *testing.T, executable string, configFactory func() (st
 		output := new(bytes.Buffer)
 		errorOutput := new(bytes.Buffer)
 		command := exec.Command(executable, "--config", configPath)
-		command.Env = append(os.Environ(), "IHOMELAND_WORLD_ADMISSION_KEY=cmd-server-integration-admission-key")
+		command.Env = append(
+			os.Environ(),
+			"IHOMELAND_WORLD_ADMISSION_KEY=cmd-server-integration-admission-key",
+			"IHOMELAND_BATTLE_DERIVATION_KEY=0123456789abcdef0123456789abcdef",
+		)
 		prepareProcess(command)
 		command.Stdout = output
 		command.Stderr = errorOutput

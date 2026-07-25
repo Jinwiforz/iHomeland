@@ -338,3 +338,11 @@ Unity 使用 Composition Root + App Scope + Scene Scope：
 - Unity Hosts：主线程、Coroutine、UI、Audio 和 SceneContext adapter
 
 客户端不得把 Scene、Prefab 或 ScriptableObject 作为在线业务事实 owner。Gameplay replica、预测、插值、HUD 与镜头的详细规则见 `docs/client-architecture.md` 和 `docs/gameplay-simulation-architecture.md`。
+
+## B0.5 安全战斗传输收口
+
+Go Composition Root 是 BattleTicket、Redis issuance、exact C++ child/control 与公开
+HTTP route 的唯一装配 owner。C++ `SimulationNode` 是 UDP listener、ticket/session
+registry、raw/KCP multiplexer 和 simulation ingress 的唯一运行时 owner。安全套件固定为
+X25519、HKDF-SHA-256 与 ChaCha20-Poly1305；B0.5 只声明实现资格，B0.6 网络故障资格仍
+是后置门。

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jinwiforz/ihomeland/server/internal/account"
+	"github.com/jinwiforz/ihomeland/server/internal/battleentry"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
@@ -54,6 +55,12 @@ type WorldApplication interface {
 	AcceptVisitInvite(ctx context.Context, authenticated session.AuthenticatedSession, visitID visitsession.VisitSessionID, inviteID visitsession.InviteID, expected visitsession.Revision, idempotencyKey string) (worldentry.ReservationResult, error)
 	// IssueWorldAdmission 从权威事实签发opaque credential。
 	IssueWorldAdmission(ctx context.Context, authenticated session.AuthenticatedSession, target worldentry.AdmissionTarget, idempotencyKey string) (worldentry.AdmissionResult, error)
+}
+
+// BattleApplication 是公开 BattleTicket handler 唯一允许调用的 application 端口。
+type BattleApplication interface {
+	// Issue 从权威 owner 事实签发 exact SimulationTarget 的短期 credential。
+	Issue(ctx context.Context, authenticated session.AuthenticatedSession, target battleentry.Target, idempotencyKey string) (battleentry.Result, error)
 }
 
 // HTTPObserver 只接收低基数operation、status class、outcome与数值测量。
@@ -100,15 +107,17 @@ type Router struct {
 	sessions SessionApplication
 	// worlds 持有world-entry编排。
 	worlds WorldApplication
+	// battles 持有 battle-entry target admission。
+	battles BattleApplication
 	// config 是启动后不可变公开投影。
 	config RouterConfig
 	// limiter 同时执行匿名IP和认证session两阶段预算。
 	limiter *limiter
 }
 
-// NewRouter 使用gin.New和固定middleware构造全部10个冻结operation。
-func NewRouter(accounts AccountApplication, sessions SessionApplication, worlds WorldApplication, config RouterConfig) (*Router, error) {
-	if accounts == nil || sessions == nil || worlds == nil || config.ServerVersion == "" || config.ProtocolVersion == 0 || config.MinimumClientVersion == "" || len(config.Endpoints) != 2 || config.HTTPBodyBytes < 4096 || config.RealtimeFrameBytes < 1024 || config.Ready == nil || len(config.Rates) != len(operations) || config.RateMaxEntries < 1 || config.RateIdleTTL <= 0 || config.Observer == nil || config.Logger == nil {
+// NewRouter 使用gin.New和固定middleware构造全部11个冻结operation。
+func NewRouter(accounts AccountApplication, sessions SessionApplication, worlds WorldApplication, battles BattleApplication, config RouterConfig) (*Router, error) {
+	if accounts == nil || sessions == nil || worlds == nil || battles == nil || config.ServerVersion == "" || config.ProtocolVersion == 0 || config.MinimumClientVersion == "" || len(config.Endpoints) != 2 || config.HTTPBodyBytes < 4096 || config.RealtimeFrameBytes < 1024 || config.Ready == nil || len(config.Rates) != len(operations) || config.RateMaxEntries < 1 || config.RateIdleTTL <= 0 || config.Observer == nil || config.Logger == nil {
 		return nil, errors.New("public HTTP router dependencies are incomplete")
 	}
 	for _, endpoint := range config.Endpoints {
@@ -118,14 +127,14 @@ func NewRouter(accounts AccountApplication, sessions SessionApplication, worlds 
 	}
 	config.Endpoints = append([]session.Endpoint(nil), config.Endpoints...)
 	gin.SetMode(gin.ReleaseMode)
-	router := &Router{engine: gin.New(), accounts: accounts, sessions: sessions, worlds: worlds, config: config, limiter: newLimiter(config.Rates, config.RateMaxEntries, config.RateIdleTTL)}
+	router := &Router{engine: gin.New(), accounts: accounts, sessions: sessions, worlds: worlds, battles: battles, config: config, limiter: newLimiter(config.Rates, config.RateMaxEntries, config.RateIdleTTL)}
 	router.engine.Use(router.safetyMiddleware())
 	handlers := map[string]gin.HandlerFunc{
 		"getVersion": router.getVersion, "getBootstrapConfig": router.getBootstrapConfig,
 		"registerAccount": router.registerAccount, "loginAccount": router.loginAccount, "refreshSession": router.refreshSession,
 		"logoutSession": router.logoutSession, "issueConnectionTicket": router.issueConnectionTicket,
 		"getWorldBootstrap": router.getWorldBootstrap, "acceptVisitInvite": router.acceptVisitInvite,
-		"issueWorldAdmission": router.issueWorldAdmission,
+		"issueWorldAdmission": router.issueWorldAdmission, "issueBattleTicket": router.issueBattleTicket,
 	}
 	for _, operation := range operations {
 		handler, exists := handlers[operation.ID]
@@ -420,6 +429,50 @@ func (router *Router) issueWorldAdmission(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, admissionProjection(result))
+}
+
+// issueBattleTicket 只解析 closed target selector 并调用 battle-entry。
+//
+// Handler 不读取 Host、不解析 runtime identity、不访问 capacity/Redis/control，也不接触 proof key。
+func (router *Router) issueBattleTicket(c *gin.Context) {
+	var request battleTicketRequest
+	if router.decodeOperationJSON(c, &request) != nil {
+		router.writeError(c, validationError)
+		return
+	}
+	var target battleentry.Target
+	if request.Kind == "OWN_WORLD" {
+		if request.VisitSessionID != "" {
+			router.writeError(c, validationError)
+			return
+		}
+		target.Kind = battleentry.TargetKindOwnWorld
+	} else if request.Kind == "VISIT_WORLD" {
+		visitID, err := visitsession.NewVisitSessionID(request.VisitSessionID)
+		if err != nil {
+			router.writeError(c, validationError)
+			return
+		}
+		target = battleentry.Target{Kind: battleentry.TargetKindVisitWorld, VisitSessionID: visitID}
+	} else {
+		router.writeError(c, validationError)
+		return
+	}
+	authenticated, ok := router.authenticated(c)
+	if !ok {
+		router.writeError(c, internalError)
+		return
+	}
+	result, err := router.battles.Issue(c.Request.Context(), authenticated, target, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		router.writeError(c, mapApplicationError(err))
+		return
+	}
+	if !result.Valid() {
+		router.writeError(c, internalError)
+		return
+	}
+	c.JSON(http.StatusCreated, battleTicketProjection(result))
 }
 
 // authenticated 读取middleware私有request scope中的受信值。

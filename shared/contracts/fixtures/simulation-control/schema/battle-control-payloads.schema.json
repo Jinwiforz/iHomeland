@@ -1,0 +1,665 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.example/schema/simulation-control/battle-control-payloads-v1.json",
+  "title": "iHomeland Battle Control Payloads v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/listenerStatusQuery"
+    },
+    {
+      "$ref": "#/$defs/listenerStatusReceipt"
+    },
+    {
+      "$ref": "#/$defs/ticketInstall"
+    },
+    {
+      "$ref": "#/$defs/ticketInstalled"
+    },
+    {
+      "$ref": "#/$defs/ticketStatusQuery"
+    },
+    {
+      "$ref": "#/$defs/ticketStatusReceipt"
+    },
+    {
+      "$ref": "#/$defs/ticketRevoke"
+    },
+    {
+      "$ref": "#/$defs/ticketRevoked"
+    },
+    {
+      "$ref": "#/$defs/sessionRevoke"
+    },
+    {
+      "$ref": "#/$defs/sessionClosed"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "identity": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{3,127}$"
+    },
+    "ticketId": {
+      "type": "string",
+      "pattern": "^btk1_[A-Za-z0-9_-]{32}$"
+    },
+    "actorSlot": {
+      "type": "string",
+      "enum": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ]
+    },
+    "listenerStatusQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "node.listener.status.query"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "simulationNodeId"
+          ],
+          "properties": {
+            "simulationNodeId": {
+              "$ref": "#/$defs/identity"
+            }
+          }
+        }
+      }
+    },
+    "listenerStatusReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "node.listener.status.receipt"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "simulationNodeId",
+            "listenerGeneration",
+            "state",
+            "bindHost",
+            "bindPort",
+            "advertisedHost",
+            "advertisedPort",
+            "wireIdentity",
+            "cryptoIdentity"
+          ],
+          "properties": {
+            "simulationNodeId": {
+              "$ref": "#/$defs/identity"
+            },
+            "listenerGeneration": {
+              "$ref": "#/$defs/decimal"
+            },
+            "state": {
+              "enum": [
+                "starting",
+                "ready",
+                "failed",
+                "stopped"
+              ]
+            },
+            "bindHost": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "bindPort": {
+              "$ref": "#/$defs/decimal"
+            },
+            "advertisedHost": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "advertisedPort": {
+              "$ref": "#/$defs/decimal"
+            },
+            "wireIdentity": {
+              "$ref": "#/$defs/sha256"
+            },
+            "cryptoIdentity": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "playerId",
+        "sessionId",
+        "sessionEpoch",
+        "role",
+        "personalWorldId",
+        "visitSessionId",
+        "worldInstanceId",
+        "runtimeNodeId",
+        "assignmentGeneration",
+        "fencingToken",
+        "assignmentFingerprint",
+        "simulationNodeId",
+        "simulationInstanceId",
+        "mappingGeneration",
+        "targetRevision",
+        "modelIdentity",
+        "profileIdentity",
+        "configIdentity",
+        "wireIdentity",
+        "actorSlot",
+        "advertisedHost",
+        "advertisedPort",
+        "issueId",
+        "issuedAtUnixMs",
+        "expiresAtUnixMs"
+      ],
+      "properties": {
+        "playerId": {
+          "$ref": "#/$defs/identity"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/identity"
+        },
+        "sessionEpoch": {
+          "$ref": "#/$defs/decimal"
+        },
+        "role": {
+          "enum": [
+            "owner",
+            "visitor"
+          ]
+        },
+        "personalWorldId": {
+          "$ref": "#/$defs/identity"
+        },
+        "visitSessionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^(|[A-Za-z][A-Za-z0-9._:-]{3,127})$"
+        },
+        "worldInstanceId": {
+          "$ref": "#/$defs/identity"
+        },
+        "runtimeNodeId": {
+          "$ref": "#/$defs/identity"
+        },
+        "assignmentGeneration": {
+          "$ref": "#/$defs/decimal"
+        },
+        "fencingToken": {
+          "$ref": "#/$defs/decimal"
+        },
+        "assignmentFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulationNodeId": {
+          "$ref": "#/$defs/identity"
+        },
+        "simulationInstanceId": {
+          "$ref": "#/$defs/identity"
+        },
+        "mappingGeneration": {
+          "$ref": "#/$defs/decimal"
+        },
+        "targetRevision": {
+          "$ref": "#/$defs/decimal"
+        },
+        "modelIdentity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "profileIdentity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "configIdentity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "wireIdentity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "actorSlot": {
+          "$ref": "#/$defs/actorSlot"
+        },
+        "advertisedHost": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "advertisedPort": {
+          "$ref": "#/$defs/decimal"
+        },
+        "issueId": {
+          "$ref": "#/$defs/identity"
+        },
+        "issuedAtUnixMs": {
+          "$ref": "#/$defs/decimal"
+        },
+        "expiresAtUnixMs": {
+          "$ref": "#/$defs/decimal"
+        }
+      }
+    },
+    "ticketInstall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.ticket.install"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "installRequestId",
+            "ticketId",
+            "bindingFingerprint",
+            "binding",
+            "proofKey"
+          ],
+          "properties": {
+            "installRequestId": {
+              "$ref": "#/$defs/identity"
+            },
+            "ticketId": {
+              "$ref": "#/$defs/ticketId"
+            },
+            "bindingFingerprint": {
+              "$ref": "#/$defs/sha256"
+            },
+            "binding": {
+              "$ref": "#/$defs/binding"
+            },
+            "proofKey": {
+              "$ref": "#/$defs/sha256",
+              "description": "仅允许运行时 Go→C++ pipe 传递；fixture、日志、report、Redis 禁止保存。"
+            }
+          }
+        }
+      }
+    },
+    "ticketInstalled": {
+      "$ref": "#/$defs/ticketReceiptInstalled"
+    },
+    "ticketStatusQuery": {
+      "$ref": "#/$defs/ticketQuery"
+    },
+    "ticketStatusReceipt": {
+      "$ref": "#/$defs/ticketReceiptStatus"
+    },
+    "ticketRevoke": {
+      "$ref": "#/$defs/ticketRevokeRequest"
+    },
+    "ticketRevoked": {
+      "$ref": "#/$defs/ticketReceiptRevoked"
+    },
+    "ticketQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.ticket.status.query"
+        },
+        "payload": {
+          "$ref": "#/$defs/ticketLookup"
+        }
+      }
+    },
+    "ticketRevokeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.ticket.revoke"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "revokeRequestId",
+            "ticketId",
+            "bindingFingerprint",
+            "simulationInstanceId",
+            "actorSlot"
+          ],
+          "properties": {
+            "revokeRequestId": {
+              "$ref": "#/$defs/identity"
+            },
+            "ticketId": {
+              "$ref": "#/$defs/ticketId"
+            },
+            "bindingFingerprint": {
+              "$ref": "#/$defs/sha256"
+            },
+            "simulationInstanceId": {
+              "$ref": "#/$defs/identity"
+            },
+            "actorSlot": {
+              "$ref": "#/$defs/actorSlot"
+            }
+          }
+        }
+      }
+    },
+    "ticketLookup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticketId",
+        "bindingFingerprint",
+        "simulationInstanceId"
+      ],
+      "properties": {
+        "ticketId": {
+          "$ref": "#/$defs/ticketId"
+        },
+        "bindingFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulationInstanceId": {
+          "$ref": "#/$defs/identity"
+        }
+      }
+    },
+    "ticketReceiptInstalled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.ticket.installed"
+        },
+        "payload": {
+          "$ref": "#/$defs/ticketReceiptPayloadInstalled"
+        }
+      }
+    },
+    "ticketReceiptStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.ticket.status.receipt"
+        },
+        "payload": {
+          "$ref": "#/$defs/ticketReceiptPayloadStatus"
+        }
+      }
+    },
+    "ticketReceiptRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.ticket.revoked"
+        },
+        "payload": {
+          "$ref": "#/$defs/ticketReceiptPayloadRevoked"
+        }
+      }
+    },
+    "ticketReceiptPayloadInstalled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installRequestId",
+        "ticketId",
+        "bindingFingerprint",
+        "simulationInstanceId",
+        "actorSlot",
+        "state"
+      ],
+      "properties": {
+        "installRequestId": {
+          "$ref": "#/$defs/identity"
+        },
+        "ticketId": {
+          "$ref": "#/$defs/ticketId"
+        },
+        "bindingFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulationInstanceId": {
+          "$ref": "#/$defs/identity"
+        },
+        "actorSlot": {
+          "$ref": "#/$defs/actorSlot"
+        },
+        "state": {
+          "enum": [
+            "installed",
+            "consumed",
+            "revoked",
+            "expired"
+          ]
+        }
+      }
+    },
+    "ticketReceiptPayloadStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticketId",
+        "bindingFingerprint",
+        "simulationInstanceId",
+        "state"
+      ],
+      "properties": {
+        "ticketId": {
+          "$ref": "#/$defs/ticketId"
+        },
+        "bindingFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulationInstanceId": {
+          "$ref": "#/$defs/identity"
+        },
+        "actorSlot": {
+          "$ref": "#/$defs/actorSlot"
+        },
+        "state": {
+          "enum": [
+            "installed",
+            "consumed",
+            "revoked",
+            "expired",
+            "missing"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "missing"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "actorSlot"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "actorSlot"
+            ]
+          }
+        }
+      ]
+    },
+    "ticketReceiptPayloadRevoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revokeRequestId",
+        "ticketId",
+        "bindingFingerprint",
+        "simulationInstanceId",
+        "state"
+      ],
+      "properties": {
+        "revokeRequestId": {
+          "$ref": "#/$defs/identity"
+        },
+        "ticketId": {
+          "$ref": "#/$defs/ticketId"
+        },
+        "bindingFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "simulationInstanceId": {
+          "$ref": "#/$defs/identity"
+        },
+        "state": {
+          "const": "revoked"
+        }
+      }
+    },
+    "sessionRevoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.session.revoke"
+        },
+        "payload": {
+          "$ref": "#/$defs/sessionIdentity"
+        }
+      }
+    },
+    "sessionClosed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle.session.closed"
+        },
+        "payload": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/sessionIdentity"
+            },
+            {
+              "type": "object",
+              "required": [
+                "closeReason",
+                "packetDispatchStopped"
+              ],
+              "properties": {
+                "closeReason": {
+                  "$ref": "#/$defs/identity"
+                },
+                "packetDispatchStopped": {
+                  "const": true
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "sessionIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revokeRequestId",
+        "battleSessionId",
+        "sessionGeneration",
+        "simulationInstanceId",
+        "assignmentFingerprint"
+      ],
+      "properties": {
+        "revokeRequestId": {
+          "$ref": "#/$defs/identity"
+        },
+        "battleSessionId": {
+          "$ref": "#/$defs/identity"
+        },
+        "sessionGeneration": {
+          "$ref": "#/$defs/decimal"
+        },
+        "simulationInstanceId": {
+          "$ref": "#/$defs/identity"
+        },
+        "assignmentFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "closeReason": {
+          "$ref": "#/$defs/identity"
+        },
+        "packetDispatchStopped": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

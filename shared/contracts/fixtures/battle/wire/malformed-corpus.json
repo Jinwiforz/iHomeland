@@ -1,0 +1,36 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "malformed-corpus",
+  "cases": [
+    { "case_id": "secure-truncated", "layer": "secure-header", "mutation": "47-bytes", "expected_reason": "BATTLE_WIRE_TRUNCATED" },
+    { "case_id": "secure-bad-magic", "layer": "secure-header", "mutation": "magic-not-IHBT", "expected_reason": "BATTLE_WIRE_MAGIC_INVALID" },
+    { "case_id": "secure-unknown-version", "layer": "secure-header", "mutation": "wire-version-2", "expected_reason": "BATTLE_WIRE_VERSION_UNSUPPORTED" },
+    { "case_id": "secure-unknown-kind", "layer": "secure-header", "mutation": "packet-kind-255", "expected_reason": "BATTLE_WIRE_KIND_INVALID" },
+    { "case_id": "secure-unknown-flags", "layer": "secure-header", "mutation": "flags-1", "expected_reason": "BATTLE_WIRE_FLAGS_INVALID" },
+    { "case_id": "secure-zero-session", "layer": "secure-header", "mutation": "session-digest-zero", "expected_reason": "BATTLE_WIRE_SESSION_INVALID" },
+    { "case_id": "secure-zero-generation", "layer": "secure-header", "mutation": "battle-session-generation-zero", "expected_reason": "BATTLE_WIRE_GENERATION_INVALID" },
+    { "case_id": "secure-zero-sequence", "layer": "secure-header", "mutation": "packet-sequence-zero", "expected_reason": "BATTLE_WIRE_SEQUENCE_INVALID" },
+    { "case_id": "secure-length-mismatch", "layer": "secure-header", "mutation": "protected-length-not-datagram", "expected_reason": "BATTLE_WIRE_LENGTH_MISMATCH" },
+    { "case_id": "secure-zero-binding", "layer": "secure-header", "mutation": "binding-discriminator-zero", "expected_reason": "BATTLE_WIRE_BINDING_INVALID" },
+    { "case_id": "secure-nonzero-reserved", "layer": "secure-header", "mutation": "reserved-1", "expected_reason": "BATTLE_WIRE_RESERVED_INVALID" },
+    { "case_id": "raw-cross-lane-route", "layer": "raw-route-header", "mutation": "message-id-3004", "expected_reason": "BATTLE_ROUTE_LANE_MISMATCH" },
+    { "case_id": "raw-zero-partitions", "layer": "raw-route-header", "mutation": "partition-count-zero", "expected_reason": "BATTLE_ROUTE_PARTITION_INVALID" },
+    { "case_id": "raw-partition-out-of-range", "layer": "raw-route-header", "mutation": "partition-index-equals-count", "expected_reason": "BATTLE_ROUTE_PARTITION_INVALID" },
+    { "case_id": "raw-length-mismatch", "layer": "raw-route-header", "mutation": "payload-length-not-protobuf", "expected_reason": "BATTLE_ROUTE_LENGTH_MISMATCH" },
+    { "case_id": "kcp-command-invalid", "layer": "kcp-segment-header", "mutation": "cmd-255", "expected_reason": "BATTLE_KCP_COMMAND_INVALID" },
+    { "case_id": "kcp-window-exceeded", "layer": "kcp-segment-header", "mutation": "wnd-65", "expected_reason": "BATTLE_KCP_WINDOW_EXCEEDED" },
+    { "case_id": "kcp-length-mismatch", "layer": "kcp-segment-header", "mutation": "len-not-segment", "expected_reason": "BATTLE_KCP_LENGTH_MISMATCH" },
+    { "case_id": "kcp-segment-ceiling", "layer": "kcp-segment-header", "mutation": "segment-payload-1001", "expected_reason": "BATTLE_KCP_SEGMENT_TOO_LARGE" },
+    { "case_id": "kcp-route-flags", "layer": "kcp-route-envelope", "mutation": "route-flags-1", "expected_reason": "BATTLE_ROUTE_FLAGS_INVALID" },
+    { "case_id": "kcp-cross-lane-route", "layer": "kcp-route-envelope", "mutation": "message-id-3002", "expected_reason": "BATTLE_ROUTE_LANE_MISMATCH" },
+    { "case_id": "protobuf-unknown-field", "layer": "protobuf", "mutation": "append-field-15-varint", "expected_reason": "BATTLE_PAYLOAD_UNKNOWN_FIELD" },
+    { "case_id": "protobuf-enum-unknown", "layer": "protobuf", "mutation": "enum-value-255", "expected_reason": "BATTLE_PAYLOAD_ENUM_INVALID" },
+    { "case_id": "datagram-over-mtu", "layer": "datagram", "mutation": "1201-bytes", "expected_reason": "BATTLE_DATAGRAM_TOO_LARGE" }
+  ],
+  "policy": {
+    "dispatch_before_complete_validation": "forbidden",
+    "fallback_lane": "forbidden",
+    "source_rewrite_on_failure": "forbidden"
+  }
+}

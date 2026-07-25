@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,48 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
 	"github.com/jinwiforz/ihomeland/server/internal/simulationcontrol"
 )
+
+// TestRealChildBattleUDPReadyBeforeHello 验证真实 Go parent 只有在 child 已绑定唯一 UDP socket 后才收到 hello。
+func TestRealChildBattleUDPReadyBeforeHello(t *testing.T) {
+	if os.Getenv("IHOMELAND_SIMULATION_REAL_CHILD") != "1" {
+		t.Skip("real simulation child harness is required")
+	}
+	repositoryRoot, _ := filepath.Abs(filepath.Join("..", "..", "..", ".."))
+	binaryPath := filepath.Join(repositoryRoot, "simulation", "out", "build", "windows-msvc-ci", "ihomeland-sim-server.exe")
+	receiptPath := filepath.Join(repositoryRoot, "simulation", "out", "build", "windows-msvc-ci", "qualification-gate-receipt.json")
+	probe, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	_ = probe.Close()
+	nonce, _ := simulationcontrol.NewSessionNonce()
+	diagnostics := &diagnosticCollector{}
+	owner, err := Start(Config{
+		BinaryPath: binaryPath, BinarySHA256: fileDigest(t, binaryPath),
+		QualificationReceiptPath: receiptPath, QualificationReceiptSHA256: fileDigest(t, receiptPath),
+		RequestTimeout: 3 * time.Second, ShutdownTimeout: 3 * time.Second, StderrLineLimit: 1024,
+		BattleUDPEnabled: true, BattleUDPBindHost: "127.0.0.1", BattleUDPBindPort: uint16(port),
+		BattleUDPAdvertisedHost: "127.0.0.1", BattleUDPAdvertisedPort: uint16(port),
+		BattleListenerIdentity: "0123456789abcdef0123456789abcdef",
+	}, nonce, simulationcontrol.NewProposalInbox(), diagnostics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Terminate(context.Background()) })
+	controller, err := simulationcontrol.BootstrapController(context.Background(), owner.Session(), realControllerConfig(t))
+	if err != nil {
+		t.Fatalf("bootstrap: %v diagnostics=%#v child=%v", err, diagnostics.snapshot(), owner.Err())
+	}
+	conflict, err := net.ListenPacket("udp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err == nil {
+		_ = conflict.Close()
+		t.Fatal("hello receipt arrived before battle UDP listener owned the configured port")
+	}
+	if err := controller.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // diagnosticCollector 保存低敏 child stderr 供失败断言。
 type diagnosticCollector struct {

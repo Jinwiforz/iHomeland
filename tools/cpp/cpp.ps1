@@ -187,7 +187,12 @@ function Write-CppBuildIdentity {
         -not $manifest.dependencies_disconnected -or
         $manifest.dependencies.jolt -ne "5.5.0" -or
         $manifest.dependencies.recast_detour -ne "1.6.0" -or
-        $manifest.dependencies.nlohmann_json -ne "3.12.0") {
+        $manifest.dependencies.nlohmann_json -ne "3.12.0" -or
+        $manifest.dependencies.asio -ne "1.38.2" -or
+        $manifest.dependencies.kcp -ne "2.1.1" -or
+        $manifest.dependencies.libsodium -ne "1.0.22" -or
+        $manifest.dependencies.abseil -ne "20250512.1" -or
+        $manifest.dependencies.protobuf -ne "35.0") {
         throw "CMake build manifest 未绑定锁定 compiler、SDK、preset、编译策略或依赖 identity"
     }
 

@@ -123,6 +123,36 @@ function Get-CppDependencyCatalog {
             Section = "libraries"; Name = "nlohmann_json_cpp"; Key = "json"
             Archive = "nlohmann-json-v{0}.tar.gz"; Top = "json-{0}"
             License = "LICENSE.MIT"; Probe = "include/nlohmann/json.hpp"; Kind = "source"
+        },
+        @{
+            Section = "libraries"; Name = "asio_cpp"; Key = "asio"
+            Archive = "asio-{0}.zip"; Top = "asio-{0}"
+            License = "LICENSE_1_0.txt"; Probe = "include/asio.hpp"; Kind = "source"
+            RequiresRollback = $true
+        },
+        @{
+            Section = "libraries"; Name = "kcp_cpp"; Key = "kcp"
+            Archive = "kcp-{0}.tar.gz"; Top = "kcp-{0}"
+            License = "LICENSE"; Probe = "ikcp.c"; Kind = "source"
+            RequiresRollback = $true
+        },
+        @{
+            Section = "libraries"; Name = "libsodium_cpp"; Key = "libsodium"
+            Archive = "libsodium-{0}.tar.gz"; Top = "libsodium-{0}"
+            License = "LICENSE"; Probe = "src/libsodium/include/sodium.h"; Kind = "source"
+            RequiresRollback = $true
+        },
+        @{
+            Section = "libraries"; Name = "abseil_cpp"; Key = "abseil"
+            Archive = "abseil-cpp-{0}.tar.gz"; Top = "abseil-cpp-{0}"
+            License = "LICENSE"; Probe = "CMakeLists.txt"; Kind = "source"
+            RequiresRollback = $true
+        },
+        @{
+            Section = "libraries"; Name = "protobuf_cpp"; Key = "protobuf"
+            Archive = "protobuf-{0}.zip"; Top = "protobuf-{0}"
+            License = "LICENSE"; Probe = "src/google/protobuf/message_lite.h"; Kind = "source"
+            RequiresRollback = $true
         }
     )
 
@@ -132,6 +162,10 @@ function Get-CppDependencyCatalog {
         if ($definition.Kind -eq "source") {
             $sourceCommit = Read-CatalogValue $catalogPath $definition.Section $definition.Name "source_commit"
         }
+        $rollback = ""
+        if ($definition.ContainsKey("RequiresRollback") -and $definition.RequiresRollback) {
+            $rollback = Read-CatalogValue $catalogPath $definition.Section $definition.Name "rollback"
+        }
         [pscustomobject]@{
             Key = $definition.Key
             Version = $version
@@ -139,6 +173,7 @@ function Get-CppDependencyCatalog {
             Sha256 = (Read-CatalogValue $catalogPath $definition.Section $definition.Name "package_sha256").ToLowerInvariant()
             SourceCommit = $sourceCommit
             LicenseIdentity = Read-CatalogValue $catalogPath $definition.Section $definition.Name "license"
+            Rollback = $rollback
             ArchiveName = ($definition.Archive -f $version)
             TopDirectory = ($definition.Top -f $version)
             LicensePath = $definition.License
@@ -166,7 +201,8 @@ function Test-RestoredDependency {
         return $manifest.version -eq $Dependency.Version -and
             $manifest.archive_sha256 -eq $Dependency.Sha256 -and
             $manifest.source_commit -eq $Dependency.SourceCommit -and
-            $manifest.license -eq $Dependency.LicenseIdentity
+            $manifest.license -eq $Dependency.LicenseIdentity -and
+            ([string]::IsNullOrEmpty($Dependency.Rollback) -or $manifest.rollback -eq $Dependency.Rollback)
     }
     catch {
         return $false
@@ -229,13 +265,15 @@ function Restore-CppDependency {
         Assert-ArchiveSafe $archivePath
         New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
         if ($archivePath.EndsWith('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
-            Expand-Archive -LiteralPath $archivePath -DestinationPath $stagingRoot
+            # Windows PowerShell 5.1 Expand-Archive 会在 Asio 官方 archive 的 Unix mode
+            # metadata 上触发错误清理；bsdtar 已在预枚举后使用同一受控 staging root。
+            & tar.exe -xf $archivePath -C $stagingRoot
         }
         else {
             & tar.exe -xzf $archivePath -C $stagingRoot
-            if ($LASTEXITCODE -ne 0) {
-                throw "解压失败：$archivePath"
-            }
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "解压失败：$archivePath"
         }
 
         $expanded = Join-Path $stagingRoot $Dependency.TopDirectory
@@ -250,6 +288,7 @@ function Restore-CppDependency {
             archive_sha256 = $Dependency.Sha256
             source_commit = $Dependency.SourceCommit
             license = $Dependency.LicenseIdentity
+            rollback = $Dependency.Rollback
         }
         $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $expanded ".restore.json") -Encoding UTF8
 

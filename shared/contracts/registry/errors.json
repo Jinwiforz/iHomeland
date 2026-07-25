@@ -29,6 +29,10 @@
     { "code": 2106, "name": "VISIT_IDEMPOTENCY_CONFLICT", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.idempotency_conflict", "retryable": false, "httpStatus": 409 },
     { "code": 2107, "name": "VISIT_MEMBERSHIP_REQUIRED", "owner": "visit", "category": "AUTH", "messageKey": "error.visit.membership_required", "retryable": false, "httpStatus": 403 },
     { "code": 2108, "name": "VISIT_OWNER_UNAVAILABLE", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.owner_unavailable", "retryable": false, "httpStatus": 409 },
-    { "code": 2109, "name": "VISIT_RECONNECT_EXPIRED", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.reconnect_expired", "retryable": false, "httpStatus": 410 }
+    { "code": 2109, "name": "VISIT_RECONNECT_EXPIRED", "owner": "visit", "category": "CONFLICT", "messageKey": "error.visit.reconnect_expired", "retryable": false, "httpStatus": 410 },
+    { "code": 3000, "name": "BATTLE_TARGET_NOT_READY", "owner": "battle", "category": "DEPENDENCY", "messageKey": "error.battle.target_not_ready", "retryable": true, "httpStatus": 503 },
+    { "code": 3001, "name": "BATTLE_CAPACITY_EXCEEDED", "owner": "battle", "category": "CONFLICT", "messageKey": "error.battle.capacity_exceeded", "retryable": false, "httpStatus": 409 },
+    { "code": 3002, "name": "BATTLE_TARGET_STALE", "owner": "battle", "category": "CONFLICT", "messageKey": "error.battle.target_stale", "retryable": false, "httpStatus": 409 },
+    { "code": 3003, "name": "BATTLE_IDEMPOTENCY_CONFLICT", "owner": "battle", "category": "CONFLICT", "messageKey": "error.battle.idempotency_conflict", "retryable": false, "httpStatus": 409 }
   ]
 }

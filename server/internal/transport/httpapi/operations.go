@@ -54,4 +54,5 @@ var operations = []Operation{
 	{ID: "getWorldBootstrap", Method: "GET", Path: "/v1/world/bootstrap", Authenticated: true, BodyLimit: 0, Timeout: 5 * time.Second, Idempotency: IdempotencySafe},
 	{ID: "acceptVisitInvite", Method: "POST", Path: "/v1/visits/:visitSessionId/invites/:inviteId/accept", Authenticated: true, BodyLimit: 4096, Timeout: 5 * time.Second, Idempotency: IdempotencyKeyRequired},
 	{ID: "issueWorldAdmission", Method: "POST", Path: "/v1/world/admissions", Authenticated: true, BodyLimit: 4096, Timeout: 5 * time.Second, Idempotency: IdempotencyKeyRequired},
+	{ID: "issueBattleTicket", Method: "POST", Path: "/v1/battle/tickets", Authenticated: true, BodyLimit: 2048, Timeout: 5 * time.Second, Idempotency: IdempotencyKeyRequired},
 }

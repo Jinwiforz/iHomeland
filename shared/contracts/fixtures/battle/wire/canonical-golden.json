@@ -1,0 +1,116 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "canonical-golden",
+  "encoding": "lowercase-hex",
+  "vectors": [
+    {
+      "vector_id": "secure-raw-aad-v1",
+      "layer": "secure-header",
+      "bytes_hex": "494842540101000000010203040506070000000901020304010203040506070800160000000210111213141516170000",
+      "byte_count": 48,
+      "sha256": "7c30228770edfc04540fca5778a6f7f1461428a50931046002fefcae5f60205d",
+      "decoded": {
+        "packet_kind": 1,
+        "battle_session_generation": 9,
+        "key_epoch": 16909060,
+        "packet_sequence": 72623859790382856,
+        "protected_payload_length": 22,
+        "endpoint_generation": 2
+      }
+    },
+    {
+      "vector_id": "raw-probe-route-v1",
+      "layer": "raw-route-header",
+      "bytes_hex": "00000bb9000600011112131415161718",
+      "byte_count": 16,
+      "sha256": "c0806b74ff4903b5053b394caa6547a109079c81707b820956ecf7dd4ef8f9c2",
+      "decoded": {
+        "message_id": 3001,
+        "payload_length": 6,
+        "partition_index": 0,
+        "partition_count": 1,
+        "application_sequence": 1230066625199609624
+      }
+    },
+    {
+      "vector_id": "battle-probe-protobuf-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleProbe",
+      "bytes_hex": "080110021803",
+      "byte_count": 6,
+      "sha256": "628065744f8bbdf574e6cf8c8055adca3200440bd6cab2b57a72f7b961bb662a",
+      "decoded": {
+        "probe_sequence": 1,
+        "latest_snapshot_sequence": 2,
+        "client_monotonic_time_us": 3
+      }
+    },
+    {
+      "vector_id": "secure-kcp-aad-v1",
+      "layer": "secure-header",
+      "bytes_hex": "494842540102000000010203040506070000000901020304010203040506070900340000000210111213141516170000",
+      "byte_count": 48,
+      "sha256": "b471ee3e8cb287168981fb27f0afd02232779ec5dad78386abea6dfcf94de31e",
+      "decoded": {
+        "packet_kind": 2,
+        "battle_session_generation": 9,
+        "key_epoch": 16909060,
+        "packet_sequence": 72623859790382857,
+        "protected_payload_length": 52,
+        "endpoint_generation": 2
+      }
+    },
+    {
+      "vector_id": "kcp-push-segment-v1",
+      "layer": "kcp-segment-header",
+      "bytes_hex": "04030201510040000d0c0b0a01000000000000001c000000",
+      "byte_count": 24,
+      "sha256": "46258d5e136bc39aa652d5f8374f0cb0d8b55d51a5403340d7c6b34b573bd913",
+      "decoded": {
+        "conv": 16909060,
+        "cmd": 81,
+        "frg": 0,
+        "wnd": 64,
+        "ts": 168496141,
+        "sn": 1,
+        "una": 0,
+        "len": 28
+      }
+    },
+    {
+      "vector_id": "kcp-ability-route-v1",
+      "layer": "kcp-route-envelope",
+      "bytes_hex": "00000bbc000c00002122232425262728",
+      "byte_count": 16,
+      "sha256": "c9d570d49da5a06575f844adebee1bcc72be4ee6099b9c4c38c6fa0fa72e3561",
+      "decoded": {
+        "message_id": 3004,
+        "payload_length": 12,
+        "route_flags": 0,
+        "application_sequence": 2387509390608836392
+      }
+    },
+    {
+      "vector_id": "battle-ability-event-protobuf-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleAbilityReliableEvent",
+      "bytes_hex": "080110021803200128073001",
+      "byte_count": 12,
+      "sha256": "68177896a4ad3831050972284c590b4664bb1366e07909b1750d87aeee79b88f",
+      "decoded": {
+        "event_id": 1,
+        "server_tick": 2,
+        "source_entity_id": 3,
+        "source_entity_generation": 1,
+        "ability_id": 7,
+        "phase": 1
+      }
+    }
+  ],
+  "parity_matrix": [
+    { "producer": "go", "consumers": ["cpp", "csharp"], "comparison": "byte-exact" },
+    { "producer": "cpp", "consumers": ["go", "csharp"], "comparison": "byte-exact" },
+    { "producer": "csharp", "consumers": ["go", "cpp"], "comparison": "byte-exact" }
+  ]
+}

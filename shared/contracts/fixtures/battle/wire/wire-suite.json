@@ -1,0 +1,146 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "wire-suite",
+  "canonical_encoding": {
+    "integer_byte_order": "network-big-endian",
+    "protobuf_mode": "deterministic",
+    "hex_case": "lower",
+    "base64_variant": "rfc4648-with-padding",
+    "comparison": "byte-exact",
+    "unknown_field_policy": "reject-on-closed-envelope",
+    "source_secret_policy": "placeholder-only"
+  },
+  "suites": [
+    {
+      "suite_id": "secure-header",
+      "domain": "wire",
+      "cases": [
+        "minimum-valid-header",
+        "maximum-valid-header",
+        "unknown-version",
+        "unknown-flags",
+        "truncated-header",
+        "declared-length-mismatch"
+      ]
+    },
+    {
+      "suite_id": "raw-route-envelope",
+      "domain": "wire",
+      "cases": [
+        "c2s-input-bundle",
+        "c2s-probe",
+        "s2c-full-snapshot",
+        "s2c-delta-snapshot",
+        "wrong-direction",
+        "oversized-payload",
+        "expired-payload"
+      ]
+    },
+    {
+      "suite_id": "kcp-route-envelope",
+      "domain": "wire",
+      "cases": [
+        "s2c-ability-event",
+        "s2c-entity-lifecycle",
+        "c2s-resync-request",
+        "s2c-resync-response",
+        "unknown-route",
+        "cross-lane-route",
+        "expired-reassembled-message"
+      ]
+    },
+    {
+      "suite_id": "cookie-handshake",
+      "domain": "handshake",
+      "cases": [
+        "client-hello-retry",
+        "retry-byte-budget",
+        "valid-cookie",
+        "expired-cookie",
+        "wrong-source-endpoint",
+        "cookie-key-overlap",
+        "cookie-before-ticket-lookup"
+      ]
+    },
+    {
+      "suite_id": "authenticated-handshake",
+      "domain": "handshake",
+      "cases": [
+        "client-auth-server-accept",
+        "exact-retry-replay",
+        "transcript-field-drift",
+        "wrong-ticket-proof",
+        "expired-ticket",
+        "ticket-consume-race",
+        "wrong-node-instance-endpoint"
+      ]
+    },
+    {
+      "suite_id": "crypto-vectors",
+      "domain": "crypto",
+      "cases": [
+        "rfc7748-x25519",
+        "rfc5869-hkdf-sha256",
+        "rfc8439-chacha20-poly1305",
+        "direction-key-separation",
+        "aad-tamper",
+        "tag-tamper",
+        "constant-time-compare-contract"
+      ]
+    },
+    {
+      "suite_id": "replay-and-rekey",
+      "domain": "replay",
+      "cases": [
+        "monotonic-sequence",
+        "in-window-reorder",
+        "duplicate",
+        "too-old",
+        "future-jump",
+        "sequence-exhaustion",
+        "packet-limit-rekey",
+        "time-limit-rekey",
+        "previous-epoch-overlap",
+        "nonce-uniqueness"
+      ]
+    },
+    {
+      "suite_id": "endpoint-rebind",
+      "domain": "rebind",
+      "cases": [
+        "authenticated-cookie-confirm",
+        "unconfirmed-new-endpoint",
+        "old-endpoint-after-commit",
+        "generation-continuity",
+        "rebind-hijack"
+      ]
+    },
+    {
+      "suite_id": "resource-governance",
+      "domain": "resource",
+      "cases": [
+        "pre-auth-zero-session-state",
+        "single-listener",
+        "node-queue-boundary",
+        "session-queue-boundary",
+        "kcp-queue-boundary",
+        "actor-eight-accepted",
+        "actor-nine-rejected",
+        "malformed-flood"
+      ]
+    },
+    {
+      "suite_id": "cross-language-parity",
+      "domain": "parity",
+      "cases": [
+        "go-encode-cpp-decode",
+        "cpp-encode-go-decode",
+        "csharp-encode-cpp-decode",
+        "cpp-encode-csharp-decode",
+        "canonical-golden-digest",
+        "malformed-corpus-parity"
+      ]
+    }
+  ]
+}

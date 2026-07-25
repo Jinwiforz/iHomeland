@@ -1,0 +1,7 @@
+version: v2
+plugins:
+  - protoc_builtin: cpp
+    protoc_path: .local/protoc/35.0/bin/protoc.exe
+    out: .tmp/simulation-protocol-stage
+inputs:
+  - directory: shared/proto

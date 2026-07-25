@@ -7,6 +7,24 @@
       "canonicalJson": "{\"kind\":\"node.health.query\",\"payload\":{\"simulationNodeId\":\"snode_fixture_1\"},\"requestId\":\"sctl_health0000000001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"3\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
       "payloadBytes": 250,
       "lengthPrefixHex": "000000fa"
+    },
+    {
+      "goldenId": "listener-status-query",
+      "canonicalJson": "{\"kind\":\"node.listener.status.query\",\"payload\":{\"simulationNodeId\":\"snode_fixture_1\"},\"requestId\":\"sctl_listener0000000001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"4\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "payloadBytes": 261,
+      "lengthPrefixHex": "00000105"
+    },
+    {
+      "goldenId": "ticket-status-query",
+      "canonicalJson": "{\"kind\":\"battle.ticket.status.query\",\"payload\":{\"bindingFingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"simulationInstanceId\":\"sinst_0123456789abcdef0123456789abcdef\",\"ticketId\":\"btk1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"},\"requestId\":\"sctl_ticketstatus000001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"5\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "payloadBytes": 427,
+      "lengthPrefixHex": "000001ab"
+    },
+    {
+      "goldenId": "battle-session-revoke",
+      "canonicalJson": "{\"kind\":\"battle.session.revoke\",\"payload\":{\"assignmentFingerprint\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"battleSessionId\":\"bses_fixture_1\",\"revokeRequestId\":\"sctl_sessionrevoke0001\",\"sessionGeneration\":\"7\",\"simulationInstanceId\":\"sinst_0123456789abcdef0123456789abcdef\"},\"requestId\":\"sctl_sessionrevoke0001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"6\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "payloadBytes": 475,
+      "lengthPrefixHex": "000001db"
     }
   ]
 }

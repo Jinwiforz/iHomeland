@@ -243,9 +243,19 @@ function Assert-ControlFrame {
         throw "$Context has unknown kind"
     }
     $payloadAllowed = @{
+        "battle.session.closed" = @("revokeRequestId", "battleSessionId", "sessionGeneration", "simulationInstanceId", "assignmentFingerprint", "closeReason", "packetDispatchStopped")
+        "battle.session.revoke" = @("revokeRequestId", "battleSessionId", "sessionGeneration", "simulationInstanceId", "assignmentFingerprint")
+        "battle.ticket.install" = @("installRequestId", "ticketId", "bindingFingerprint", "binding", "proofKey")
+        "battle.ticket.installed" = @("installRequestId", "ticketId", "bindingFingerprint", "simulationInstanceId", "actorSlot", "state")
+        "battle.ticket.revoke" = @("revokeRequestId", "ticketId", "bindingFingerprint", "simulationInstanceId")
+        "battle.ticket.revoked" = @("revokeRequestId", "ticketId", "bindingFingerprint", "simulationInstanceId", "state")
+        "battle.ticket.status.query" = @("ticketId", "bindingFingerprint", "simulationInstanceId")
+        "battle.ticket.status.receipt" = @("ticketId", "bindingFingerprint", "simulationInstanceId", "actorSlot", "state")
         "node.hello.challenge" = @("simulationNodeId", "runtimeNodeId", "expectedBuildIdentity", "expectedModelManifest", "expectedProfileManifest", "instanceCapacity", "actorCapacity")
         "node.hello.receipt" = @("simulationNodeId", "runtimeNodeId", "buildIdentity", "modelManifest", "profileManifest", "platformQualification", "instanceCapacity", "actorCapacity")
         "node.health.query" = @("simulationNodeId")
+        "node.listener.status.query" = @("simulationNodeId")
+        "node.listener.status.receipt" = @("simulationNodeId", "listenerGeneration", "state", "bindHost", "bindPort", "advertisedHost", "advertisedPort", "wireIdentity", "cryptoIdentity")
     }
     if ($payloadAllowed.ContainsKey([string]$Frame.kind)) {
         $allowed = $payloadAllowed[[string]$Frame.kind]
@@ -260,11 +270,6 @@ function Assert-ForbiddenScope {
     $patterns = @(
         '"grpc"',
         '"tcp"',
-        '"udp"',
-        '"asio"',
-        '"kcp"',
-        '"aead"',
-        '"ticket"',
         '"cookie"',
         '"unity"',
         '"messageId"\s*:\s*[0-9]',
@@ -272,6 +277,10 @@ function Assert-ForbiddenScope {
     )
     foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Filter "*.json") {
         $raw = [System.IO.File]::ReadAllText($file.FullName)
+        if ($raw -match '"proofKey"\s*:\s*"[A-Za-z0-9_-]{32,}"' -or
+            $raw -match '"ticketSecret"\s*:') {
+            throw "simulation-control secret material entered source corpus: $($file.FullName)"
+        }
         foreach ($pattern in $patterns) {
             if ($raw -match $pattern) {
                 throw "simulation-control forbidden scope '$pattern': $($file.FullName)"
@@ -351,14 +360,34 @@ function Invoke-ControlValidation {
     }
 
     $inventory = Read-JsonDocument -Path (Join-Path $Root "message-inventory.json")
-    $inventoryFields = @("schemaVersion", "documentKind", "frameMaxBytes", "pendingRequestLimit", "resultOutboxLimit", "messages")
+    $inventoryFields = @("schemaVersion", "documentKind", "frameMaxBytes", "pendingRequestLimit", "resultOutboxLimit", "ticketRequestQueueLimit", "priorityPolicy", "secretPolicy", "messages")
     Assert-Properties -Value $inventory -Required $inventoryFields -Allowed $inventoryFields -Context "message inventory"
     if ($inventory.schemaVersion -ne "simulation-control-v1" -or
         $inventory.documentKind -ne "message-inventory" -or
         [int]$inventory.frameMaxBytes -ne 65536 -or
         [int]$inventory.pendingRequestLimit -ne 256 -or
-        [int]$inventory.resultOutboxLimit -ne 256) {
+        [int]$inventory.resultOutboxLimit -ne 256 -or
+        [int]$inventory.ticketRequestQueueLimit -ne 64) {
         throw "simulation-control inventory limits are invalid"
+    }
+    $priorityFields = @("highDeadlineClasses", "lowDeadlineClasses", "selection", "activeTurn")
+    Assert-Properties -Value $inventory.priorityPolicy -Required $priorityFields -Allowed $priorityFields -Context "message inventory priority policy"
+    $expectedHigh = @("startup", "health", "lifecycle", "drain", "shutdown", "result", "revoke")
+    if ((@($inventory.priorityPolicy.highDeadlineClasses) -join "|") -cne ($expectedHigh -join "|") -or
+        (@($inventory.priorityPolicy.lowDeadlineClasses) -join "|") -cne "ticket" -or
+        [string]$inventory.priorityPolicy.selection -cne "high-first-after-active-turn" -or
+        [string]$inventory.priorityPolicy.activeTurn -cne "non-preemptive") {
+        throw "simulation-control priority policy drifted"
+    }
+    $secretPolicyFields = @("secretFields", "allowedDirection", "fixtureValue", "logging", "reporting", "storage")
+    Assert-Properties -Value $inventory.secretPolicy -Required $secretPolicyFields -Allowed $secretPolicyFields -Context "message inventory secret policy"
+    if ((@($inventory.secretPolicy.secretFields) -join "|") -cne "battle.ticket.install.payload.proofKey" -or
+        [string]$inventory.secretPolicy.allowedDirection -cne "go-to-cpp" -or
+        [string]$inventory.secretPolicy.fixtureValue -cne "[REDACTED]" -or
+        [string]$inventory.secretPolicy.logging -cne "forbidden" -or
+        [string]$inventory.secretPolicy.reporting -cne "forbidden" -or
+        [string]$inventory.secretPolicy.storage -cne "forbidden") {
+        throw "simulation-control secret policy drifted"
     }
     $messageFields = @("kind", "direction", "maxPayloadBytes", "deadlineClass", "replayIdentity")
     $knownKinds = @()
@@ -373,9 +402,13 @@ function Invoke-ControlValidation {
         $knownKinds += [string]$message.kind
     }
     $expectedKinds = @(
+        "battle.session.closed", "battle.session.revoke",
+        "battle.ticket.install", "battle.ticket.installed", "battle.ticket.revoke",
+        "battle.ticket.revoked", "battle.ticket.status.query", "battle.ticket.status.receipt",
         "instance.drain", "instance.drained", "instance.ready", "instance.start",
         "instance.status.query", "instance.status.receipt", "instance.stop", "instance.stopped",
         "node.health.query", "node.health.receipt", "node.hello.challenge", "node.hello.receipt",
+        "node.listener.status.query", "node.listener.status.receipt",
         "node.shutdown", "node.stopped", "result.ack", "result.proposal"
     )
     if ((@($knownKinds | Sort-Object) -join "|") -ne ($expectedKinds -join "|")) {
@@ -450,6 +483,22 @@ function Invoke-ControlValidation {
         [string]$result.proposal.evidenceDigest
     if ([string]$result.proposal.proposalFingerprint -cne (Get-TextSha256 -Value $proposalMaterial)) {
         throw "simulation-control result proposal fingerprint drifted"
+    }
+
+    $battleControl = Read-JsonDocument -Path (Join-Path $Root "cases\battle-control.json")
+    $battleControlFields = @("schemaVersion", "caseId", "category", "listenerStatus", "ticketLifecycle", "sessionLifecycle", "expectations")
+    Assert-Properties -Value $battleControl -Required $battleControlFields -Allowed $battleControlFields -Context "battle control case"
+    if ([string]$battleControl.schemaVersion -cne "simulation-control-v1" -or
+        [string]$battleControl.caseId -cne "battle-listener-ticket-session-control" -or
+        [string]$battleControl.category -cne "battle-control" -or
+        [string]$battleControl.ticketLifecycle.proofKeyRule -cne "runtime-only-secret-redacted-in-fixtures-logs-reports-and-storage" -or
+        [string]$battleControl.ticketLifecycle.replayRule -cne "same-request-and-binding-replays-original-state-and-slot" -or
+        [string]$battleControl.ticketLifecycle.conflictRule -cne "same-request-or-ticket-with-field-drift-is-rejected" -or
+        [string]$battleControl.sessionLifecycle.requestKind -cne "battle.session.revoke" -or
+        [string]$battleControl.sessionLifecycle.receiptKind -cne "battle.session.closed" -or
+        @($battleControl.expectations) -notcontains "all-payloads-closed" -or
+        @($battleControl.expectations) -notcontains "proof-key-only-on-ticket-install") {
+        throw "simulation-control battle control contract drifted"
     }
 
     $golden = Read-JsonDocument -Path (Join-Path $Root "canonical-golden.json")
@@ -841,7 +890,7 @@ function Assert-DeliveryGovernance {
     Push-Location $RepositoryRoot
     try {
         Invoke-CheckedCommand -Failure "simulation-control OpenSpec strict gate failed" -Command {
-            & openspec.cmd validate establish-go-simulation-control --strict
+            & openspec.cmd validate go-simulation-control --strict
         }
         Invoke-CheckedCommand -Failure "simulation-control repository diff gate failed" -Command {
             & git diff --check

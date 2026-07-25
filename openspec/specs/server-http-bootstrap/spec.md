@@ -22,7 +22,7 @@
 - **THEN** diagnostic listener 返回稳定非成功响应且不会调用 HTTP application service
 
 ### Requirement: HTTP router 必须精确实现冻结 OpenAPI operation
-公开 router MUST 且只能实现 `getVersion`、`getBootstrapConfig`、`registerAccount`、`loginAccount`、`refreshSession`、`logoutSession`、`issueConnectionTicket`、`getWorldBootstrap`、`acceptVisitInvite` 与 `issueWorldAdmission` 对应的现有 method/path、认证、status 和 schema。Runtime operation table 的 body limit、timeout 与 idempotency mode MUST 与 `openapi.yaml` 精确一致；公开 response/error 字段、enum 和 Unix 毫秒投影 MUST 由集中 versioned codec 映射，handler MUST NOT 定义同义 DTO、错误或时间单位。
+公开 router MUST 且只能实现 `getVersion`、`getBootstrapConfig`、`registerAccount`、`loginAccount`、`refreshSession`、`logoutSession`、`issueConnectionTicket`、`getWorldBootstrap`、`acceptVisitInvite`、`issueWorldAdmission` 与 `issueBattleTicket` 对应的现有 method/path、认证、status 和 schema。Runtime operation table 的 body limit、timeout 与 idempotency mode MUST 与 `openapi.yaml` 精确一致；公开 response/error 字段、enum 和 Unix 毫秒投影 MUST 由集中 versioned codec 映射，handler MUST NOT 定义同义 DTO、错误或时间单位。
 
 #### Scenario: OpenAPI metadata 与 runtime 漂移
 - **WHEN** route 的 method/path/operationId/body limit/timeout/idempotency 或认证要求与 OpenAPI 不一致，或 router 多注册未声明业务 route
@@ -151,3 +151,22 @@ Transport-independent world-entry application MUST 拥有 `BootstrapOwnWorld`、
 #### Scenario: 只完成本 change
 - **WHEN** HTTPS 测试能够签发 connection ticket 和 world admission 但后续 WSS/TLS-TCP change 尚未完成
 - **THEN** 项目只声明 HTTP bootstrap capability 通过，advertised realtime endpoint 不被当作 connectivity 或服务端 v1 资格验收证据
+
+### Requirement: BattleTicket handler 必须只适配权威 battle admission application
+
+`issueBattleTicket` handler MUST 只执行 closed decode、Bearer AuthContext、deadline/idempotency、调用 BattleTicket application 和集中 codec 映射。Application MUST 从 Session、PersonalWorld/VisitSession role、current SimulationTarget、capacity owner 与 trusted BattleEndpointProvider 派生 binding，并在 Redis issuance 和 exact child install 均成功后返回。Handler MUST 不访问 C++ handle、Redis、placement、socket 或 crypto provider，不从 Host/request body 推导 endpoint，不把 ConnectionTicket/WorldAdmission/GAMEPLAY scope 提升为 battle 资格。
+
+#### Scenario: Valid bearer 但 target 尚未 ready
+
+- **WHEN** actor session 有效但 SimulationTarget missing/stale、child listener 未 ready 或 capacity 不可证明
+- **THEN** operation 返回稳定 dependency/capacity 结果且不签发或安装 credential
+
+#### Scenario: Battle ticket response 丢失后重试
+
+- **WHEN** 首次 issuance/install 已提交但 response 丢失，caller 以相同 lineage、target 和 Idempotency-Key 重试
+- **THEN** application 重放首次 ticket/expiry/endpoint，不再次占用 actor slot；handler 不生成新 identity
+
+#### Scenario: 进程进入 draining
+
+- **WHEN** public runtime 已停止新 battle issuance 但旧 HTTP 连接仍提交 request
+- **THEN** readiness/draining gate 在 application 前拒绝，不让即将撤销的 target 产生新 ticket

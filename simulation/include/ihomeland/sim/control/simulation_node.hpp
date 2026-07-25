@@ -1,9 +1,16 @@
 #pragma once
 
+#include "ihomeland/sim/transport/udp_listener.hpp"
+
 #include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -113,11 +120,109 @@ struct ResultProposal final {
     std::string proposal_fingerprint;
 };
 
+/// BattleTicketState 是 exact child 内不可逆 ticket lifecycle。
+enum class BattleTicketState : std::uint8_t {
+    /// Installed 已预留 actor slot，尚未被握手消费。
+    Installed = 1,
+    /// Consumed 已由一次成功握手转换为 active actor。
+    Consumed = 2,
+    /// Revoked 已显式撤销且不可恢复。
+    Revoked = 3,
+    /// Expired 已到绝对 deadline 且不可恢复。
+    Expired = 4,
+};
+
+/// BattleTicketBinding 是 Go authority facts 在 exact child 的不可变投影。
+struct BattleTicketBinding final {
+    /// player_id 来自认证 Session，不接受 UDP payload 覆盖。
+    std::string player_id;
+    /// session_id 绑定账号 session lineage。
+    std::string session_id;
+    /// session_epoch 是撤销屏障。
+    std::uint64_t session_epoch;
+    /// role 只允许 owner 或 visitor。
+    std::string role;
+    /// personal_world_id 绑定持久世界。
+    std::string personal_world_id;
+    /// visit_session_id 仅 Visitor 非空。
+    std::string visit_session_id;
+    /// world_instance_id 绑定 placement runtime。
+    std::string world_instance_id;
+    /// runtime_node_id 必须匹配本 node registration。
+    std::string runtime_node_id;
+    /// assignment_generation 是 current placement generation。
+    std::uint64_t assignment_generation;
+    /// fencing_token 绑定完整 AssignmentStamp。
+    std::uint64_t fencing_token;
+    /// assignment_fingerprint 必须匹配运行 instance。
+    std::string assignment_fingerprint;
+    /// simulation_node_id 必须匹配本 child incarnation。
+    std::string simulation_node_id;
+    /// simulation_instance_id 绑定不可复活 worker。
+    std::string simulation_instance_id;
+    /// mapping_generation 绑定 InputTick timeline。
+    std::uint64_t mapping_generation;
+    /// target_revision 绑定 Go current target revision。
+    std::uint64_t target_revision;
+    /// model_identity 绑定冻结 model。
+    std::string model_identity;
+    /// profile_identity 绑定冻结 network profile。
+    std::string profile_identity;
+    /// config_identity 绑定 checked runtime config。
+    std::string config_identity;
+    /// wire_identity 绑定 battle wire corpus。
+    std::string wire_identity;
+    /// actor_slot 是 0..7 的 exact instance slot。
+    std::uint8_t actor_slot;
+    /// advertised_host 是 ticket 唯一允许的 UDP host。
+    std::string advertised_host;
+    /// advertised_port 是 ticket 唯一允许的 UDP port。
+    std::uint16_t advertised_port;
+    /// issue_id 绑定 HTTP response-loss identity。
+    std::string issue_id;
+    /// issued_at_unix_ms 是首次冻结签发时刻。
+    std::uint64_t issued_at_unix_ms;
+    /// expires_at_unix_ms 是等于即失效的绝对 deadline。
+    std::uint64_t expires_at_unix_ms;
+};
+
+/// BattleTicketInstallCommand 是 private control 唯一可安装的 secret-bearing 输入。
+struct BattleTicketInstallCommand final {
+    /// install_request_id 绑定 control request replay。
+    std::string install_request_id;
+    /// ticket_id 是 UDP 只可查找的 opaque identity。
+    std::string ticket_id;
+    /// binding_fingerprint 绑定全部 immutable fields。
+    std::string binding_fingerprint;
+    /// binding 是 Go 收集的完整 authority facts。
+    BattleTicketBinding binding;
+    /// proof_key 只允许进入 locked memory，不得日志或持久化。
+    std::array<std::uint8_t, 32> proof_key;
+};
+
+/// BattleTicketReceipt 是 install/status/revoke 的低敏结果。
+struct BattleTicketReceipt final {
+    /// ticket_id 回显 exact lookup identity。
+    std::string ticket_id;
+    /// binding_fingerprint 回显完整 binding。
+    std::string binding_fingerprint;
+    /// simulation_instance_id 回显 exact worker。
+    std::string simulation_instance_id;
+    /// actor_slot 是首次安装冻结的位置。
+    std::uint8_t actor_slot;
+    /// state 是不可逆 lifecycle 状态。
+    BattleTicketState state;
+    /// replayed 表示相同 request/binding 的幂等结果。
+    bool replayed;
+};
+
 /// SimulationNode 拥有一个 child 内全部 SimulationInstance 与 result outbox。
 class SimulationNode final {
 public:
     /// ResultOutboxLimit 是每个 node 的 hard pending result 数量。
     static constexpr std::size_t ResultOutboxLimit = 256;
+    /// BattleTicketRegistryLimit 限制含 terminal tombstone 的 ticket 总量。
+    static constexpr std::size_t BattleTicketRegistryLimit = 256;
 
     /// 构造函数验证资格 identity 与 1..8 actor capacity。
     explicit SimulationNode(SimulationNodeConfig config);
@@ -156,6 +261,64 @@ public:
         const std::string& result_id,
         const std::string& proposal_fingerprint);
 
+    /// InstallBattleTicket 原子验证 exact target 并预留 installed+active actor slot。
+    [[nodiscard]] BattleTicketReceipt InstallBattleTicket(
+        const BattleTicketInstallCommand& command,
+        std::uint64_t observed_unix_ms);
+
+    /// BattleTicketStatus 返回 exact ticket/binding 状态并惰性提交 expiry。
+    [[nodiscard]] BattleTicketReceipt BattleTicketStatus(
+        const std::string& ticket_id,
+        const std::string& binding_fingerprint,
+        std::uint64_t observed_unix_ms);
+
+    /// ConsumeBattleTicket 至多一次把 Installed 转为 Consumed。
+    [[nodiscard]] BattleTicketReceipt ConsumeBattleTicket(
+        const std::string& ticket_id,
+        const std::string& binding_fingerprint,
+        std::uint64_t observed_unix_ms);
+
+    /// AuthenticateAndConsumeBattleTicket 在同一 registry lock 内验证 proof 并一次消费。
+    ///
+    /// authenticator 只获得有界 proof key view，禁止保存、记录或跨调用使用。
+    void AuthenticateAndConsumeBattleTicket(
+        const std::string& ticket_id,
+        const std::string& expected_simulation_node_id,
+        const std::string& expected_advertised_host,
+        std::uint16_t expected_advertised_port,
+        std::uint64_t observed_unix_ms,
+        const std::function<bool(
+            std::span<const std::uint8_t, 32>,
+            const BattleTicketBinding&,
+            const std::string&)>& authenticator);
+
+    /// RevokeBattleTicket 以 request identity 幂等终结 exact ticket。
+    [[nodiscard]] BattleTicketReceipt RevokeBattleTicket(
+        const std::string& revoke_request_id,
+        const std::string& ticket_id,
+        const std::string& binding_fingerprint,
+        const std::string& simulation_instance_id,
+        std::uint8_t actor_slot);
+
+    /// InstalledOrActiveActors 返回 exact instance 仍占用的 slot 数。
+    [[nodiscard]] std::size_t InstalledOrActiveActors(
+        const std::string& simulation_instance_id,
+        std::uint64_t observed_unix_ms);
+
+    /// StartBattleUdpListener 创建并启动本 node 生命周期内唯一 UDP listener。
+    ///
+    /// 任一 bind/start 失败会使 node fail closed，禁止改端口重试。
+    void StartBattleUdpListener(
+        BattleUdpListenerConfig config,
+        BattleUdpListener::DatagramHandler handler);
+
+    /// StopBattleUdpListener 幂等停止 node-global UDP ingress。
+    void StopBattleUdpListener() noexcept;
+
+    /// UdpListenerStatus 返回已创建 listener 的低敏状态；未创建时为空。
+    [[nodiscard]] std::optional<BattleUdpListenerStatus>
+    UdpListenerStatus() const;
+
     /// BeginShutdown 阻止新 start，并有界停止全部实例。
     void BeginShutdown(std::chrono::milliseconds deadline);
 
@@ -170,6 +333,8 @@ public:
 
 private:
     struct Entry;
+    struct TicketEntry;
+    struct RevokeTombstone;
     /// RetiredBinding 保存同一 node incarnation 内不可复活的 exact runtime tombstone。
     struct RetiredBinding {
         /// world_instance_id 绑定已经停止的 Go-owned runtime identity。
@@ -188,6 +353,16 @@ private:
     std::vector<ResultProposal> outbox_;
     /// acked_results_ 有界保存 exact ack replay identity，避免响应重放误杀 control session。
     std::vector<ResultProposal> acked_results_;
+    /// tickets_ 保存 locked proof key 与 terminal tombstone。
+    std::vector<std::unique_ptr<TicketEntry>> tickets_;
+    /// revoke_tombstones_ 阻止先到 cancel 后的迟到 install 恢复资格。
+    std::vector<std::unique_ptr<RevokeTombstone>> revoke_tombstones_;
+    /// ticket_mutex_ 保护 install/consume/revoke/status 的原子 hard cap。
+    mutable std::mutex ticket_mutex_;
+    /// battle_udp_listener_ 是 raw、KCP 与 transport-control 唯一 socket owner。
+    std::unique_ptr<BattleUdpListener> battle_udp_listener_;
+    /// battle_udp_listener_created_ 阻止失败后改端口或停止后创建第二 listener。
+    bool battle_udp_listener_created_{false};
     /// healthy_ 一旦进入 shutdown 就不可恢复。
     bool healthy_{true};
 };

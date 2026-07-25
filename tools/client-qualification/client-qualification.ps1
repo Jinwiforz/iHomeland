@@ -296,7 +296,22 @@ function Invoke-OwnedProcess {
     $safeStage = $Stage -replace '[^a-z0-9-]', '-'
     $stdout = Join-Path $RunDirectory "$safeStage.stdout.log"
     $stderr = Join-Path $RunDirectory "$safeStage.stderr.log"
-    $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $previousModulePath = $env:PSModulePath
+    try {
+        if ([System.IO.Path]::GetFileName($FilePath) -ieq "powershell.exe") {
+            # Windows PowerShell子进程必须优先解析自身系统模块，不能误载同机PowerShell 7同名模块。
+            $windowsModuleRoot = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\Modules"
+            $moduleEntries = @($previousModulePath -split ';' | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_) -and
+                -not [string]::Equals($_.TrimEnd('\'), $windowsModuleRoot.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+            })
+            $env:PSModulePath = (@($windowsModuleRoot) + $moduleEntries) -join ';'
+        }
+        $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    }
+    finally {
+        $env:PSModulePath = $previousModulePath
+    }
     # Windows PowerShell 5.1只有在子进程存活时取得Handle，稍后才能可靠读取ExitCode。
     $null = $process.Handle
     $OwnedProcesses.Add($process)

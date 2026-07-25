@@ -1,0 +1,66 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "wire-layout",
+  "secure_header": {
+    "size_bytes": 48,
+    "byte_order": "network-big-endian",
+    "aead_role": "aad",
+    "fields": [
+      { "name": "magic", "offset": 0, "width": 4, "encoding": "ascii", "constraint": "IHBT" },
+      { "name": "wire_version", "offset": 4, "width": 1, "encoding": "uint8", "constraint": "1" },
+      { "name": "packet_kind", "offset": 5, "width": 1, "encoding": "uint8", "constraint": "1=raw,2=kcp,3=control" },
+      { "name": "flags", "offset": 6, "width": 2, "encoding": "uint16-be", "constraint": "zero-until-registered" },
+      { "name": "session_id_digest", "offset": 8, "width": 8, "encoding": "opaque", "constraint": "nonzero-routing-handle" },
+      { "name": "battle_session_generation", "offset": 16, "width": 4, "encoding": "uint32-be", "constraint": "positive" },
+      { "name": "key_epoch", "offset": 20, "width": 4, "encoding": "uint32-be", "constraint": "nonce-prefix" },
+      { "name": "packet_sequence", "offset": 24, "width": 8, "encoding": "uint64-be", "constraint": "positive-monotonic-no-wrap" },
+      { "name": "protected_payload_length", "offset": 32, "width": 2, "encoding": "uint16-be", "constraint": "excludes-aead-tag" },
+      { "name": "endpoint_generation", "offset": 34, "width": 4, "encoding": "uint32-be", "constraint": "positive" },
+      { "name": "binding_discriminator", "offset": 38, "width": 8, "encoding": "opaque", "constraint": "nonzero-ticket-derived" },
+      { "name": "reserved", "offset": 46, "width": 2, "encoding": "zero", "constraint": "must-be-zero" }
+    ]
+  },
+  "raw_route_header": {
+    "size_bytes": 16,
+    "byte_order": "network-big-endian",
+    "fields": [
+      { "name": "message_id", "offset": 0, "width": 4, "encoding": "uint32-be", "constraint": "registered-raw-route" },
+      { "name": "payload_length", "offset": 4, "width": 2, "encoding": "uint16-be", "constraint": "exact-protobuf-bytes" },
+      { "name": "partition_index", "offset": 6, "width": 1, "encoding": "uint8", "constraint": "less-than-partition-count" },
+      { "name": "partition_count", "offset": 7, "width": 1, "encoding": "uint8", "constraint": "positive-bounded" },
+      { "name": "application_sequence", "offset": 8, "width": 8, "encoding": "uint64-be", "constraint": "route-policy" }
+    ]
+  },
+  "kcp_segment_header": {
+    "size_bytes": 24,
+    "byte_order": "little-endian",
+    "source_identity": "kcp-2.1.1",
+    "fields": [
+      { "name": "conv", "offset": 0, "width": 4, "encoding": "uint32-le", "constraint": "battle-session-derived" },
+      { "name": "cmd", "offset": 4, "width": 1, "encoding": "uint8", "constraint": "81=push,82=ack,83=wask,84=wins" },
+      { "name": "frg", "offset": 5, "width": 1, "encoding": "uint8", "constraint": "kcp-bounded-fragment" },
+      { "name": "wnd", "offset": 6, "width": 2, "encoding": "uint16-le", "constraint": "maximum-64" },
+      { "name": "ts", "offset": 8, "width": 4, "encoding": "uint32-le", "constraint": "kcp-monotonic-ms" },
+      { "name": "sn", "offset": 12, "width": 4, "encoding": "uint32-le", "constraint": "kcp-segment-sequence" },
+      { "name": "una", "offset": 16, "width": 4, "encoding": "uint32-le", "constraint": "kcp-unacknowledged-sequence" },
+      { "name": "len", "offset": 20, "width": 4, "encoding": "uint32-le", "constraint": "exact-segment-payload" }
+    ]
+  },
+  "kcp_route_envelope": {
+    "size_bytes": 16,
+    "byte_order": "network-big-endian",
+    "fields": [
+      { "name": "message_id", "offset": 0, "width": 4, "encoding": "uint32-be", "constraint": "registered-kcp-route" },
+      { "name": "payload_length", "offset": 4, "width": 2, "encoding": "uint16-be", "constraint": "exact-reassembled-protobuf-bytes" },
+      { "name": "route_flags", "offset": 6, "width": 2, "encoding": "uint16-be", "constraint": "zero-until-registered" },
+      { "name": "application_sequence", "offset": 8, "width": 8, "encoding": "uint64-be", "constraint": "route-policy" }
+    ]
+  },
+  "datagram_equation": {
+    "raw": "48 secure + 16 raw + protobuf + 16 tag <= 1200",
+    "kcp": "48 secure + 24 kcp + segment-payload + 16 tag <= 1200",
+    "ipv6_udp_budget_bytes": 48,
+    "ip_fragmentation": "forbidden"
+  }
+}

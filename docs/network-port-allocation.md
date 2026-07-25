@@ -22,7 +22,7 @@
 | Realtime | 本地 TLS/TCP | TCP | `8444` | 本机或开发网 | 仓库 local 配置的可覆盖推荐值，客户端仍以 endpoint/ticket 为准 |
 | Server Runtime | 健康、就绪、版本与 metrics | TCP | `8081` | 默认仅 loopback | 不承载公开业务；生产环境限制在管理网络 |
 | Realtime | 部署 TLS/TCP | TCP | 不预留固定值 | 按部署配置 | 由 endpoint/ticket 下发，客户端不得硬编码 |
-| Game Simulation | raw UDP + KCP lanes | UDP | 尚未分配 | 按部署配置 | model/profile 已完成；Go/C++ control、安全 transport 与真实网络资格完成前仍不得分配 |
+| Game Simulation | raw UDP + KCP lanes | UDP | `58445` | 本机或开发网 | private/dynamic 范围内的可覆盖本地推荐值；生产值仍只由部署配置与 ticket 下发 |
 | MySQL | 持久化数据库 | TCP | `3306` | 内网 | 实际连接端口可由环境配置或端口映射覆盖 |
 | Redis | 可恢复运行态 | TCP | `6379` | 内网 | 不得暴露公网 |
 | OpenTelemetry Collector | OTLP/gRPC | TCP | `4317` | 内网 | Collector 产品默认端口 |
@@ -35,27 +35,37 @@
 
 B0.4 Go/C++ control 不占用端口：Go 只启动本机 child，并通过继承 stdin/stdout pipe
 交换 control frame。`--control-stdio` 不得创建 loopback、Unix socket、named pipe
-listener 或临时随机端口；因此它不会修改本表的 Game Simulation UDP“尚未分配”状态。
+listener 或临时随机端口。B0.5 的 UDP listener 与该 control pipe 独立，仍由同一
+`SimulationNode` composition owner 创建且每个 node 最多一个。
 
 公开 HTTP 与 WSS control 复用同一个实际 listener：WSS 不是第二个端口，而是该入口的精确 `/v1/control` upgrade path。`publicApi.address` 决定进程 bind，`publicApi.endpoints.wss` 决定客户端可见且写入 ticket 的 advertised endpoint；两者可以因 ingress 或 port mapping 不同，但必须由部署配置显式对应，服务端不得从不受信 Host header 重建 advertised endpoint。
 
 Gameplay TLS/TCP 使用 `publicApi.gameplayTcp.address` 独立 bind，客户端只使用 `publicApi.endpoints.tlsTcp` 下发的 advertised endpoint。bind 与 advertised endpoint 可以因 NAT、ingress 或端口映射不同；Session ticket、WorldAdmission 和 TCP handshake 必须复用同一个受信 advertised 值。gameplay bind 端口不得与公开 HTTP/WSS 或 diagnostic 端口相同；明文本地模式要求 bind 与实际 remote 都是 loopback，production 必须使用 TLS 1.3。
 
-## UDP/KCP 分配门禁
+## UDP/KCP 分配与门禁
 
-Game Simulation UDP production 端口、推荐本地端口和可部署 listener 配置必须保持“尚未分配”，直到 roadmap 中有序交付的一组 changes 提供以下证据，并由实际启用 listener 的 change 汇总验证：
+本地推荐端口为 `58445/udp`，处于 private/dynamic 范围，避免占用已登记的
+`8445/udp`。它只是仓库 local 配置的可覆盖值，不是产品协议常量。生产端口不得从
+HTTP `Host`、diagnostic 地址或客户端 payload 推导，也不得在 bind 冲突时自动递增；
+只允许由部署配置提供 bind address，并由 BattleTicket 下发独立 advertised endpoint。
+
+B0.5 已在启用本地/隔离环境 listener 前汇总并验证以下实现证据：
 
 - 已批准的 battle simulation model，冻结 SimulationTick、input consumption、历史帧和过载语义，并由 `shared/contracts/fixtures/battle/model/` 与只读 validator 提供 completion evidence；该 evidence 本身不分配 wire、lane、listener 或端口；
-- 已完成的 `shared/contracts/fixtures/battle/network-profile/`，绑定 model digest并冻结 1200-byte MTU、20/40 Hz simulation/input、10 Hz snapshot、logical lane inventory、KCP 参数、插值窗口和 per-player/per-instance target budget；其中真实 wire/KCP/socket/CPU/memory 仍须 implementation qualification；
+- 已完成的 `shared/contracts/fixtures/battle/network-profile/`，绑定 model digest 并冻结 1200-byte MTU、20/40 Hz simulation/input、10 Hz snapshot、logical lane inventory、KCP 参数、插值窗口和 per-player/per-instance target budget；真实 wire/KCP/socket 的实现资格由 B0.5 独立补证；
 - HTTPS 签发的短期一次性 ticket，绑定 session epoch、PlayerID、完整 AssignmentStamp、SimulationInstanceID、audience/channel、受信 advertised endpoint 与绝对 expiry；
 - cookie challenge 与抗放大预算，在地址未验证前 response bytes/requests 严格受限；
 - AEAD algorithm/key derivation/key epoch/nonce discipline、replay window 与 endpoint binding/rebinding 验证；
 - per-IP、per-session、per-message、per-instance 限流，以及 malformed packet fast reject 和有界 queue/memory；
-- raw UDP 与 KCP 复用一个认证 multiplexer、listener 和安全 session 的设计与测试；如拆分 listener，必须有独立运维/安全证据；
-- 可重复网络模拟覆盖 latency、jitter、loss、reorder、duplicate、burst、pause、MTU、NAT/rebinding 和 forged/replay traffic；
-- qualification 证明 bandwidth、重传放大、CPU、内存、queue pressure、降级、重连和 shutdown 均在预算内。
+- raw UDP 与 KCP 复用一个认证 multiplexer、listener 和安全 session 的设计与测试；如拆分 listener，必须有独立运维/安全证据。
 
-满足门禁后，环境实际 endpoint 仍由部署配置和 ticket 下发，Unity 不硬编码端口。仅在 loopback integration test 使用 `127.0.0.1:0` 不构成 production 端口分配。
+B0.6 在 production 放量前还必须提供可重复网络模拟，覆盖 latency、jitter、loss、
+reorder、duplicate、burst、pause、MTU、NAT/rebinding 和 forged/replay traffic，并证明
+bandwidth、重传放大、CPU、内存、queue pressure、降级、重连和 shutdown 均在预算内。
+
+环境实际 endpoint 始终由部署配置和 ticket 下发，Unity 不硬编码端口。隔离 loopback
+integration test 可以使用 `127.0.0.1:0` 并从实际 listener 回读端口，不构成 production
+端口分配；B0.6 完成前，任何 production 映射都只能用于部署预演，不能作为放量依据。
 
 ## 覆盖与映射
 

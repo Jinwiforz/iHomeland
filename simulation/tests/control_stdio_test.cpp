@@ -135,6 +135,82 @@ void TestBuildDrift() {
         "build drift lacked low-sensitive diagnostic");
 }
 
+/// TestTicketCancelTombstone 验证先到 revoke 与 status 经 closed control frame 幂等。
+void TestTicketCancelTombstone() {
+    std::stringstream input(
+        std::ios::in | std::ios::out | std::ios::binary);
+    AppendFrame(
+        input,
+        Frame(
+            "1",
+            "sctl_stdio_ticket_hello_0001",
+            "node.hello.challenge",
+            R"({"actorCapacity":8,"expectedBuildIdentity":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expectedModelManifest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","expectedProfileManifest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","instanceCapacity":2,"runtimeNodeId":"rnode_stdio_test","simulationNodeId":"snode_stdio_test"})"));
+    AppendFrame(
+        input,
+        Frame(
+            "3",
+            "sctl_ticket_revoke_000000000001",
+            "battle.ticket.revoke",
+            R"({"actorSlot":"2","bindingFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","revokeRequestId":"sctl_ticket_revoke_000000000001","simulationInstanceId":"sinst_11111111111111111111111111111111","ticketId":"btk1_11111111111111111111111111111111"})"));
+    AppendFrame(
+        input,
+        Frame(
+            "5",
+            "sctl_ticket_status_000000000001",
+            "battle.ticket.status.query",
+            R"({"bindingFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","simulationInstanceId":"sinst_11111111111111111111111111111111","ticketId":"btk1_11111111111111111111111111111111"})"));
+    AppendFrame(
+        input,
+        Frame(
+            "7",
+            "sctl_stdio_ticket_stop_0001",
+            "node.shutdown",
+            R"({"deadlineMs":"1000"})"));
+    input.seekg(0);
+    std::stringstream output(
+        std::ios::in | std::ios::out | std::ios::binary);
+    std::ostringstream diagnostics;
+    Require(
+        ihomeland::sim::RunControlStdio(
+            input,
+            output,
+            diagnostics,
+            BuildBinding()) == 0,
+        "ticket cancel control session failed");
+    Require(
+        diagnostics.str().empty(),
+        "ticket cancel wrote diagnostics");
+
+    output.seekg(0);
+    ihomeland::sim::ControlFrame receipt;
+    Require(
+        ihomeland::sim::ControlFrameCodec::Read(output, receipt) &&
+            receipt.kind == "node.hello.receipt",
+        "ticket cancel hello receipt was invalid");
+    Require(
+        ihomeland::sim::ControlFrameCodec::Read(output, receipt) &&
+            receipt.kind == "battle.ticket.revoked" &&
+            receipt.payload_json.find(
+                R"("state":"revoked")") !=
+                std::string::npos,
+        "ticket revoke receipt was invalid");
+    Require(
+        ihomeland::sim::ControlFrameCodec::Read(output, receipt) &&
+            receipt.kind == "battle.ticket.status.receipt" &&
+            receipt.payload_json.find(
+                R"("actorSlot":"2")") !=
+                std::string::npos &&
+            receipt.payload_json.find(
+                R"("state":"revoked")") !=
+                std::string::npos,
+        "ticket tombstone status receipt was invalid");
+    Require(
+        ihomeland::sim::ControlFrameCodec::Read(output, receipt) &&
+            receipt.kind == "node.stopped",
+        "ticket cancel shutdown receipt was invalid");
+}
+
 }  // namespace
 
 /// main 运行私有 stdio control integration 回归。
@@ -142,6 +218,7 @@ int main() {
     try {
         TestHealthyShutdown();
         TestBuildDrift();
+        TestTicketCancelTombstone();
         return 0;
     } catch (const std::exception&) {
         return 1;

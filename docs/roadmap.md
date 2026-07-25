@@ -383,7 +383,7 @@ Q0 的唯一完整入口、冻结 digest、分层证据、报告语义与长期 
 
 ### B0.2 `define-battle-network-profile`
 
-**状态：**已完成实现，等待 change 归档。
+**状态：**已完成并于 2026-07-23 归档。
 
 **进入条件：**B0.1 delta 已同步主 specs 且 OpenSpec strict 通过；模型 validator 与失败回归通过；`manifest.json`、`assumptions.json` 和全部 cases 的 digest 无漂移。B0.2 只能消费已冻结的 command/state/query/event 维度、VisitSession 容量兼容 workload、Tick 消费与历史/容量需求，不得为迎合网络参数改写模型语义。
 
@@ -419,9 +419,9 @@ socket/KCP/AEAD、production network 与 Unity runtime。
 
 **状态：**实现、主 specs 同步、server v1 完整回归、client v1 全部 20 项 mandatory
 资格与 B0.4 完整资格均已通过；连续两份低敏 B0.4 report 字节一致并得到
-`control-qualified-windows-x64`。change 已于 2026-07-24 完成归档，B0.5 的提案进入条件
-已经满足；battle wire、UDP/KCP/AEAD 与 Unity battle runtime 仍须由独立 OpenSpec
-change 冻结并验收，不能直接开始实现。
+`control-qualified-windows-x64`。change 已于 2026-07-24 完成归档，并解锁了 B0.5；
+battle wire、UDP/KCP/AEAD 已由后续独立 OpenSpec 冻结和验收，Unity battle runtime
+仍须等待 B0.6 网络资格。
 
 **进入条件：**B0.3 的 10 个冻结 model cases、CI/ASan/parity/benchmark、连续
 determinism 与唯一 qualification report 全部通过，主 specs 已同步并归档；C++ core
@@ -448,16 +448,25 @@ operator 场景与 cleanup，绑定 contract/Development/Release digest
 
 ### B0.5 `establish-secure-battle-transport`
 
-**进入条件：**B0.4 主 specs 已同步并归档，连续资格报告为 qualified，且
+**状态：**实现、主 specs 同步、跨语言 wire/crypto/KCP、真实 child/loopback UDP、
+server v1 与 client v1 回归均已通过，取得 `secure-transport-qualified-windows-x64`；
+change 已于 2026-07-25 完成归档，仅解锁 B0.6，不代表公网或 Unity gameplay 可发布。
+
+**进入条件（已满足）：**B0.4 主 specs 已同步并归档，连续资格报告为 qualified，且
 SimulationTarget/8-actor gate、child crash/restart、result replay 和现有 world/visit 回归
 均有证据；随后必须由独立 change 冻结 battle endpoint ownership、threat model、numeric
 message registry、ticket/cookie/AEAD/replay/anti-amplification 与实际 UDP listener/端口。
-在该 change 获批前 Asio/KCP、UDP 配置、network qualification 和 Unity battle runtime
-继续关闭。
+该 change 实施前 Asio/KCP、UDP 配置、network qualification 和 Unity battle runtime
+均保持关闭。
 
 **产出：**Asio 单 UDP listener/authenticated multiplexer、raw/KCP lanes、HTTPS battle ticket、cookie challenge、AEAD/key epoch/nonce、replay window、endpoint binding/rebinding、限流、抗放大、有界 queue 和跨 C++/C#/Go wire fixtures。
 
 **完成条件：**伪造、重放、放大、乱序、重复、过期、MTU、backpressure、rebind、key rollover 和 shutdown tests 全部通过；账号凭据、资产、奖励与结算不进入 UDP。
+
+**完成 evidence：**B0.5 唯一 qualification report 覆盖 45/45 OpenSpec tasks 与全部
+mandatory gates，并绑定 model/profile/control/wire/registry/config/fixture、Go/C++/C#
+toolchain 和 binary identity。实现结论只适用于 Windows x64；B0.6 仍需独立验证
+latency、jitter、loss、reorder、duplicate、burst、pause、NAT 与容量曲线。
 
 ### B0.6 `qualify-battle-network`
 

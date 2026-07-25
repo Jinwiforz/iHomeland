@@ -122,6 +122,14 @@ type Metrics struct {
 	simulationProcessExits *prometheus.CounterVec
 	// simulationShutdowns 记录 simulation component 关闭结果。
 	simulationShutdowns *prometheus.CounterVec
+	// battleEvents 记录握手、安全、路由与生命周期的固定事件。
+	battleEvents *prometheus.CounterVec
+	// battleTrafficBytes 记录固定方向与 lane 的 datagram bytes。
+	battleTrafficBytes *prometheus.CounterVec
+	// battleNetworkSeconds 记录 RTT、jitter 与 loss/retransmit ratio 的数值样本。
+	battleNetworkSeconds *prometheus.HistogramVec
+	// battleQueueDepth 记录固定队列的瞬时条目数。
+	battleQueueDepth *prometheus.GaugeVec
 }
 
 // NewMetrics 注册运行时固定指标集合；私有 registry 使重复构造不会污染 package global 状态。
@@ -180,8 +188,12 @@ func NewMetrics() *Metrics {
 		simulationResults:         prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_result_total", Help: "Simulation result decision results."}, []string{"outcome"}),
 		simulationProcessExits:    prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_process_exit_total", Help: "Simulation child process exit results."}, []string{"outcome"}),
 		simulationShutdowns:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_simulation_shutdown_total", Help: "Simulation component shutdown results."}, []string{"outcome"}),
+		battleEvents:              prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_battle_transport_events_total", Help: "Low-cardinality secure battle transport events."}, []string{"stage", "outcome"}),
+		battleTrafficBytes:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_battle_transport_bytes_total", Help: "Secure battle transport bytes."}, []string{"direction", "lane"}),
+		battleNetworkSeconds:      prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_battle_transport_network_seconds", Help: "Battle transport RTT and jitter samples.", Buckets: prometheus.ExponentialBuckets(0.001, 2, 12)}, []string{"sample"}),
+		battleQueueDepth:          prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_battle_transport_queue_items", Help: "Battle transport bounded queue depth."}, []string{"queue"}),
 	}
-	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries, metrics.simulationNodeHealth, metrics.simulationInstances, metrics.simulationCapacity, metrics.simulationControlRequests, metrics.simulationControlSeconds, metrics.simulationControlQueue, metrics.simulationDrains, metrics.simulationResults, metrics.simulationProcessExits, metrics.simulationShutdowns)
+	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries, metrics.simulationNodeHealth, metrics.simulationInstances, metrics.simulationCapacity, metrics.simulationControlRequests, metrics.simulationControlSeconds, metrics.simulationControlQueue, metrics.simulationDrains, metrics.simulationResults, metrics.simulationProcessExits, metrics.simulationShutdowns, metrics.battleEvents, metrics.battleTrafficBytes, metrics.battleNetworkSeconds, metrics.battleQueueDepth)
 	return metrics
 }
 
@@ -241,7 +253,7 @@ func (metrics *Metrics) ObserveMigration(outcome string, count int) {
 // PersonalWorld/placement adapter 只上报此处枚举的流程结果；identity、SQL、key、fence、
 // idempotency material 与原始错误永远不能成为 label。
 func (metrics *Metrics) RecordStorageOperation(adapter string, operation string, outcome string) {
-	requireMetricLabel(adapter, "mysql", "redis", "account", "session", "personalworld", "placement", "visitsession", "worldadmission", "simulationresult")
+	requireMetricLabel(adapter, "mysql", "redis", "account", "session", "personalworld", "placement", "visitsession", "worldadmission", "battleticket", "simulationresult")
 	requireMetricLabel(operation,
 		"transaction", "command", "script", "ensure_primary", "find_by_id", "archive", "allocation",
 		"resolve", "acquire", "activate", "renew", "revoke", "replace", "qualify_write", "create",
@@ -257,6 +269,41 @@ func (metrics *Metrics) RecordStorageOperation(adapter string, operation string,
 		"invalidated", "epoch_mismatch", "consumed", "binding_mismatch", "available", "unavailable", "corrupt", "stale",
 		"begin_failed", "owner_rejected", "insert_failed", "duplicate_unknown")
 	metrics.storageOperationTotal.WithLabelValues(adapter, operation, outcome).Inc()
+}
+
+// ObserveBattleEvent 记录封闭 stage/outcome；接口不接受 ticket、session、endpoint 或 binding。
+func (metrics *Metrics) ObserveBattleEvent(stage string, outcome string) {
+	requireMetricLabel(stage, "handshake", "cookie", "auth", "replay", "rate", "route", "backpressure", "rebind", "rekey", "close")
+	requireMetricLabel(outcome, "accepted", "rejected", "issued", "validated", "duplicate", "too_old", "limited", "dropped", "closed", "timeout", "failed")
+	metrics.battleEvents.WithLabelValues(stage, outcome).Inc()
+}
+
+// ObserveBattleTraffic 记录固定方向/lane 的聚合字节数。
+func (metrics *Metrics) ObserveBattleTraffic(direction string, lane string, bytes int) {
+	requireMetricLabel(direction, "c2s", "s2c")
+	requireMetricLabel(lane, "handshake", "raw", "kcp")
+	if bytes < 0 {
+		panic("invalid battle traffic bytes")
+	}
+	metrics.battleTrafficBytes.WithLabelValues(direction, lane).Add(float64(bytes))
+}
+
+// ObserveBattleNetwork 记录 RTT 或 jitter 秒数；loss/retransmit 使用独立固定 outcome counter。
+func (metrics *Metrics) ObserveBattleNetwork(sample string, duration time.Duration) {
+	requireMetricLabel(sample, "rtt", "jitter")
+	if duration < 0 {
+		panic("invalid battle network duration")
+	}
+	metrics.battleNetworkSeconds.WithLabelValues(sample).Observe(duration.Seconds())
+}
+
+// SetBattleQueue 记录 node、session、KCP 或 egress 的有界深度。
+func (metrics *Metrics) SetBattleQueue(queue string, items int) {
+	requireMetricLabel(queue, "node", "session", "kcp", "egress")
+	if items < 0 {
+		panic("invalid battle queue depth")
+	}
+	metrics.battleQueueDepth.WithLabelValues(queue).Set(float64(items))
 }
 
 // SetSimulationNodeHealth 更新唯一 child node 的封闭状态；调用方不得传入 node identity。
@@ -331,7 +378,7 @@ func (metrics *Metrics) ObserveSimulationShutdown(outcome string) {
 
 // ObservePublicHTTP 记录固定operation、status class与三值outcome，不接受URL、identity或错误文本。
 func (metrics *Metrics) ObservePublicHTTP(operation string, statusClass string, outcome string, seconds float64, responseBytes int) {
-	requireMetricLabel(operation, "getVersion", "getBootstrapConfig", "registerAccount", "loginAccount", "refreshSession", "logoutSession", "issueConnectionTicket", "getWorldBootstrap", "acceptVisitInvite", "issueWorldAdmission")
+	requireMetricLabel(operation, "getVersion", "getBootstrapConfig", "registerAccount", "loginAccount", "refreshSession", "logoutSession", "issueConnectionTicket", "getWorldBootstrap", "acceptVisitInvite", "issueWorldAdmission", "issueBattleTicket")
 	requireMetricLabel(statusClass, "2xx", "4xx", "5xx")
 	requireMetricLabel(outcome, "success", "client_error", "server_error")
 	metrics.publicRequestsTotal.WithLabelValues(operation, statusClass, outcome).Inc()

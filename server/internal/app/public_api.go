@@ -21,6 +21,8 @@ type preparedPublicAPI struct {
 	tlsConfig *tls.Config
 	// derivationKey 必须在public component Start返回前清零，成功时service已复制所需材料。
 	derivationKey []byte
+	// battleDerivationKey 必须在 BattleTicket issuer 复制后立即清零。
+	battleDerivationKey []byte
 }
 
 // Destroy 清零尚未转移给 WorldAdmission service 的 derivation key 副本。
@@ -30,6 +32,8 @@ func (prepared *preparedPublicAPI) Destroy() {
 	}
 	clear(prepared.derivationKey)
 	prepared.derivationKey = nil
+	clear(prepared.battleDerivationKey)
+	prepared.battleDerivationKey = nil
 }
 
 // preparePublicAPI 在 logger、listener 与 storage client 创建前解析全部公开 secret material。
@@ -48,6 +52,20 @@ func preparePublicAPI(ctx context.Context, settings config.PublicAPI, provider s
 		return nil
 	}); err != nil {
 		return preparedPublicAPI{}, fmt.Errorf("prepare publicApi.worldAdmission.derivationKeySecret: %w", err)
+	}
+	battleValue, err := resolveSecret(ctx, provider, settings.BattleUDP.DerivationKeySecret, "publicApi.battleUdp.derivationKeySecret")
+	if err != nil {
+		return preparedPublicAPI{}, err
+	}
+	defer battleValue.Destroy()
+	if err := battleValue.Expose(func(content []byte) error {
+		if len(content) != 32 {
+			return errors.New("battle derivation key must contain exactly 32 bytes")
+		}
+		prepared.battleDerivationKey = append([]byte(nil), content...)
+		return nil
+	}); err != nil {
+		return preparedPublicAPI{}, fmt.Errorf("prepare publicApi.battleUdp.derivationKeySecret: %w", err)
 	}
 	succeeded := false
 	defer func() {

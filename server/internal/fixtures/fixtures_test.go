@@ -140,6 +140,63 @@ func TestFixtureFilesMatchDeterministicGeneration(t *testing.T) {
 	}
 }
 
+// TestBattleTicketHTTPFixturesCoverAdmissionBoundary 验证公开样例同时冻结 own/visit、8/9 actor、
+// stale target、response-loss 与 credential redaction，且成功响应不泄漏内部 binding。
+func TestBattleTicketHTTPFixturesCoverAdmissionBoundary(t *testing.T) {
+	manifest := buildHTTPFixtures()
+	cases := make(map[string]HTTPCase, len(manifest.Cases))
+	for _, testCase := range manifest.Cases {
+		cases[testCase.Name] = testCase
+	}
+	required := []string{
+		"battle-ticket-own-world-success",
+		"battle-ticket-eighth-visit-actor-success",
+		"battle-ticket-ninth-actor-capacity",
+		"battle-ticket-stale-target",
+		"battle-ticket-response-loss-replay",
+		"battle-ticket-credential-field-rejected",
+	}
+	for _, name := range required {
+		if _, ok := cases[name]; !ok {
+			t.Fatalf("missing BattleTicket HTTP fixture %s", name)
+		}
+	}
+	own := cases["battle-ticket-own-world-success"]
+	replay := cases["battle-ticket-response-loss-replay"]
+	ownResponse, err := json.Marshal(own.Response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayResponse, err := json.Marshal(replay.Response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ownResponse, replayResponse) {
+		t.Fatal("BattleTicket response-loss replay must preserve the first credential and binding projection")
+	}
+	for _, name := range []string{"battle-ticket-own-world-success", "battle-ticket-eighth-visit-actor-success"} {
+		response, err := json.Marshal(cases[name].Response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{
+			`"assignmentStamp"`, `"runtimeNodeId"`, `"simulationNodeId"`,
+			`"simulationInstanceId"`, `"actorSlot"`, `"proofKey"`,
+		} {
+			if bytes.Contains(response, []byte(forbidden)) {
+				t.Fatalf("BattleTicket fixture %s leaked internal field %s", name, forbidden)
+			}
+		}
+	}
+	redacted, err := json.Marshal(cases["battle-ticket-credential-field-rejected"].Response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(redacted, []byte("fixture_secret_must_not_be_echoed")) {
+		t.Fatal("BattleTicket validation error echoed credential-like request material")
+	}
+}
+
 // TestNegativeCasesCoversRequiredBoundaries 保证拒绝用例持续覆盖协议规定的边界。
 // 这里验证清单完整性；各畸形字节的具体拒绝行为由对应 codec 与 contract 测试负责。
 func TestNegativeCasesCoversRequiredBoundaries(t *testing.T) {

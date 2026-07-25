@@ -3,9 +3,9 @@
   "documentKind": "manifest",
   "b03Binding": {
     "qualificationConclusion": "implementation-qualified-windows-x64",
-    "releaseBuildIdentitySha256": "86861672c50e7d57f2744b56408f430638815bd08d3b668155aeec184bd607f6",
-    "asanBuildIdentitySha256": "4a5a65491bb17e6bd8b01c284026c681a73b4211e8d807f91a045a917357e2e2",
-    "qualificationGateReceiptSha256": "64ef4905e71852d731edc2f1115b9a255cb106b2c0ff55ddb9a8162ef76d540b",
+    "releaseBuildIdentitySha256": "0864e3f42aaa3029600fa31ddae3673fb62b932fa6252022ab9675a62b575424",
+    "asanBuildIdentitySha256": "085b444c82535e3e7d141e41211a2fe468a30ec3af5a803d16edb6c870f3eb13",
+    "qualificationGateReceiptSha256": "32b5d61f2e3d3f700187462540028a05d76a478898684d219e5e27cf038a9b19",
     "modelManifestSha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
     "profileManifestSha256": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
     "maximumActors": 8,
@@ -15,17 +15,22 @@
     {
       "path": "schema/frame.schema.json",
       "documentKind": "frame-schema",
-      "sha256": "26cebd50ead38f2238a6fcf26c7a8b124a3adef069ff417c4dff6b698b07949d"
+      "sha256": "8897d23535a9d8c59d7ced6dce91fa05f091bb417859b6f2a4557d441f73f0ff"
+    },
+    {
+      "path": "schema/battle-control-payloads.schema.json",
+      "documentKind": "battle-control-payload-schema",
+      "sha256": "e257f3c12310c6ba2a1da69f1916da5c0a06ea0dd01f3c33290db053b91334c7"
     },
     {
       "path": "message-inventory.json",
       "documentKind": "message-inventory",
-      "sha256": "16dad2e0bacb8658c06a501bb911985b816d73c266089f7c0875c84df6c2fdbc"
+      "sha256": "e7ba18bc990bd1064f57d22f5dfc79b28695a1c1548b5f61906053469124da82"
     },
     {
       "path": "canonical-golden.json",
       "documentKind": "canonical-golden",
-      "sha256": "ef8dc71ecf5630a278701de3b21651526d360a124e6ce6cbe2974fb6ff6cad88"
+      "sha256": "14dd00c40c70d19549c4eccd3d6aa45b8a21d935bef54026460b58840fb96d77"
     },
     {
       "path": "runtime/config/control-baseline-v1.json",
@@ -44,6 +49,12 @@
     }
   ],
   "cases": [
+    {
+      "caseId": "battle-listener-ticket-session-control",
+      "path": "cases/battle-control.json",
+      "category": "battle-control",
+      "sha256": "db09c588ec8329abba71d61f79c159ad6c79f49b91f5d8f5a39e2f020e049cb2"
+    },
     {
       "caseId": "hello-compatible-node",
       "path": "cases/hello.json",

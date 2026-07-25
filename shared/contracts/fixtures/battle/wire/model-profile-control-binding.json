@@ -1,0 +1,28 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "model-profile-control-binding",
+  "sources": [
+    {
+      "owner": "battle-model",
+      "manifest_path": "../model/manifest.json",
+      "manifest_sha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1"
+    },
+    {
+      "owner": "battle-network-profile",
+      "manifest_path": "../network-profile/manifest.json",
+      "manifest_sha256": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f"
+    },
+    {
+      "owner": "simulation-control",
+      "manifest_path": "../../simulation-control/manifest.json",
+      "manifest_sha256": "a6e5d72de49cad8adc53bb686f2573b37486af54057aa03ece373df6af83f4b1"
+    }
+  ],
+  "invariants": {
+    "maximum_actors": 8,
+    "simulation_tick_ns": 50000000,
+    "source_corpus_mode": "immutable",
+    "qualification_boundary": "b0.5-implementation-only"
+  }
+}

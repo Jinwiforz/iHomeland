@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -100,7 +101,28 @@ func runTLS(arguments []string) error {
 	// file: secret 是文本边界；hex 保留 256-bit 熵，同时排除 NUL 与换行解析歧义。
 	admissionKey := make([]byte, hex.EncodedLen(len(admissionEntropy)))
 	hex.Encode(admissionKey, admissionEntropy)
-	return os.WriteFile(filepath.Join(*directory, "admission-key"), admissionKey, 0o600)
+	if err := os.WriteFile(filepath.Join(*directory, "admission-key"), admissionKey, 0o600); err != nil {
+		return err
+	}
+	battleKey, err := newBattleDerivationKey()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(*directory, "battle-derivation-key"), battleKey, 0o600)
+}
+
+// newBattleDerivationKey 生成精确32字节随机根密钥，并排除file:边界禁止或会被裁剪的字节。
+func newBattleDerivationKey() ([]byte, error) {
+	for {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, err
+		}
+		if bytes.IndexByte(key, 0) < 0 && key[len(key)-1] != '\n' {
+			return key, nil
+		}
+		clear(key)
+	}
 }
 
 // runProbe 只通过公开 HTTPS version/config 判断独立服务端是否 ready。

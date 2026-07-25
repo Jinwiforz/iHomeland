@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,5 +21,15 @@ func TestRunTLSWritesTextSafeAdmissionKey(t *testing.T) {
 	decoded, err := hex.DecodeString(string(content))
 	if err != nil || len(decoded) != 32 {
 		t.Fatalf("admission key is not 32-byte hex: length=%d error=%v", len(decoded), err)
+	}
+	battleKey, err := os.ReadFile(filepath.Join(directory, "battle-derivation-key"))
+	if err != nil {
+		t.Fatalf("ReadFile() battle key error = %v", err)
+	}
+	if len(battleKey) != 32 {
+		t.Fatalf("battle derivation key length = %d, want 32", len(battleKey))
+	}
+	if strings.ContainsRune(string(battleKey), '\x00') || battleKey[len(battleKey)-1] == '\n' {
+		t.Fatal("battle derivation key contains forbidden file-secret bytes")
 	}
 }

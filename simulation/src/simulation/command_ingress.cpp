@@ -149,6 +149,28 @@ bool CommandIngress::ValidatePayload(const GameplayCommand& command) {
                 return payload->directive != 0 && payload->trusted_source;
             }
             return false;
+        case GameplayCommandKind::AimIntent:
+            if (const auto* payload =
+                    std::get_if<AimIntentPayload>(
+                        &command.payload)) {
+                return payload->yaw_millidegrees >=
+                           -180'000 &&
+                       payload->yaw_millidegrees <=
+                           180'000 &&
+                       payload->pitch_millidegrees >=
+                           -90'000 &&
+                       payload->pitch_millidegrees <=
+                           90'000;
+            }
+            return false;
+        case GameplayCommandKind::InteractSlot:
+            if (const auto* payload =
+                    std::get_if<InteractSlotPayload>(
+                        &command.payload)) {
+                return payload->interaction_slot >= 1 &&
+                       payload->interaction_slot <= 16;
+            }
+            return false;
     }
     return false;
 }
@@ -167,6 +189,21 @@ std::string CommandIngress::CanonicalPayload(const GameplayCommand& command) {
                 token += "|" + std::to_string(payload.ability_id);
             } else if constexpr (std::is_same_v<Payload, LifecycleDirectivePayload>) {
                 token += "|" + std::to_string(payload.directive);
+            } else if constexpr (
+                std::is_same_v<Payload, AimIntentPayload>) {
+                token += "|" +
+                         std::to_string(
+                             payload.yaw_millidegrees) +
+                         "|" +
+                         std::to_string(
+                             payload.pitch_millidegrees);
+            } else if constexpr (
+                std::is_same_v<
+                    Payload,
+                    InteractSlotPayload>) {
+                token += "|" +
+                         std::to_string(
+                             payload.interaction_slot);
             }
         },
         command.payload);

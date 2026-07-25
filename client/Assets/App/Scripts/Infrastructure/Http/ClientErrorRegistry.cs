@@ -114,6 +114,10 @@ namespace IHomeland.Client.Infrastructure.Http
             Add(errors, 2107, ClientServerErrorCategory.Authentication, "error.visit.membership_required", false, HttpStatusCode.Forbidden);
             Add(errors, 2108, ClientServerErrorCategory.Conflict, "error.visit.owner_unavailable", false, HttpStatusCode.Conflict);
             Add(errors, 2109, ClientServerErrorCategory.Conflict, "error.visit.reconnect_expired", false, HttpStatusCode.Gone);
+            Add(errors, 3000, ClientServerErrorCategory.Dependency, "error.battle.target_not_ready", true, HttpStatusCode.ServiceUnavailable);
+            Add(errors, 3001, ClientServerErrorCategory.Conflict, "error.battle.capacity_exceeded", false, HttpStatusCode.Conflict);
+            Add(errors, 3002, ClientServerErrorCategory.Conflict, "error.battle.target_stale", false, HttpStatusCode.Conflict);
+            Add(errors, 3003, ClientServerErrorCategory.Conflict, "error.battle.idempotency_conflict", false, HttpStatusCode.Conflict);
             return errors;
         }
 

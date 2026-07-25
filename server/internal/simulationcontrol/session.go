@@ -23,6 +23,8 @@ const (
 	SessionErrorDeadline SessionErrorKind = "deadline"
 	// SessionErrorClosed 表示 terminal session 不再接受请求。
 	SessionErrorClosed SessionErrorKind = "closed"
+	// SessionErrorBackpressure 表示对应优先级等待队列已达到 hard limit。
+	SessionErrorBackpressure SessionErrorKind = "backpressure"
 )
 
 // SessionError 保存稳定分类且不携带 nonce、payload 或完整 assignment。
@@ -69,6 +71,16 @@ type Session struct {
 	proposals ProposalHandler
 	// callMutex 保证同一 session 同时只有一个 request turn。
 	callMutex sync.Mutex
+	// laneMutex 保护高低优先级等待者与 active turn。
+	laneMutex sync.Mutex
+	// laneChanged 以 close-and-recreate 广播优先级状态变化。
+	laneChanged chan struct{}
+	// laneActive 表示已有 request/send 占用不可抢占的单一 pipe turn。
+	laneActive bool
+	// highWaiting 是 lifecycle/health/revoke/result ack 等待者数量。
+	highWaiting int
+	// ticketWaiting 是 install/status 低优先级队列长度，不含 active turn。
+	ticketWaiting int
 	// sequenceMutex 线性化 reader 与 writer 共享 sequence。
 	sequenceMutex sync.Mutex
 	// sequence 是已接受或写入的最后 frame sequence。
@@ -98,6 +110,7 @@ func NewSession(reader io.Reader, writer io.Writer, closer io.Closer, nonce Dige
 		nonce:          nonce,
 		requestTimeout: requestTimeout,
 		proposals:      proposals,
+		laneChanged:    make(chan struct{}),
 		incoming:       make(chan Frame, PendingRequestLimit),
 		terminal:       make(chan struct{}),
 		closer:         closer,
@@ -114,6 +127,11 @@ func (session *Session) Call(ctx context.Context, requestID RequestID, kind stri
 	if session == nil || ctx == nil || !requestID.Valid() || expectedKind == "" {
 		return nil, errors.New("simulation control call input is invalid")
 	}
+	release, err := session.enterLane(ctx, ticketLowPriority(kind))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	session.callMutex.Lock()
 	defer session.callMutex.Unlock()
 	if err := session.failure(); err != nil {
@@ -177,6 +195,11 @@ func (session *Session) Send(ctx context.Context, requestID RequestID, kind stri
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	release, err := session.enterLane(ctx, false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	session.callMutex.Lock()
 	defer session.callMutex.Unlock()
 	if err := session.failure(); err != nil {
@@ -197,6 +220,95 @@ func (session *Session) Send(ctx context.Context, requestID RequestID, kind stri
 		return session.failure()
 	}
 	return nil
+}
+
+// enterLane 在单一 pipe turn 前执行 high-first 有界仲裁。
+//
+// Active turn 不可抢占，但结束后所有已等待 high 请求都先于 ticket install/status。
+func (session *Session) enterLane(ctx context.Context, ticket bool) (func(), error) {
+	if session == nil || ctx == nil {
+		return nil, errors.New("simulation control lane input is invalid")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	session.laneMutex.Lock()
+	if ticket {
+		if session.ticketWaiting >= TicketRequestQueueLimit {
+			session.laneMutex.Unlock()
+			return nil, &SessionError{Kind: SessionErrorBackpressure}
+		}
+		session.ticketWaiting++
+	} else {
+		if session.highWaiting >= PendingRequestLimit {
+			session.laneMutex.Unlock()
+			return nil, &SessionError{Kind: SessionErrorBackpressure}
+		}
+		session.highWaiting++
+	}
+	registered := true
+	for {
+		if !session.laneActive && (!ticket || session.highWaiting == 0) {
+			session.laneActive = true
+			if ticket {
+				session.ticketWaiting--
+			} else {
+				session.highWaiting--
+			}
+			registered = false
+			session.laneMutex.Unlock()
+			return func() { session.leaveLane() }, nil
+		}
+		changed := session.laneChanged
+		session.laneMutex.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			session.laneMutex.Lock()
+			if registered {
+				if ticket {
+					session.ticketWaiting--
+				} else {
+					session.highWaiting--
+				}
+				session.broadcastLaneChange()
+			}
+			session.laneMutex.Unlock()
+			return nil, ctx.Err()
+		case <-session.terminal:
+			session.laneMutex.Lock()
+			if registered {
+				if ticket {
+					session.ticketWaiting--
+				} else {
+					session.highWaiting--
+				}
+				session.broadcastLaneChange()
+			}
+			session.laneMutex.Unlock()
+			return nil, session.failure()
+		}
+		session.laneMutex.Lock()
+	}
+}
+
+// leaveLane 释放 active turn 并同时唤醒全部高低优先级等待者。
+func (session *Session) leaveLane() {
+	session.laneMutex.Lock()
+	session.laneActive = false
+	session.broadcastLaneChange()
+	session.laneMutex.Unlock()
+}
+
+// broadcastLaneChange 要求调用方持有 laneMutex。
+func (session *Session) broadcastLaneChange() {
+	close(session.laneChanged)
+	session.laneChanged = make(chan struct{})
+}
+
+// ticketLowPriority 只把 install/status 查询放入有界低优先级 lane；所有 revoke 保持 high。
+func ticketLowPriority(kind string) bool {
+	return kind == "battle.ticket.install" || kind == "battle.ticket.status.query"
 }
 
 // Close 终止 pipes 并让 pending call 观察 closed failure。

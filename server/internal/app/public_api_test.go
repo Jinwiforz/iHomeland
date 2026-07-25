@@ -35,6 +35,7 @@ func TestPreparePublicAPIResolvesTLSAndDerivationKey(t *testing.T) {
 	certificatePath, privateKeyPEM := writeTestCertificate(t)
 	t.Setenv("TEST_PUBLIC_PRIVATE_KEY", string(privateKeyPEM))
 	t.Setenv("TEST_ADMISSION_KEY", strings.Repeat("k", 32))
+	t.Setenv("IHOMELAND_BATTLE_DERIVATION_KEY", strings.Repeat("b", 32))
 	settings := config.DefaultPublicAPI()
 	settings.TLS = config.PublicTLS{Enabled: true, CertificateFile: certificatePath, PrivateKeySecret: "env:TEST_PUBLIC_PRIVATE_KEY"}
 	settings.WorldAdmission.DerivationKeySecret = "env:TEST_ADMISSION_KEY"
@@ -60,6 +61,7 @@ func TestPreparePublicAPIResolvesTLSAndDerivationKey(t *testing.T) {
 
 // TestPreparePublicAPIFailsClosedAndRedactsSecret 验证短 key 与无效 TLS pair 不产生可用结果或泄漏。
 func TestPreparePublicAPIFailsClosedAndRedactsSecret(t *testing.T) {
+	t.Setenv("IHOMELAND_BATTLE_DERIVATION_KEY", strings.Repeat("b", 32))
 	t.Setenv("TEST_SHORT_ADMISSION_KEY", "sensitive-short-key")
 	settings := config.DefaultPublicAPI()
 	settings.WorldAdmission.DerivationKeySecret = "env:TEST_SHORT_ADMISSION_KEY"

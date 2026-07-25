@@ -71,7 +71,7 @@ mapped_tick =
   + floor((input_tick - base_input_tick) * input_step_ns / simulation_step_ns)
 ```
 
-`LastProcessedInputTick` 只推进到已接受且已处理的最大连续 `InputTick`；gap、expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。B0.2 已冻结这些参数；C++、wire 与 Unity consumer 必须读取同一 profile，不得使用隐藏默认值。即使 profile 已完成，production UDP 仍必须等待 Go/C++ control、安全 transport 与真实网络资格。
+`LastProcessedInputTick` 只推进到已接受且已处理的最大连续 `InputTick`；gap、expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。B0.2 已冻结这些参数；C++、wire 与 Unity consumer 必须读取同一 profile，不得使用隐藏默认值。Go/C++ control 与安全 transport 已完成实现资格，但 production UDP 仍必须等待 B0.6 真实网络资格。
 
 ### B0.1 冻结模型
 
@@ -118,7 +118,7 @@ mapped_tick =
 
 CPU、allocator/memory、真实 codec size、真实 socket、AEAD 和 KCP adapter parity 仍是 `implementation_required`；上述 target budget 不是伪造的实现测量。Profile 用 6 个 cases、12 个 fault scenarios 和 24 个结果覆盖 latency、jitter、loss/burst、reorder、duplicate、baseline gap、MTU、KCP retransmit、queue、slow consumer 与 disconnect/drain；28 项隔离失败回归证明摘要、coverage、lane、预算、安全字段和连续只读重放门。
 
-`message-inventory.json` 只冻结 `battle.input.bundle`、full/delta snapshot、probe、entity lifecycle、reliable ability event 与 resync 的 logical kind、direction、唯一 raw/KCP lane、expiry、size/rate 和恢复语义。它不是 production registry，不分配 numeric message ID、`.proto`、wire header、listener 或端口；这些仍由安全 transport change 一次性交付并做 parity。
+`message-inventory.json` 只冻结 `battle.input.bundle`、full/delta snapshot、probe、entity lifecycle、reliable ability event 与 resync 的 logical kind、direction、唯一 raw/KCP lane、expiry、size/rate 和恢复语义。它不是 production registry，不自行分配 numeric message ID、`.proto`、wire header、listener 或端口；这些已由 B0.5 安全 transport 独立交付并完成 parity。
 
 ### 输入 history 与预测 history
 
@@ -362,6 +362,14 @@ stdout 只能包含 canonical frame，stderr 只能包含截断、去控制字�
 C++ drain 先为 node-global、最多 256 entries 的 immutable outbox 预留容量，再关闭新输入、完成有限 Tick、写入 `ResultProposal` 并返回 drained；容量满时保持本次 drain 未完成，不能在重试时伪装成功。Go 先重算 proposal fingerprint，再执行 receipt-first 裁决并持久化到
 MySQL；只有 committed/rejected/replayed receipt 确定后才 ack。该 control target 不是
 battle wire target：它不包含 UDP endpoint、credential、numeric message ID 或客户端字段。
+
+### B0.5 BattleSession ingress
+
+`BattleSessionContext` 与 `BattleActorBinding` 只由 Go install control frame 创建，
+PlayerID、role、AssignmentStamp 与 actor slot 不接受 UDP payload 覆盖。合法 input
+intent 进入 `SimulationInstance` 有界 inbox，worker 保持唯一写；snapshot/event 只从
+只读 projection 与 event queue 产生。B0.5 已完成真实 child/loopback 实现资格，正式弱网、
+跨区和大规模压测仍属于 B0.6。
 
 ## 首个可玩竖切的完成定义
 

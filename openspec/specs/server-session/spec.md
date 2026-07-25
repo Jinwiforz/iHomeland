@@ -98,3 +98,26 @@ Session domain/application MUST 只依赖消费侧定义的 SessionStore、Endpo
 #### Scenario: 正式服务端启动
 - **WHEN** production Redis store、connection registry 或公开 auth/transport adapter 尚未全部接线并通过对应验收
 - **THEN** Composition Root 不注入测试 memory session store、不开放相关业务 listener，也不宣称 session API 已可用
+
+### Requirement: Account session 失效必须撤销 BattleTicket 与 BattleSession
+
+BattleTicket 和 BattleSession MUST 绑定唯一 Account SessionID/epoch 且不得构造第二份身份事实。Logout、forced logout、ban、refresh replay 或其他 epoch 递增 MUST 先提交 Session owner 的权威失效，再通知 BattleTicket/BattleSession invalidator 撤销该 lineage 的 installed ticket、proof key 和 active session；通知失败 MUST 不得回滚 epoch 或恢复旧 battle 资格。UDP payload、ticket selector、endpoint rebind 或 actor 字段 MUST 不能覆盖 AuthContext 派生的 PlayerID、role 或 epoch。
+
+#### Scenario: Active battle 中 logout
+
+- **WHEN** HTTPS AuthContext 对 active BattleSession 所属账号执行 logout
+- **THEN** SessionStore 先原子推进 epoch 并撤销旧 token/ticket，随后 C++ 停止旧 lineage packet dispatch；旧 BattleTicket、key 或 rebind 不能继续使用
+
+#### Scenario: Revoke 通知暂时失败
+
+- **WHEN** epoch 已提交但 child control revoke 超时或 child 不可达
+- **THEN** Go 保持 session 无效、撤销 target/readiness 并受控关闭，不把通知失败解释为旧 BattleSession 仍获授权
+
+### Requirement: BattleTicket 必须与 ConnectionTicket 和 WorldAdmission 不可互换
+
+Session policy MUST 明确 WSS ConnectionTicket 只授予 CONTROL、TLS/TCP ConnectionTicket 只授予 GAMEPLAY，而 BattleTicket 只允许在绑定 UDP endpoint 上建立 exact SimulationTarget 的 BATTLE session。WorldAdmission 继续只授权 TLS/TCP PersonalWorld/VisitSession target。任一 credential 提交到错误 listener/channel、错误 endpoint、错误 assignment 或错误 session epoch MUST fail closed 且不得转换 scope 或消费为另一凭据。
+
+#### Scenario: TLS/TCP ticket 提交到 battle UDP
+
+- **WHEN** 客户端把有效 GAMEPLAY ConnectionTicket 或 WorldAdmission 编码进 battle handshake
+- **THEN** UDP listener 在建立 session 前拒绝且不把它转换为 BattleTicket、不泄漏 credential detail

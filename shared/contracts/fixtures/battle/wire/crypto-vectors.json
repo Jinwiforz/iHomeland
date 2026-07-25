@@ -1,0 +1,41 @@
+{
+  "format_version": "1",
+  "corpus_version": "battle-wire-v1",
+  "document_kind": "crypto-vectors",
+  "x25519": {
+    "source": "RFC 7748 section 6.1",
+    "alice_private_hex": "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+    "alice_public_hex": "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
+    "bob_private_hex": "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb",
+    "bob_public_hex": "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+    "shared_secret_hex": "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+  },
+  "hkdf_sha256": {
+    "source": "RFC 5869 appendix A.1",
+    "ikm_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "salt_hex": "000102030405060708090a0b0c",
+    "info_hex": "f0f1f2f3f4f5f6f7f8f9",
+    "output_bytes": 42,
+    "prk_hex": "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5",
+    "okm_hex": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+  },
+  "hmac_sha256": {
+    "source": "RFC 4231 test case 1",
+    "key_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "data_hex": "4869205468657265",
+    "tag_hex": "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+  },
+  "chacha20_poly1305": {
+    "source": "RFC 8439 section 2.8.2",
+    "key_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+    "nonce_hex": "070000004041424344454647",
+    "aad_hex": "50515253c0c1c2c3c4c5c6c7",
+    "plaintext_hex": "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e",
+    "ciphertext_hex": "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116",
+    "tag_hex": "1ae10b594f09e26a7e902ecbd0600691"
+  },
+  "parity_implementations": [
+    "go-stdlib-xcrypto",
+    "cpp-libsodium-1.0.22"
+  ]
+}

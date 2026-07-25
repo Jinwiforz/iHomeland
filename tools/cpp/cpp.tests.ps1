@@ -80,10 +80,20 @@ try {
     Assert-ArchiveSafe $safeArchive
     Assert-Throws { Assert-ArchiveSafe $unsafeArchive } "越界成员"
 
+    $catalog = @(Get-CppDependencyCatalog $RepositoryRoot)
+    Assert-True ($catalog.Count -eq 9) "C++ dependency catalog 必须完整包含 tool、simulation 与 battle transport source"
+    foreach ($requiredKey in @("asio", "kcp", "libsodium", "abseil", "protobuf")) {
+        $locked = @($catalog | Where-Object { $_.Key -eq $requiredKey })
+        Assert-True ($locked.Count -eq 1) "$requiredKey 必须且只能登记一次"
+        Assert-True (-not [string]::IsNullOrWhiteSpace($locked[0].Rollback)) "$requiredKey 必须登记回滚规则"
+    }
+    Assert-True (($catalog | Where-Object { $_.Key -eq "asio" }).TopDirectory -eq "asio-1.38.2") "Asio standalone archive 顶层目录必须绑定精确版本"
+
     $dependency = [pscustomobject]@{
         Key = "sample"; Version = "1.0"; Url = "test://sample"
         Sha256 = (Get-FileHash -LiteralPath $safeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
         SourceCommit = "0123456789abcdef"; LicenseIdentity = "Test"
+        Rollback = "test rollback"
         ArchiveName = "sample-1.0.zip"; TopDirectory = "sample-1.0"
         LicensePath = "LICENSE"; ProbePath = "bin/tool.exe"; Kind = "tool"
     }

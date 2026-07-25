@@ -27,7 +27,12 @@
         "IHOMELAND_MSC_VER": "1950",
         "IHOMELAND_JOLT_SOURCE": "${sourceDir}/../.local/cpp/sources/jolt/5.5.0",
         "IHOMELAND_RECAST_SOURCE": "${sourceDir}/../.local/cpp/sources/recast/1.6.0",
-        "IHOMELAND_JSON_SOURCE": "${sourceDir}/../.local/cpp/sources/json/3.12.0"
+        "IHOMELAND_JSON_SOURCE": "${sourceDir}/../.local/cpp/sources/json/3.12.0",
+        "IHOMELAND_ASIO_SOURCE": "${sourceDir}/../.local/cpp/sources/asio/1.38.2",
+        "IHOMELAND_KCP_SOURCE": "${sourceDir}/../.local/cpp/sources/kcp/2.1.1",
+        "IHOMELAND_LIBSODIUM_SOURCE": "${sourceDir}/../.local/cpp/sources/libsodium/1.0.22",
+        "IHOMELAND_ABSEIL_SOURCE": "${sourceDir}/../.local/cpp/sources/abseil/20250512.1",
+        "IHOMELAND_PROTOBUF_SOURCE": "${sourceDir}/../.local/cpp/sources/protobuf/35.0"
       }
     },
     {

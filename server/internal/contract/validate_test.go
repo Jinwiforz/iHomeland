@@ -139,7 +139,17 @@ func TestValidateMessagesRejectsInvalidGovernance(t *testing.T) {
 		{name: "missing route policy", mutate: func(catalog *Catalog) { catalog.Routes.Routes[0].QoS = "" }},
 		{name: "push timeout", mutate: func(catalog *Catalog) { catalog.Routes.Routes[0].TimeoutMS = 1 }},
 		{name: "push correlation strategy", mutate: func(catalog *Catalog) {
-			catalog.Routes.Routes[len(catalog.Routes.Routes)-1].Idempotency = "REQUEST_ID"
+			for index := range catalog.Messages.Messages {
+				if catalog.Messages.Messages[index].Kind != "PUSH" {
+					continue
+				}
+				for routeIndex := range catalog.Routes.Routes {
+					if catalog.Routes.Routes[routeIndex].MessageID == catalog.Messages.Messages[index].ID {
+						catalog.Routes.Routes[routeIndex].Idempotency = "REQUEST_ID"
+						return
+					}
+				}
+			}
 		}},
 		{name: "response correlation strategy", mutate: func(catalog *Catalog) {
 			for index := range catalog.Messages.Messages {

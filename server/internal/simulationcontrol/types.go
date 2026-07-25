@@ -20,6 +20,8 @@ const (
 	MaximumFrameBytes = 65_536
 	// PendingRequestLimit 是单 session 等待关联结果的 hard limit。
 	PendingRequestLimit = 256
+	// TicketRequestQueueLimit 是低优先级 install/status 等待队列 hard limit。
+	TicketRequestQueueLimit = 64
 	// QualifiedActorCapacity 是 B0.3 已资格的单 instance actor 上限。
 	QualifiedActorCapacity = 8
 )

@@ -1,7 +1,10 @@
 #include "ihomeland/sim/control/control_frame.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -58,6 +61,32 @@ void TestRoundTrip() {
     Require(
         !ihomeland::sim::ControlFrameCodec::Read(stream, decoded),
         "clean EOF was not reported");
+}
+
+/// TestCanonicalGolden 验证全部冻结 Go/C++ control frame bytes 完全一致。
+void TestCanonicalGolden() {
+    const auto path =
+        std::string(IHOMELAND_SIMULATION_CONTROL_FIXTURE_ROOT) +
+        "/canonical-golden.json";
+    std::ifstream input(path, std::ios::binary);
+    Require(input.good(), "control canonical golden cannot be opened");
+    const auto document = nlohmann::json::parse(input);
+    Require(
+        document.at("frames").size() >= 4,
+        "control canonical golden coverage is incomplete");
+    for (const auto& golden : document.at("frames")) {
+        const auto canonical = golden.at("canonicalJson").get<std::string>();
+        const auto frame =
+            ihomeland::sim::ControlFrameCodec::ParsePayload(canonical);
+        Require(
+            ihomeland::sim::ControlFrameCodec::EncodePayload(frame) ==
+                canonical,
+            "C++ control frame codec drifted from canonical golden");
+        Require(
+            canonical.size() ==
+                golden.at("payloadBytes").get<std::size_t>(),
+            "C++ control frame golden byte length drifted");
+    }
 }
 
 /// TestMalformedFrames 覆盖 partial、trailing、污染、unknown 与 write failure。
@@ -143,6 +172,7 @@ void TestSessionSequence() {
 int main() {
     try {
         TestRoundTrip();
+        TestCanonicalGolden();
         TestMalformedFrames();
         TestSessionSequence();
         return 0;

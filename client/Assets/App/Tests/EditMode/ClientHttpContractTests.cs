@@ -511,7 +511,7 @@ namespace IHomeland.Client.Tests.EditMode
             using (var document = JsonDocument.Parse(File.ReadAllText(registryPath)))
             {
                 var errors = document.RootElement.GetProperty("errors").EnumerateArray().ToArray();
-                Assert.That(errors, Has.Length.EqualTo(28));
+                Assert.That(errors, Has.Length.EqualTo(32));
                 foreach (var item in errors)
                 {
                     var code = item.GetProperty("code").GetInt32();

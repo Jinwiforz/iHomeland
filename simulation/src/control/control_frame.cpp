@@ -23,6 +23,14 @@ using Json = nlohmann::json;
 /// IsKnownKind 验证 control inventory 的闭合集合。
 [[nodiscard]] bool IsKnownKind(const std::string_view kind) {
     static const std::set<std::string, std::less<>> kinds{
+        "battle.session.closed",
+        "battle.session.revoke",
+        "battle.ticket.install",
+        "battle.ticket.installed",
+        "battle.ticket.revoke",
+        "battle.ticket.revoked",
+        "battle.ticket.status.query",
+        "battle.ticket.status.receipt",
         "instance.drain",
         "instance.drained",
         "instance.ready",
@@ -35,6 +43,8 @@ using Json = nlohmann::json;
         "node.health.receipt",
         "node.hello.challenge",
         "node.hello.receipt",
+        "node.listener.status.query",
+        "node.listener.status.receipt",
         "node.shutdown",
         "node.stopped",
         "result.ack",

@@ -40,6 +40,7 @@ var publicHostPattern = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}
 var publicOperationIDs = [...]string{
 	"getVersion", "getBootstrapConfig", "registerAccount", "loginAccount", "refreshSession",
 	"logoutSession", "issueConnectionTicket", "getWorldBootstrap", "acceptVisitInvite", "issueWorldAdmission",
+	"issueBattleTicket",
 }
 
 // PublicAPI 保存公开 listener、协议投影和业务 policy 的非敏感配置。
@@ -80,6 +81,8 @@ type PublicAPI struct {
 	VisitSession VisitSessionPolicy `yaml:"visitSession"`
 	// WorldAdmission 定义签发与响应丢失恢复策略。
 	WorldAdmission WorldAdmissionPolicy `yaml:"worldAdmission"`
+	// BattleUDP 定义唯一 C++ listener、ticket 与安全会话的冻结策略。
+	BattleUDP BattleUDPPolicy `yaml:"battleUdp"`
 	// WebSocketControl 定义共享公开listener上的WSS控制面资源与握手策略。
 	WebSocketControl WebSocketControlPolicy `yaml:"websocketControl"`
 	// GameplayTCP 定义独立TLS/TCP gameplay listener的认证、并发和生命周期预算。
@@ -184,6 +187,40 @@ type WorldAdmissionPolicy struct {
 	ReplayRetention time.Duration `yaml:"replayRetention"`
 	// DerivationKeySecret 是HMAC key的env:/file: reference。
 	DerivationKeySecret string `yaml:"derivationKeySecret"`
+}
+
+// BattleUDPPolicy 定义安全战斗 UDP listener 与客户端可见 endpoint 的严格配置。
+type BattleUDPPolicy struct {
+	// BindAddress 是 C++ child 唯一 UDP socket 的显式数字 IP 与端口。
+	BindAddress string `yaml:"bindAddress"`
+	// Advertised 是只经 HTTPS BattleTicket 下发的受信 endpoint。
+	Advertised Endpoint `yaml:"advertised"`
+	// DerivationKeySecret 是 BattleTicket deterministic secret 根密钥引用。
+	DerivationKeySecret string `yaml:"derivationKeySecret"`
+	// WireIdentity 绑定 wire suite source corpus。
+	WireIdentity string `yaml:"wireIdentity"`
+	// MaximumTicketLifetime 是单枚 BattleTicket 的绝对寿命上限。
+	MaximumTicketLifetime time.Duration `yaml:"maximumTicketLifetime"`
+	// ReplayRetention 保留 response-loss 幂等证据。
+	ReplayRetention time.Duration `yaml:"replayRetention"`
+	// CookieRotation 是 stateless cookie key 轮换周期。
+	CookieRotation time.Duration `yaml:"cookieRotation"`
+	// RekeyInterval 是 authenticated traffic key 时间上限。
+	RekeyInterval time.Duration `yaml:"rekeyInterval"`
+	// PreviousEpochOverlap 是旧 epoch 唯一允许的接收重叠窗口。
+	PreviousEpochOverlap time.Duration `yaml:"previousEpochOverlap"`
+	// PreAuthRate 限制单 remote identity 的无状态握手速率。
+	PreAuthRate RatePolicy `yaml:"preAuthRate"`
+	// NodeQueueItems 是 node ingress/egress hard budget。
+	NodeQueueItems int `yaml:"nodeQueueItems"`
+	// SessionQueueItems 是每会话 ingress/egress hard budget。
+	SessionQueueItems int `yaml:"sessionQueueItems"`
+	// KCPQueueItems 是 reliable lane 的消息 hard budget。
+	KCPQueueItems int `yaml:"kcpQueueItems"`
+	// MessageExpiry 是 KCP/reassembled message 最大排队寿命。
+	MessageExpiry time.Duration `yaml:"messageExpiry"`
+	// DrainTimeout 限制停止公开输入后的 KCP/egress drain。
+	DrainTimeout time.Duration `yaml:"drainTimeout"`
 }
 
 // WebSocketControlPolicy 定义WSS控制面的固定握手与每进程资源预算。
@@ -319,6 +356,16 @@ func DefaultPublicAPI() PublicAPI {
 			ReplayRetention:     5 * time.Minute,
 			DerivationKeySecret: "env:IHOMELAND_WORLD_ADMISSION_KEY",
 		},
+		BattleUDP: BattleUDPPolicy{
+			BindAddress: "127.0.0.1:58445", Advertised: Endpoint{Host: "127.0.0.1", Port: 58445},
+			DerivationKeySecret: "env:IHOMELAND_BATTLE_DERIVATION_KEY",
+			WireIdentity:        "3d0505f82dcfacec3b296e0a089ce58db2338a59b45e65c87ae6f1dddf47c2b1", MaximumTicketLifetime: 30 * time.Second,
+			ReplayRetention: 5 * time.Minute, CookieRotation: 30 * time.Second,
+			RekeyInterval: 10 * time.Minute, PreviousEpochOverlap: 3 * time.Second,
+			PreAuthRate:    RatePolicy{Requests: 60, Window: time.Minute, Burst: 10},
+			NodeQueueItems: 256, SessionQueueItems: 256, KCPQueueItems: 64,
+			MessageExpiry: 500 * time.Millisecond, DrainTimeout: 3 * time.Second,
+		},
 		WebSocketControl: WebSocketControlPolicy{
 			Path: "/v1/control", Subprotocol: "ihomeland.control.v1",
 			AllowedHosts:   []string{"127.0.0.1:8080", "localhost:8080"},
@@ -406,10 +453,67 @@ func (public PublicAPI) validate(environment string, diagnosticAddress string) e
 	if err := public.WorldAdmission.validate(); err != nil {
 		return err
 	}
+	if err := public.BattleUDP.validate(environment, public.Address, diagnosticAddress, public.GameplayTCP.Address); err != nil {
+		return err
+	}
 	if err := public.WebSocketControl.Validate(public.Limits.RealtimeFrameBytes); err != nil {
 		return err
 	}
 	return public.GameplayTCP.Validate(public.Limits.RealtimeFrameBytes, public.Address, diagnosticAddress, public.TLS.Enabled, environment == "test")
+}
+
+// validate 冻结 B0.5 profile，并阻止 UDP 与 HTTP、diagnostic 或 TLS/TCP owner 共享端口。
+func (policy BattleUDPPolicy) validate(environment string, publicAddress string, diagnosticAddress string, gameplayAddress string) error {
+	host, portText, err := net.SplitHostPort(policy.BindAddress)
+	if err != nil {
+		return errors.New("battleUdp.bindAddress must contain an explicit IP and port")
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return errors.New("battleUdp.bindAddress host must be an explicit numeric IP")
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 && environment != "test" {
+		return errors.New("battleUdp.bindAddress port 0 is allowed only in test")
+	}
+	if port == 0 && (!address.IsLoopback() || policy.Advertised.Host != "127.0.0.1" || policy.Advertised.Port != 0) {
+		return errors.New("battleUdp test port 0 requires 127.0.0.1 bind and advertised endpoint")
+	}
+	if port != 0 {
+		for name, other := range map[string]string{"publicApi.address": publicAddress, "diagnostic.address": diagnosticAddress, "gameplayTcp.address": gameplayAddress} {
+			_, otherPort, splitErr := net.SplitHostPort(other)
+			if splitErr == nil && otherPort == portText {
+				return fmt.Errorf("battleUdp.bindAddress port must differ from %s", name)
+			}
+		}
+	}
+	if policy.Advertised.Port < 0 || policy.Advertised.Port > 65535 ||
+		(policy.Advertised.Port == 0 && environment != "test") ||
+		net.ParseIP(policy.Advertised.Host) == nil {
+		return errors.New("battleUdp.advertised must contain an explicit trusted host and port")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(policy.WireIdentity) {
+		return errors.New("battleUdp.wireIdentity must be lowercase SHA-256")
+	}
+	if err := validateSecretReference(policy.DerivationKeySecret); err != nil {
+		return fmt.Errorf("battleUdp.derivationKeySecret: %w", err)
+	}
+	if policy.MaximumTicketLifetime < time.Second || policy.MaximumTicketLifetime > 2*time.Minute ||
+		policy.ReplayRetention < policy.MaximumTicketLifetime || policy.ReplayRetention > time.Hour {
+		return errors.New("battleUdp ticket and replay deadlines are invalid")
+	}
+	if policy.CookieRotation != 30*time.Second || policy.RekeyInterval != 10*time.Minute ||
+		policy.PreviousEpochOverlap != 3*time.Second || policy.MessageExpiry != 500*time.Millisecond ||
+		policy.NodeQueueItems != 256 || policy.SessionQueueItems != 256 || policy.KCPQueueItems != 64 {
+		return errors.New("battleUdp must use the qualified B0.5 crypto and queue profile")
+	}
+	if err := policy.PreAuthRate.validate(); err != nil {
+		return fmt.Errorf("battleUdp.preAuthRate: %w", err)
+	}
+	if policy.DrainTimeout < policy.MessageExpiry || policy.DrainTimeout > 10*time.Second {
+		return errors.New("battleUdp.drainTimeout must be between message expiry and 10s")
+	}
+	return nil
 }
 
 // validate 约束runtime、lease与deadline容量，并校验queue可覆盖所有可达业务deadline。
@@ -694,6 +798,10 @@ func publicAPIEnvironmentOverrides(config *Config) []environmentOverride {
 		{key: "IHOMELAND_PUBLIC_TLS_TCP_HOST", apply: stringSetter(&config.PublicAPI.Endpoints.TLSTCP.Host)},
 		{key: "IHOMELAND_PUBLIC_TLS_TCP_PORT", apply: intSetter(&config.PublicAPI.Endpoints.TLSTCP.Port)},
 		{key: "IHOMELAND_WORLD_ADMISSION_KEY_SECRET", apply: stringSetter(&config.PublicAPI.WorldAdmission.DerivationKeySecret)},
+		{key: "IHOMELAND_BATTLE_UDP_BIND_ADDRESS", apply: stringSetter(&config.PublicAPI.BattleUDP.BindAddress)},
+		{key: "IHOMELAND_BATTLE_UDP_ADVERTISED_HOST", apply: stringSetter(&config.PublicAPI.BattleUDP.Advertised.Host)},
+		{key: "IHOMELAND_BATTLE_UDP_ADVERTISED_PORT", apply: intSetter(&config.PublicAPI.BattleUDP.Advertised.Port)},
+		{key: "IHOMELAND_BATTLE_DERIVATION_KEY_SECRET", apply: stringSetter(&config.PublicAPI.BattleUDP.DerivationKeySecret)},
 		{key: "IHOMELAND_PASSWORD_HASH_CONCURRENCY", apply: intSetter(&config.PublicAPI.Account.MaxConcurrentHashes)},
 		{key: "IHOMELAND_PLACEMENT_LEASE_TTL", apply: durationSetter(&config.PublicAPI.WorldRuntime.PlacementLeaseTTL)},
 		{key: "IHOMELAND_WORLD_RUNTIME_MAX_INSTANCES", apply: intSetter(&config.PublicAPI.WorldRuntime.MaxInstances)},

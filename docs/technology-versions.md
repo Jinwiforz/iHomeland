@@ -145,12 +145,24 @@ qualification 只由 Release CI binary 生成，避免调试或 sanitizer instru
 
 直接依赖 notice 与上游 license 必须由恢复测试验证存在，并由发布/资格 artifact 保留。升级任一版本时必须同时更新 URL、checksum、commit、notice、adapter parity、determinism、sanitizer 和 benchmark；回滚通过恢复 `versions.yaml` 与 CMake source 到前一提交并清除对应 `.local/cpp/` 版本目录完成，不能复用新版本 binary tree。
 
+### B0.5 已引入的网络与密码依赖
+
+| 能力 | 锁定依赖 | 唯一版本 owner | 约束 |
+|---|---|---|---|
+| 异步 UDP I/O | standalone Asio | `cpp-battle-udp-adapter` | 单 listener、显式取消/关闭、禁止系统 fallback |
+| 可靠 ARQ | KCP core | `cpp-battle-kcp-adapter` | 项目 clock/output/session 包装、有界 queue 与重传预算 |
+| X25519/HKDF/ChaCha20-Poly1305 | libsodium | `cpp-battle-crypto-adapter` | 固定 suite、secret 清理、跨语言 RFC vector parity |
+| C++ battle payload | Protobuf lite + Abseil | `cpp-battle-protobuf-adapter` | 只消费统一 proto source，不提交 generated code |
+
+精确 version、source identity、SHA-256、license、adapter owner 与 rollback 以
+`versions.yaml` 为唯一机器可读基线。构建必须从 `tools/cpp/cpp.ps1` 校验恢复，禁止
+系统依赖或未锁定 fallback。升级任一依赖必须重跑 wire/crypto/KCP parity、Release/ASan
+与 B0.5 failure regression；B0.6 网络报告不能替代依赖完整性验证。
+
 ### 后续仍未引入的依赖
 
 | 能力 | 计划依赖 | 唯一版本 owner | 引入门禁 |
 |---|---|---|---|
-| 异步 UDP I/O | Asio | C++ network adapter | Go/C++ control、端口 owner、精确 release/source/checksum、license、安全与取消/关闭语义评审 |
-| 可靠 ARQ | KCP core | C++ KCP adapter | 安全 transport change、精确 source/checksum、license、项目 clock/output/session 包装与拥塞预算 |
 | 客户端镜头 | Cinemachine | Unity camera host | Battle network qualification、Unity Package Manager 精确版本、兼容矩阵与 scene/prefab 回归 |
 
 项目代码只能通过窄 adapter/port 使用第三方能力。业务 component、跨端 protocol、公开 application contract 和持久 schema 不得暴露 Asio、Jolt、Detour 或 KCP 类型。不得把上游源码片段改名复制进业务目录来规避版本和许可证治理；确需 vendoring 时必须保留上游身份、完整许可证和补丁清单。

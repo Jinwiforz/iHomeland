@@ -222,6 +222,7 @@ function Write-ServerConfig {
     $certificate = Join-Path $RunDirectory "server-cert.pem"
     $privateKey = Join-Path $RunDirectory "server-key.pem"
     $admissionKey = Join-Path $RunDirectory "admission-key"
+    $battleKey = Join-Path $RunDirectory "battle-derivation-key"
     $mysqlPassword = Join-Path $storageDirectory "mysql-password"
     $redisPassword = Join-Path $storageDirectory "redis-password"
     $simulationBinary = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\ihomeland-sim-server.exe"
@@ -280,6 +281,7 @@ publicApi:
     getWorldBootstrap: { requests: 10000, window: 1m, burst: 10000 }
     acceptVisitInvite: { requests: 10000, window: 1m, burst: 10000 }
     issueWorldAdmission: { requests: 10000, window: 1m, burst: 10000 }
+    issueBattleTicket: { requests: 10000, window: 1m, burst: 10000 }
   worldRuntime:
     placementLeaseTtl: 5s
     maxInstances: 64
@@ -296,6 +298,11 @@ publicApi:
     maximumLifetime: 15s
     replayRetention: 1m
     derivationKeySecret: $(Quote-YamlSingle ("file:" + $admissionKey))
+  battleUdp:
+    bindAddress: 127.0.0.1:58445
+    advertised: { host: 127.0.0.1, port: 58445 }
+    derivationKeySecret: $(Quote-YamlSingle ("file:" + $battleKey))
+    wireIdentity: 3d0505f82dcfacec3b296e0a089ce58db2338a59b45e65c87ae6f1dddf47c2b1
   websocketControl:
     allowedHosts:
       - localhost:$PublicPort
@@ -523,7 +530,7 @@ function Wait-DiagnosticConvergence {
 function Assert-LowSensitivityArtifacts {
     $artifactPaths = @($ReportPath, (Join-Path $RunDirectory "client.stdout.log"), (Join-Path $RunDirectory "client.stderr.log")) + @(Get-ChildItem -LiteralPath $RunDirectory -Filter "server.*.log" | ForEach-Object { $_.FullName })
     $storageDirectory = Join-Path (Join-Path $RepositoryRoot ".local\storage") $StorageRunId
-    $secretPaths = @((Join-Path $RunDirectory "admission-key"), (Join-Path $RunDirectory "server-key.pem"), (Join-Path $storageDirectory "mysql-password"), (Join-Path $storageDirectory "redis-password"))
+    $secretPaths = @((Join-Path $RunDirectory "admission-key"), (Join-Path $RunDirectory "battle-derivation-key"), (Join-Path $RunDirectory "server-key.pem"), (Join-Path $storageDirectory "mysql-password"), (Join-Path $storageDirectory "redis-password"))
     $secrets = @()
     foreach ($path in $secretPaths) {
         if (Test-Path -LiteralPath $path) {

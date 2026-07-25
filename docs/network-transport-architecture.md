@@ -68,7 +68,7 @@ KCP   -> registry-approved late-value discrete commands/events and resync
 
 Owner 只拥有 PersonalWorld 业务事实，不是 P2P host。HTTPS/WSS/TLS-TCP 终止于 Go adapter，UDP/KCP 终止于 C++ Game Simulation Server adapter。一个 message id 只能选择一个登记通道，不能因为 Owner/Visitor 角色不同而跨 WSS、TCP、raw UDP 或 KCP 双写。
 
-现有代码中的 `tcpgameplay`/`ClientGameplayChannel` 是历史稳定名称，实际只承载可靠的 world/visit business contract；它不是未来 C++ battle simulation transport，后者由独立 `BattleNetworkClient` 与 UDP/KCP registry 拥有。
+现有代码中的 `tcpgameplay`/`ClientGameplayChannel` 是历史稳定名称，实际只承载可靠的 world/visit business contract；它不是 C++ battle simulation transport。后者由独立 UDP/KCP registry 与 C++ adapter 拥有，后续 Unity consumer 归 `BattleNetworkClient`，不得复用 TLS/TCP channel。
 
 ## 通道职责
 
@@ -93,7 +93,7 @@ Owner 只拥有 PersonalWorld 业务事实，不是 P2P host。HTTPS/WSS/TLS-TCP
 
 HTTP 请求必须有大小、超时、限流、幂等和结构化错误策略。
 
-当前公开 HTTP component 已实现并接线冻结 OpenAPI 中的 10 个 operation：version/config、register/login/refresh/logout、connection ticket、world bootstrap、invite accept 和 world admission issue。它使用独立于 diagnostic 的 listener、production MySQL/Redis adapters、原子 Session 认证、按 operation deadline 与两阶段限流；production 只允许 TLS 1.3，本地明文仅允许 loopback。
+当前公开 HTTP component 已实现并接线冻结 OpenAPI 中的 11 个 operation：version/config、register/login/refresh/logout、connection ticket、world bootstrap、invite accept、world admission issue 和 battle ticket issue。它使用独立于 diagnostic 的 listener、production MySQL/Redis adapters、原子 Session 认证、按 operation deadline 与两阶段限流；production 只允许 TLS 1.3，本地明文仅允许 loopback。
 
 ### WSS 带外控制面
 
@@ -166,9 +166,9 @@ Active gameplay connection 使用 registry 登记的 common heartbeat `1/2` 保�
 
 `shared/contracts/fixtures/battle/model/` 是 B0.1 的纯 gameplay 模型 source of truth。B0.2 的 `shared/contracts/fixtures/battle/network-profile/` 已绑定其 `manifest.json`、`assumptions.json`、全部 cases 与 required coverage digest，并在不改写模型状态迁移的前提下冻结 cadence、窗口、MTU、逻辑 lane、KCP、capacity 与 budget。
 
-Profile 的 6 个 cases、12 个场景和 24 个 canonical 结果由 `tools/battle-network-profile/` 只读重放；默认 5 actors 通过，33 actors compatibility 明确要求后续 capacity gate。Profile-qualified 只覆盖逻辑网络模型；真实 C++ CPU/memory、codec、socket、AEAD 和 KCP adapter 仍需后续实现与 B0.6 补证。
+Profile 的 6 个 cases、12 个场景和 24 个 canonical 结果由 `tools/battle-network-profile/` 只读重放；默认 5 actors 通过，33 actors compatibility 明确要求后续 capacity gate。Profile-qualified 只覆盖逻辑网络模型；真实 codec、socket、AEAD 和 KCP adapter 已由 B0.5 补齐实现资格，公网 fault matrix 与容量曲线仍由 B0.6 补证。
 
-模型与 profile fixture 都不是 wire contract：B0.2 的 logical kind 不等于 numeric message ID，也不创建 `.proto`、framing、endpoint、ticket、packet layout、listener、推荐端口、第三方 C++ dependency 或 generated code。所有 production wire、安全和 listener 决策继续等待对应 OpenSpec change。
+模型与 profile fixture 都不是 wire contract：B0.2 的 logical kind 不等于 numeric message ID，也不创建 `.proto`、framing、endpoint、ticket、packet layout、listener、推荐端口、第三方 C++ dependency 或 generated code。这些 wire、安全与 listener 决策已由 B0.5 独立冻结；B0.6 只验证冻结实现的网络故障和容量包络，不反向改写模型语义。
 
 ### Go/C++ control 与 battle transport 的边界
 
@@ -181,12 +181,24 @@ input。
 
 该本机 pipe 选择只证明当前单机故障边界；未来若扩缩容或独立部署证明确需远程 control，
 必须另提 change，重新冻结 authentication、mTLS/authorization、discovery、backpressure、
-兼容性和故障恢复，不能把当前 JSON frame 直接暴露为公网 API。B0.5 仍须独立交付 Asio
-UDP listener、ticket、cookie/AEAD/replay protection、raw/KCP wire 与端口 owner。
+兼容性和故障恢复，不能把当前 JSON frame 直接暴露为公网 API。B0.5 已在不改变该 pipe
+边界的前提下独立交付 Asio UDP listener、ticket、cookie/AEAD/replay protection、
+raw/KCP wire 与端口 owner。
+
+### B0.5 UDP 安全通道
+
+每个 SimulationNode 只创建一个 Asio UDP listener，raw 与 KCP 复用 authenticated
+multiplexer。48-byte secure header 使用 direction-isolated AEAD key、32-bit epoch 与
+64-bit sequence；256-packet replay window、stateless cookie、endpoint rebind confirm
+和 10 分钟/`2^20` packet rekey 均 fail closed。KCP 固定 10 ms update、window 64、
+fast resend 2、RTO 30–200 ms、dead-link 10、1000-byte segment ceiling。
+
+B0.5 资格只证明当前 Windows x64 实现、跨语言 wire/crypto/KCP parity 与真实
+child/loopback UDP 安全边界，不证明 B0.6 的公网 fault matrix、NAT 包络或生产容量。
 
 ### 裸 UDP 不可靠时序面
 
-B0.2 已对以下 logical kind 冻结 raw lane、频率、大小、expiry 与恢复语义；numeric message ID 和最终 wire route 仍等待安全 transport registry：
+B0.2 冻结了以下 logical kind 的 raw lane、频率、大小、expiry 与恢复语义；B0.5 已将它们登记到 battle numeric message range 与唯一 wire route：
 
 | 方向 | 初始消息类别 | 交付语义 |
 |---|---|---|
@@ -195,7 +207,7 @@ B0.2 已对以下 logical kind 冻结 raw lane、频率、大小、expiry 与恢
 | S2C | `battle.snapshot.delta` | 最大 900 bytes、10/s、300 ms expiry；必须引用已确认 baseline |
 | S2C | `battle.snapshot.full` | 最大 1040 bytes、2/s、500 ms expiry；建立新 baseline identity |
 
-设计思想是“丢失后等待更新包”，不能通过重试把旧数据变成可靠业务。Profile-qualified datagram 上限是 1200 bytes；保守扣除 IPv6/UDP、future secure session、AEAD tag 和 lane header 后，raw/KCP logical payload 上限分别是 1072/1064 bytes。B0.5 必须用真实 wire 验证预留开销；超限时 fail closed，不能缩减安全字段或依赖 IP 分片。
+设计思想是“丢失后等待更新包”，不能通过重试把旧数据变成可靠业务。Profile-qualified datagram 上限是 1200 bytes；扣除 IPv6/UDP、48-byte secure header、AEAD tag 和 lane header 后，raw/KCP logical payload 上限分别是 1072/1064 bytes。B0.5 已用真实 wire 验证该预留开销；超限时 fail closed，不能缩减安全字段或依赖 IP 分片。
 
 权威 full/delta snapshot 禁止进入 KCP。若客户端丢失 delta baseline，只能等待/请求按 profile 允许的后续 full baseline，不能可靠重传整条连续 snapshot 流。
 
@@ -211,11 +223,11 @@ B0.2 logical inventory 只允许承载：
 
 KCP 只提供 ARQ。握手、身份、加密、重放保护、拥塞预算、限流和 endpoint rebinding 仍由项目负责。应用层必须继续校验 tick、sequence、过期与合法性。
 
-冻结 profile 使用 10 ms update、send/receive window 64、fast resend 2、RTO 30–200 ms、dead link 10、segment/message ceiling 1000 bytes、queue 64 和 application expiry 500 ms。它只证明有限 ARQ 模型；真实 KCP core 的时钟、segment、重传放大和 adapter parity 必须由 B0.5/B0.6 补证。
+冻结 profile 使用 10 ms update、send/receive window 64、fast resend 2、RTO 30–200 ms、dead link 10、segment/message ceiling 1000 bytes、queue 64 和 application expiry 500 ms。B0.5 已补证真实 KCP core 的时钟、segment 与 adapter parity；B0.6 继续验证 fault matrix 下的重传放大和容量预算。
 
 同一 message id 只能登记 raw UDP 或 KCP 其中一个 lane，禁止为了“保险”双写。调用方不得运行时选择 lane，也不得在 raw 超时后把相同消息静默转入 KCP/TCP；改变 QoS 必须变更 registry、兼容性和网络资格基线。
 
-B0.2 logical kind 是未来 registry 的强制输入，但尚未占用任何编号。B0.5 必须建立 logical kind 到 numeric message ID 的一一映射；未映射、拆分、合并或 lane 漂移都必须先更新 profile，不能用占位编号绕过协议治理。
+B0.2 logical kind 是 battle registry 的强制输入；B0.5 已建立 8 个 logical kind 到 `3000-3007` 的一一映射。未映射、拆分、合并或 lane 漂移都必须先更新 profile 和 OpenSpec，不能用占位编号绕过协议治理。
 
 ## Message Route Registry
 
@@ -417,4 +429,4 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 
 所有网络模拟必须可重复并记录参数。
 
-当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 10 个公开 HTTP operation、真实 Redis WSS/TCP ticket 一次性消费、TCP world admission，以及真实 wire `OWN_WORLD` snapshot 与 VisitSession `OPEN`/`CREATE_INVITE`/HTTP `ACCEPT`/`JOIN`/断线 `RECONNECT`/`LEAVE`/`KICK`/`CLOSE`。同一 harness 还验证 response/push 顺序、精确 safe-return 后关闭、stale admission、assignment replacement、Redis flush、进程重建、跨通道 logout 失效和资源清理。通过表示个人世界服务端业务竖切可用，不表示 `qualify-server-v1` 的独立协议客户端、压力/故障全矩阵或 Unity gate 已完成。
+当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 11 个公开 HTTP operation、真实 Redis WSS/TCP/BattleTicket 一次性状态、TCP world admission，以及真实 wire `OWN_WORLD` snapshot 与 VisitSession `OPEN`/`CREATE_INVITE`/HTTP `ACCEPT`/`JOIN`/断线 `RECONNECT`/`LEAVE`/`KICK`/`CLOSE`。同一 harness 还验证 response/push 顺序、精确 safe-return 后关闭、stale admission、assignment replacement、Redis flush、进程重建、跨通道 logout 失效和资源清理。通过表示真实 storage graph 可支持既有个人世界竖切与 B0.5 ticket issuance；完整 battle wire、安全 UDP/KCP 与网络 fault 资格分别由 B0.5/B0.6 专属入口裁决。

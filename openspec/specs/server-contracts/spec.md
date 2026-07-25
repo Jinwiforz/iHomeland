@@ -113,3 +113,31 @@ OpenAPI register/login username MUST 声明 3-64 characters、ASCII letter/digit
 #### Scenario: 协议生成与兼容性验证
 - **WHEN** 统一协议入口基于新增 enum value 重建 Go 与 Unity C# code 并执行 compatibility/fixture parity
 - **THEN** 现有字段编号、message ID、route 和既有 golden 语义保持兼容，未知或 unspecified state 仍被应用层拒绝
+
+### Requirement: Battle contract 必须由统一 source 生成并拥有独立 numeric range
+
+协议 source MUST 新增 `battle/v1` Protobuf package 与 `battle: 3000-3199` owner range。初始 8 个 logical kind MUST 按 profile 一一登记为 `3000-3007`，并在 message/route registry 中固定 owner、direction、UDP 或 KCP allowed channel、battle auth scope、QoS、max size、rate、idempotency、expiry、tick/sequence、baseline/recovery 和 assignment/session binding。Go/C#/C++ generated code MUST 由统一入口重建且保持忽略；schema、registry、fixture 和 lock/checksum MUST 提交。Unknown message、错误 lane/direction、duplicate ID、logical kind 漏映射或同一 kind 跨 channel 双写 MUST 使 validator 失败。
+
+#### Scenario: Logical kind 未分配 numeric ID
+
+- **WHEN** network profile inventory 包含 8 个 kind 但 battle registry 缺少、合并或额外拆分任一映射
+- **THEN** contract validation 失败且 UDP dispatcher 不能启动
+
+#### Scenario: Snapshot 同时登记 UDP 与 KCP
+
+- **WHEN** route registry 为 full/delta snapshot 登记多个 allowed channel 或 KCP
+- **THEN** validator 拒绝，不生成可运行 route table
+
+#### Scenario: Payload 声明权威身份或结果
+
+- **WHEN** battle input schema 新增可覆盖 PlayerID/role/actor/assignment 或声明最终 hit/damage/death/reward 的字段
+- **THEN** schema security gate 失败且不得通过 generated adapter 进入 simulation
+
+### Requirement: BattleTicket HTTP contract 必须 closed 且独立于既有凭据
+
+OpenAPI MUST 新增认证、幂等的 BattleTicket issuance operation，request 只允许 target selector 与 expected client wire compatibility，response 只返回 ticket ID/secret、advertised UDP endpoint、wire suite、expiry 和 client-safe binding。Contract MUST 明确 BattleTicket 不能用于 WSS/TLS-TCP、ConnectionTicket 不能用于 UDP/KCP、WorldAdmission 不能替代 battle actor admission。Fixtures MUST 覆盖 own/visit 成功、8/9 actor、stale target、wrong epoch、response-loss replay、unknown field 和 credential redaction。
+
+#### Scenario: Client 提交 endpoint 或 actor slot
+
+- **WHEN** BattleTicket request 包含 host、port、scope、PlayerID、role、actor slot、assignment 或 SimulationInstanceID
+- **THEN** closed decoder 在 application 前拒绝，不用 payload 影响 endpoint、身份、容量或 target 解析

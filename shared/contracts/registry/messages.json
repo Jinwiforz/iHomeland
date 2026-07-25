@@ -6,7 +6,8 @@
     { "owner": "control", "start": 500, "end": 999 },
     { "owner": "account", "start": 1000, "end": 1999 },
     { "owner": "world", "start": 2000, "end": 2099 },
-    { "owner": "visit", "start": 2100, "end": 2299 }
+    { "owner": "visit", "start": 2100, "end": 2299 },
+    { "owner": "battle", "start": 3000, "end": 3199 }
   ],
   "reserved": [],
   "messages": [
@@ -43,6 +44,14 @@
     { "id": 2119, "name": "VISIT_SNAPSHOT_REQUEST", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSnapshotRequest", "kind": "REQUEST", "direction": "CLIENT_TO_SERVER" },
     { "id": 2120, "name": "VISIT_SNAPSHOT_RESPONSE", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSnapshotResponse", "kind": "RESPONSE", "direction": "SERVER_TO_CLIENT" },
     { "id": 2121, "name": "VISIT_SNAPSHOT_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSnapshotPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
-    { "id": 2122, "name": "VISIT_SAFE_RETURN_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSafeReturnPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" }
+    { "id": 2122, "name": "VISIT_SAFE_RETURN_PUSH", "owner": "visit", "protobuf": "ihomeland.visit.v1.VisitSafeReturnPush", "kind": "PUSH", "direction": "SERVER_TO_CLIENT" },
+    { "id": 3000, "name": "BATTLE_INPUT_BUNDLE", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleInputBundle", "kind": "DATAGRAM", "direction": "CLIENT_TO_SERVER" },
+    { "id": 3001, "name": "BATTLE_PROBE", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleProbe", "kind": "DATAGRAM", "direction": "CLIENT_TO_SERVER" },
+    { "id": 3002, "name": "BATTLE_FULL_SNAPSHOT", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleFullSnapshot", "kind": "DATAGRAM", "direction": "SERVER_TO_CLIENT" },
+    { "id": 3003, "name": "BATTLE_DELTA_SNAPSHOT", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleDeltaSnapshot", "kind": "DATAGRAM", "direction": "SERVER_TO_CLIENT" },
+    { "id": 3004, "name": "BATTLE_ABILITY_RELIABLE_EVENT", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleAbilityReliableEvent", "kind": "DATAGRAM", "direction": "SERVER_TO_CLIENT" },
+    { "id": 3005, "name": "BATTLE_ENTITY_LIFECYCLE", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleEntityLifecycle", "kind": "DATAGRAM", "direction": "SERVER_TO_CLIENT" },
+    { "id": 3006, "name": "BATTLE_RESYNC_REQUEST", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleResyncRequest", "kind": "DATAGRAM", "direction": "CLIENT_TO_SERVER" },
+    { "id": 3007, "name": "BATTLE_RESYNC_RESPONSE", "owner": "battle", "protobuf": "ihomeland.battle.v1.BattleResyncResponse", "kind": "DATAGRAM", "direction": "SERVER_TO_CLIENT" }
   ]
 }

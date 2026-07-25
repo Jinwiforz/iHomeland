@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jinwiforz/ihomeland/server/internal/account"
+	"github.com/jinwiforz/ihomeland/server/internal/battleticket"
 	"github.com/jinwiforz/ihomeland/server/internal/session"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 	"github.com/jinwiforz/ihomeland/server/internal/worldadmission"
@@ -25,14 +26,26 @@ type catalogError struct {
 
 // 以下条目是多个owner共享的errors.json冻结投影；不得按handler复制或附加backend文本。
 var (
-	validationError   = catalogError{Status: 400, Code: 200, MessageKey: "error.validation.failed"}
-	unauthenticated   = catalogError{Status: 401, Code: 100, MessageKey: "error.auth.unauthenticated"}
-	forbidden         = catalogError{Status: 403, Code: 101, MessageKey: "error.auth.forbidden"}
-	invalidCredential = catalogError{Status: 401, Code: 102, MessageKey: "error.auth.invalid_credentials"}
-	usernameConflict  = catalogError{Status: 409, Code: 104, MessageKey: "error.account.username_taken"}
-	dependencyError   = catalogError{Status: 503, Code: 500, MessageKey: "error.dependency.unavailable", Retryable: true}
-	internalError     = catalogError{Status: 500, Code: 501, MessageKey: "error.internal", Retryable: true}
-	rateLimited       = catalogError{Status: 429, Code: 400, MessageKey: "error.rate_limited", Retryable: true}
+	validationError      = catalogError{Status: 400, Code: 200, MessageKey: "error.validation.failed"}
+	unauthenticated      = catalogError{Status: 401, Code: 100, MessageKey: "error.auth.unauthenticated"}
+	forbidden            = catalogError{Status: 403, Code: 101, MessageKey: "error.auth.forbidden"}
+	invalidCredential    = catalogError{Status: 401, Code: 102, MessageKey: "error.auth.invalid_credentials"}
+	usernameConflict     = catalogError{Status: 409, Code: 104, MessageKey: "error.account.username_taken"}
+	dependencyError      = catalogError{Status: 503, Code: 500, MessageKey: "error.dependency.unavailable", Retryable: true}
+	internalError        = catalogError{Status: 500, Code: 501, MessageKey: "error.internal", Retryable: true}
+	rateLimited          = catalogError{Status: 429, Code: 400, MessageKey: "error.rate_limited", Retryable: true}
+	battleTargetNotReady = catalogError{
+		Status: 503, Code: 3000, MessageKey: "error.battle.target_not_ready", Retryable: true,
+	}
+	battleCapacityExceeded = catalogError{
+		Status: 409, Code: 3001, MessageKey: "error.battle.capacity_exceeded",
+	}
+	battleTargetStale = catalogError{
+		Status: 409, Code: 3002, MessageKey: "error.battle.target_stale",
+	}
+	battleIdempotencyConflict = catalogError{
+		Status: 409, Code: 3003, MessageKey: "error.battle.idempotency_conflict",
+	}
 )
 
 // mapApplicationError 集中把领域错误映射到errors.json，不回显cause或错误文本。
@@ -59,6 +72,24 @@ func mapApplicationError(err error) catalogError {
 		return forbidden
 	case session.ErrorKindDependencyUnavailable:
 		return dependencyError
+	}
+	switch battleticket.ErrorCodeOf(err) {
+	case battleticket.ErrorCodeInvalidArgument:
+		return validationError
+	case battleticket.ErrorCodeTargetNotReady:
+		return battleTargetNotReady
+	case battleticket.ErrorCodeCapacityExceeded:
+		return battleCapacityExceeded
+	case battleticket.ErrorCodeTargetStale:
+		return battleTargetStale
+	case battleticket.ErrorCodeIdempotencyConflict:
+		return battleIdempotencyConflict
+	case battleticket.ErrorCodeExpired:
+		return unauthenticated
+	case battleticket.ErrorCodeDependency, battleticket.ErrorCodeCommitUnknown:
+		return dependencyError
+	case battleticket.ErrorCodeDependencyDefect:
+		return internalError
 	}
 	switch {
 	case worldentry.IsErrorCode(err, worldentry.ErrorCodeValidation):

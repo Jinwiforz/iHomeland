@@ -109,18 +109,40 @@ type RouteEntry struct {
 	MessageID uint32 `json:"messageId"`
 	// Channel 是消息唯一允许使用的可靠通道，例如 WSS 或 TLS_TCP。
 	Channel string `json:"channel"`
+	// Lane 在共享 UDP listener 内选择 RAW 或 KCP；非 UDP route 必须保持空值。
+	Lane string `json:"lane,omitempty"`
+	// HandlerOwner 是负责 battle logical kind 校验、dispatch 与生命周期的细粒度 owner。
+	HandlerOwner string `json:"handlerOwner,omitempty"`
 	// AuthScope 是连接 session 在 dispatch 前必须持有的服务端授权范围。
 	AuthScope string `json:"authScope"`
 	// QoS 描述可靠性与排序要求，供 adapter 选择发送策略。
 	QoS string `json:"qos"`
 	// MaxSize 是完整编码 envelope 的字节上限，并且不能超过全局 frame 上限。
 	MaxSize uint32 `json:"maxSize"`
+	// MaxPayloadSize 是 battle payload 在 secure/lane headers 与 AEAD tag 之外的逻辑字节上限。
+	MaxPayloadSize uint32 `json:"maxPayloadSize,omitempty"`
 	// RatePolicy 指向服务端拥有的限流策略名称，客户端不能自行选择。
 	RatePolicy string `json:"ratePolicy"`
+	// MaxRatePerSecond 是 battle route 对单 session/message 的精确每秒消息上限。
+	MaxRatePerSecond uint32 `json:"maxRatePerSecond,omitempty"`
 	// Idempotency 决定消息需要 REQUEST_ID、COMMAND_ID、任一 CORRELATION_ID 还是不允许关联。
 	Idempotency string `json:"idempotency"`
 	// TimeoutMS 是服务端处理预算的毫秒数；零值仅在明确允许无响应的消息上有效。
 	TimeoutMS uint32 `json:"timeoutMs"`
+	// ExpiryMS 是 battle application message 从发送到失效的最大毫秒数。
+	ExpiryMS uint32 `json:"expiryMs,omitempty"`
+	// TickPolicy 冻结 battle payload 必须携带或引用的 simulation tick 语义。
+	TickPolicy string `json:"tickPolicy,omitempty"`
+	// SequencePolicy 冻结 battle route 的 monotonic、replacement 或 input sequence 语义。
+	SequencePolicy string `json:"sequencePolicy,omitempty"`
+	// BaselinePolicy 冻结 snapshot baseline 的建立、引用或缺失处理。
+	BaselinePolicy string `json:"baselinePolicy,omitempty"`
+	// RecoveryPolicy 冻结丢包、过期或 gap 后唯一允许的恢复路径。
+	RecoveryPolicy string `json:"recoveryPolicy,omitempty"`
+	// SplitPolicy 冻结 logical payload 是否允许按 input/state partition 拆分。
+	SplitPolicy string `json:"splitPolicy,omitempty"`
+	// BindingPolicy 要求 route 精确绑定 server-owned session、endpoint、target 与 generation。
+	BindingPolicy string `json:"bindingPolicy,omitempty"`
 }
 
 // RouteRegistry 提供后续 dispatcher 消费的完整实时路由集合。

@@ -1,0 +1,274 @@
+edition = "2024";
+
+package ihomeland.battle.v1;
+
+option csharp_namespace = "IHomeland.Protocol.Battle.V1";
+option go_package = "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/battle/v1;battlev1";
+option optimize_for = LITE_RUNTIME;
+
+// BattleInputKind 是客户端可请求、但仍需 simulation authority 校验的封闭输入集合。
+// 客户端不能通过该枚举提交 transform、命中、伤害、效果、死亡、奖励或历史状态。
+enum BattleInputKind {
+  // BATTLE_INPUT_KIND_UNSPECIFIED 用于拒绝缺失或未知输入。
+  BATTLE_INPUT_KIND_UNSPECIFIED = 0;
+  // BATTLE_INPUT_KIND_MOVE 请求按量化二维轴移动。
+  BATTLE_INPUT_KIND_MOVE = 1;
+  // BATTLE_INPUT_KIND_AIM 请求更新量化瞄准方向。
+  BATTLE_INPUT_KIND_AIM = 2;
+  // BATTLE_INPUT_KIND_JUMP 请求在当前 simulation 条件允许时跳跃。
+  BATTLE_INPUT_KIND_JUMP = 3;
+  // BATTLE_INPUT_KIND_PRIMARY_ABILITY 请求触发 primary ability。
+  BATTLE_INPUT_KIND_PRIMARY_ABILITY = 4;
+  // BATTLE_INPUT_KIND_SECONDARY_ABILITY 请求触发 secondary ability。
+  BATTLE_INPUT_KIND_SECONDARY_ABILITY = 5;
+  // BATTLE_INPUT_KIND_INTERACT 请求与 simulation 选择的合法目标交互。
+  BATTLE_INPUT_KIND_INTERACT = 6;
+}
+
+// BattleAbilityPhase 表达 reliable ability event 的封闭生命周期阶段。
+// 该值是服务端 simulation 输出，不能从客户端输入反向写入权威状态。
+enum BattleAbilityPhase {
+  // BATTLE_ABILITY_PHASE_UNSPECIFIED 用于拒绝缺失或未知阶段。
+  BATTLE_ABILITY_PHASE_UNSPECIFIED = 0;
+  // BATTLE_ABILITY_PHASE_STARTED 表示 ability 已被权威 simulation 接受并开始。
+  BATTLE_ABILITY_PHASE_STARTED = 1;
+  // BATTLE_ABILITY_PHASE_COMMITTED 表示 ability 已跨过不可取消的权威提交点。
+  BATTLE_ABILITY_PHASE_COMMITTED = 2;
+  // BATTLE_ABILITY_PHASE_COMPLETED 表示 ability 已正常完成。
+  BATTLE_ABILITY_PHASE_COMPLETED = 3;
+  // BATTLE_ABILITY_PHASE_CANCELLED 表示 ability 在完成前被权威规则终止。
+  BATTLE_ABILITY_PHASE_CANCELLED = 4;
+}
+
+// BattleEntityLifecycleKind 表达 entity generation 的可靠创建或销毁事件。
+// 同一 entity_id 的后续 generation 必须严格大于已经销毁的 generation。
+enum BattleEntityLifecycleKind {
+  // BATTLE_ENTITY_LIFECYCLE_KIND_UNSPECIFIED 用于拒绝缺失或未知事件。
+  BATTLE_ENTITY_LIFECYCLE_KIND_UNSPECIFIED = 0;
+  // BATTLE_ENTITY_LIFECYCLE_KIND_SPAWN 建立一个新的 entity generation。
+  BATTLE_ENTITY_LIFECYCLE_KIND_SPAWN = 1;
+  // BATTLE_ENTITY_LIFECYCLE_KIND_DESPAWN 终止一个已存在的 entity generation。
+  BATTLE_ENTITY_LIFECYCLE_KIND_DESPAWN = 2;
+}
+
+// BattleResyncReason 表达客户端请求恢复 snapshot baseline 的稳定原因。
+// 原因只用于选择恢复策略，不能扩大客户端可见性或访问范围。
+enum BattleResyncReason {
+  // BATTLE_RESYNC_REASON_UNSPECIFIED 用于拒绝缺失或未知原因。
+  BATTLE_RESYNC_REASON_UNSPECIFIED = 0;
+  // BATTLE_RESYNC_REASON_MISSING_BASELINE 表示客户端从未收到所引用的 baseline。
+  BATTLE_RESYNC_REASON_MISSING_BASELINE = 1;
+  // BATTLE_RESYNC_REASON_BASELINE_EXPIRED 表示客户端 baseline 已超过允许年龄。
+  BATTLE_RESYNC_REASON_BASELINE_EXPIRED = 2;
+  // BATTLE_RESYNC_REASON_DELTA_GAP 表示 snapshot sequence 出现不可恢复缺口。
+  BATTLE_RESYNC_REASON_DELTA_GAP = 3;
+  // BATTLE_RESYNC_REASON_ENTITY_GENERATION_GAP 表示 entity lifecycle generation 不连续。
+  BATTLE_RESYNC_REASON_ENTITY_GENERATION_GAP = 4;
+}
+
+// BattleResyncDisposition 表达服务端对受限 resync request 的处理结果。
+// 拒绝结果不会在其他 transport 上补发 payload，客户端只能按 retry_after_ms 重试。
+enum BattleResyncDisposition {
+  // BATTLE_RESYNC_DISPOSITION_UNSPECIFIED 用于拒绝缺失或未知结果。
+  BATTLE_RESYNC_DISPOSITION_UNSPECIFIED = 0;
+  // BATTLE_RESYNC_DISPOSITION_SCHEDULED 表示下一轮 raw snapshot 将发送完整 baseline。
+  BATTLE_RESYNC_DISPOSITION_SCHEDULED = 1;
+  // BATTLE_RESYNC_DISPOSITION_RATE_LIMITED 表示请求有效但触发有界限流。
+  BATTLE_RESYNC_DISPOSITION_RATE_LIMITED = 2;
+  // BATTLE_RESYNC_DISPOSITION_STALE_REQUEST 表示客户端引用的状态已被更新请求取代。
+  BATTLE_RESYNC_DISPOSITION_STALE_REQUEST = 3;
+}
+
+// QuantizedTransform 是 snapshot 中与平台无关的整数 transform 投影。
+// 坐标和角度的量化规则由 battle model 持有，客户端不得把该投影作为 mutation 回传。
+message QuantizedTransform {
+  // position_x_mm 是 world 坐标 X 分量，单位为 millimeter。
+  sint32 position_x_mm = 1;
+  // position_y_mm 是 world 坐标 Y 分量，单位为 millimeter。
+  sint32 position_y_mm = 2;
+  // position_z_mm 是 world 坐标 Z 分量，单位为 millimeter。
+  sint32 position_z_mm = 3;
+  // yaw_millidegrees 是绕 world up axis 的量化角度，范围由 adapter 校验。
+  sint32 yaw_millidegrees = 4;
+  // velocity_x_mm_per_second 是 world 坐标 X 速度，单位为 millimeter per second。
+  sint32 velocity_x_mm_per_second = 5;
+  // velocity_y_mm_per_second 是 world 坐标 Y 速度，单位为 millimeter per second。
+  sint32 velocity_y_mm_per_second = 6;
+  // velocity_z_mm_per_second 是 world 坐标 Z 速度，单位为 millimeter per second。
+  sint32 velocity_z_mm_per_second = 7;
+}
+
+// BattleInputCommand 是一个 tick 内按 command_sequence 排序的受限玩家意图。
+// actor identity 只能来自已认证 BattleSessionContext，payload 故意不包含 PlayerID。
+message BattleInputCommand {
+  // command_sequence 在同一 BattleSession generation 内从 1 单调递增。
+  uint64 command_sequence = 1;
+  // kind 决定哪些量化参数允许非零，未知组合必须拒绝。
+  BattleInputKind kind = 2;
+  // move_x_milli 是水平移动轴，合法范围为 -1000 到 1000。
+  sint32 move_x_milli = 3;
+  // move_y_milli 是垂直移动轴，合法范围为 -1000 到 1000。
+  sint32 move_y_milli = 4;
+  // aim_yaw_millidegrees 是请求瞄准的 yaw，合法范围由 simulation model 校验。
+  sint32 aim_yaw_millidegrees = 5;
+  // aim_pitch_millidegrees 是请求瞄准的 pitch，合法范围由 simulation model 校验。
+  sint32 aim_pitch_millidegrees = 6;
+  // interaction_slot 是受限交互槽位，不是客户端指定的 entity identity。
+  uint32 interaction_slot = 7;
+}
+
+// BattleInputBundle 将一个或多个相邻 input tick 的有限冗余封装到 raw lane。
+// adapter 必须先校验 tick、sequence、expiry、数量和 kind allowlist，再写入有界 inbox。
+message BattleInputBundle {
+  // newest_input_tick 是 bundle 中最新输入所属的 simulation tick。
+  uint64 newest_input_tick = 1;
+  // latest_observed_server_tick 是客户端已应用的最新 server tick，仅用于迟延与过期判断。
+  uint64 latest_observed_server_tick = 2;
+  // commands 按 command_sequence 升序排列，数量和 encoded size 受 registry 硬限制。
+  repeated BattleInputCommand commands = 3;
+}
+
+// BattleProbe 是不携带业务 mutation 的 c2s raw lane 网络观测。
+// 服务端只把序列与已观测 snapshot 用于低敏 RTT/loss 指标，不回显任意客户端 bytes。
+message BattleProbe {
+  // probe_sequence 在同一 BattleSession generation 内从 1 单调递增。
+  uint64 probe_sequence = 1;
+  // latest_snapshot_sequence 是客户端已成功应用的最新 snapshot sequence。
+  uint64 latest_snapshot_sequence = 2;
+  // client_monotonic_time_us 是客户端本地单调时钟采样，单位为 microsecond。
+  uint64 client_monotonic_time_us = 3;
+}
+
+// BattleEntityState 是 full snapshot 中一个 entity generation 的完整公开状态。
+// 最终事实仍由 SimulationInstance 持有，该消息只是一致 tick 的只读投影。
+message BattleEntityState {
+  // entity_id 是 instance 内稳定的非零 entity identity。
+  uint64 entity_id = 1;
+  // entity_generation 防止已销毁 identity 的迟到状态覆盖后续复用。
+  uint32 entity_generation = 2;
+  // transform 是当前 server tick 的量化权威姿态。
+  QuantizedTransform transform = 3;
+  // health_milli 是量化生命值，0 表示已死亡但不替代 lifecycle event。
+  uint32 health_milli = 4;
+  // state_flags 是 registry 冻结的 bit set，未知 bit 必须拒绝。
+  uint32 state_flags = 5;
+}
+
+// BattleEntityDelta 是相对已确认 baseline 的有界 entity 状态变化。
+// state_mask 指示显式存在的字段，接收方必须拒绝 mask 与字段 presence 不一致。
+message BattleEntityDelta {
+  // entity_id 标识被更新的非零 entity。
+  uint64 entity_id = 1;
+  // entity_generation 必须与当前 lifecycle generation 精确匹配。
+  uint32 entity_generation = 2;
+  // state_mask 的 bit 0、1、2 分别声明 transform、health_milli、state_flags。
+  uint32 state_mask = 3;
+  // transform 在 state_mask bit 0 设置时提供完整量化姿态。
+  QuantizedTransform transform = 4;
+  // health_milli 在 state_mask bit 1 设置时提供新的量化生命值。
+  uint32 health_milli = 5;
+  // state_flags 在 state_mask bit 2 设置时提供完整替换 bit set。
+  uint32 state_flags = 6;
+}
+
+// BattleFullSnapshot 建立一个可供后续 delta 引用的完整 raw lane baseline。
+// 大型 state 必须按 registry 的 bounded-state-partitions 规则拆为独立 datagram。
+message BattleFullSnapshot {
+  // server_tick 是所有 entities 共享的一致 simulation tick。
+  uint64 server_tick = 1;
+  // snapshot_sequence 在同一 BattleSession generation 内从 1 单调递增。
+  uint64 snapshot_sequence = 2;
+  // baseline_id 是本次完整 baseline 的非零 identity。
+  uint64 baseline_id = 3;
+  // partition_index 是本 baseline 分区的零基索引。
+  uint32 partition_index = 4;
+  // partition_count 是同一 baseline 的总分区数，必须大于 0 且保持有界。
+  uint32 partition_count = 5;
+  // entities 按 entity_id、entity_generation 排序，禁止跨分区重复。
+  repeated BattleEntityState entities = 6;
+}
+
+// BattleDeltaSnapshot 携带相对 confirmed baseline 的可替换 raw lane state。
+// 丢失或无法解码时客户端等待更新 delta，超过恢复边界后走唯一 KCP resync route。
+message BattleDeltaSnapshot {
+  // server_tick 是所有 deltas 共享的一致 simulation tick。
+  uint64 server_tick = 1;
+  // snapshot_sequence 在同一 BattleSession generation 内从 1 单调递增。
+  uint64 snapshot_sequence = 2;
+  // baseline_id 必须引用客户端已经确认的完整 baseline。
+  uint64 baseline_id = 3;
+  // partition_index 是本 snapshot 分区的零基索引。
+  uint32 partition_index = 4;
+  // partition_count 是同一 snapshot 的总分区数，必须大于 0 且保持有界。
+  uint32 partition_count = 5;
+  // deltas 按 entity_id、entity_generation 排序，禁止跨分区重复。
+  repeated BattleEntityDelta deltas = 6;
+}
+
+// BattleAbilityReliableEvent 是 ability 生命周期的 s2c KCP 可靠有序事件。
+// event 超过 application expiry 后必须终结，不能降级到 raw、WSS 或 TLS/TCP 重发。
+message BattleAbilityReliableEvent {
+  // event_id 在同一 BattleSession generation 内唯一且单调。
+  uint64 event_id = 1;
+  // server_tick 是 ability phase 被权威 simulation 提交的 tick。
+  uint64 server_tick = 2;
+  // source_entity_id 是触发 ability 的权威 entity identity。
+  uint64 source_entity_id = 3;
+  // source_entity_generation 防止迟到事件命中新 generation。
+  uint32 source_entity_generation = 4;
+  // ability_id 是版本化 battle content catalog 中的非零 identity。
+  uint32 ability_id = 5;
+  // phase 是本事件表达的封闭 ability 生命周期阶段。
+  BattleAbilityPhase phase = 6;
+  // target_entity_ids 是按 identity 升序排列的公开目标集合。
+  repeated uint64 target_entity_ids = 7;
+}
+
+// BattleEntityLifecycle 是 entity generation 的 s2c KCP 可靠有序事件。
+// spawn 与 despawn 由 SimulationInstance event queue 唯一产生，snapshot 不替代该顺序事实。
+message BattleEntityLifecycle {
+  // event_id 在同一 BattleSession generation 内唯一且单调。
+  uint64 event_id = 1;
+  // server_tick 是 lifecycle transition 被权威 simulation 提交的 tick。
+  uint64 server_tick = 2;
+  // entity_id 是发生 transition 的非零 entity identity。
+  uint64 entity_id = 3;
+  // entity_generation 是本事件建立或终止的精确 generation。
+  uint32 entity_generation = 4;
+  // kind 区分 generation 的 spawn 与 despawn。
+  BattleEntityLifecycleKind kind = 5;
+  // archetype_id 是 spawn 时的版本化 content identity，despawn 时必须为 0。
+  uint32 archetype_id = 6;
+  // initial_state 只允许在 spawn 时提供，并必须与 entity_id、generation 一致。
+  BattleEntityState initial_state = 7;
+}
+
+// BattleResyncRequest 请求服务端在 raw lane 安排新的完整 baseline。
+// 请求本身不改变 simulation state，并受 session、message rate 与 application expiry 限制。
+message BattleResyncRequest {
+  // request_sequence 在同一 BattleSession generation 内从 1 单调递增。
+  uint64 request_sequence = 1;
+  // latest_server_tick 是客户端已应用的最新 server tick。
+  uint64 latest_server_tick = 2;
+  // missing_baseline_id 是无法继续解码的 baseline identity；从未收到时为 0。
+  uint64 missing_baseline_id = 3;
+  // latest_snapshot_sequence 是客户端已成功应用的最新 snapshot sequence。
+  uint64 latest_snapshot_sequence = 4;
+  // reason 是选择恢复策略所需的封闭原因。
+  BattleResyncReason reason = 5;
+}
+
+// BattleResyncResponse 确认 resync request 是否已安排新的 raw lane full snapshot。
+// response 不内嵌 full snapshot，以保持唯一 lane 和 1200-byte datagram 上限。
+message BattleResyncResponse {
+  // request_sequence 回显对应 request 的 identity。
+  uint64 request_sequence = 1;
+  // server_tick 是服务端作出处理决议时的 simulation tick。
+  uint64 server_tick = 2;
+  // disposition 是本次请求的稳定处理结果。
+  BattleResyncDisposition disposition = 3;
+  // scheduled_baseline_id 是 SCHEDULED 时下一完整 baseline 的 identity，其他结果为 0。
+  uint64 scheduled_baseline_id = 4;
+  // retry_after_ms 是 RATE_LIMITED 时允许重试的最短等待，其他结果为 0。
+  uint32 retry_after_ms = 5;
+}

@@ -1,8 +1,8 @@
 openapi: 3.2.0
 info:
-  title: iHomeland 启动、账号与会话 API
+  title: iHomeland 启动、账号、会话与 Battle API
   version: 1.0.0
-  summary: 定义 HTTPS 启动、账号、会话与连接 ticket 契约。
+  summary: 定义 HTTPS 启动、账号、会话、连接 ticket 与 BattleTicket 契约。
 servers:
   - url: https://api.example.invalid
     description: 仅用于契约占位；运行 endpoint 必须来自部署配置。
@@ -211,6 +211,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorldAdmissionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /v1/battle/tickets:
+    post:
+      operationId: issueBattleTicket
+      summary: 为 own-world 或已有 Visitor membership 的 current SimulationTarget 签发一次性 BattleTicket。
+      x-ihomeland-body-limit-bytes: 2048
+      x-ihomeland-timeout-ms: 5000
+      x-ihomeland-idempotency: IDEMPOTENCY_KEY_REQUIRED
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BattleTicketRequest"
+      responses:
+        "201":
+          description: 已安装到 exact current target 的一次性 BattleTicket；credential 只能交给 battle handshake owner。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BattleTicketResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
 components:
@@ -585,6 +609,102 @@ components:
           type: integer
           format: int64
           minimum: 1
+    BattleTicketRequest:
+      oneOf:
+        - $ref: "#/components/schemas/OwnWorldBattleTarget"
+        - $ref: "#/components/schemas/VisitWorldBattleTarget"
+    OwnWorldBattleTarget:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [OWN_WORLD]
+    VisitWorldBattleTarget:
+      type: object
+      additionalProperties: false
+      required: [kind, visitSessionId]
+      properties:
+        kind:
+          type: string
+          enum: [VISIT_WORLD]
+        visitSessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._:-]+$'
+    BattleTicketResponse:
+      type: object
+      additionalProperties: false
+      required: [ticketId, ticketSecret, endpoint, wireSuite, role, targetKind, targetRevision, expiresAtMs]
+      properties:
+        ticketId:
+          type: string
+          minLength: 32
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._~-]+$'
+          description: UDP ClientHello 可发送的非秘密 opaque identity，不包含可解析 claims。
+        ticketSecret:
+          type: string
+          minLength: 43
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: 仅经 HTTPS 单次交付给 battle handshake owner 的 base64url credential；禁止日志、缓存和回显。
+        endpoint:
+          $ref: "#/components/schemas/BattleEndpoint"
+        wireSuite:
+          $ref: "#/components/schemas/BattleWireSuite"
+        role:
+          type: string
+          enum: [OWNER, VISITOR]
+        targetKind:
+          type: string
+          enum: [OWN_WORLD, VISIT_WORLD]
+        targetRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 签发时冻结的 current SimulationTarget revision，仅用于检测响应漂移。
+        expiresAtMs:
+          type: integer
+          format: int64
+          minimum: 1
+    BattleEndpoint:
+      type: object
+      additionalProperties: false
+      required: [transport, host, port]
+      properties:
+        transport:
+          type: string
+          enum: [UDP]
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+          description: 只由 trusted BattleEndpointProvider 投影，不能从 HTTP Host 或 request body推导。
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+    BattleWireSuite:
+      type: object
+      additionalProperties: false
+      required: [wireVersion, keyAgreement, kdf, aead]
+      properties:
+        wireVersion:
+          type: integer
+          minimum: 1
+          maximum: 255
+        keyAgreement:
+          type: string
+          enum: [X25519]
+        kdf:
+          type: string
+          enum: [HKDF-SHA-256]
+        aead:
+          type: string
+          enum: [ChaCha20-Poly1305]
     Endpoint:
       type: object
       additionalProperties: false
