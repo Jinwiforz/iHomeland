@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-run-evidence-v1.json",
+  "title": "iHomeland Battle Network Run Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "runKind",
+    "runId",
+    "identity",
+    "scenarios",
+    "cleanup"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "runKind": { "enum": ["diagnostic", "verify", "soak"] },
+    "runId": {
+      "type": "string",
+      "pattern": "^bqrun_[0-9a-f]{32}$"
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "scenarios": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/scenario" }
+    },
+    "cleanup": { "$ref": "#/$defs/cleanup" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "identity": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "sourceSha256",
+        "binarySha256",
+        "toolchainSha256",
+        "dependencySha256",
+        "modelSha256",
+        "profileSha256",
+        "controlSha256",
+        "wireSha256",
+        "configSha256",
+        "environmentSha256",
+        "faultSha256",
+        "workloadSha256"
+      ],
+      "properties": {
+        "sourceSha256": { "$ref": "#/$defs/sha256" },
+        "binarySha256": { "$ref": "#/$defs/sha256" },
+        "toolchainSha256": { "$ref": "#/$defs/sha256" },
+        "dependencySha256": { "$ref": "#/$defs/sha256" },
+        "modelSha256": { "$ref": "#/$defs/sha256" },
+        "profileSha256": { "$ref": "#/$defs/sha256" },
+        "controlSha256": { "$ref": "#/$defs/sha256" },
+        "wireSha256": { "$ref": "#/$defs/sha256" },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "environmentSha256": { "$ref": "#/$defs/sha256" },
+        "faultSha256": { "$ref": "#/$defs/sha256" },
+        "workloadSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ScenarioId",
+        "WorkloadId",
+        "EvidenceKind",
+        "Sha256",
+        "Disposition"
+      ],
+      "properties": {
+        "ScenarioId": { "$ref": "#/$defs/stableId" },
+        "WorkloadId": { "$ref": "#/$defs/stableId" },
+        "EvidenceKind": {
+          "enum": [
+            "scenario-run-evidence",
+            "soak-run-evidence",
+            "admission-capacity-evidence",
+            "security-availability-evidence",
+            "lifecycle-evidence",
+            "regression-evidence"
+          ]
+        },
+        "Sha256": { "$ref": "#/$defs/sha256" },
+        "Disposition": {
+          "enum": [
+            "failed",
+            "passed",
+            "skipped",
+            "stale",
+            "unclassified",
+            "unsupported"
+          ]
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "remainingProcesses",
+        "remainingListeners",
+        "remainingContainers",
+        "reusableCredentials"
+      ],
+      "properties": {
+        "disposition": { "enum": ["failed", "passed"] },
+        "remainingProcesses": { "type": "integer", "minimum": 0 },
+        "remainingListeners": { "type": "integer", "minimum": 0 },
+        "remainingContainers": { "type": "integer", "minimum": 0 },
+        "reusableCredentials": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -28,6 +28,20 @@ enum class BattleUdpListenerMode : std::uint8_t {
     LoopbackTest = 2,
 };
 
+/// BattleUdpSendDisposition 是同一 listener socket 的 closed enqueue 结果。
+enum class BattleUdpSendDisposition : std::uint8_t {
+    /// Queued 表示 datagram 已复制并交给 listener executor。
+    Queued = 1,
+    /// InvalidRemote 表示目标 endpoint 为空、未指定或 multicast。
+    InvalidRemote = 2,
+    /// InvalidDatagram 表示 datagram 为空或超过 battle MTU ceiling。
+    InvalidDatagram = 3,
+    /// QueueFull 表示 pending send 已达到固定 hard limit。
+    QueueFull = 4,
+    /// Stopped 表示 listener 未运行或已经开始关闭。
+    Stopped = 5,
+};
+
 /// BattleUdpListenerConfig 绑定 node-global socket、ticket endpoint 与 cookie identity。
 struct BattleUdpListenerConfig final {
     /// bind_endpoint 是本机实际 bind identity。
@@ -54,6 +68,16 @@ struct BattleUdpListenerCounters final {
     std::uint64_t receive_failures;
     /// handler_failures 统计 multiplexer callback 抛出的异常。
     std::uint64_t handler_failures;
+    /// queued_send_datagrams 统计成功取得 bounded queue slot 的 output。
+    std::uint64_t queued_send_datagrams;
+    /// sent_datagrams 统计同一 socket 完成的完整 output。
+    std::uint64_t sent_datagrams;
+    /// sent_bytes 统计成功发送的低敏总 byte count。
+    std::uint64_t sent_bytes;
+    /// rejected_send_datagrams 统计 invalid、queue full 或 stopped enqueue。
+    std::uint64_t rejected_send_datagrams;
+    /// send_failures 统计非 shutdown 的 socket send failure。
+    std::uint64_t send_failures;
 };
 
 /// BattleUdpListenerStatus 暴露 readiness 与 bind/advertised identity。
@@ -78,6 +102,8 @@ class BattleUdpListener final {
 public:
     /// MaximumDatagramBytes 固定 receive buffer 与 battle MTU ceiling。
     static constexpr std::size_t MaximumDatagramBytes = 1200;
+    /// MaximumPendingSendDatagrams 固定 listener output hard budget。
+    static constexpr std::size_t MaximumPendingSendDatagrams = 256;
 
     /// DatagramHandler 接收已通过廉价 fixed-header 分类的 datagram。
     using DatagramHandler = std::function<void(
@@ -102,6 +128,11 @@ public:
 
     /// Stop 幂等关闭 socket 并等待 worker 退出。
     void Stop() noexcept;
+
+    /// Send 复制 datagram 并在唯一 listener executor 上有界序列化发送。
+    [[nodiscard]] BattleUdpSendDisposition Send(
+        std::span<const std::uint8_t> datagram,
+        const BattleRemoteEndpoint& remote);
 
     /// Status 返回不含 remote endpoint 与 payload 的线程安全快照。
     [[nodiscard]] BattleUdpListenerStatus Status() const;

@@ -16,6 +16,8 @@
 
 namespace ihomeland::sim {
 
+struct InputAcknowledgementProjection;
+
 /// BattleActorRole 是Go install允许投影的closed role。
 enum class BattleActorRole : std::uint8_t {
     /// Owner 表示PersonalWorld owner。
@@ -190,12 +192,11 @@ struct BattleIngressResult final {
 /// BattleInputIngress 把validated 3000 raw payload映射为绑定actor的intent commands。
 class BattleInputIngress final {
 public:
-    /// 构造函数借用immutable context、唯一CommandIngress与node governor。
+    /// 构造函数借用immutable context、唯一CommandIngress与session governor。
     BattleInputIngress(
         const BattleSessionContext& context,
         CommandIngress& command_ingress,
-        BattleResourceGovernor& resources,
-        std::uint64_t instance_handle);
+        BattleSessionResourceGovernor& resources);
 
     /// Handle 只接受3000 c2s frame并禁止payload identity/unsafe state。
     [[nodiscard]] BattleIngressResult Handle(
@@ -207,10 +208,8 @@ private:
     const BattleSessionContext* context_;
     /// command_ingress_ 是SimulationInstance唯一输入边界。
     CommandIngress* command_ingress_;
-    /// resources_ 是node/session hard budget owner。
-    BattleResourceGovernor* resources_;
-    /// instance_handle_ 是低敏instance rate identity。
-    std::uint64_t instance_handle_;
+    /// resources_ 是当前session拥有的node hard budget视图。
+    BattleSessionResourceGovernor* resources_;
 };
 
 /// BattleReplicationLane 是每个logical message唯一允许的传输lane。
@@ -231,6 +230,10 @@ struct BattleReplicationItem final {
     std::uint64_t application_sequence;
     /// application_tick 是权威server tick。
     std::uint64_t application_tick;
+    /// partition_index 是 raw snapshot 的零基分区；KCP 固定为 0。
+    std::uint8_t partition_index{};
+    /// partition_count 是同一 logical snapshot 的分区数；KCP 固定为 1。
+    std::uint8_t partition_count{1};
     /// expires_at_unix_ms 等于即终结。
     std::uint64_t expires_at_unix_ms;
     /// payload 是typed Protobuf exact bytes。
@@ -258,11 +261,13 @@ public:
     static constexpr std::size_t QueueItems = 256;
     /// KcpItems 与KCP adapter application queue一致。
     static constexpr std::size_t KcpItems = 64;
+    /// SnapshotMaximumPartitions 与 raw receiver 的固定 32-bit bitmap 一致。
+    static constexpr std::size_t SnapshotMaximumPartitions = 32;
 
-    /// 构造函数借用immutable context与resource governor。
+    /// 构造函数借用immutable context与session resource governor。
     BattleReplicationQueue(
         const BattleSessionContext& context,
-        BattleResourceGovernor& resources);
+        BattleSessionResourceGovernor& resources);
 
     /// 析构函数释放尚未发送item占用的egress budget。
     ~BattleReplicationQueue();
@@ -277,6 +282,8 @@ public:
         std::uint64_t server_tick,
         std::uint64_t snapshot_sequence,
         std::uint64_t baseline_id,
+        const InputAcknowledgementProjection&
+            acknowledgement,
         std::span<const StateProjectionToken> states,
         std::uint64_t now_unix_ms);
 
@@ -285,6 +292,8 @@ public:
         std::uint64_t server_tick,
         std::uint64_t snapshot_sequence,
         std::uint64_t baseline_id,
+        const InputAcknowledgementProjection&
+            acknowledgement,
         std::span<const StateProjectionToken> states,
         std::uint64_t now_unix_ms);
 

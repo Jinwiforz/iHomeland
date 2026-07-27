@@ -8,11 +8,24 @@ param(
     [ValidateRange(120, 900)]
     [int]$StorageTimeoutSeconds = 300,
     [string]$ServerQualificationReportPath = "",
-    [string]$ClientQualificationReportPath = ""
+    [string]$ClientQualificationReportPath = "",
+    [switch]$ReuseQualifiedCppEvidence
 )
+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw "simulation-control requires PowerShell 7 or newer; invoke it with pwsh"
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$ClientContractIdentityModule = Join-Path (
+    Join-Path $PSScriptRoot "..\client-qualification"
+) "ClientContractIdentity.psm1"
+Import-Module $ClientContractIdentityModule -Force
+$CppIdentityModule = Join-Path (
+    Join-Path $PSScriptRoot "..\cpp"
+) "CppIdentity.psm1"
+Import-Module $CppIdentityModule -Force
 
 # Get-RepositoryRoot 返回脚本所在仓库根，避免依赖调用方当前目录。
 function Get-RepositoryRoot {
@@ -64,6 +77,32 @@ function Read-JsonDocument {
     }
     catch {
         throw "simulation-control invalid JSON '$Path': $($_.Exception.Message)"
+    }
+}
+
+# Read-GeneratedJsonEvidence 读取构建工具生成的 UTF-8 JSON；允许平台原生换行，但仍拒绝 BOM、非法 UTF-8 与顶层重复字段。
+function Read-GeneratedJsonEvidence {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "simulation-control missing generated evidence: $Path"
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        throw "simulation-control generated evidence has UTF-8 BOM: $Path"
+    }
+    try {
+        $raw = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    }
+    catch {
+        throw "simulation-control generated evidence is not valid UTF-8 '$Path': $($_.Exception.Message)"
+    }
+    Assert-NoTopLevelDuplicateProperty -Raw $raw -Path $Path
+    try {
+        return ($raw | ConvertFrom-Json)
+    }
+    catch {
+        throw "simulation-control invalid generated JSON '$Path': $($_.Exception.Message)"
     }
 }
 
@@ -360,21 +399,21 @@ function Invoke-ControlValidation {
     }
 
     $inventory = Read-JsonDocument -Path (Join-Path $Root "message-inventory.json")
-    $inventoryFields = @("schemaVersion", "documentKind", "frameMaxBytes", "pendingRequestLimit", "resultOutboxLimit", "ticketRequestQueueLimit", "priorityPolicy", "secretPolicy", "messages")
+    $inventoryFields = @("schemaVersion", "documentKind", "frameMaxBytes", "pendingRequestLimit", "resultOutboxLimit", "lowPriorityRequestQueueLimit", "priorityPolicy", "secretPolicy", "messages")
     Assert-Properties -Value $inventory -Required $inventoryFields -Allowed $inventoryFields -Context "message inventory"
     if ($inventory.schemaVersion -ne "simulation-control-v1" -or
         $inventory.documentKind -ne "message-inventory" -or
         [int]$inventory.frameMaxBytes -ne 65536 -or
         [int]$inventory.pendingRequestLimit -ne 256 -or
         [int]$inventory.resultOutboxLimit -ne 256 -or
-        [int]$inventory.ticketRequestQueueLimit -ne 64) {
+        [int]$inventory.lowPriorityRequestQueueLimit -ne 64) {
         throw "simulation-control inventory limits are invalid"
     }
     $priorityFields = @("highDeadlineClasses", "lowDeadlineClasses", "selection", "activeTurn")
     Assert-Properties -Value $inventory.priorityPolicy -Required $priorityFields -Allowed $priorityFields -Context "message inventory priority policy"
     $expectedHigh = @("startup", "health", "lifecycle", "drain", "shutdown", "result", "revoke")
     if ((@($inventory.priorityPolicy.highDeadlineClasses) -join "|") -cne ($expectedHigh -join "|") -or
-        (@($inventory.priorityPolicy.lowDeadlineClasses) -join "|") -cne "ticket" -or
+        (@($inventory.priorityPolicy.lowDeadlineClasses) -join "|") -cne "qualification|ticket" -or
         [string]$inventory.priorityPolicy.selection -cne "high-first-after-active-turn" -or
         [string]$inventory.priorityPolicy.activeTurn -cne "non-preemptive") {
         throw "simulation-control priority policy drifted"
@@ -402,6 +441,7 @@ function Invoke-ControlValidation {
         $knownKinds += [string]$message.kind
     }
     $expectedKinds = @(
+        "battle_qualification_snapshot_receipt", "battle_qualification_snapshot_request",
         "battle.session.closed", "battle.session.revoke",
         "battle.ticket.install", "battle.ticket.installed", "battle.ticket.revoke",
         "battle.ticket.revoked", "battle.ticket.status.query", "battle.ticket.status.receipt",
@@ -411,7 +451,16 @@ function Invoke-ControlValidation {
         "node.listener.status.query", "node.listener.status.receipt",
         "node.shutdown", "node.stopped", "result.ack", "result.proposal"
     )
-    if ((@($knownKinds | Sort-Object) -join "|") -ne ($expectedKinds -join "|")) {
+    $expectedKindSet = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal)
+    foreach ($expectedKind in $expectedKinds) {
+        [void]$expectedKindSet.Add($expectedKind)
+    }
+    $unexpectedKinds = @($knownKinds | Where-Object {
+        -not $expectedKindSet.Contains($_)
+    })
+    if ($knownKinds.Count -ne $expectedKindSet.Count -or
+        $unexpectedKinds.Count -ne 0) {
         throw "simulation-control inventory kinds are incomplete"
     }
 
@@ -486,7 +535,7 @@ function Invoke-ControlValidation {
     }
 
     $battleControl = Read-JsonDocument -Path (Join-Path $Root "cases\battle-control.json")
-    $battleControlFields = @("schemaVersion", "caseId", "category", "listenerStatus", "ticketLifecycle", "sessionLifecycle", "expectations")
+    $battleControlFields = @("schemaVersion", "caseId", "category", "listenerStatus", "ticketLifecycle", "sessionLifecycle", "qualificationSnapshot", "expectations")
     Assert-Properties -Value $battleControl -Required $battleControlFields -Allowed $battleControlFields -Context "battle control case"
     if ([string]$battleControl.schemaVersion -cne "simulation-control-v1" -or
         [string]$battleControl.caseId -cne "battle-listener-ticket-session-control" -or
@@ -496,8 +545,13 @@ function Invoke-ControlValidation {
         [string]$battleControl.ticketLifecycle.conflictRule -cne "same-request-or-ticket-with-field-drift-is-rejected" -or
         [string]$battleControl.sessionLifecycle.requestKind -cne "battle.session.revoke" -or
         [string]$battleControl.sessionLifecycle.receiptKind -cne "battle.session.closed" -or
+        [string]$battleControl.qualificationSnapshot.requestKind -cne "battle_qualification_snapshot_request" -or
+        [string]$battleControl.qualificationSnapshot.receiptKind -cne "battle_qualification_snapshot_receipt" -or
+        [string]$battleControl.qualificationSnapshot.mode -cne "explicit-run-only" -or
+        [string]$battleControl.qualificationSnapshot.productionDisposition -cne "rejected" -or
         @($battleControl.expectations) -notcontains "all-payloads-closed" -or
-        @($battleControl.expectations) -notcontains "proof-key-only-on-ticket-install") {
+        @($battleControl.expectations) -notcontains "proof-key-only-on-ticket-install" -or
+        @($battleControl.expectations) -notcontains "qualification-snapshot-does-not-create-listener-or-file-management-plane") {
         throw "simulation-control battle control contract drifted"
     }
 
@@ -679,35 +733,6 @@ function Get-CorpusSha256 {
     }
 }
 
-# Get-TrackedTreeSha256 与 client qualification 使用同一 tracked/untracked path:hash 规则。
-function Get-TrackedTreeSha256 {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
-        [Parameter(Mandatory = $true)][string[]]$PathSpecs
-    )
-
-    $tracked = & git -C $RepositoryRoot ls-files -- @PathSpecs
-    if ($LASTEXITCODE -ne 0) { throw "simulation-control tracked evidence input cannot be enumerated" }
-    $untracked = & git -C $RepositoryRoot ls-files --others --exclude-standard -- @PathSpecs
-    if ($LASTEXITCODE -ne 0) { throw "simulation-control untracked evidence input cannot be enumerated" }
-    $paths = @($tracked) + @($untracked)
-    if (@($paths).Count -eq 0) { throw "simulation-control tracked evidence input is empty" }
-    $builder = [System.Text.StringBuilder]::new()
-    foreach ($relative in @($paths | Sort-Object -Unique)) {
-        $full = Join-Path $RepositoryRoot $relative
-        [void]$builder.Append($relative.Replace('\', '/')).Append(':').Append((Get-Sha256 -Path $full)).Append("`n")
-    }
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($builder.ToString())
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
-    }
-    finally {
-        $sha.Dispose()
-        [Array]::Clear($bytes, 0, $bytes.Length)
-    }
-}
-
 # Get-DirectorySha256 绑定完整 Player build 目录的稳定相对路径与内容。
 function Get-DirectorySha256 {
     param([Parameter(Mandatory = $true)][string]$Directory)
@@ -762,7 +787,7 @@ function Assert-V1QualificationEvidence {
     $clientRun = Split-Path -Parent $clientPath
     $development = Join-Path $clientRun "development"
     $release = Join-Path $clientRun "release"
-    $currentContract = Get-TrackedTreeSha256 -RepositoryRoot $RepositoryRoot -PathSpecs @("shared/contracts", "client/Packages", "client/ProjectSettings/ProjectVersion.txt")
+    $currentContract = Get-ClientContractDigest -RepositoryRoot $RepositoryRoot
     if ([string]$client.qualificationVersion -ne "client-v1" -or
         -not [bool]$client.qualified -or [string]$client.cleanup -ne "pass" -or
         $null -ne $client.failure -or [string]$client.contractDigest -ne $currentContract -or
@@ -864,13 +889,62 @@ function Invoke-GoVerification {
     }
 }
 
-# Invoke-CppVerification 重建 B0.3 Release/ASan evidence，并构建 real-child Debug binary。
-function Invoke-CppVerification {
+# Get-CurrentCppSourceDigest 使用与 C++ 资格入口一致的 path:hash 规则计算当前输入身份。
+function Get-CurrentCppSourceDigest {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    return Get-CppSourceIdentityDigest -RepositoryRoot $RepositoryRoot
+}
+
+# Assert-CurrentCppQualificationEvidence 只复用 exact source、双 target 与 CTest receipt 均匹配的 B0.3 证据。
+function Assert-CurrentCppQualificationEvidence {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
 
+    $ciIdentityPath = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\ihomeland-build-identity.json"
+    $asanIdentityPath = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-asan\ihomeland-build-identity.json"
+    $receiptPath = Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\qualification-gate-receipt.json"
+    $reportPath = Join-Path $RepositoryRoot "simulation\reports\qualification.json"
+    $ciIdentity = Read-GeneratedJsonEvidence -Path $ciIdentityPath
+    $asanIdentity = Read-GeneratedJsonEvidence -Path $asanIdentityPath
+    $receipt = Read-GeneratedJsonEvidence -Path $receiptPath
+    $report = Read-GeneratedJsonEvidence -Path $reportPath
+    $sourceDigest = Get-CurrentCppSourceDigest -RepositoryRoot $RepositoryRoot
+
+    if ([string]$ciIdentity.preset -cne "windows-msvc-ci" -or
+        [string]$asanIdentity.preset -cne "windows-msvc-asan" -or
+        [string]$ciIdentity.source_sha256 -cne $sourceDigest -or
+        [string]$asanIdentity.source_sha256 -cne $sourceDigest -or
+        [string]$receipt.source_sha256 -cne $sourceDigest -or
+        [string]$receipt.ci_target_identity -cne [string]$ciIdentity.target_identity -or
+        [string]$receipt.asan_target_identity -cne [string]$asanIdentity.target_identity -or
+        -not [bool]$receipt.ci_ctest_passed -or
+        -not [bool]$receipt.asan_ctest_passed) {
+        throw "simulation-control current B0.3 source, target, or CTest receipt is stale"
+    }
+    if (-not [bool]$report.qualified -or
+        [string]$report.conclusion -cne "implementation-qualified-windows-x64" -or
+        [string]$report.build_identity_sha256 -cne (Get-Sha256 -Path $ciIdentityPath) -or
+        [string]$report.asan_build_identity_sha256 -cne (Get-Sha256 -Path $asanIdentityPath) -or
+        [string]$report.gate_receipt_sha256 -cne (Get-Sha256 -Path $receiptPath)) {
+        throw "simulation-control current B0.3 qualification report is stale"
+    }
+    Write-Output "simulation-control reused exact current B0.3 qualification evidence"
+}
+
+# Invoke-CppVerification 验证或重建 B0.3 evidence，并构建 real-child Debug binary。
+function Invoke-CppVerification {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [switch]$ReuseQualifiedEvidence
+    )
+
     $cppTool = Join-Path $RepositoryRoot "tools\cpp\cpp.ps1"
-    Invoke-CheckedCommand -Failure "simulation-control C++ Release/ASan gate failed" -Command {
-        & $cppTool verify -Preset windows-msvc-release
+    if ($ReuseQualifiedEvidence) {
+        Assert-CurrentCppQualificationEvidence -RepositoryRoot $RepositoryRoot
+    }
+    else {
+        Invoke-CheckedCommand -Failure "simulation-control C++ Release/ASan gate failed" -Command {
+            & $cppTool verify -Preset windows-msvc-release
+        }
     }
     Invoke-CheckedCommand -Failure "simulation-control C++ Debug configure gate failed" -Command {
         & $cppTool configure -Preset windows-msvc-debug
@@ -1008,9 +1082,11 @@ switch ($Action) {
             "simulation\src\control"
         )
         $sourceBefore = Get-CorpusSha256 -RepositoryRoot $repositoryRoot -Roots $sourceRoots
+        # 外部资格 evidence 只需读取冻结文件，必须在 build/race/storage 之前 fail fast。
+        $v1Evidence = Assert-V1QualificationEvidence -RepositoryRoot $repositoryRoot -ServerReportPath $ServerQualificationReportPath -ClientReportPath $ClientQualificationReportPath
         Invoke-ControlValidation -Root $resolvedFixtureRoot -RepositoryRoot $repositoryRoot
         Invoke-IsolatedTests -SourceRoot $resolvedFixtureRoot -RepositoryRoot $repositoryRoot
-        Invoke-CppVerification -RepositoryRoot $repositoryRoot
+        Invoke-CppVerification -RepositoryRoot $repositoryRoot -ReuseQualifiedEvidence:$ReuseQualifiedCppEvidence
         Invoke-GoVerification -RepositoryRoot $repositoryRoot -FuzzSeconds $FuzzTimeSeconds
         $previousStorageRealChild = $env:IHOMELAND_SIMULATION_REAL_CHILD
         try {
@@ -1023,7 +1099,6 @@ switch ($Action) {
             $env:IHOMELAND_SIMULATION_REAL_CHILD = $previousStorageRealChild
         }
         Assert-DeliveryGovernance -RepositoryRoot $repositoryRoot
-        $v1Evidence = Assert-V1QualificationEvidence -RepositoryRoot $repositoryRoot -ServerReportPath $ServerQualificationReportPath -ClientReportPath $ClientQualificationReportPath
         $sourceAfter = Get-CorpusSha256 -RepositoryRoot $repositoryRoot -Roots $sourceRoots
         if ($sourceBefore -ne $sourceAfter) {
             throw "simulation-control verification modified source corpus"

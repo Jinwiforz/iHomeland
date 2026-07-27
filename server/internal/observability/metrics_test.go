@@ -104,6 +104,15 @@ func TestSimulationControlMetricLabelsAcceptFixedVocabulary(t *testing.T) {
 	metrics.ObserveSimulationShutdown("clean")
 }
 
+// TestBattleQualificationControlMetricLabelsAcceptMemoryVocabulary 保护资格快照内存指标的封闭标签。
+func TestBattleQualificationControlMetricLabelsAcceptMemoryVocabulary(t *testing.T) {
+	t.Parallel()
+
+	metrics := NewMetrics()
+	metrics.SetBattleQualificationControlMetric("instance-memory-bytes", 1)
+	metrics.SetBattleQualificationControlMetric("history-memory-bytes", 1)
+}
+
 // TestSimulationControlMetricLabelsRejectIdentity 防止 node、instance 或 stamp 成为 label。
 func TestSimulationControlMetricLabelsRejectIdentity(t *testing.T) {
 	t.Parallel()

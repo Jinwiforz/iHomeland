@@ -53,15 +53,17 @@ func (adapter *VisitSessionServiceAdapter) ResolveBattleAuthority(ctx context.Co
 	if adapter == nil || adapter.service == nil {
 		return VisitAuthority{}, errors.New("visit session service is unavailable")
 	}
-	eligibility, err := adapter.service.ResolveAdmissionEligibility(ctx, authenticated, visitID)
+	eligibility, err := adapter.service.ResolveBattleEligibility(ctx, authenticated, visitID)
 	if err != nil {
 		return VisitAuthority{}, err
 	}
-	authority := VisitAuthority{Intent: eligibility.Intent(), Revision: eligibility.Revision()}
-	if !eligibility.Valid() || !authority.Valid() {
+	if !eligibility.Valid() {
 		return VisitAuthority{}, errors.New("visit session service returned malformed eligibility")
 	}
-	return authority, nil
+	return NewVisitAuthority(
+		eligibility.VisitorID(), eligibility.SessionID(), eligibility.Epoch(),
+		eligibility.Assignment(), eligibility.ExpiresAt(), eligibility.Revision(),
+	)
 }
 
 // SimulationTargetResolver 解析完整 assignment stamp 对应的 current exact child target。
@@ -344,24 +346,23 @@ func (service *Service) resolveAuthority(ctx context.Context, authenticated sess
 	if !visitAuthority.Valid() {
 		return authority{}, admissionError("visit", battleticket.ErrorCodeDependencyDefect, nil)
 	}
-	intent := visitAuthority.Intent
 	auth := authenticated.AuthContext()
-	if intent.VisitSessionID() != selector.VisitSessionID || intent.VisitorID() != playerID ||
-		intent.SessionID() != auth.SessionID() || intent.Epoch() != auth.Epoch() ||
-		!now.Before(intent.ExpiresAt()) {
+	if visitAuthority.visitorID != playerID ||
+		visitAuthority.sessionID != auth.SessionID() || visitAuthority.epoch != auth.Epoch() ||
+		!now.Before(visitAuthority.expiresAt) {
 		return authority{}, admissionError("visit", battleticket.ErrorCodeTargetStale, nil)
 	}
-	current, err := service.resolveCurrent(ctx, intent.Assignment().WorldID(), now)
+	current, err := service.resolveCurrent(ctx, visitAuthority.assignment.WorldID(), now)
 	if err != nil {
 		return authority{}, err
 	}
-	if !current.Stamp().Equal(intent.Assignment()) {
+	if !current.Stamp().Equal(visitAuthority.assignment) {
 		return authority{}, admissionError("visit", battleticket.ErrorCodeTargetStale, nil)
 	}
 	return authority{
-		role: battleticket.RoleVisitor, worldID: intent.Assignment().WorldID(),
+		role: battleticket.RoleVisitor, worldID: visitAuthority.assignment.WorldID(),
 		visitSessionID: selector.VisitSessionID, assignment: current,
-		deadline: intent.ExpiresAt(),
+		deadline: visitAuthority.expiresAt,
 	}, nil
 }
 

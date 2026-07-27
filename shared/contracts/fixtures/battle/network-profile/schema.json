@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ihomeland.local/schemas/battle-network-profile-v1.json",
+  "$id": "https://ihomeland.local/schemas/battle-network-profile-v2.json",
   "title": "iHomeland Battle Network Profile",
   "type": "object",
   "additionalProperties": false,
@@ -11,10 +11,10 @@
   ],
   "properties": {
     "format_version": {
-      "const": "1"
+      "const": "2"
     },
     "profile_version": {
-      "const": "battle-network-profile-v1"
+      "const": "battle-network-profile-v2"
     },
     "document_kind": {
       "enum": [

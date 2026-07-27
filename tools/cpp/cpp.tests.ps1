@@ -10,6 +10,7 @@ $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 # TestRoot 每次运行均唯一，避免并行测试互相删除文件。
 $TestRoot = Join-Path $RepositoryRoot (".tmp\cpp-tool-tests-" + [guid]::NewGuid().ToString("N"))
 Import-Module (Join-Path $PSScriptRoot "CppTool.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "CppIdentity.psm1") -Force
 
 # Assert-True 为无第三方测试框架的 bootstrap 阶段提供最小断言。
 function Assert-True {
@@ -73,6 +74,33 @@ function New-TestZip {
 
 try {
     New-Item -ItemType Directory -Force -Path $TestRoot | Out-Null
+    $currentSourceIdentity = Get-CppSourceIdentityDigest -RepositoryRoot $RepositoryRoot
+    $identityModulePath = (Resolve-Path (Join-Path $PSScriptRoot "CppIdentity.psm1")).Path
+    $identityModuleLiteral = $identityModulePath.Replace("'", "''")
+    $repositoryLiteral = $RepositoryRoot.Replace("'", "''")
+    $identityProbe = @"
+Import-Module '$identityModuleLiteral' -Force
+Get-CppSourceIdentityDigest -RepositoryRoot '$repositoryLiteral'
+"@
+    $identityProbeEncoded = [Convert]::ToBase64String(
+        [System.Text.Encoding]::Unicode.GetBytes($identityProbe))
+    $otherPowerShell = if ($PSVersionTable.PSVersion.Major -ge 7) {
+        "powershell.exe"
+    }
+    else {
+        "pwsh.exe"
+    }
+    $otherIdentityOutput = @(
+        & $otherPowerShell -NoProfile -EncodedCommand $identityProbeEncoded 2>$null
+    )
+    Assert-True ($LASTEXITCODE -eq 0) "另一 PowerShell 宿主无法计算 C++ source identity"
+    $otherSourceIdentity = [string](@(
+            $otherIdentityOutput | Where-Object { $_ -cmatch '^[0-9a-f]{64}$' }
+        ) | Select-Object -Last 1)
+    Assert-True (
+        $otherSourceIdentity -eq $currentSourceIdentity
+    ) "C++ source identity 在 PowerShell 5.1 与 7 之间发生漂移"
+
     $safeArchive = Join-Path $TestRoot "safe.zip"
     $unsafeArchive = Join-Path $TestRoot "unsafe.zip"
     New-TestZip $safeArchive "sample-1.0"

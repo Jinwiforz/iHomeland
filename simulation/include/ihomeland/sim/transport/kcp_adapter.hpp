@@ -11,21 +11,7 @@
 
 namespace ihomeland::sim {
 
-/// BattleKcpRoutePolicy 是3004..3007可靠route的closed registry projection。
-struct BattleKcpRoutePolicy final {
-    /// message_id 是 battle owner range 内唯一 numeric identity。
-    std::uint32_t message_id;
-    /// direction 是该 route 唯一允许方向。
-    BattleRouteDirection direction;
-    /// maximum_payload_bytes 是 Protobuf encoded hard ceiling。
-    std::uint16_t maximum_payload_bytes;
-    /// maximum_rate_per_second 由外层资源治理执行。
-    std::uint16_t maximum_rate_per_second;
-};
-
-/// FindBattleKcpRoutePolicy 返回3004..3007 KCP registry projection。
-[[nodiscard]] const BattleKcpRoutePolicy*
-FindBattleKcpRoutePolicy(std::uint32_t message_id) noexcept;
+class BattleRuntimeMetrics;
 
 /// BattleKcpMessageView 是 callback 期间有效的已重组可靠消息。
 struct BattleKcpMessageView final {
@@ -51,7 +37,7 @@ enum class BattleKcpDisposition : std::uint8_t {
     RouteRejected = 4,
     /// QueueFull 表示64-message hard cap已达到。
     QueueFull = 5,
-    /// Expired 表示500ms deadline已终结消息或 session KCP state。
+    /// Expired 表示 route deadline 已终结消息或 session KCP state。
     Expired = 6,
     /// ClockInvalid 表示 absolute clock回退或session relative clock越过uint32范围。
     ClockInvalid = 7,
@@ -98,8 +84,12 @@ public:
     static constexpr std::size_t MaximumMessageBytes = 1000;
     /// QueueItems 固定 application + inflight message hard cap。
     static constexpr std::size_t QueueItems = 64;
-    /// MessageExpiryMilliseconds 固定 application deadline。
-    static constexpr std::uint32_t MessageExpiryMilliseconds = 500;
+    /// ReliableEventExpiryMilliseconds 保留 adapter API，并引用 route owner。
+    static constexpr std::uint32_t ReliableEventExpiryMilliseconds =
+        BattleKcpRoutePolicy::ReliableEventExpiryMilliseconds;
+    /// ResyncExpiryMilliseconds 保留 adapter API，并引用 route owner。
+    static constexpr std::uint32_t ResyncExpiryMilliseconds =
+        BattleKcpRoutePolicy::ResyncExpiryMilliseconds;
 
     /// SegmentOutput 把 KCP bytes交给同一session的secure KCP packet owner。
     using SegmentOutput =
@@ -113,7 +103,8 @@ public:
         std::uint32_t conversation,
         BattleTransportRole local_role,
         SegmentOutput segment_output,
-        MessageHandler message_handler);
+        MessageHandler message_handler,
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
     /// 析构函数释放KCP handle并丢弃未确认的非持久transport数据。
     ~BattleKcpAdapter();

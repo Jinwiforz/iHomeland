@@ -10,6 +10,114 @@
 
 namespace ihomeland::sim {
 
+InputAcknowledgementStore::
+    InputAcknowledgementStore(
+        const std::uint64_t mapping_generation,
+        std::vector<std::uint64_t> actor_ids)
+    : mapping_generation_(mapping_generation),
+      actor_count_(actor_ids.size()) {
+    std::sort(actor_ids.begin(), actor_ids.end());
+    if (mapping_generation_ == 0 ||
+        actor_ids.empty() ||
+        actor_ids.size() > MaximumActors ||
+        actor_ids.front() == 0 ||
+        std::adjacent_find(
+            actor_ids.begin(),
+            actor_ids.end()) != actor_ids.end()) {
+        throw std::invalid_argument(
+            "input acknowledgement store binding is invalid");
+    }
+    std::copy(
+        actor_ids.begin(),
+        actor_ids.end(),
+        actor_ids_.begin());
+}
+
+void InputAcknowledgementStore::Publish(
+    const std::uint64_t server_tick,
+    const std::span<
+        const InputAcknowledgementProjection>
+        projections) {
+    std::scoped_lock lock(snapshot_mutex_);
+    if (projections.size() != actor_count_) {
+        throw std::invalid_argument(
+            "input acknowledgement projection set is incomplete");
+    }
+    if (server_tick == 0 ||
+        server_tick <= published_server_tick_) {
+        throw std::invalid_argument(
+            "input acknowledgement server Tick regressed");
+    }
+    for (std::size_t index = 0;
+         index < actor_count_;
+         ++index) {
+        const auto& projection =
+            projections[index];
+        const auto previous =
+            frontiers_[index];
+        if (projection.actor_id !=
+                actor_ids_[index] ||
+            projection.mapping_generation !=
+                mapping_generation_ ||
+            projection.last_processed_input_tick <
+                previous) {
+            throw std::invalid_argument(
+                "input acknowledgement projection regressed");
+        }
+    }
+    for (std::size_t index = 0;
+         index < actor_count_;
+         ++index) {
+        frontiers_[index] =
+            projections[index]
+                .last_processed_input_tick;
+    }
+    published_server_tick_ = server_tick;
+}
+
+std::optional<InputAcknowledgementSnapshot>
+InputAcknowledgementStore::Freeze(
+    const std::uint64_t actor_id,
+    const std::uint64_t mapping_generation) const {
+    if (actor_id == 0 ||
+        mapping_generation !=
+            mapping_generation_) {
+        return std::nullopt;
+    }
+    const auto end =
+        actor_ids_.begin() +
+        static_cast<std::ptrdiff_t>(
+            actor_count_);
+    const auto iterator = std::lower_bound(
+        actor_ids_.begin(),
+        end,
+        actor_id);
+    if (iterator == end ||
+        *iterator != actor_id) {
+        return std::nullopt;
+    }
+    const auto index =
+        static_cast<std::size_t>(
+            std::distance(
+                actor_ids_.begin(),
+                iterator));
+    std::scoped_lock lock(snapshot_mutex_);
+    if (published_server_tick_ == 0) {
+        return std::nullopt;
+    }
+    return InputAcknowledgementSnapshot{
+        .server_tick = published_server_tick_,
+        .acknowledgement =
+            {
+                .actor_id = actor_id,
+                .mapping_generation =
+                    mapping_generation_,
+                .last_processed_input_tick =
+                    frontiers_[index],
+            },
+    };
+}
+
 InputTimeline::InputTimeline(
     InputMappingConfig mapping,
     std::vector<std::uint64_t> actor_ids,
@@ -20,7 +128,8 @@ InputTimeline::InputTimeline(
       continuous_hold_ticks_(continuous_hold_ticks),
       gap_expiry_ticks_(gap_expiry_ticks),
       pending_capacity_per_actor_(pending_capacity_per_actor) {
-    if (mapping.generation == 0 || mapping.base_input_tick == 0 ||
+    if (mapping.generation == 0 ||
+        mapping.base_input_tick != FirstInputTick ||
         mapping.base_simulation_tick == 0 || mapping.input_step_ns == 0 ||
         mapping.simulation_step_ns == 0 || actor_ids.empty() ||
         pending_capacity_per_actor == 0) {
@@ -131,6 +240,43 @@ std::vector<ActorInputResolution> InputTimeline::Resolve(
             .last_processed_input_tick = state.last_processed_input_tick});
     }
     return resolutions;
+}
+
+std::vector<InputAcknowledgementProjection>
+InputTimeline::FreezeAcknowledgements() const {
+    std::vector<InputAcknowledgementProjection>
+        projections;
+    projections.reserve(states_.size());
+    for (const auto& state : states_) {
+        projections.push_back(
+            InputAcknowledgementProjection{
+                .actor_id = state.actor_id,
+                .mapping_generation =
+                    mapping_.generation,
+                .last_processed_input_tick =
+                    state.last_processed_input_tick,
+            });
+    }
+    return projections;
+}
+
+void InputTimeline::ReplaceMapping(
+    const InputMappingConfig successor) {
+    if (successor.generation <=
+            mapping_.generation ||
+        successor.base_input_tick !=
+            FirstInputTick ||
+        successor.base_simulation_tick == 0 ||
+        successor.input_step_ns == 0 ||
+        successor.simulation_step_ns == 0 ||
+        successor.simulation_step_ns %
+                successor.input_step_ns !=
+            0) {
+        throw std::invalid_argument(
+            "InputTimeline successor mapping is invalid");
+    }
+    mapping_ = successor;
+    Reset();
 }
 
 void InputTimeline::Reset() {

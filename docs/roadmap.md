@@ -420,8 +420,8 @@ socket/KCP/AEAD、production network 与 Unity runtime。
 **状态：**实现、主 specs 同步、server v1 完整回归、client v1 全部 20 项 mandatory
 资格与 B0.4 完整资格均已通过；连续两份低敏 B0.4 report 字节一致并得到
 `control-qualified-windows-x64`。change 已于 2026-07-24 完成归档，并解锁了 B0.5；
-battle wire、UDP/KCP/AEAD 已由后续独立 OpenSpec 冻结和验收，Unity battle runtime
-仍须等待 B0.6 网络资格。
+battle wire、UDP/KCP/AEAD 与 network development-readiness 已由后续独立 OpenSpec
+冻结和验收，Unity battle runtime 已满足 B0.7 开发进入条件；最终产品资格仍需显式执行。
 
 **进入条件：**B0.3 的 10 个冻结 model cases、CI/ASan/parity/benchmark、连续
 determinism 与唯一 qualification report 全部通过，主 specs 已同步并归档；C++ core
@@ -451,6 +451,11 @@ operator 场景与 cleanup，绑定 contract/Development/Release digest
 **状态：**实现、主 specs 同步、跨语言 wire/crypto/KCP、真实 child/loopback UDP、
 server v1 与 client v1 回归均已通过，取得 `secure-transport-qualified-windows-x64`；
 change 已于 2026-07-25 完成归档，仅解锁 B0.6，不代表公网或 Unity gameplay 可发布。
+后续已归档的 `repair-battle-handshake-runtime` 重新打开该资格边界，修复公开 proof derivation、
+同一生产 socket 的出站链路、handshake bootstrap ownership 与 node-global session
+composition；旧 B0.5 report 不得作为当前最终资格证据复用。修复 change 已用真实 Go
+parent、C++ child 和独立 C++ protocol client 完成直接影响面验证，完整报告由显式最终
+资格针对冻结候选一次生成。
 
 **进入条件（已满足）：**B0.4 主 specs 已同步并归档，连续资格报告为 qualified，且
 SimulationTarget/8-actor gate、child crash/restart、result replay 和现有 world/visit 回归
@@ -467,6 +472,16 @@ message registry、ticket/cookie/AEAD/replay/anti-amplification 与实际 UDP li
 mandatory gates，并绑定 model/profile/control/wire/registry/config/fixture、Go/C++/C#
 toolchain 和 binary identity。实现结论只适用于 Windows x64；B0.6 仍需独立验证
 latency、jitter、loss、reorder、duplicate、burst、pause、NAT 与容量曲线。
+修复后的 report 还必须证明 raw/KCP/control 共享生产 listener、KCP 无 ingress 时仍按
+固定 cadence 推进，以及 replay、tamper、MTU、rebind、rekey、close 和 8/9 actor
+边界均经真实 socket 到达生产 runtime。
+
+后续已归档的 `extend-battle-resync-expiry` 将 profile 升级为
+`battle-network-profile-v2`：`3004/3005` sender expiry 保持 500 ms，
+`3006/3007` 调整为 2250 ms，receiver reassembly 改由 KCP window/queue 与 session
+lifecycle 有界。旧 profile v1 binary/report/binding 必须全部失效；开发期只重建 current
+consumer binding 与定向兼容证据，最终报告在使用者冻结当前产品候选时一次重建，不能只
+替换 manifest digest。
 
 ### B0.6 `qualify-battle-network`
 
@@ -474,11 +489,26 @@ latency、jitter、loss、reorder、duplicate、burst、pause、NAT 与容量曲
 
 **产出：**`tools/battle-qualification/`、可重复 network fault matrix、带宽/CPU/内存/queue/KCP 重传放大报告、安全 negative corpus、重连/迁移/Visitor soak 和低敏 evidence。
 
-**完成条件：**目标网络矩阵在预算内通过，所有 run 可由 manifest 重放，失败能定位到 lane/session/assignment/tick，发布门可自动阻止 profile 漂移。
+**完成条件：**完整矩阵、容量、安全、生命周期、soak 和 finalize 能由统一入口按需运行；
+代表性 clean、baseline-gap、loss/reorder、1/5 actor、安全与 lifecycle 场景证明 runner、
+metric、scope、cleanup 和 profile 漂移门可用。Tooling 完成不要求变化中的工作区生成
+最终 qualified report。
+
+**当前状态：**资格 corpus、opaque gateway、独立 C++ 协议客户端、Go 黑盒 harness、
+qualification-only control snapshot、安全/lifecycle runner、统一入口与 finalize gate
+均已实现；profile v2 consumer binding、input acknowledgement、failure regression 和
+代表性 development-readiness 已通过。`qualify-battle-network` 及其四个衍生 change
+已于 2026-07-27 同步主 specs 并归档，B0.7 功能开发进入条件已满足。当前没有生成
+`battle-network-qualified-windows-x64-controlled` 结论；连续两次完整 verify、30 分钟
+soak 与 finalize 保留给使用者显式冻结的最终候选。唯一运行顺序和 evidence/cleanup
+规则见 `docs/battle-network-qualification.md`。
 
 ### B0.7 `implement-unity-gameplay-runtime`
 
-**进入条件：**battle network qualification 通过，C++ 服务端先支持冻结 wire 与兼容策略；Unity package/版本和 Cinemachine 回归基线获批。
+**进入条件：**battle network qualification tooling 与代表性 network
+development-readiness 通过，C++ 服务端先支持冻结 wire 与兼容策略；Unity package/版本
+和 Cinemachine 回归基线获批。未执行完整最终资格时不得声明 battle network 或产品
+combat 已 qualified。
 
 **产出：**`BattleNetworkClient`、纯 C# GameplayReplica/InputHistory/PredictedStateHistory、reconciliation/interpolation、Actor Views、Input System actions、uGUI HUD、UI Toolkit 复用和 Cinemachine CameraIntent Host。
 
@@ -486,11 +516,15 @@ latency、jitter、loss、reorder、duplicate、burst、pause、NAT 与容量曲
 
 ### B0.8 `deliver-personal-world-combat-slice`
 
-**进入条件：**Unity gameplay runtime 和 battle network 发布门稳定，玩法配置最小治理方案已由独立 change 冻结。
+**进入条件：**Unity gameplay runtime 与 battle network development-readiness 稳定，
+玩法配置最小治理方案已由独立 change 冻结。
 
 **产出：**一把近战剑、一把远程扇子、武器授予技能、少量怪物、一只 Boss、基础碰撞/导航/动画/VFX/Audio/HUD，以及 Owner 邀请 Visitor 协作的产品场景。
 
-**完成条件：**从登录进入自己的 PersonalWorld 到双人协作击败 Boss 的可重复 PC build 验收通过；伤害/死亡由服务器权威，异常网络可恢复或明确失败，内容与性能达到首个商业化 vertical slice 的冻结质量线。
+**完成条件：**从登录进入自己的 PersonalWorld 到双人协作击败 Boss 的可重复 PC build
+验收通过；伤害/死亡由服务器权威，异常网络可恢复或明确失败。准备冻结里程碑或发布时，
+再由使用者显式运行包含完整 battle 网络矩阵、1/5/8 actor、安全/生命周期、连续 verify、
+长时 soak 与 finalize 的当前产品资格。
 
 ## 条件路线
 

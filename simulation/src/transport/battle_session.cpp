@@ -1,6 +1,7 @@
 #include "ihomeland/sim/transport/battle_session.hpp"
 
 #include "ihomeland/battle/v1/battle.pb.h"
+#include "ihomeland/sim/simulation/input_timeline.hpp"
 
 #include <algorithm>
 #include <deque>
@@ -12,6 +13,16 @@
 
 namespace ihomeland::sim {
 namespace {
+
+constexpr std::uint64_t InputCommandLifetimeTicks = 6;
+constexpr std::int32_t MaximumMovePermille = 1'000;
+constexpr std::uint32_t PrimaryAbilityId = 1;
+constexpr std::uint32_t SecondaryAbilityId = 2;
+constexpr std::uint32_t MaximumInteractionSlot = 16;
+constexpr std::uint32_t InitialEntityGeneration = 1;
+constexpr std::uint32_t CompleteEntityStateMask = 7;
+constexpr std::uint32_t DeadEntityStateFlag =
+    std::uint32_t{1} << 31U;
 
 /// NonEmpty 验证authority string不为空。
 [[nodiscard]] bool NonEmpty(
@@ -79,7 +90,7 @@ ToGameplayCommand(
         HasUnexpectedInputFields(input) ||
         input_tick >
             std::numeric_limits<std::uint64_t>::max() -
-                6U) {
+                InputCommandLifetimeTicks) {
         return std::nullopt;
     }
     auto command = GameplayCommand{
@@ -90,17 +101,22 @@ ToGameplayCommand(
         .actor_id = context.Actor().actor_id,
         .input_tick = input_tick,
         .sequence = input.command_sequence(),
-        .expires_at_tick = input_tick + 6U,
+        .expires_at_tick =
+            input_tick + InputCommandLifetimeTicks,
         .kind = GameplayCommandKind::JumpPressed,
         .payload = JumpPressedPayload{},
     };
     using namespace ihomeland::battle::v1;
     switch (input.kind()) {
         case BATTLE_INPUT_KIND_MOVE:
-            if (input.move_x_milli() < -1'000 ||
-                input.move_x_milli() > 1'000 ||
-                input.move_y_milli() < -1'000 ||
-                input.move_y_milli() > 1'000) {
+            if (input.move_x_milli() <
+                    -MaximumMovePermille ||
+                input.move_x_milli() >
+                    MaximumMovePermille ||
+                input.move_y_milli() <
+                    -MaximumMovePermille ||
+                input.move_y_milli() >
+                    MaximumMovePermille) {
                 return std::nullopt;
             }
             command.kind =
@@ -131,17 +147,18 @@ ToGameplayCommand(
             command.kind =
                 GameplayCommandKind::ActivateAbility;
             command.payload = ActivateAbilityPayload{
-                .ability_id = 1};
+                .ability_id = PrimaryAbilityId};
             break;
         case BATTLE_INPUT_KIND_SECONDARY_ABILITY:
             command.kind =
                 GameplayCommandKind::ActivateAbility;
             command.payload = ActivateAbilityPayload{
-                .ability_id = 2};
+                .ability_id = SecondaryAbilityId};
             break;
         case BATTLE_INPUT_KIND_INTERACT:
             if (input.interaction_slot() == 0 ||
-                input.interaction_slot() > 16) {
+                input.interaction_slot() >
+                    MaximumInteractionSlot) {
                 return std::nullopt;
             }
             command.kind =
@@ -162,7 +179,8 @@ void FillState(
     ihomeland::battle::v1::BattleEntityState& output,
     const StateProjectionToken& state) {
     output.set_entity_id(state.actor_id);
-    output.set_entity_generation(1);
+    output.set_entity_generation(
+        InitialEntityGeneration);
     auto* transform = output.mutable_transform();
     transform->set_position_x_mm(
         static_cast<std::int32_t>(std::clamp(
@@ -193,7 +211,48 @@ void FillState(
                 std::numeric_limits<std::uint32_t>::max()))));
     output.set_state_flags(
         state.phase |
-        (state.alive ? 0U : 0x80000000U));
+        (state.alive ? 0U : DeadEntityStateFlag));
+}
+
+/// FillDelta 将只读 simulation state 转为完整替换语义的 delta projection。
+void FillDelta(
+    ihomeland::battle::v1::BattleEntityDelta& output,
+    const StateProjectionToken& state) {
+    output.set_entity_id(state.actor_id);
+    output.set_entity_generation(
+        InitialEntityGeneration);
+    output.set_state_mask(CompleteEntityStateMask);
+    auto* transform = output.mutable_transform();
+    transform->set_position_x_mm(
+        static_cast<std::int32_t>(std::clamp(
+            state.x_mm,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    transform->set_position_y_mm(
+        static_cast<std::int32_t>(std::clamp(
+            state.y_mm,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    transform->set_position_z_mm(
+        static_cast<std::int32_t>(std::clamp(
+            state.z_mm,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    output.set_health_milli(
+        static_cast<std::uint32_t>(std::clamp(
+            state.health_scaled,
+            std::int64_t{0},
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::uint32_t>::max()))));
+    output.set_state_flags(
+        state.phase |
+        (state.alive ? 0U : DeadEntityStateFlag));
 }
 
 }  // namespace
@@ -326,17 +385,10 @@ BattleSessionContext::Authority() const noexcept {
 BattleInputIngress::BattleInputIngress(
     const BattleSessionContext& context,
     CommandIngress& command_ingress,
-    BattleResourceGovernor& resources,
-    const std::uint64_t instance_handle)
+    BattleSessionResourceGovernor& resources)
     : context_(&context),
       command_ingress_(&command_ingress),
-      resources_(&resources),
-      instance_handle_(instance_handle) {
-    if (instance_handle == 0) {
-        throw std::invalid_argument(
-            "battle ingress instance handle is zero");
-    }
-}
+      resources_(&resources) {}
 
 BattleIngressResult BattleInputIngress::Handle(
     const BattleRawFrameView& frame,
@@ -363,8 +415,6 @@ BattleIngressResult BattleInputIngress::Handle(
         return result;
     }
     const auto rate = resources_->AllowMessage(
-        context_->BattleSessionHandle(),
-        instance_handle_,
         3000,
         frame.policy->maximum_rate_per_second,
         now_unix_ms);
@@ -408,7 +458,6 @@ BattleIngressResult BattleInputIngress::Handle(
     }
     for (auto& command : commands) {
         const auto budget = resources_->ReserveIngress(
-            context_->BattleSessionHandle(),
             1);
         if (!budget.allowed) {
             ++result.rejected_commands;
@@ -425,7 +474,6 @@ BattleIngressResult BattleInputIngress::Handle(
             command_ingress_->Submit(
                 std::move(command));
         resources_->ReleaseIngress(
-            context_->BattleSessionHandle(),
             1);
         if (submitted.accepted) {
             ++result.accepted_commands;
@@ -469,7 +517,6 @@ struct BattleReplicationQueue::Impl final {
                     iterator->message_id ==
                         item.message_id) {
                     resources->ReleaseEgress(
-                        context->BattleSessionHandle(),
                         1);
                     iterator = queue.erase(iterator);
                     ++metrics.replaced_snapshots;
@@ -488,7 +535,6 @@ struct BattleReplicationQueue::Impl final {
                  BattleReplicationLane::Kcp &&
              kcp_count >= KcpItems) ||
             !resources->ReserveEgress(
-                 context->BattleSessionHandle(),
                  1).allowed) {
             ++metrics.rejected;
             context->Authority()->Invalidate(
@@ -507,10 +553,93 @@ struct BattleReplicationQueue::Impl final {
         return true;
     }
 
+    /// EnqueueSnapshotBatch 原子替换同 route 的完整 partition set。
+    [[nodiscard]] bool EnqueueSnapshotBatch(
+        std::vector<BattleReplicationItem> items) {
+        std::scoped_lock lock(mutex);
+        if (!context->Authority()->Active() ||
+            items.empty() ||
+            std::ranges::any_of(
+                items,
+                [](const BattleReplicationItem& item) {
+                    return item.lane !=
+                               BattleReplicationLane::Raw ||
+                        item.payload.empty();
+                })) {
+            ++metrics.rejected;
+            return false;
+        }
+        const auto message_id =
+            items.front().message_id;
+        if (std::ranges::any_of(
+                items,
+                [message_id](
+                    const BattleReplicationItem& item) {
+                    return item.message_id !=
+                        message_id;
+                })) {
+            ++metrics.rejected;
+            return false;
+        }
+        const auto replaced = static_cast<std::size_t>(
+            std::ranges::count_if(
+                queue,
+                [message_id](
+                    const BattleReplicationItem& item) {
+                    return item.lane ==
+                               BattleReplicationLane::Raw &&
+                        item.message_id == message_id;
+                }));
+        const auto retained = queue.size() - replaced;
+        if (items.size() >
+            QueueItems - retained) {
+            ++metrics.rejected;
+            context->Authority()->Invalidate(
+                BattleSessionInvalidationReason::
+                    Backpressure);
+            return false;
+        }
+        if (items.size() > replaced &&
+            !resources->ReserveEgress(
+                 items.size() - replaced).allowed) {
+            ++metrics.rejected;
+            context->Authority()->Invalidate(
+                BattleSessionInvalidationReason::
+                    Backpressure);
+            return false;
+        }
+        std::erase_if(
+            queue,
+            [message_id](
+                const BattleReplicationItem& item) {
+                return item.lane ==
+                           BattleReplicationLane::Raw &&
+                    item.message_id == message_id;
+            });
+        if (replaced > items.size()) {
+            resources->ReleaseEgress(
+                replaced - items.size());
+        }
+        for (auto& item : items) {
+            queue.push_back(std::move(item));
+        }
+        if (replaced != 0) {
+            ++metrics.replaced_snapshots;
+        }
+        metrics.queued = queue.size();
+        metrics.kcp_queued =
+            static_cast<std::size_t>(
+                std::ranges::count(
+                    queue,
+                    BattleReplicationLane::Kcp,
+                    &BattleReplicationItem::lane));
+        return true;
+    }
+
     /// context 是immutable session authority binding。
     const BattleSessionContext* context;
-    /// resources 是node/session hard budget owner。
-    BattleResourceGovernor* resources;
+    /// resources 是当前session拥有的node hard budget视图。
+    BattleSessionResourceGovernor* resources;
     /// queue 保存最多256个owned items。
     std::deque<BattleReplicationItem> queue;
     /// metrics 保存低敏累计与current usage。
@@ -521,7 +650,7 @@ struct BattleReplicationQueue::Impl final {
 
 BattleReplicationQueue::BattleReplicationQueue(
     const BattleSessionContext& context,
-    BattleResourceGovernor& resources)
+    BattleSessionResourceGovernor& resources)
     : impl_(std::make_unique<Impl>()) {
     impl_->context = &context;
     impl_->resources = &resources;
@@ -531,12 +660,18 @@ BattleReplicationQueue::~BattleReplicationQueue() {
     if (impl_ != nullptr) {
         std::scoped_lock lock(impl_->mutex);
         impl_->resources->ReleaseEgress(
-            impl_->context->BattleSessionHandle(),
             impl_->queue.size());
     }
 }
 
 namespace {
+
+constexpr std::uint32_t FullSnapshotMessageID = 3'002;
+constexpr std::uint32_t DeltaSnapshotMessageID = 3'003;
+constexpr std::uint32_t AbilityEventMessageID = 3'004;
+constexpr std::uint32_t EntityLifecycleMessageID = 3'005;
+constexpr std::uint32_t ResyncResponseMessageID = 3'007;
+constexpr std::uint64_t MicrosecondsPerMillisecond = 1'000;
 
 /// ValidReplicationIdentity 验证通用非零tick/sequence/deadline input。
 [[nodiscard]] bool ValidReplicationIdentity(
@@ -548,7 +683,128 @@ namespace {
            now_unix_ms != 0 &&
            now_unix_ms <=
                std::numeric_limits<std::uint64_t>::max() -
-                   lifetime;
+                    lifetime;
+}
+
+/// RawReplicationDeadline 从 immutable raw route 构造 producer queue 绝对期限。
+[[nodiscard]] std::optional<std::uint64_t>
+RawReplicationDeadline(
+    const BattleRawRoutePolicy& policy,
+    const std::uint64_t tick,
+    const std::uint64_t sequence,
+    const std::uint64_t now_unix_ms) noexcept {
+    if (policy.direction !=
+            BattleRouteDirection::ServerToClient ||
+        policy.expiry_microseconds == 0 ||
+        policy.expiry_microseconds %
+                MicrosecondsPerMillisecond !=
+            0) {
+        return std::nullopt;
+    }
+    const auto lifetime =
+        policy.expiry_microseconds /
+        MicrosecondsPerMillisecond;
+    if (!ValidReplicationIdentity(
+            tick,
+            sequence,
+            now_unix_ms,
+            lifetime)) {
+        return std::nullopt;
+    }
+    return now_unix_ms + lifetime;
+}
+
+/// KcpReplicationDeadline 从 immutable KCP route 构造 producer queue 绝对期限。
+[[nodiscard]] std::optional<std::uint64_t>
+KcpReplicationDeadline(
+    const std::uint32_t message_id,
+    const std::uint64_t tick,
+    const std::uint64_t sequence,
+    const std::uint64_t now_unix_ms) noexcept {
+    const auto* policy =
+        FindBattleKcpRoutePolicy(message_id);
+    if (policy == nullptr ||
+        policy->direction !=
+            BattleRouteDirection::ServerToClient ||
+        !ValidReplicationIdentity(
+            tick,
+            sequence,
+            now_unix_ms,
+            policy->expiry_milliseconds)) {
+        return std::nullopt;
+    }
+    return now_unix_ms +
+        policy->expiry_milliseconds;
+}
+
+/// BuildSnapshotPartitions 以实际 Protobuf encoded size 切分有界 state 集合。
+template <
+    typename Snapshot,
+    typename CreateSnapshot,
+    typename AddState,
+    typename RemoveLast,
+    typename StateCount>
+[[nodiscard]] std::optional<std::vector<Snapshot>>
+BuildSnapshotPartitions(
+    const std::span<const StateProjectionToken> states,
+    const std::size_t maximum_payload_bytes,
+    CreateSnapshot create_snapshot,
+    AddState add_state,
+    RemoveLast remove_last,
+    StateCount state_count) {
+    if (states.empty() ||
+        maximum_payload_bytes == 0) {
+        return std::nullopt;
+    }
+    std::vector<Snapshot> partitions;
+    partitions.reserve(
+        BattleReplicationQueue::
+            SnapshotMaximumPartitions);
+    auto current = create_snapshot();
+    for (const auto& state : states) {
+        add_state(current, state);
+        if (current.ByteSizeLong() <=
+            maximum_payload_bytes) {
+            continue;
+        }
+        remove_last(current);
+        if (state_count(current) == 0 ||
+            partitions.size() >=
+                BattleReplicationQueue::
+                    SnapshotMaximumPartitions) {
+            return std::nullopt;
+        }
+        partitions.push_back(std::move(current));
+        current = create_snapshot();
+        add_state(current, state);
+        if (current.ByteSizeLong() >
+            maximum_payload_bytes) {
+            return std::nullopt;
+        }
+    }
+    if (state_count(current) == 0 ||
+        partitions.size() >=
+            BattleReplicationQueue::
+                SnapshotMaximumPartitions) {
+        return std::nullopt;
+    }
+    partitions.push_back(std::move(current));
+    const auto partition_count =
+        static_cast<std::uint32_t>(
+            partitions.size());
+    for (std::size_t index = 0;
+         index < partitions.size();
+         ++index) {
+        partitions[index].set_partition_index(
+            static_cast<std::uint32_t>(index));
+        partitions[index].set_partition_count(
+            partition_count);
+        if (partitions[index].ByteSizeLong() >
+            maximum_payload_bytes) {
+            return std::nullopt;
+        }
+    }
+    return partitions;
 }
 
 }  // namespace
@@ -557,142 +813,184 @@ bool BattleReplicationQueue::QueueFullSnapshot(
     const std::uint64_t server_tick,
     const std::uint64_t snapshot_sequence,
     const std::uint64_t baseline_id,
+    const InputAcknowledgementProjection&
+        acknowledgement,
     const std::span<const StateProjectionToken> states,
     const std::uint64_t now_unix_ms) {
-    if (!ValidReplicationIdentity(
+    const auto* policy =
+        FindBattleRawRoutePolicy(
+            FullSnapshotMessageID);
+    const auto deadline = policy == nullptr ?
+        std::optional<std::uint64_t>{} :
+        RawReplicationDeadline(
+            *policy,
             server_tick,
             snapshot_sequence,
-            now_unix_ms,
-            500) ||
-        baseline_id == 0 || states.empty()) {
+            now_unix_ms);
+    if (!deadline.has_value() ||
+        baseline_id == 0 || states.empty() ||
+        std::ranges::any_of(
+            states,
+            [](const StateProjectionToken& state) {
+                return state.actor_id == 0;
+            }) ||
+        acknowledgement.actor_id !=
+            impl_->context->Actor().actor_id ||
+        acknowledgement.mapping_generation !=
+            impl_->context->MappingGeneration()) {
         return false;
     }
-    ihomeland::battle::v1::BattleFullSnapshot message;
-    message.set_server_tick(server_tick);
-    message.set_snapshot_sequence(snapshot_sequence);
-    message.set_baseline_id(baseline_id);
-    message.set_partition_index(0);
-    message.set_partition_count(1);
-    for (const auto& state : states) {
-        if (state.actor_id == 0) {
-            return false;
-        }
-        FillState(*message.add_entities(), state);
-    }
-    auto payload = Serialize(message);
-    const auto* policy =
-        FindBattleRawRoutePolicy(3002);
-    if (policy == nullptr ||
-        payload.size() >
-            policy->maximum_payload_bytes) {
+    using Snapshot =
+        ihomeland::battle::v1::
+            BattleFullSnapshot;
+    const auto partitions =
+        BuildSnapshotPartitions<Snapshot>(
+            states,
+            policy->maximum_payload_bytes,
+            [&]() {
+                Snapshot message;
+                message.set_server_tick(server_tick);
+                message.set_snapshot_sequence(
+                    snapshot_sequence);
+                message.set_baseline_id(baseline_id);
+                message.set_partition_index(0);
+                message.set_partition_count(
+                    static_cast<std::uint32_t>(
+                        SnapshotMaximumPartitions));
+                message.set_last_processed_input_tick(
+                    acknowledgement
+                        .last_processed_input_tick);
+                return message;
+            },
+            [](Snapshot& message,
+               const StateProjectionToken& state) {
+                FillState(
+                    *message.add_entities(),
+                    state);
+            },
+            [](Snapshot& message) {
+                message.mutable_entities()->
+                    RemoveLast();
+            },
+            [](const Snapshot& message) {
+                return message.entities_size();
+            });
+    if (!partitions.has_value()) {
         return false;
     }
-    return impl_->Enqueue(
-        {
+    std::vector<BattleReplicationItem> items;
+    items.reserve(partitions->size());
+    for (const auto& message : *partitions) {
+        items.push_back({
             .lane = BattleReplicationLane::Raw,
-            .message_id = 3002,
+            .message_id = FullSnapshotMessageID,
             .application_sequence =
                 snapshot_sequence,
             .application_tick = server_tick,
-            .expires_at_unix_ms =
-                now_unix_ms + 500,
-            .payload = std::move(payload),
-        },
-        true);
+            .partition_index =
+                static_cast<std::uint8_t>(
+                    message.partition_index()),
+            .partition_count =
+                static_cast<std::uint8_t>(
+                    message.partition_count()),
+            .expires_at_unix_ms = *deadline,
+            .payload = Serialize(message),
+        });
+    }
+    return impl_->EnqueueSnapshotBatch(
+        std::move(items));
 }
 
 bool BattleReplicationQueue::QueueDeltaSnapshot(
     const std::uint64_t server_tick,
     const std::uint64_t snapshot_sequence,
     const std::uint64_t baseline_id,
+    const InputAcknowledgementProjection&
+        acknowledgement,
     const std::span<const StateProjectionToken> states,
     const std::uint64_t now_unix_ms) {
-    if (!ValidReplicationIdentity(
+    const auto* policy =
+        FindBattleRawRoutePolicy(
+            DeltaSnapshotMessageID);
+    const auto deadline = policy == nullptr ?
+        std::optional<std::uint64_t>{} :
+        RawReplicationDeadline(
+            *policy,
             server_tick,
             snapshot_sequence,
-            now_unix_ms,
-            300) ||
-        baseline_id == 0 || states.empty()) {
+            now_unix_ms);
+    if (!deadline.has_value() ||
+        baseline_id == 0 || states.empty() ||
+        std::ranges::any_of(
+            states,
+            [](const StateProjectionToken& state) {
+                return state.actor_id == 0;
+            }) ||
+        acknowledgement.actor_id !=
+            impl_->context->Actor().actor_id ||
+        acknowledgement.mapping_generation !=
+            impl_->context->MappingGeneration()) {
         return false;
     }
-    ihomeland::battle::v1::BattleDeltaSnapshot message;
-    message.set_server_tick(server_tick);
-    message.set_snapshot_sequence(snapshot_sequence);
-    message.set_baseline_id(baseline_id);
-    message.set_partition_index(0);
-    message.set_partition_count(1);
-    for (const auto& state : states) {
-        if (state.actor_id == 0) {
-            return false;
-        }
-        auto* delta = message.add_deltas();
-        delta->set_entity_id(state.actor_id);
-        delta->set_entity_generation(1);
-        delta->set_state_mask(7);
-        auto* transform =
-            delta->mutable_transform();
-        transform->set_position_x_mm(
-            static_cast<std::int32_t>(
-                std::clamp(
-                    state.x_mm,
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::int32_t>::min()),
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::int32_t>::max()))));
-        transform->set_position_y_mm(
-            static_cast<std::int32_t>(
-                std::clamp(
-                    state.y_mm,
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::int32_t>::min()),
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::int32_t>::max()))));
-        transform->set_position_z_mm(
-            static_cast<std::int32_t>(
-                std::clamp(
-                    state.z_mm,
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::int32_t>::min()),
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::int32_t>::max()))));
-        delta->set_health_milli(
-            static_cast<std::uint32_t>(
-                std::clamp(
-                    state.health_scaled,
-                    std::int64_t{0},
-                    static_cast<std::int64_t>(
-                        std::numeric_limits<
-                            std::uint32_t>::max()))));
-        delta->set_state_flags(
-            state.phase |
-            (state.alive ? 0U : 0x80000000U));
-    }
-    auto payload = Serialize(message);
-    const auto* policy =
-        FindBattleRawRoutePolicy(3003);
-    if (policy == nullptr ||
-        payload.size() >
-            policy->maximum_payload_bytes) {
+    using Snapshot =
+        ihomeland::battle::v1::
+            BattleDeltaSnapshot;
+    const auto partitions =
+        BuildSnapshotPartitions<Snapshot>(
+            states,
+            policy->maximum_payload_bytes,
+            [&]() {
+                Snapshot message;
+                message.set_server_tick(server_tick);
+                message.set_snapshot_sequence(
+                    snapshot_sequence);
+                message.set_baseline_id(baseline_id);
+                message.set_partition_index(0);
+                message.set_partition_count(
+                    static_cast<std::uint32_t>(
+                        SnapshotMaximumPartitions));
+                message.set_last_processed_input_tick(
+                    acknowledgement
+                        .last_processed_input_tick);
+                return message;
+            },
+            [](Snapshot& message,
+               const StateProjectionToken& state) {
+                FillDelta(
+                    *message.add_deltas(),
+                    state);
+            },
+            [](Snapshot& message) {
+                message.mutable_deltas()->
+                    RemoveLast();
+            },
+            [](const Snapshot& message) {
+                return message.deltas_size();
+            });
+    if (!partitions.has_value()) {
         return false;
     }
-    return impl_->Enqueue(
-        {
+    std::vector<BattleReplicationItem> items;
+    items.reserve(partitions->size());
+    for (const auto& message : *partitions) {
+        items.push_back({
             .lane = BattleReplicationLane::Raw,
-            .message_id = 3003,
+            .message_id = DeltaSnapshotMessageID,
             .application_sequence =
                 snapshot_sequence,
             .application_tick = server_tick,
-            .expires_at_unix_ms =
-                now_unix_ms + 300,
-            .payload = std::move(payload),
-        },
-        true);
+            .partition_index =
+                static_cast<std::uint8_t>(
+                    message.partition_index()),
+            .partition_count =
+                static_cast<std::uint8_t>(
+                    message.partition_count()),
+            .expires_at_unix_ms = *deadline,
+            .payload = Serialize(message),
+        });
+    }
+    return impl_->EnqueueSnapshotBatch(
+        std::move(items));
 }
 
 bool BattleReplicationQueue::QueueAbilityEvent(
@@ -701,11 +999,13 @@ bool BattleReplicationQueue::QueueAbilityEvent(
     const std::uint32_t ability_id,
     const std::uint32_t phase,
     const std::uint64_t now_unix_ms) {
-    if (!ValidReplicationIdentity(
+    const auto deadline =
+        KcpReplicationDeadline(
+            AbilityEventMessageID,
             event.tick,
             event.activation_id,
-            now_unix_ms,
-            500) ||
+            now_unix_ms);
+    if (!deadline.has_value() ||
         event.source_actor_id == 0 ||
         source_generation == 0 ||
         ability_id == 0 || phase < 1 || phase > 4) {
@@ -730,12 +1030,11 @@ bool BattleReplicationQueue::QueueAbilityEvent(
     return impl_->Enqueue(
         {
             .lane = BattleReplicationLane::Kcp,
-            .message_id = 3004,
+            .message_id = AbilityEventMessageID,
             .application_sequence =
                 event.activation_id,
             .application_tick = event.tick,
-            .expires_at_unix_ms =
-                now_unix_ms + 500,
+            .expires_at_unix_ms = *deadline,
             .payload = Serialize(message),
         },
         false);
@@ -747,11 +1046,13 @@ bool BattleReplicationQueue::QueueEntityLifecycle(
     const std::uint32_t kind,
     const std::uint32_t archetype_id,
     const std::uint64_t now_unix_ms) {
-    if (!ValidReplicationIdentity(
+    const auto deadline =
+        KcpReplicationDeadline(
+            EntityLifecycleMessageID,
             event.tick,
             event.activation_id,
-            now_unix_ms,
-            500) ||
+            now_unix_ms);
+    if (!deadline.has_value() ||
         event.source_actor_id == 0 ||
         entity_generation == 0 ||
         kind < 1 || kind > 2 ||
@@ -773,12 +1074,11 @@ bool BattleReplicationQueue::QueueEntityLifecycle(
     return impl_->Enqueue(
         {
             .lane = BattleReplicationLane::Kcp,
-            .message_id = 3005,
+            .message_id = EntityLifecycleMessageID,
             .application_sequence =
                 event.activation_id,
             .application_tick = event.tick,
-            .expires_at_unix_ms =
-                now_unix_ms + 500,
+            .expires_at_unix_ms = *deadline,
             .payload = Serialize(message),
         },
         false);
@@ -790,11 +1090,13 @@ bool BattleReplicationQueue::QueueResyncResponse(
     const std::uint32_t disposition,
     const std::uint64_t scheduled_baseline_id,
     const std::uint64_t now_unix_ms) {
-    if (!ValidReplicationIdentity(
+    const auto deadline =
+        KcpReplicationDeadline(
+            ResyncResponseMessageID,
             server_tick,
             request_sequence,
-            now_unix_ms,
-            500) ||
+            now_unix_ms);
+    if (!deadline.has_value() ||
         disposition < 1 || disposition > 3 ||
         (disposition == 1 &&
          scheduled_baseline_id == 0) ||
@@ -813,12 +1115,11 @@ bool BattleReplicationQueue::QueueResyncResponse(
     return impl_->Enqueue(
         {
             .lane = BattleReplicationLane::Kcp,
-            .message_id = 3007,
+            .message_id = ResyncResponseMessageID,
             .application_sequence =
                 request_sequence,
             .application_tick = server_tick,
-            .expires_at_unix_ms =
-                now_unix_ms + 500,
+            .expires_at_unix_ms = *deadline,
             .payload = Serialize(message),
         },
         false);
@@ -838,7 +1139,6 @@ BattleReplicationQueue::Pop(
                impl_->queue.front().
                    expires_at_unix_ms) {
         impl_->resources->ReleaseEgress(
-            impl_->context->BattleSessionHandle(),
             1);
         impl_->queue.pop_front();
         ++impl_->metrics.expired;
@@ -851,7 +1151,6 @@ BattleReplicationQueue::Pop(
     auto item = std::move(impl_->queue.front());
     impl_->queue.pop_front();
     impl_->resources->ReleaseEgress(
-        impl_->context->BattleSessionHandle(),
         1);
     impl_->metrics.queued = impl_->queue.size();
     impl_->metrics.kcp_queued =

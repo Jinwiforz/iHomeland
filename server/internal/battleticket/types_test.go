@@ -2,6 +2,7 @@ package battleticket
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -19,6 +20,64 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/simulationcontrol"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 )
+
+// TestProofKeyV2MatchesPublicVector 冻结 ticket ID public salt 与 versioned domain。
+func TestProofKeyV2MatchesPublicVector(t *testing.T) {
+	ticketID, err := ParseTicketID("btk1_AAECAwQFBgcICQoLDA0ODw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := ParseTicketSecret("bts1_ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := DeriveProofKey(ticketID, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = "40d65068dd108e2d727be477529ec572db2b6df9aa1edc1495b1cefd72d9f517"
+	actual := proof.Bytes()
+	if hex.EncodeToString(actual[:]) != expected {
+		t.Fatalf("proof-key/v2 vector mismatch: got %x", actual)
+	}
+
+	changedTicketID, err := ParseTicketID("btk1_AQECAwQFBgcICQoLDA0ODw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedProof, err := DeriveProofKey(changedTicketID, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedProof.Bytes() == actual {
+		t.Fatal("ticket ID drift did not change proof-key/v2 output")
+	}
+	changedSecretBytes := secret.Bytes()
+	changedSecretBytes[0] ^= 0xff
+	changedSecret := TicketSecret{material: changedSecretBytes}
+	clear(changedSecretBytes[:])
+	changedSecretProof, err := DeriveProofKey(ticketID, changedSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedSecretProof.Bytes() == actual {
+		t.Fatal("ticket secret drift did not change proof-key/v2 output")
+	}
+	legacyProof, err := deriveProofKey(
+		ticketID,
+		secret,
+		"ihomeland/battle-ticket/proof-key/v1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyProof.Bytes() == actual {
+		t.Fatal("legacy proof domain matched proof-key/v2 output")
+	}
+	if _, err := DeriveProofKey(TicketID{}, secret); ErrorCodeOf(err) != ErrorCodeInvalidArgument {
+		t.Fatalf("invalid ticket ID was not rejected: %v", err)
+	}
+}
 
 // TestDeriveIsDeterministicAndTargetBound 验证 response-loss 重放稳定且任一 target revision 漂移改写 material。
 func TestDeriveIsDeterministicAndTargetBound(t *testing.T) {

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "checks": [
+    {
+      "id": "quality-contract",
+      "class": "incremental",
+      "owner": "project-validation",
+      "order": 10
+    },
+    {
+      "id": "battle-profile-validate",
+      "class": "incremental",
+      "owner": "battle-network-profile",
+      "order": 20
+    },
+    {
+      "id": "battle-wire-validate",
+      "class": "incremental",
+      "owner": "secure-battle-transport",
+      "order": 30
+    },
+    {
+      "id": "simulation-control-validate",
+      "class": "incremental",
+      "owner": "simulation-control",
+      "order": 40
+    },
+    {
+      "id": "battle-qualification-validate",
+      "class": "incremental",
+      "owner": "battle-qualification",
+      "order": 50
+    },
+    {
+      "id": "proto-verify",
+      "class": "targeted-expensive",
+      "owner": "proto",
+      "order": 100
+    },
+    {
+      "id": "cpp-handshake-targeted",
+      "class": "targeted-expensive",
+      "owner": "cpp",
+      "order": 110
+    },
+    {
+      "id": "go-handshake-targeted",
+      "class": "targeted-expensive",
+      "owner": "go",
+      "order": 120
+    },
+    {
+      "id": "cpp-resync-targeted",
+      "class": "targeted-expensive",
+      "owner": "cpp",
+      "order": 130
+    },
+    {
+      "id": "go-resync-targeted",
+      "class": "targeted-expensive",
+      "owner": "go",
+      "order": 140
+    },
+    {
+      "id": "cpp-acknowledgement-targeted",
+      "class": "targeted-expensive",
+      "owner": "cpp",
+      "order": 150
+    },
+    {
+      "id": "go-acknowledgement-targeted",
+      "class": "targeted-expensive",
+      "owner": "go",
+      "order": 160
+    },
+    {
+      "id": "battle-handshake-diagnose",
+      "class": "targeted-expensive",
+      "owner": "battle-qualification",
+      "order": 170
+    },
+    {
+      "id": "battle-resync-diagnose",
+      "class": "targeted-expensive",
+      "owner": "battle-qualification",
+      "order": 180
+    },
+    {
+      "id": "battle-acknowledgement-diagnose",
+      "class": "targeted-expensive",
+      "owner": "battle-qualification",
+      "order": 190
+    },
+    {
+      "id": "battle-qualification-representative",
+      "class": "targeted-expensive",
+      "owner": "battle-qualification",
+      "order": 200
+    },
+    {
+      "id": "openspec-change-strict",
+      "class": "incremental",
+      "owner": "openspec",
+      "order": 900
+    },
+    {
+      "id": "final-product-qualification",
+      "class": "final-only",
+      "owner": "project-validation",
+      "order": 1000
+    }
+  ]
+}

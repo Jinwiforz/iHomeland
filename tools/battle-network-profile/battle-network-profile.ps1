@@ -32,8 +32,11 @@ $BattleModelValidator = Join-Path $RepositoryRoot "tools\battle-model\battle-mod
 $Utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $Ordinal = [System.StringComparer]::Ordinal
-$ProfileVersion = "battle-network-profile-v1"
-$FormatVersion = "1"
+$ProfileVersion = "battle-network-profile-v2"
+$FormatVersion = "2"
+$ReliableRouteExpiryMicroseconds = [int64]500000
+$ResyncRouteExpiryMicroseconds = [int64]2250000
+$MaximumRouteExpiryMicroseconds = $ResyncRouteExpiryMicroseconds
 $RequiredPhases = @(
     "boss-burst",
     "combat-heavy",
@@ -486,7 +489,7 @@ function Invoke-ScenarioSimulation {
                 Add-LogicalEvent $copies $Scenario ([ref]$randomState) `
                     "reliable-$player-$tick" "s2c" "kcp" $sequence `
                     $tickStartUs $payload `
-                    ([int64]$Profile.kcp_profile.application_expiry_us) 1 `
+                    $ReliableRouteExpiryMicroseconds 1 `
                     $Profile.kcp_profile
             }
         }
@@ -859,14 +862,18 @@ function Assert-ProfileStructure {
         "send_window_segments", "receive_window_segments", "fast_resend",
         "rto_min_us", "rto_max_us", "dead_link_retries",
         "segment_ceiling_bytes", "message_ceiling_bytes",
-        "queue_limit_messages", "application_expiry_us",
+        "queue_limit_messages", "maximum_route_expiry_us",
+        "sender_expiry_policy", "receiver_reassembly_policy",
+        "caller_override_policy",
         "adapter_parity_status"
     ) @(
         "conversation_scope", "update_interval_us", "no_delay",
         "send_window_segments", "receive_window_segments", "fast_resend",
         "rto_min_us", "rto_max_us", "dead_link_retries",
         "segment_ceiling_bytes", "message_ceiling_bytes",
-        "queue_limit_messages", "application_expiry_us",
+        "queue_limit_messages", "maximum_route_expiry_us",
+        "sender_expiry_policy", "receiver_reassembly_policy",
+        "caller_override_policy",
         "adapter_parity_status"
     ) "KCP profile"
     if ([int]$Profile.kcp_profile.segment_ceiling_bytes -gt $kcpPayload -or
@@ -878,6 +885,16 @@ function Assert-ProfileStructure {
         [string]$Profile.kcp_profile.adapter_parity_status -cne
             "implementation-required") {
         Fail-BattleNetworkProfile "KCP profile budget differs"
+    }
+    if ([int64]$Profile.kcp_profile.maximum_route_expiry_us -ne
+            $MaximumRouteExpiryMicroseconds -or
+        [string]$Profile.kcp_profile.sender_expiry_policy -cne
+            "immutable-route-enqueue-deadline" -or
+        [string]$Profile.kcp_profile.receiver_reassembly_policy -cne
+            "kcp-window-and-session-lifecycle" -or
+        [string]$Profile.kcp_profile.caller_override_policy -cne
+            "forbidden") {
+        Fail-BattleNetworkProfile "KCP expiry ownership differs"
     }
     Assert-ClosedProperties $Profile.capacity @(
         "qualified_default_players", "qualified_max_players",
@@ -958,9 +975,36 @@ function Assert-MessageInventory {
         }
         if ([string]$message.lane -eq "kcp" -and
             ([int64]$message.expiry_us -le 0 -or
+                [int64]$message.expiry_us -gt
+                    [int64]$Profile.kcp_profile.maximum_route_expiry_us -or
                 [string]$message.recovery_policy -ceq
                     "deliver-after-expiry")) {
             Fail-BattleNetworkProfile "reliable expiry policy differs"
+        }
+        $expectedExpiry = switch ([string]$message.kind) {
+            "battle.ability.reliable-event" {
+                $ReliableRouteExpiryMicroseconds
+                break
+            }
+            "battle.entity.lifecycle" {
+                $ReliableRouteExpiryMicroseconds
+                break
+            }
+            "battle.resync.request" {
+                $ResyncRouteExpiryMicroseconds
+                break
+            }
+            "battle.resync.response" {
+                $ResyncRouteExpiryMicroseconds
+                break
+            }
+            default {
+                $null
+            }
+        }
+        if ($null -ne $expectedExpiry -and
+            [int64]$message.expiry_us -ne [int64]$expectedExpiry) {
+            Fail-BattleNetworkProfile "KCP route expiry differs"
         }
     }
 }

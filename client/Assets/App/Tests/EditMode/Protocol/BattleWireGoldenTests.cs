@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Google.Protobuf;
 using IHomeland.Protocol.Battle.V1;
 using NUnit.Framework;
@@ -50,6 +52,245 @@ namespace IHomeland.Client.Tests.EditMode.Protocol
             Assert.That(
                 BattleAbilityReliableEvent.Parser.ParseFrom(abilityBytes).Phase,
                 Is.EqualTo(BattleAbilityPhase.Started));
+
+            AssertFullSnapshot(
+                vectors,
+                "battle-full-snapshot-ack-zero-v1",
+                1,
+                1,
+                1,
+                0,
+                1,
+                0);
+            AssertDeltaSnapshot(
+                vectors,
+                "battle-delta-snapshot-ack-zero-v1",
+                1,
+                1,
+                1,
+                0,
+                1,
+                0);
+            AssertDeltaSnapshot(
+                vectors,
+                "battle-delta-snapshot-ack-normal-v1",
+                2,
+                2,
+                1,
+                0,
+                1,
+                42);
+            AssertDeltaSnapshot(
+                vectors,
+                "battle-delta-snapshot-ack-large-v1",
+                3,
+                3,
+                1,
+                0,
+                1,
+                ulong.MaxValue);
+            AssertFullSnapshot(
+                vectors,
+                "battle-full-snapshot-ack-multipart-0-v1",
+                4,
+                4,
+                2,
+                0,
+                2,
+                128);
+            AssertFullSnapshot(
+                vectors,
+                "battle-full-snapshot-ack-multipart-1-v1",
+                4,
+                4,
+                2,
+                1,
+                2,
+                128);
+
+            var missingAcknowledgement = BattleFullSnapshot.Parser.ParseFrom(
+                LoadMalformedBytes(
+                    "snapshot-ack-presence-missing",
+                    "BATTLE_SNAPSHOT_ACK_MISSING"));
+            Assert.That(missingAcknowledgement.HasLastProcessedInputTick, Is.False);
+
+            var ticketId = new byte[16];
+            var ticketSecret = new byte[32];
+            for (var index = 0; index < ticketId.Length; index++)
+            {
+                ticketId[index] = (byte)index;
+            }
+
+            for (var index = 0; index < ticketSecret.Length; index++)
+            {
+                ticketSecret[index] = (byte)(0x20 + index);
+            }
+
+            var expectedProof = DeriveProofKeyV2(ticketId, ticketSecret);
+            AssertBytes(
+                vectors,
+                "battle-ticket-proof-key-v2",
+                expectedProof);
+            var wrongTicketId = (byte[])ticketId.Clone();
+            wrongTicketId[0] ^= byte.MaxValue;
+            var wrongSecret = (byte[])ticketSecret.Clone();
+            wrongSecret[0] ^= byte.MaxValue;
+            Assert.That(
+                DeriveProofKeyV2(wrongTicketId, ticketSecret),
+                Is.Not.EqualTo(expectedProof),
+                "错误 ticket ID 不得派生相同 proof。");
+            Assert.That(
+                DeriveProofKeyV2(ticketId, wrongSecret),
+                Is.Not.EqualTo(expectedProof),
+                "错误 ticket secret 不得派生相同 proof。");
+            Assert.That(
+                DeriveProofKey(
+                    ticketId,
+                    ticketSecret,
+                    "ihomeland/battle-ticket/proof-key/v1"),
+                Is.Not.EqualTo(expectedProof),
+                "旧 derivation domain 不得兼容 proof-key/v2。");
+            Array.Clear(expectedProof, 0, expectedProof.Length);
+            Array.Clear(wrongTicketId, 0, wrongTicketId.Length);
+            Array.Clear(wrongSecret, 0, wrongSecret.Length);
+        }
+
+        /// <summary>
+        /// 重编码 full snapshot fixture，并验证显式零值不会被当作字段缺失。
+        /// </summary>
+        /// <param name="vectors">共享 canonical vector 索引。</param>
+        /// <param name="vectorId">当前 full snapshot vector identity。</param>
+        /// <param name="serverTick">权威 simulation tick。</param>
+        /// <param name="snapshotSequence">session 内 snapshot sequence。</param>
+        /// <param name="baselineId">完整 baseline identity。</param>
+        /// <param name="partitionIndex">当前零基分区索引。</param>
+        /// <param name="partitionCount">逻辑 snapshot 分区总数。</param>
+        /// <param name="lastProcessedInputTick">当前 mapping generation 的连续输入确认。</param>
+        private static void AssertFullSnapshot(
+            IReadOnlyDictionary<string, byte[]> vectors,
+            string vectorId,
+            ulong serverTick,
+            ulong snapshotSequence,
+            ulong baselineId,
+            uint partitionIndex,
+            uint partitionCount,
+            ulong lastProcessedInputTick)
+        {
+            var snapshot = new BattleFullSnapshot
+            {
+                ServerTick = serverTick,
+                SnapshotSequence = snapshotSequence,
+                BaselineId = baselineId,
+                PartitionIndex = partitionIndex,
+                PartitionCount = partitionCount,
+                LastProcessedInputTick = lastProcessedInputTick,
+            };
+            var encoded = snapshot.ToByteArray();
+            AssertBytes(vectors, vectorId, encoded);
+            var parsed = BattleFullSnapshot.Parser.ParseFrom(encoded);
+            Assert.That(parsed.HasLastProcessedInputTick, Is.True, vectorId);
+            Assert.That(parsed.LastProcessedInputTick, Is.EqualTo(lastProcessedInputTick), vectorId);
+        }
+
+        /// <summary>
+        /// 重编码 delta snapshot fixture，并验证最大 uint64 使用规范十字节 varint。
+        /// </summary>
+        /// <param name="vectors">共享 canonical vector 索引。</param>
+        /// <param name="vectorId">当前 delta snapshot vector identity。</param>
+        /// <param name="serverTick">权威 simulation tick。</param>
+        /// <param name="snapshotSequence">session 内 snapshot sequence。</param>
+        /// <param name="baselineId">引用的 full baseline identity。</param>
+        /// <param name="partitionIndex">当前零基分区索引。</param>
+        /// <param name="partitionCount">逻辑 snapshot 分区总数。</param>
+        /// <param name="lastProcessedInputTick">当前 mapping generation 的连续输入确认。</param>
+        private static void AssertDeltaSnapshot(
+            IReadOnlyDictionary<string, byte[]> vectors,
+            string vectorId,
+            ulong serverTick,
+            ulong snapshotSequence,
+            ulong baselineId,
+            uint partitionIndex,
+            uint partitionCount,
+            ulong lastProcessedInputTick)
+        {
+            var snapshot = new BattleDeltaSnapshot
+            {
+                ServerTick = serverTick,
+                SnapshotSequence = snapshotSequence,
+                BaselineId = baselineId,
+                PartitionIndex = partitionIndex,
+                PartitionCount = partitionCount,
+                LastProcessedInputTick = lastProcessedInputTick,
+            };
+            var encoded = snapshot.ToByteArray();
+            AssertBytes(vectors, vectorId, encoded);
+            var parsed = BattleDeltaSnapshot.Parser.ParseFrom(encoded);
+            Assert.That(parsed.HasLastProcessedInputTick, Is.True, vectorId);
+            Assert.That(parsed.LastProcessedInputTick, Is.EqualTo(lastProcessedInputTick), vectorId);
+        }
+
+        /// <summary>
+        /// 从 HTTPS 可交付的 raw ticket ID/secret 独立执行 proof-key/v2 HKDF。
+        /// </summary>
+        /// <param name="ticketId">固定 16-byte public HKDF salt。</param>
+        /// <param name="ticketSecret">固定 32-byte test-only IKM。</param>
+        /// <returns>32-byte ClientAuth transcript proof key。</returns>
+        private static byte[] DeriveProofKeyV2(byte[] ticketId, byte[] ticketSecret)
+        {
+            return DeriveProofKey(
+                ticketId,
+                ticketSecret,
+                "ihomeland/battle-ticket/proof-key/v2");
+        }
+
+        /// <summary>
+        /// 使用指定 domain 派生测试 proof，生产协议只允许 v2 domain。
+        /// </summary>
+        /// <param name="ticketId">固定 16-byte public HKDF salt。</param>
+        /// <param name="ticketSecret">固定 32-byte test-only IKM。</param>
+        /// <param name="domain">用于验证版本隔离的 HKDF info。</param>
+        /// <returns>32-byte transcript proof key。</returns>
+        private static byte[] DeriveProofKey(
+            byte[] ticketId,
+            byte[] ticketSecret,
+            string domain)
+        {
+            if (ticketId == null || ticketId.Length != 16)
+            {
+                throw new ArgumentException("ticket ID 必须为 16 bytes。", nameof(ticketId));
+            }
+
+            if (ticketSecret == null || ticketSecret.Length != 32)
+            {
+                throw new ArgumentException("ticket secret 必须为 32 bytes。", nameof(ticketSecret));
+            }
+
+            if (string.IsNullOrEmpty(domain))
+            {
+                throw new ArgumentException("proof domain 不得为空。", nameof(domain));
+            }
+
+            byte[] pseudoRandomKey;
+            using (var extract = new HMACSHA256(ticketId))
+            {
+                pseudoRandomKey = extract.ComputeHash(ticketSecret);
+            }
+
+            try
+            {
+                var info = Encoding.UTF8.GetBytes(domain);
+                var expansionInput = new byte[info.Length + 1];
+                Buffer.BlockCopy(info, 0, expansionInput, 0, info.Length);
+                expansionInput[expansionInput.Length - 1] = 1;
+                using (var expand = new HMACSHA256(pseudoRandomKey))
+                {
+                    return expand.ComputeHash(expansionInput);
+                }
+            }
+            finally
+            {
+                Array.Clear(pseudoRandomKey, 0, pseudoRandomKey.Length);
+            }
         }
 
         /// <summary>
@@ -245,6 +486,56 @@ namespace IHomeland.Client.Tests.EditMode.Protocol
         }
 
         /// <summary>
+        /// 从共享 malformed corpus 取得具有固定 bytes 与 reason 的负例。
+        /// </summary>
+        /// <param name="caseId">稳定负例 identity。</param>
+        /// <param name="expectedReason">当前 consumer 必须匹配的拒绝原因。</param>
+        /// <returns>由调用方独立拥有的 payload bytes。</returns>
+        /// <exception cref="InvalidDataException">负例缺失、reason 漂移或 bytes 未冻结时抛出。</exception>
+        private static byte[] LoadMalformedBytes(string caseId, string expectedReason)
+        {
+            var path = Path.Combine(
+                RepositoryRoot,
+                "shared",
+                "contracts",
+                "fixtures",
+                "battle",
+                "wire",
+                "malformed-corpus.json");
+            var document = UnityEngine.JsonUtility.FromJson<BattleWireMalformedDocument>(
+                File.ReadAllText(path));
+            if (document == null || document.cases == null)
+            {
+                throw new InvalidDataException("battle malformed corpus 为空或结构无效。");
+            }
+
+            foreach (var testCase in document.cases)
+            {
+                if (testCase != null &&
+                    string.Equals(testCase.case_id, caseId, StringComparison.Ordinal))
+                {
+                    if (!string.Equals(
+                            testCase.expected_reason,
+                            expectedReason,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException($"malformed case {caseId} 的 reason 已漂移。");
+                    }
+
+                    var bytes = DecodeHex(testCase.bytes_hex);
+                    if (bytes.Length != testCase.byte_count)
+                    {
+                        throw new InvalidDataException($"malformed case {caseId} 的 byte count 已漂移。");
+                    }
+
+                    return bytes;
+                }
+            }
+
+            throw new InvalidDataException($"malformed case {caseId} 不存在。");
+        }
+
+        /// <summary>
         /// 严格解码 lowercase even-length hex，不接受平台相关分隔符。
         /// </summary>
         /// <param name="value">corpus 中的 bytes_hex。</param>
@@ -316,6 +607,45 @@ namespace IHomeland.Client.Tests.EditMode.Protocol
         /// 保存本次 corpus 的全部 canonical vectors。
         /// </summary>
         public BattleWireGoldenVector[] vectors = Array.Empty<BattleWireGoldenVector>();
+    }
+
+    /// <summary>
+    /// 映射共享 malformed corpus 的最小 JSON 投影。
+    /// </summary>
+    [Serializable]
+    internal sealed class BattleWireMalformedDocument
+    {
+        /// <summary>
+        /// 保存稳定 negative cases。
+        /// </summary>
+        public BattleWireMalformedCase[] cases = Array.Empty<BattleWireMalformedCase>();
+    }
+
+    /// <summary>
+    /// 映射一个可直接解码的 malformed payload。
+    /// </summary>
+    [Serializable]
+    internal sealed class BattleWireMalformedCase
+    {
+        /// <summary>
+        /// 稳定 case identity。
+        /// </summary>
+        public string case_id = string.Empty;
+
+        /// <summary>
+        /// canonical lowercase payload bytes。
+        /// </summary>
+        public string bytes_hex = string.Empty;
+
+        /// <summary>
+        /// payload 冻结长度。
+        /// </summary>
+        public int byte_count;
+
+        /// <summary>
+        /// receiver 必须产生的稳定拒绝原因。
+        /// </summary>
+        public string expected_reason = string.Empty;
     }
 
     /// <summary>

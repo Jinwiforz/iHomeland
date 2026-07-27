@@ -1,0 +1,122 @@
+{
+  "formatVersion": 1,
+  "qualificationVersion": "battle-network-qualification-v1",
+  "documentKind": "workloads",
+  "simulationTickNanoseconds": 50000000,
+  "inputTickNanoseconds": 25000000,
+  "snapshotIntervalTicks": 2,
+  "workloads": [
+    {
+      "workloadId": "solo-owner",
+      "classification": "network-capacity",
+      "ownerCount": 1,
+      "visitorCount": 0,
+      "battleActorCount": 1,
+      "expectedDisposition": "qualified",
+      "phases": ["clean", "movement-heavy", "boss-burst", "kcp-retransmit", "queue-pressure"]
+    },
+    {
+      "workloadId": "default-coop",
+      "classification": "mandatory-network",
+      "ownerCount": 1,
+      "visitorCount": 4,
+      "battleActorCount": 5,
+      "expectedDisposition": "qualified",
+      "phases": ["clean", "movement-heavy", "combat-heavy", "boss-burst", "disconnect-drain"]
+    },
+    {
+      "workloadId": "default-capacity",
+      "classification": "network-capacity",
+      "ownerCount": 1,
+      "visitorCount": 4,
+      "battleActorCount": 5,
+      "expectedDisposition": "qualified",
+      "phases": ["clean", "movement-heavy", "boss-burst", "kcp-retransmit", "queue-pressure"]
+    },
+    {
+      "workloadId": "qualified-capacity",
+      "classification": "network-capacity",
+      "ownerCount": 1,
+      "visitorCount": 7,
+      "battleActorCount": 8,
+      "expectedDisposition": "qualified",
+      "phases": ["clean", "movement-heavy", "boss-burst", "kcp-retransmit", "queue-pressure"]
+    },
+    {
+      "workloadId": "overflow-probe",
+      "classification": "admission-policy",
+      "ownerCount": 1,
+      "visitorCount": 8,
+      "battleActorCount": 9,
+      "expectedDisposition": "battle-capacity-rejected",
+      "phases": ["admission"]
+    },
+    {
+      "workloadId": "visit-capacity-compatibility",
+      "classification": "compatibility-policy",
+      "ownerCount": 1,
+      "visitorCount": 32,
+      "battleActorCount": 8,
+      "expectedDisposition": "visit-membership-preserved-battle-gated",
+      "phases": ["admission"]
+    }
+  ],
+  "messageCadence": [
+    {
+      "logicalKind": "battle.input.bundle",
+      "lane": "raw",
+      "direction": "uplink",
+      "maximumRatePerSecond": 40,
+      "maximumLogicalBytes": 384
+    },
+    {
+      "logicalKind": "battle.probe",
+      "lane": "raw",
+      "direction": "uplink",
+      "maximumRatePerSecond": 4,
+      "maximumLogicalBytes": 96
+    },
+    {
+      "logicalKind": "battle.snapshot.delta",
+      "lane": "raw",
+      "direction": "downlink",
+      "maximumRatePerSecond": 10,
+      "maximumLogicalBytes": 900
+    },
+    {
+      "logicalKind": "battle.snapshot.full",
+      "lane": "raw",
+      "direction": "downlink",
+      "maximumRatePerSecond": 2,
+      "maximumLogicalBytes": 1040
+    },
+    {
+      "logicalKind": "battle.entity.lifecycle",
+      "lane": "kcp",
+      "direction": "downlink",
+      "maximumRatePerSecond": 20,
+      "maximumLogicalBytes": 512
+    },
+    {
+      "logicalKind": "battle.ability.reliable-event",
+      "lane": "kcp",
+      "direction": "downlink",
+      "maximumRatePerSecond": 20,
+      "maximumLogicalBytes": 512
+    },
+    {
+      "logicalKind": "battle.resync.request",
+      "lane": "kcp",
+      "direction": "uplink",
+      "maximumRatePerSecond": 2,
+      "maximumLogicalBytes": 128
+    },
+    {
+      "logicalKind": "battle.resync.response",
+      "lane": "kcp",
+      "direction": "downlink",
+      "maximumRatePerSecond": 2,
+      "maximumLogicalBytes": 768
+    }
+  ]
+}

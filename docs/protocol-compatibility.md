@@ -245,3 +245,30 @@ Battle message owner range 为 `3000-3199`，当前只登记 `3000-3007`。每�
 只有一个 UDP lane、direction、QoS、size/rate/expiry、baseline/recovery 与 binding
 policy。三端 generated code 由统一 proto 入口重建，canonical wire、malformed corpus
 和 simulation-control golden 必须通过 B0.5 唯一 verify 入口；旧 evidence 不得复用。
+
+当前 profile identity 为 `battle-network-profile-v2`。Numeric route `3004/3005`
+使用 500 ms sender expiry，`3006/3007` 使用 2250 ms sender expiry；registry、
+profile、Go/C++/C# projection、producer queue、KCP adapter 与报告必须逐项一致。
+Receiver 不从 segment arrival 推导同名 deadline。任一 v1 digest、lane default、
+caller override 或 receiver timer 出现时，binding/parity gate 必须 fail closed。
+
+`BattleFullSnapshot` 与 `BattleDeltaSnapshot` 的 `last_processed_input_tick` 使用
+Protobuf explicit presence，确认接收 session 的当前 actor 在当前 mapping generation
+内已经应用或稳定终结的最大连续 InputTick。显式 `0` 与字段缺失具有不同语义；当前
+wire identity 必须拒绝缺失字段。同一逻辑 snapshot 的所有 partition 必须冻结相同
+sequence、baseline、mapping generation 与确认值，三端 consumer 只能在完整集合一致
+后发布该确认，不能从 `ServerTick`、日志或到达顺序推导。
+
+独立资格客户端的 stdio contract 由
+`shared/contracts/fixtures/battle/protocol-client/` 拥有。`IHBQ` outer frame 使用
+严格递增 sequence、absolute request deadline 与零值 receipt deadline；session-start
+固定 76 bytes 且只允许一次 secret ingress。workload、network-transition、poll 及三类
+receipt 都使用 versioned exact field table，未知 kind/flag、reserved drift、部分读、
+超期或 trailing bytes 必须直接终结 child，不得回显输入。该 contract 不是玩家协议，
+不得把它注册到 HTTP/WSS/TCP/UDP message registry。
+
+B0.6 的 metric identity 同样属于兼容性边界。`delivery-age` 固定绑定
+`fault-gateway/maximum-gateway-delivery-age`，只归约成功写入 socket 的实际 packet
+age；客户端相邻 snapshot receipt gap 是 cadence/baseline 诊断，不能替代该指标。
+Go loader、PowerShell validator、schema 与 failure regression 必须同时拒绝 source
+或 method 漂移。

@@ -27,6 +27,8 @@ $ContractRoot = Join-Path $RepositoryRoot "shared\contracts\fixtures\client-qual
 $ManifestPath = Join-Path $ContractRoot "manifest.json"
 $RegistryPath = Join-Path $ContractRoot "automatic-registry.json"
 $DiagnosticRegistryPath = Join-Path $ContractRoot "diagnostic-registry.json"
+$ClientContractIdentityModule = Join-Path $PSScriptRoot "ClientContractIdentity.psm1"
+Import-Module $ClientContractIdentityModule -Force
 $QualificationRoot = if ($Action -eq "diagnose") {
     Join-Path $RepositoryRoot ".local\client-diagnostics"
 }
@@ -47,6 +49,7 @@ $UnityTestStageBudgetMilliseconds = 600000
 $UnityBuildStageBudgetMilliseconds = 900000
 # Player smoke必须观察到完整App Scope进入Running，不能仅以进程仍存活判定成功。
 $PlayerSmokeObservationSliceMilliseconds = 250
+$PowerShellHostPath = (Get-Process -Id $PID).Path
 $OwnedProcesses = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
 $StageResults = [System.Collections.Generic.List[object]]::new()
 $PrimaryFailure = ""
@@ -246,30 +249,6 @@ function Get-DiagnosticUnitySelectors {
         if ($entry.Count -eq 1) { $selectors += @($entry[0].selectors) }
     }
     return @($selectors | Sort-Object -Unique)
-}
-
-# Get-TreeDigest对tracked输入的相对路径与内容建立稳定SHA-256，不把绝对路径写入证据。
-function Get-TreeDigest {
-    param([string[]]$PathSpecs)
-    $tracked = & git -C $RepositoryRoot ls-files -- @PathSpecs
-    if ($LASTEXITCODE -ne 0) { throw "tracked digest input cannot be enumerated" }
-    $untracked = & git -C $RepositoryRoot ls-files --others --exclude-standard -- @PathSpecs
-    if ($LASTEXITCODE -ne 0) { throw "untracked digest input cannot be enumerated" }
-    $lines = @($tracked) + @($untracked)
-    if (@($lines).Count -eq 0) { throw "contract digest input is empty" }
-    $builder = [System.Text.StringBuilder]::new()
-    foreach ($relative in @($lines | Sort-Object -Unique)) {
-        $full = Join-Path $RepositoryRoot $relative
-        $hash = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
-        [void]$builder.Append($relative.Replace('\', '/')).Append(':').Append($hash).Append("`n")
-    }
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($builder.ToString())
-    try {
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant() }
-        finally { $sha.Dispose() }
-    }
-    finally { [Array]::Clear($bytes, 0, $bytes.Length) }
 }
 
 # Get-BuildDigest绑定完整Player目录，不依赖文件枚举返回顺序。
@@ -517,7 +496,7 @@ function Assert-PlayerLogRedaction {
 
 # Invoke-DocumentationGovernance验证OpenSpec、diff whitespace、必需文档和禁止tracked输出。
 function Invoke-DocumentationGovernance {
-    Invoke-OwnedProcess "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $RepositoryRoot "tools\client-qualification\client-qualification.tests.ps1")) 120000 "qualification-tool-tests"
+    Invoke-OwnedProcess $PowerShellHostPath @("-NoProfile", "-File", (Join-Path $RepositoryRoot "tools\client-qualification\client-qualification.tests.ps1")) 120000 "qualification-tool-tests"
     Invoke-OwnedProcess "cmd.exe" @(
         "/d",
         "/c",
@@ -927,7 +906,7 @@ try {
     $manifest = Read-QualificationManifest
     $registry = Assert-RegistryCompleteness $manifest
     $diagnosticRegistry = Read-DiagnosticRegistry $registry
-    $contractDigest = Get-TreeDigest @("shared/contracts", "client/Packages", "client/ProjectSettings/ProjectVersion.txt")
+    $contractDigest = Get-ClientContractDigest -RepositoryRoot $RepositoryRoot
     $StageResults.Add([ordered]@{ id = "contract"; outcome = "pass"; durationMs = [Math]::Max(0, [int64]([DateTime]::UtcNow - $contractStageStarted).TotalMilliseconds) })
 
     if ($Action -eq "validate") { return }

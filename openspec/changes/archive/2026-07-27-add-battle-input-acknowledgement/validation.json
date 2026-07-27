@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "add-battle-input-acknowledgement",
+  "checks": [
+    {
+      "id": "proto-verify",
+      "reason": "snapshot acknowledgement 修改共享协议和 Go、C++、C# generated consumers"
+    },
+    {
+      "id": "battle-wire-validate",
+      "reason": "presence、partition、negative fixture 和 MTU contract 直接受影响"
+    },
+    {
+      "id": "cpp-acknowledgement-targeted",
+      "reason": "InputTimeline projection、snapshot publisher 与独立协议客户端直接受影响"
+    },
+    {
+      "id": "go-acknowledgement-targeted",
+      "reason": "qualification observer 和跨语言 contract 直接消费 acknowledgement"
+    },
+    {
+      "id": "battle-acknowledgement-diagnose",
+      "reason": "clean、reorder/duplicate 与 reconnect 代表性路径覆盖 acknowledgement 推进和 generation reset"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "simulation model 与 secure transport delta contract 必须通过 strict validation"
+    }
+  ]
+}

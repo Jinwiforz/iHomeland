@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-profile-implementation-overlay-v1.json",
+  "title": "iHomeland Battle Network Profile Implementation Overlay",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "documentKind",
+    "profileVersion",
+    "profileSha256",
+    "qualificationReportSha256",
+    "qualification",
+    "environmentClass",
+    "publicInternetQualified",
+    "unlocks",
+    "implementationRequired",
+    "targets",
+    "capacity"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "documentKind": {
+      "const": "battle-network-profile-implementation-overlay"
+    },
+    "profileVersion": { "const": "battle-network-profile-v2" },
+    "profileSha256": { "$ref": "#/$defs/sha256" },
+    "qualificationReportSha256": { "$ref": "#/$defs/sha256" },
+    "qualification": {
+      "const": "battle-network-qualified-windows-x64-controlled"
+    },
+    "environmentClass": {
+      "const": "controlled-local-fault-gateway"
+    },
+    "publicInternetQualified": { "const": false },
+    "unlocks": { "const": ["implement-unity-gameplay-runtime"] },
+    "implementationRequired": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/implementationItem" }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 14,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/target" }
+    },
+    "capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "defaultQualifiedActors",
+        "maximumQualifiedActors",
+        "rejectedOverflowActor",
+        "visitCompatibilityActors",
+        "capacityGateRequired",
+        "capacityGateDisposition"
+      ],
+      "properties": {
+        "defaultQualifiedActors": { "const": 5 },
+        "maximumQualifiedActors": { "const": 8 },
+        "rejectedOverflowActor": { "const": 9 },
+        "visitCompatibilityActors": { "const": 33 },
+        "capacityGateRequired": { "const": true },
+        "capacityGateDisposition": { "const": "passed" }
+      }
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "implementationItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirementId",
+        "sourceEvidenceSha256",
+        "measuredValue",
+        "unit",
+        "workloadId",
+        "method",
+        "environmentClass",
+        "disposition"
+      ],
+      "properties": {
+        "requirementId": {
+          "enum": [
+            "cpu-per-tick-measurement",
+            "history-memory-measurement",
+            "kcp-adapter-parity",
+            "memory-per-instance-measurement",
+            "wire-encoded-size-parity"
+          ]
+        },
+        "sourceEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "measuredValue": { "type": "integer", "minimum": 0 },
+        "unit": { "$ref": "#/$defs/stableId" },
+        "workloadId": { "$ref": "#/$defs/stableId" },
+        "method": { "$ref": "#/$defs/stableId" },
+        "environmentClass": {
+          "const": "controlled-local-fault-gateway"
+        },
+        "disposition": { "const": "passed" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metricId",
+        "sourceEvidenceSha256",
+        "measuredValue",
+        "unit",
+        "workloadId",
+        "method",
+        "budget",
+        "environmentClass",
+        "disposition"
+      ],
+      "properties": {
+        "metricId": { "$ref": "#/$defs/stableId" },
+        "sourceEvidenceSha256": { "$ref": "#/$defs/sha256" },
+        "measuredValue": { "type": "integer", "minimum": 0 },
+        "unit": { "$ref": "#/$defs/stableId" },
+        "workloadId": { "$ref": "#/$defs/stableId" },
+        "method": { "$ref": "#/$defs/stableId" },
+        "budget": { "type": "integer", "minimum": 0 },
+        "environmentClass": {
+          "const": "controlled-local-fault-gateway"
+        },
+        "disposition": { "const": "passed" }
+      }
+    }
+  }
+}

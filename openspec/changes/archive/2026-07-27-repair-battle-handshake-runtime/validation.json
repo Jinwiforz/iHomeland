@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "repair-battle-handshake-runtime",
+  "checks": [
+    {
+      "id": "battle-wire-validate",
+      "reason": "proof derivation、handshake 和 secure wire fixtures 直接受影响"
+    },
+    {
+      "id": "simulation-control-validate",
+      "reason": "production child、listener 和 session composition 由 control root 启动"
+    },
+    {
+      "id": "cpp-handshake-targeted",
+      "reason": "listener send、handshake bootstrap、session 和 endpoint rebind 直接受影响"
+    },
+    {
+      "id": "go-handshake-targeted",
+      "reason": "BattleTicket derivation、install 与真实 child supervision 直接受影响"
+    },
+    {
+      "id": "battle-handshake-diagnose",
+      "reason": "clean handshake、proof forgery 与 endpoint rebind 代表性真实路径直接覆盖本修复"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "修复后的 secure transport contract 必须通过 strict validation"
+    }
+  ]
+}

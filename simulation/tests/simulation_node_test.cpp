@@ -325,6 +325,99 @@ void TestBattleTicketRegistry() {
         "stopped target lost exact terminal install replay");
 }
 
+/// TestQualificationSnapshot 验证 exact binding、只读计数与低敏聚合。
+void TestQualificationSnapshot() {
+    constexpr std::uint64_t observed_unix_ms = 2'000;
+    constexpr std::size_t raw_datagram_bytes = 1'200;
+    constexpr std::uint64_t kcp_retransmits = 3;
+    ihomeland::sim::SimulationNode node(TestConfig());
+    const auto command =
+        TestCommand("qualification_snapshot_0001");
+    const auto ready = node.Start(command);
+    auto installed =
+        TestTicketCommand(command, ready, 0);
+    auto consumed =
+        TestTicketCommand(command, ready, 1);
+    static_cast<void>(
+        node.InstallBattleTicket(
+            installed,
+            observed_unix_ms));
+    static_cast<void>(
+        node.InstallBattleTicket(
+            consumed,
+            observed_unix_ms));
+    static_cast<void>(
+        node.ConsumeBattleTicket(
+            consumed.ticket_id,
+            consumed.binding_fingerprint,
+            observed_unix_ms));
+    auto& metrics = node.RuntimeMetrics();
+    metrics.RecordDatagram(
+        ihomeland::sim::BattleMetricDirection::Ingress,
+        ihomeland::sim::BattleMetricLane::Raw,
+        raw_datagram_bytes);
+    metrics.RecordKcpRetransmits(kcp_retransmits);
+    metrics.RecordRebind();
+    metrics.RecordRekey();
+    metrics.RecordClose(
+        ihomeland::sim::BattleCloseReasonCategory::Lifecycle);
+
+    const auto first = node.QualificationSnapshot(
+        ready.simulation_instance_id,
+        command.assignment.fingerprint,
+        observed_unix_ms);
+    const auto second = node.QualificationSnapshot(
+        ready.simulation_instance_id,
+        command.assignment.fingerprint,
+        observed_unix_ms);
+    Require(
+        first.simulation_node_id ==
+                TestConfig().simulation_node_id &&
+            first.simulation_instance_id ==
+                ready.simulation_instance_id &&
+            first.assignment_fingerprint ==
+                command.assignment.fingerprint,
+        "qualification snapshot identity drifted");
+    Require(
+        first.node_count == 1 &&
+            first.running_instance_count == 1 &&
+            first.active_session_count == 1 &&
+            first.installed_ticket_count == 1,
+        "qualification snapshot runtime counts drifted");
+    Require(
+        first.metrics.raw_ingress_bytes == raw_datagram_bytes &&
+            first.metrics.raw_ingress_packets == 1 &&
+            first.metrics.kcp_retransmits == kcp_retransmits &&
+            first.metrics.rebinds == 1 &&
+            first.metrics.rekeys == 1 &&
+            first.metrics.close_lifecycle == 1,
+        "qualification snapshot metrics drifted");
+    Require(
+        second.active_session_count ==
+                first.active_session_count &&
+            second.installed_ticket_count ==
+                first.installed_ticket_count &&
+            second.metrics.raw_ingress_packets ==
+                first.metrics.raw_ingress_packets,
+        "qualification snapshot read mutated runtime state");
+    RequireFailure(
+        [&] {
+            static_cast<void>(node.QualificationSnapshot(
+                "sinst_ffffffffffffffffffffffffffffffff",
+                command.assignment.fingerprint,
+                observed_unix_ms));
+        },
+        "qualification snapshot accepted stale instance");
+    RequireFailure(
+        [&] {
+            static_cast<void>(node.QualificationSnapshot(
+                ready.simulation_instance_id,
+                std::string(64, '9'),
+                observed_unix_ms));
+        },
+        "qualification snapshot accepted stale assignment");
+}
+
 /// TestLifecycle 验证 start replay、capacity、drain、result ack 与 stop replay。
 void TestLifecycle() {
     ihomeland::sim::SimulationNode node(TestConfig());
@@ -483,6 +576,7 @@ int main() {
         TestLifecycle();
         TestActorQualificationCap();
         TestBattleTicketRegistry();
+        TestQualificationSnapshot();
         TestResultOutboxCapacity();
         return 0;
     } catch (const std::exception&) {

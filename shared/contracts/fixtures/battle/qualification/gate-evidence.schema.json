@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-gate-evidence-v1.json",
+  "title": "iHomeland Battle Qualification Gate Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "evidenceKind",
+    "scenarioId",
+    "workloadId",
+    "assertions",
+    "disposition"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "evidenceKind": {
+      "enum": [
+        "security-availability-evidence",
+        "lifecycle-evidence",
+        "regression-evidence"
+      ]
+    },
+    "scenarioId": { "$ref": "#/$defs/stableId" },
+    "workloadId": { "$ref": "#/$defs/stableId" },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/stableId" }
+    },
+    "security": { "$ref": "#/$defs/security" },
+    "transition": { "$ref": "#/$defs/transition" },
+    "disposition": { "const": "passed" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "evidenceKind": { "const": "security-availability-evidence" }
+        }
+      },
+      "then": {
+        "required": ["security"],
+        "not": { "required": ["transition"] }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidenceKind": { "const": "lifecycle-evidence" }
+        }
+      },
+      "then": {
+        "required": ["transition"],
+        "not": { "required": ["security"] }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidenceKind": { "const": "regression-evidence" }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["security"] },
+            { "required": ["transition"] }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attackDatagrams",
+        "rejectedDatagrams",
+        "responseDatagrams",
+        "legitimateActorCount",
+        "availabilityPassed"
+      ],
+      "properties": {
+        "attackDatagrams": { "type": "integer", "minimum": 1 },
+        "rejectedDatagrams": { "type": "integer", "minimum": 1 },
+        "responseDatagrams": { "type": "integer", "minimum": 0 },
+        "legitimateActorCount": { "const": 5 },
+        "availabilityPassed": { "const": true }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "predecessorSha256",
+        "predecessorRejected"
+      ],
+      "properties": {
+        "mode": { "enum": ["preserved", "replaced", "terminated"] },
+        "predecessorSha256": { "$ref": "#/$defs/sha256" },
+        "successorSha256": { "$ref": "#/$defs/sha256" },
+        "predecessorRejected": { "const": true }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "terminated" } }
+          },
+          "then": { "not": { "required": ["successorSha256"] } },
+          "else": { "required": ["successorSha256"] }
+        }
+      ]
+    }
+  }
+}

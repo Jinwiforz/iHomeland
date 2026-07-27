@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// TestHTTPClientFrozenOperations 验证 10 个冻结 operation 的 method、path、认证、幂等键与 closed response。
+// TestHTTPClientFrozenOperations 验证 11 个冻结 operation 的 method、path、认证、幂等键与 closed response。
 func TestHTTPClientFrozenOperations(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -44,6 +44,10 @@ func TestHTTPClientFrozenOperations(t *testing.T) {
 			requireBearerAndIdempotency(t, request)
 			writer.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(writer, `{"credential":"wad1_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","endpoint":{"channel":"TLS_TCP","host":"127.0.0.1","port":2},"role":"OWNER","purpose":"OWN_WORLD","expiresAtMs":3}`)
+		case "POST /v1/battle/tickets":
+			requireBearerAndIdempotency(t, request)
+			writer.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(writer, battleTicketFixture())
 		default:
 			http.Error(writer, "unexpected operation", http.StatusNotFound)
 		}
@@ -85,6 +89,127 @@ func TestHTTPClientFrozenOperations(t *testing.T) {
 	}
 	if _, err := client.IssueWorldAdmission(ctx, access, "idempotency_5678", WorldAdmissionRequest{Kind: "OWN_WORLD"}); err != nil {
 		t.Fatalf("world admission: %v", err)
+	}
+	battleTicket, err := client.IssueBattleTicket(ctx, access, "battle_ticket_1234", BattleTicketRequest{Kind: "OWN_WORLD"})
+	if err != nil {
+		t.Fatalf("battle ticket: %v", err)
+	}
+	if battleTicket.Role != "OWNER" || battleTicket.Endpoint.Transport != "UDP" {
+		t.Fatal("battle ticket projection drifted")
+	}
+	if err := battleTicket.Close(); err != nil {
+		t.Fatalf("close battle ticket: %v", err)
+	}
+}
+
+// TestBattleTicketResponseLossReplayAndSecretOwnership 验证同 key 精确重放且 secret 只能转移一次。
+func TestBattleTicketResponseLossReplayAndSecretOwnership(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		requireBearerAndIdempotency(t, request)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(writer, battleTicketFixture())
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new HTTP client: %v", err)
+	}
+	access, _ := NewSecret("access")
+	ticket, err := client.IssueBattleTicketAfterResponseLoss(
+		context.Background(), access, "battle_replay_1234",
+		BattleTicketRequest{Kind: "OWN_WORLD"},
+	)
+	if err != nil {
+		t.Fatalf("response-loss replay: %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("request count=%d want=2", requestCount)
+	}
+	secret, err := ticket.TakeSecret()
+	if err != nil {
+		t.Fatalf("take secret: %v", err)
+	}
+	if _, err := ticket.TakeSecret(); err == nil {
+		t.Fatal("battle ticket secret was transferred twice")
+	}
+	secret.Clear()
+}
+
+// TestBattleTicketCredentialOwnership 验证 public identity 与 bearer 只解码并转移一次。
+func TestBattleTicketCredentialOwnership(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requireBearerAndIdempotency(t, request)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(writer, battleTicketFixture())
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new HTTP client: %v", err)
+	}
+	access, _ := NewSecret("access")
+	ticket, err := client.IssueBattleTicket(
+		context.Background(),
+		access,
+		"battle_credential_1234",
+		BattleTicketRequest{Kind: "OWN_WORLD"},
+	)
+	if err != nil {
+		t.Fatalf("issue BattleTicket: %v", err)
+	}
+	credential, err := ticket.TakeCredential()
+	if err != nil {
+		t.Fatalf("take credential: %v", err)
+	}
+	if credential.TicketID != ([battleTicketIDBytes]byte{}) {
+		t.Fatal("BattleTicket identity bytes drifted")
+	}
+	if credential.TicketSecret != [battleTicketSecretBytes]byte{
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 1, 1, 1, 1, 1, 1, 1,
+	} {
+		t.Fatal("BattleTicket secret bytes drifted")
+	}
+	if _, err := ticket.TakeCredential(); err == nil {
+		t.Fatal("BattleTicket credential was transferred twice")
+	}
+	credential.Clear()
+	if credential != (BattleCredential{}) {
+		t.Fatal("BattleTicket credential was not cleared")
+	}
+}
+
+// TestBattleTicketRejectsDriftedReplay 验证同 key 返回不同 credential 时 fail closed。
+func TestBattleTicketRejectsDriftedReplay(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestCount++
+		requireBearerAndIdempotency(t, request)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusCreated)
+		fixture := battleTicketFixture()
+		if requestCount == 2 {
+			fixture = strings.Replace(fixture, "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg", 1)
+		}
+		_, _ = io.WriteString(writer, fixture)
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new HTTP client: %v", err)
+	}
+	access, _ := NewSecret("access")
+	if ticket, err := client.IssueBattleTicketAfterResponseLoss(
+		context.Background(), access, "battle_replay_5678",
+		BattleTicketRequest{Kind: "OWN_WORLD"},
+	); err == nil || ticket != nil {
+		t.Fatal("drifted BattleTicket replay was accepted")
 	}
 }
 
@@ -160,6 +285,11 @@ func writeAuthFixture(writer io.Writer) {
 // tokenFixture 返回只在本地 unit server 使用的 token JSON。
 func tokenFixture() string {
 	return `{"accessToken":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","refreshToken":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","accessExpiresAtMs":2,"refreshExpiresAtMs":3}`
+}
+
+// battleTicketFixture 返回 production fixed-width identity 与 credential 的 closed response。
+func battleTicketFixture() string {
+	return `{"ticketId":"btk1_AAAAAAAAAAAAAAAAAAAAAA","ticketSecret":"bts1_AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE","endpoint":{"transport":"UDP","host":"127.0.0.1","port":30000},"wireSuite":{"wireVersion":1,"keyAgreement":"X25519","kdf":"HKDF-SHA-256","aead":"ChaCha20-Poly1305"},"role":"OWNER","targetKind":"OWN_WORLD","targetRevision":1,"expiresAtMs":2}`
 }
 
 // requireBearer 验证冻结 operation 使用 bearer header。

@@ -2,23 +2,29 @@
 
 #include "ihomeland/sim/simulation/input_timeline.hpp"
 #include "ihomeland/sim/simulation/simulation_instance.hpp"
+#include "ihomeland/sim/transport/battle_route.hpp"
+#include "ihomeland/sim/transport/secure_datagram.hpp"
 
 #include "ihomeland/battle/v1/battle.pb.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <iostream>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 namespace {
 
 using namespace std::chrono_literals;
 constexpr std::uint64_t NowUnixMs = 10'000'000;
+constexpr auto InstanceTransitionDeadline = 2s;
 
 /// Require 把session/ingress/replication漂移转换为test failure。
 void Require(
@@ -110,6 +116,8 @@ void TestContextAndIngress() {
             ihomeland::sim::ManualTickClock>();
     std::vector<ihomeland::sim::IngressCommand>
         observed;
+    std::mutex observed_mutex;
+    std::condition_variable observed_condition;
     auto instance =
         ihomeland::sim::SimulationInstance(
             InstanceIdentity(),
@@ -119,13 +127,15 @@ void TestContextAndIngress() {
                 .hard_tick_debt = 4,
             },
             clock,
-            [&](const ihomeland::sim::TickObservation&
-                    tick) {
-                observed.insert(
-                    observed.end(),
-                    tick.commands.begin(),
-                    tick.commands.end());
-            });
+             [&](const ihomeland::sim::TickObservation&
+                     tick) {
+                 std::lock_guard lock(observed_mutex);
+                 observed.insert(
+                     observed.end(),
+                     tick.commands.begin(),
+                     tick.commands.end());
+                 observed_condition.notify_all();
+             });
     const std::vector<ihomeland::sim::StartupStep>
         steps{{
             .stage =
@@ -155,11 +165,16 @@ void TestContextAndIngress() {
             256);
     auto resources =
         ihomeland::sim::BattleResourceGovernor{};
+    auto session_resources =
+        ihomeland::sim::
+            BattleSessionResourceGovernor(
+                resources,
+                context.BattleSessionHandle(),
+                201);
     auto ingress = ihomeland::sim::BattleInputIngress(
         context,
         command_ingress,
-        resources,
-        201);
+        session_resources);
 
     ihomeland::battle::v1::BattleInputBundle bundle;
     bundle.set_newest_input_tick(1);
@@ -241,24 +256,31 @@ void TestContextAndIngress() {
         "session invalidation was overwritten or revived");
 
     clock->Advance();
-    for (std::uint32_t attempt = 0;
-         attempt < 10'000 &&
-         instance.CommittedTick() == 0;
-         ++attempt) {
-        std::this_thread::yield();
-    }
-    Require(
-        observed.size() == 3 &&
+    bool observed_valid = false;
+    {
+        std::unique_lock lock(observed_mutex);
+        observed_valid =
+            observed_condition.wait_for(
+                lock,
+                InstanceTransitionDeadline,
+                [&] {
+                    return observed.size() == 3;
+                }) &&
             std::ranges::all_of(
                 observed,
                 [](const auto& command) {
                     return command.actor_id == 42;
-                }),
-        "UDP payload changedcontext actor binding");
+                });
+    }
     instance.BeginDrain();
     clock->Advance();
+    const auto stopped =
+        instance.Stop(InstanceTransitionDeadline);
     Require(
-        instance.Stop(2s),
+        observed_valid,
+        "UDP payload changed context actor binding");
+    Require(
+        stopped,
         "session ingress instance failed to drain");
 
     bool ninth_rejected = false;
@@ -295,10 +317,16 @@ void TestReplication() {
     auto context = Context(instance, authority);
     auto resources =
         ihomeland::sim::BattleResourceGovernor{};
+    auto session_resources =
+        ihomeland::sim::
+            BattleSessionResourceGovernor(
+                resources,
+                context.BattleSessionHandle(),
+                201);
     auto replication =
         ihomeland::sim::BattleReplicationQueue(
             context,
-            resources);
+            session_resources);
     const std::vector<
         ihomeland::sim::StateProjectionToken>
         states{{
@@ -310,23 +338,33 @@ void TestReplication() {
             .phase = 2,
             .alive = true,
         }};
+    const auto acknowledgement =
+        ihomeland::sim::
+            InputAcknowledgementProjection{
+                .actor_id = 42,
+                .mapping_generation = 11,
+                .last_processed_input_tick = 0,
+            };
     Require(
         replication.QueueFullSnapshot(
             10,
             1,
             7,
+            acknowledgement,
             states,
             NowUnixMs) &&
             replication.QueueDeltaSnapshot(
                 11,
                 2,
                 7,
+                acknowledgement,
                 states,
                 NowUnixMs) &&
             replication.QueueDeltaSnapshot(
                 12,
                 3,
                 7,
+                acknowledgement,
                 states,
                 NowUnixMs),
         "snapshot projection failed");
@@ -368,6 +406,10 @@ void TestReplication() {
     auto full = replication.Pop(NowUnixMs + 1);
     auto delta = replication.Pop(NowUnixMs + 1);
     auto ability = replication.Pop(NowUnixMs + 1);
+    ihomeland::battle::v1::BattleFullSnapshot
+        full_message;
+    ihomeland::battle::v1::BattleDeltaSnapshot
+        delta_message;
     Require(
         full.has_value() &&
             full->message_id == 3002 &&
@@ -381,13 +423,31 @@ void TestReplication() {
             ability->message_id == 3004 &&
             ability->lane ==
                 ihomeland::sim::
-                    BattleReplicationLane::Kcp,
+                    BattleReplicationLane::Kcp &&
+            full_message.ParseFromArray(
+                full->payload.data(),
+                static_cast<int>(
+                    full->payload.size())) &&
+            full_message
+                .has_last_processed_input_tick() &&
+            full_message
+                    .last_processed_input_tick() ==
+                0 &&
+            delta_message.ParseFromArray(
+                delta->payload.data(),
+                static_cast<int>(
+                    delta->payload.size())) &&
+            delta_message
+                .has_last_processed_input_tick() &&
+            delta_message
+                    .last_processed_input_tick() ==
+                0,
         "replication violated unique lane or latest snapshot");
 
     auto expiring =
         ihomeland::sim::BattleReplicationQueue(
             context,
-            resources);
+            session_resources);
     Require(
         expiring.QueueAbilityEvent(
             event,
@@ -399,6 +459,54 @@ void TestReplication() {
                 NowUnixMs + 500).has_value() &&
             expiring.Metrics().expired == 1,
         "expired reliable event was not terminated");
+    auto resync_alive =
+        ihomeland::sim::BattleReplicationQueue(
+            context,
+            session_resources);
+    Require(
+        resync_alive.QueueResyncResponse(
+            11,
+            12,
+            1,
+            9,
+            NowUnixMs) &&
+            resync_alive.Pop(
+                NowUnixMs +
+                ihomeland::sim::BattleKcpRoutePolicy::
+                    ReliableEventExpiryMilliseconds)
+                .has_value(),
+        "resync response inherited reliable-event expiry");
+    auto resync_expired =
+        ihomeland::sim::BattleReplicationQueue(
+            context,
+            session_resources);
+    Require(
+        resync_expired.QueueResyncResponse(
+            12,
+            12,
+            1,
+            10,
+            NowUnixMs) &&
+            !resync_expired.Pop(
+                 NowUnixMs +
+                 ihomeland::sim::BattleKcpRoutePolicy::
+                     ResyncExpiryMilliseconds)
+                 .has_value() &&
+            resync_expired.Metrics().expired == 1,
+        "resync response ignored route-owned expiry");
+    auto predecessor_acknowledgement =
+        acknowledgement;
+    predecessor_acknowledgement
+        .mapping_generation = 10;
+    Require(
+        !replication.QueueDeltaSnapshot(
+            13,
+            4,
+            7,
+            predecessor_acknowledgement,
+            states,
+            NowUnixMs + 10),
+        "predecessor mapping acknowledgement reached publisher");
     authority->Invalidate(
         ihomeland::sim::
             BattleSessionInvalidationReason::
@@ -408,15 +516,167 @@ void TestReplication() {
             13,
             4,
             7,
+            acknowledgement,
             states,
             NowUnixMs + 10),
         "invalidated session continued replication");
 }
 
+/// TestSnapshotPartitionBudget 验证最大 ack varint 仍按既有 payload/MTU 预算切分。
+void TestSnapshotPartitionBudget() {
+    constexpr std::size_t StateCount = 96;
+    auto clock =
+        std::make_shared<
+            ihomeland::sim::ManualTickClock>();
+    auto instance =
+        ihomeland::sim::SimulationInstance(
+            InstanceIdentity(),
+            {
+                .tick_step = 50ms,
+                .inbox_capacity = 1,
+                .hard_tick_debt = 1,
+            },
+            clock,
+            [](const ihomeland::sim::
+                   TickObservation&) {});
+    auto authority =
+        std::make_shared<
+            ihomeland::sim::
+                BattleSessionAuthority>();
+    auto context = Context(instance, authority);
+    auto resources =
+        ihomeland::sim::BattleResourceGovernor{};
+    auto session_resources =
+        ihomeland::sim::
+            BattleSessionResourceGovernor(
+                resources,
+                context.BattleSessionHandle(),
+                201);
+    auto replication =
+        ihomeland::sim::BattleReplicationQueue(
+            context,
+            session_resources);
+    std::vector<
+        ihomeland::sim::StateProjectionToken>
+        states;
+    states.reserve(StateCount);
+    for (std::size_t index = 0;
+         index < StateCount;
+         ++index) {
+        states.push_back({
+            .actor_id =
+                static_cast<std::uint64_t>(
+                    index + 1),
+            .x_mm =
+                std::numeric_limits<
+                    std::int32_t>::max(),
+            .y_mm =
+                std::numeric_limits<
+                    std::int32_t>::min(),
+            .z_mm =
+                std::numeric_limits<
+                    std::int32_t>::max(),
+            .health_scaled =
+                std::numeric_limits<
+                    std::uint32_t>::max(),
+            .phase =
+                std::numeric_limits<
+                    std::uint32_t>::max(),
+            .alive = false,
+        });
+    }
+    const auto acknowledgement =
+        ihomeland::sim::
+            InputAcknowledgementProjection{
+                .actor_id = 42,
+                .mapping_generation = 11,
+                .last_processed_input_tick =
+                    std::numeric_limits<
+                        std::uint64_t>::max(),
+            };
+    Require(
+        replication.QueueFullSnapshot(
+            20,
+            1,
+            7,
+            acknowledgement,
+            states,
+            NowUnixMs),
+        "large full snapshot was not partitioned");
+    const auto* policy =
+        ihomeland::sim::
+            FindBattleRawRoutePolicy(3'002);
+    Require(
+        policy != nullptr,
+        "full snapshot route policy is missing");
+
+    std::size_t observed_states = 0;
+    std::size_t observed_partitions = 0;
+    std::uint8_t partition_count = 0;
+    while (const auto item =
+               replication.Pop(NowUnixMs + 1)) {
+        ihomeland::battle::v1::
+            BattleFullSnapshot message;
+        Require(
+            item->message_id == 3'002 &&
+                item->payload.size() <=
+                    policy->maximum_payload_bytes &&
+                item->payload.size() +
+                        ihomeland::sim::
+                            BattleRawDispatcher::
+                                RawHeaderBytes +
+                        ihomeland::sim::
+                            BattleSecureChannel::
+                                SecureHeaderBytes +
+                        ihomeland::sim::
+                            BattleSecureChannel::
+                                AeadTagBytes <=
+                    ihomeland::sim::
+                        BattleSecureChannel::
+                            MaximumDatagramBytes &&
+                message.ParseFromArray(
+                    item->payload.data(),
+                    static_cast<int>(
+                        item->payload.size())) &&
+                message
+                    .has_last_processed_input_tick() &&
+                message
+                        .last_processed_input_tick() ==
+                    acknowledgement
+                        .last_processed_input_tick &&
+                message.partition_index() ==
+                    item->partition_index &&
+                message.partition_count() ==
+                    item->partition_count &&
+                item->partition_index ==
+                    observed_partitions,
+            "snapshot partition exceeded budget or drifted");
+        partition_count = item->partition_count;
+        observed_states +=
+            static_cast<std::size_t>(
+                message.entities_size());
+        ++observed_partitions;
+    }
+    Require(
+        observed_partitions > 1 &&
+            observed_partitions ==
+                partition_count &&
+            observed_states == StateCount,
+        "snapshot partition boundary lost state");
+}
+
 }  // namespace
 
+/// main 统一报告测试不变量，避免未处理异常退化为无诊断的 fast-fail。
 int main() {
-    TestContextAndIngress();
-    TestReplication();
-    return 0;
+    try {
+        TestContextAndIngress();
+        TestReplication();
+        TestSnapshotPartitionBudget();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "battle_session_test: "
+                  << error.what() << '\n';
+        return 1;
+    }
 }

@@ -2,6 +2,7 @@
 
 #include "ihomeland/sim/control/control_frame.hpp"
 #include "ihomeland/sim/control/simulation_node.hpp"
+#include "ihomeland/sim/transport/battle_transport_runtime.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -13,8 +14,10 @@
 #include <chrono>
 #include <cstdint>
 #include <istream>
+#include <limits>
 #include <memory>
 #include <ostream>
+#include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -24,6 +27,8 @@ namespace ihomeland::sim {
 namespace {
 
 using Json = nlohmann::json;
+constexpr std::uint32_t
+    BattleResyncRequestMessageId = 3'006;
 
 /// ParseObject 解析 canonical payload 并要求 object。
 [[nodiscard]] Json ParseObject(const std::string& payload) {
@@ -116,6 +121,12 @@ void RequireFields(
     return result;
 }
 
+/// ReadBindingFingerprint 解码 control 已验证的 canonical SHA-256。
+[[nodiscard]] std::array<std::uint8_t, 32>
+ReadBindingFingerprint(const Json& value) {
+    return ReadProofKey(value);
+}
+
 /// ObservedUnixMilliseconds 返回 ticket expiry 使用的 UTC 毫秒快照。
 [[nodiscard]] std::uint64_t ObservedUnixMilliseconds() {
     const auto value = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -181,6 +192,81 @@ void RequireFields(
     }.dump();
 }
 
+/// QualificationSnapshotPayload 生成不含动态标签或业务身份的 closed receipt。
+[[nodiscard]] std::string QualificationSnapshotPayload(
+    const BattleQualificationSnapshotReceipt& snapshot,
+    const std::string& run_id,
+    const std::uint64_t sample_sequence) {
+    const auto& metrics = snapshot.metrics;
+    return Json{
+        {"activeSessionCount",
+         std::to_string(snapshot.active_session_count)},
+        {"assignmentFingerprint",
+         snapshot.assignment_fingerprint},
+        {"committedTick", std::to_string(snapshot.committed_tick)},
+        {"installedTicketCount",
+         std::to_string(snapshot.installed_ticket_count)},
+        {"metrics",
+         {
+             {"closeAuthentication",
+              std::to_string(metrics.close_authentication)},
+             {"closeInternal", std::to_string(metrics.close_internal)},
+             {"closeLifecycle", std::to_string(metrics.close_lifecycle)},
+             {"closeNormal", std::to_string(metrics.close_normal)},
+             {"closeResource", std::to_string(metrics.close_resource)},
+             {"closeTimeout", std::to_string(metrics.close_timeout)},
+             {"closeTransport", std::to_string(metrics.close_transport)},
+             {"droppedPackets",
+              std::to_string(metrics.dropped_packets)},
+             {"egressQueueHighWatermark",
+              std::to_string(metrics.egress_queue_high_watermark)},
+             {"expiredMessages",
+              std::to_string(metrics.expired_messages)},
+             {"ingressQueueHighWatermark",
+              std::to_string(metrics.ingress_queue_high_watermark)},
+             {"instanceMemoryBytes",
+              std::to_string(metrics.instance_memory_bytes)},
+             {"kcpEgressBytes",
+              std::to_string(metrics.kcp_egress_bytes)},
+             {"kcpEgressPackets",
+              std::to_string(metrics.kcp_egress_packets)},
+             {"kcpIngressBytes",
+              std::to_string(metrics.kcp_ingress_bytes)},
+             {"kcpIngressPackets",
+              std::to_string(metrics.kcp_ingress_packets)},
+             {"kcpQueueHighWatermark",
+              std::to_string(metrics.kcp_queue_high_watermark)},
+             {"kcpRetransmits",
+              std::to_string(metrics.kcp_retransmits)},
+             {"maximumTickDurationNs",
+              std::to_string(metrics.maximum_tick_duration_ns)},
+             {"historyMemoryBytes",
+              std::to_string(metrics.history_memory_bytes)},
+             {"rawEgressBytes",
+              std::to_string(metrics.raw_egress_bytes)},
+             {"rawEgressPackets",
+              std::to_string(metrics.raw_egress_packets)},
+             {"rawIngressBytes",
+              std::to_string(metrics.raw_ingress_bytes)},
+             {"rawIngressPackets",
+              std::to_string(metrics.raw_ingress_packets)},
+             {"rebinds", std::to_string(metrics.rebinds)},
+             {"rejectedPackets",
+              std::to_string(metrics.rejected_packets)},
+             {"rekeys", std::to_string(metrics.rekeys)},
+             {"tickDebtHighWatermark",
+              std::to_string(metrics.tick_debt_high_watermark)},
+         }},
+        {"nodeCount", std::to_string(snapshot.node_count)},
+        {"qualificationRunId", run_id},
+        {"runningInstanceCount",
+         std::to_string(snapshot.running_instance_count)},
+        {"sampleSequence", std::to_string(sample_sequence)},
+        {"simulationInstanceId", snapshot.simulation_instance_id},
+        {"simulationNodeId", snapshot.simulation_node_id},
+    }.dump();
+}
+
 /// EmitPendingResults 顺序输出 node 当前等待 ack 的 proposals。
 void EmitPendingResults(
     std::ostream& output,
@@ -205,8 +291,18 @@ int RunControlStdio(
     std::ostream& output,
     std::ostream& diagnostics,
     const ControlBuildBinding& build,
-    const BattleUdpListenerConfig* battle_listener) {
+    const BattleUdpListenerConfig* battle_listener,
+    const QualificationControlConfig* qualification) {
     try {
+        static const std::regex qualification_run_pattern{
+            "^bqrun_[0-9a-f]{32}$"};
+        if (qualification != nullptr &&
+            !std::regex_match(
+                qualification->run_id,
+                qualification_run_pattern)) {
+            throw std::invalid_argument(
+                "qualification control run identity is invalid");
+        }
         ControlFrame hello_frame;
         if (!ControlFrameCodec::Read(input, hello_frame)) {
             throw std::runtime_error("control stdin ended before hello");
@@ -249,13 +345,103 @@ int RunControlStdio(
                 hello.at("instanceCapacity").get<std::size_t>(),
             .actor_capacity = hello.at("actorCapacity").get<std::size_t>(),
         });
+        std::unique_ptr<BattleTransportRuntime>
+            battle_runtime;
         if (battle_listener != nullptr) {
+            battle_runtime =
+                std::make_unique<
+                    BattleTransportRuntime>(
+                    BattleTransportRuntimeConfig{
+                        .simulation_node_id =
+                            node->Config()
+                                .simulation_node_id,
+                        .advertised_host =
+                            battle_listener->
+                                advertised_endpoint.host,
+                        .advertised_port =
+                            battle_listener->
+                                advertised_endpoint.port,
+                        .listener_identity =
+                            battle_listener->
+                                listener_identity,
+                        .maximum_sessions =
+                            node->Config()
+                                .actor_capacity,
+                    },
+                    *node,
+                    [owner = node.get()](
+                        const std::span<
+                            const std::uint8_t>
+                            datagram,
+                        const BattleRemoteEndpoint&
+                            remote) {
+                        return owner->
+                            SendBattleUdpDatagram(
+                                datagram,
+                                remote);
+                    },
+                    [owner = node.get()](
+                        const BattleSessionContext&
+                            context,
+                        const std::uint64_t
+                            now_unix_ms) {
+                        return owner->
+                            BattleRawContext(
+                                context,
+                                now_unix_ms);
+                    },
+                    [owner = node.get()](
+                        const BattleSessionContext&
+                            context) {
+                        return owner->
+                            ResolveBattleCommandIngress(
+                                context);
+                    },
+                    [owner = node.get()](
+                        const BattleSessionContext&
+                            context) {
+                        return owner->
+                            BattleReplicationSnapshot(
+                                context);
+                    },
+                    [](
+                        const BattleSessionContext&,
+                        const BattleKcpMessageView&
+                            message) {
+                        if (message.policy == nullptr ||
+                            message.policy->
+                                    message_id !=
+                                BattleResyncRequestMessageId) {
+                            throw std::runtime_error(
+                                "battle KCP application route is invalid");
+                        }
+                    },
+                    [owner = node.get()](
+                        const BattleSessionContext&
+                            context) {
+                        return owner->
+                            BattleSessionCurrent(
+                                context);
+                    },
+                    ObservedUnixMilliseconds(),
+                    &node->RuntimeMetrics());
+            auto* runtime_owner =
+                battle_runtime.get();
             node->StartBattleUdpListener(
                 *battle_listener,
-                [](const std::span<const std::uint8_t>,
-                   const BattleRemoteEndpoint&) {
-                    // 完整 fixed-header 验证后由后续 authenticated session owner 消费；
-                    // bootstrap listener 不保存 payload 或 remote identity。
+                [runtime_owner](
+                    const std::span<
+                        const std::uint8_t>
+                        datagram,
+                    const BattleRemoteEndpoint&
+                        remote) {
+                    const auto disposition =
+                        runtime_owner->
+                            EnqueueDatagram(
+                                datagram,
+                                remote,
+                                ObservedUnixMilliseconds());
+                    static_cast<void>(disposition);
                 });
         }
         const auto hello_receipt = Json{
@@ -275,6 +461,7 @@ int RunControlStdio(
                 "node.hello.receipt",
                 hello_receipt));
 
+        std::uint64_t qualification_sample_sequence = 0;
         ControlFrame frame;
         while (ControlFrameCodec::Read(input, frame)) {
             sequence.AcceptInbound(frame);
@@ -299,6 +486,55 @@ int RunControlStdio(
                         frame.request_id,
                         "node.health.receipt",
                         receipt));
+            } else if (
+                frame.kind ==
+                "battle_qualification_snapshot_request") {
+                if (qualification == nullptr) {
+                    throw std::runtime_error(
+                        "qualification snapshot is disabled");
+                }
+                RequireFields(
+                    payload,
+                    {
+                        "assignmentFingerprint",
+                        "qualificationRunId",
+                        "sampleSequence",
+                        "simulationInstanceId",
+                        "simulationNodeId",
+                    },
+                    "qualification snapshot request");
+                const auto requested_sequence = ReadDecimal(
+                    payload.at("sampleSequence"),
+                    "qualification sample sequence");
+                if (qualification_sample_sequence ==
+                        std::numeric_limits<std::uint64_t>::max() ||
+                    requested_sequence !=
+                        qualification_sample_sequence + 1 ||
+                    payload.at("qualificationRunId")
+                            .get<std::string>() !=
+                        qualification->run_id ||
+                    payload.at("simulationNodeId")
+                            .get<std::string>() !=
+                        node->Config().simulation_node_id) {
+                    throw std::runtime_error(
+                        "qualification snapshot identity or sequence is stale");
+                }
+                const auto snapshot = node->QualificationSnapshot(
+                    payload.at("simulationInstanceId")
+                        .get<std::string>(),
+                    payload.at("assignmentFingerprint")
+                        .get<std::string>(),
+                    ObservedUnixMilliseconds());
+                qualification_sample_sequence = requested_sequence;
+                ControlFrameCodec::Write(
+                    output,
+                    sequence.MakeOutbound(
+                        frame.request_id,
+                        "battle_qualification_snapshot_receipt",
+                        QualificationSnapshotPayload(
+                            snapshot,
+                            qualification->run_id,
+                            requested_sequence)));
             } else if (frame.kind == "instance.start") {
                 RequireFields(
                     payload,
@@ -415,6 +651,22 @@ int RunControlStdio(
                 } else if (frame.kind == "instance.drain") {
                     const auto deadline = std::chrono::milliseconds(
                         ReadDecimal(payload.at("deadlineMs"), "drain deadline"));
+                    const auto current =
+                        node->Status(
+                            world_instance_id,
+                            assignment_fingerprint);
+                    if (battle_runtime != nullptr &&
+                        !current
+                             .simulation_instance_id
+                             .empty()) {
+                        static_cast<void>(
+                            battle_runtime->
+                                RevokeInstance(
+                                    current
+                                        .simulation_instance_id,
+                                    BattleSessionInvalidationReason::
+                                        Instance));
+                    }
                     const auto status = node->Drain(
                         world_instance_id,
                         assignment_fingerprint,
@@ -429,6 +681,22 @@ int RunControlStdio(
                 } else {
                     const auto deadline = std::chrono::milliseconds(
                         ReadDecimal(payload.at("deadlineMs"), "stop deadline"));
+                    const auto current =
+                        node->Status(
+                            world_instance_id,
+                            assignment_fingerprint);
+                    if (battle_runtime != nullptr &&
+                        !current
+                             .simulation_instance_id
+                             .empty()) {
+                        static_cast<void>(
+                            battle_runtime->
+                                RevokeInstance(
+                                    current
+                                        .simulation_instance_id,
+                                    BattleSessionInvalidationReason::
+                                        Instance));
+                    }
                     node->Stop(
                         world_instance_id,
                         assignment_fingerprint,
@@ -709,6 +977,18 @@ int RunControlStdio(
                     ReadActorSlot(
                         payload.at("actorSlot"),
                         "ticket revoke actor slot"));
+                if (battle_runtime != nullptr) {
+                    auto fingerprint =
+                        ReadBindingFingerprint(
+                            payload.at(
+                                "bindingFingerprint"));
+                    static_cast<void>(
+                        battle_runtime->RevokeBinding(
+                            fingerprint));
+                    SecureZeroMemory(
+                        fingerprint.data(),
+                        fingerprint.size());
+                }
                 const auto receipt = Json{
                     {"bindingFingerprint",
                      revoked.binding_fingerprint},
@@ -741,6 +1021,9 @@ int RunControlStdio(
                     payload.at("proposalFingerprint").get<std::string>());
             } else if (frame.kind == "node.shutdown") {
                 RequireFields(payload, {"deadlineMs"}, "node shutdown");
+                if (battle_runtime != nullptr) {
+                    battle_runtime->Stop();
+                }
                 node->BeginShutdown(std::chrono::milliseconds(
                     ReadDecimal(payload.at("deadlineMs"), "shutdown deadline")));
                 const auto receipt = Json{
@@ -759,6 +1042,9 @@ int RunControlStdio(
             } else {
                 throw std::runtime_error("control request kind is not accepted");
             }
+        }
+        if (battle_runtime != nullptr) {
+            battle_runtime->Stop();
         }
         node->BeginShutdown(std::chrono::milliseconds(0));
         return 0;

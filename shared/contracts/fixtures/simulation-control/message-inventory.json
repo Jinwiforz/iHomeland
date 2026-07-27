@@ -4,7 +4,7 @@
   "frameMaxBytes": 65536,
   "pendingRequestLimit": 256,
   "resultOutboxLimit": 256,
-  "ticketRequestQueueLimit": 64,
+  "lowPriorityRequestQueueLimit": 64,
   "priorityPolicy": {
     "highDeadlineClasses": [
       "startup",
@@ -16,6 +16,7 @@
       "revoke"
     ],
     "lowDeadlineClasses": [
+      "qualification",
       "ticket"
     ],
     "selection": "high-first-after-active-turn",
@@ -32,6 +33,20 @@
     "storage": "forbidden"
   },
   "messages": [
+    {
+      "kind": "battle_qualification_snapshot_receipt",
+      "direction": "cpp-to-go",
+      "maxPayloadBytes": 8192,
+      "deadlineClass": "qualification",
+      "replayIdentity": "qualificationRunId+simulationNodeId+simulationInstanceId+sampleSequence"
+    },
+    {
+      "kind": "battle_qualification_snapshot_request",
+      "direction": "go-to-cpp",
+      "maxPayloadBytes": 4096,
+      "deadlineClass": "qualification",
+      "replayIdentity": "qualificationRunId+simulationNodeId+simulationInstanceId+sampleSequence"
+    },
     {
       "kind": "battle.session.closed",
       "direction": "cpp-to-go",

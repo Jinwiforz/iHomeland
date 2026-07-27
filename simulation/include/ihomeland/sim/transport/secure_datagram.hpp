@@ -12,6 +12,8 @@
 
 namespace ihomeland::sim {
 
+class BattleRuntimeMetrics;
+
 /// BattleTransportRole 决定本端 send/receive 使用的独立方向 key。
 enum class BattleTransportRole : std::uint8_t {
     /// Client 发送 C2S 并接收 S2C。
@@ -136,7 +138,8 @@ public:
         std::uint32_t key_epoch,
         std::uint64_t next_send_sequence,
         std::uint64_t epoch_started_unix_ms,
-        std::uint64_t sent_packets_current_epoch);
+        std::uint64_t sent_packets_current_epoch,
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
     /// 析构函数清零并解锁 directional traffic/rekey secrets。
     ~BattleSecureChannel();
@@ -201,6 +204,8 @@ private:
     std::uint64_t epoch_started_unix_ms_;
     /// sent_packets_current_epoch_ 统计成功或烧掉 nonce 的发送尝试。
     std::uint64_t sent_packets_current_epoch_;
+    /// runtime_metrics_ 可选借用 node 生命周期内的低敏累计 owner。
+    BattleRuntimeMetrics* runtime_metrics_;
     /// rollover_deadline_unix_ms_ 为零表示尚未触发 rollover。
     std::uint64_t rollover_deadline_unix_ms_{};
     /// previous_epoch_ 为零表示没有 overlap receive key。

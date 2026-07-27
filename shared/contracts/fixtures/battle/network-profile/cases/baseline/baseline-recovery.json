@@ -1,6 +1,6 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "case",
   "case_id": "case-baseline-recovery",
   "category": "baseline",

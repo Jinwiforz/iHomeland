@@ -4,6 +4,12 @@
   "title": "iHomeland Battle Control Payloads v1",
   "oneOf": [
     {
+      "$ref": "#/$defs/qualificationSnapshotRequest"
+    },
+    {
+      "$ref": "#/$defs/qualificationSnapshotReceipt"
+    },
+    {
       "$ref": "#/$defs/listenerStatusQuery"
     },
     {
@@ -63,6 +69,236 @@
         "6",
         "7"
       ]
+    },
+    "qualificationRunId": {
+      "type": "string",
+      "pattern": "^bqrun_[0-9a-f]{32}$"
+    },
+    "qualificationSnapshotRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle_qualification_snapshot_request"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assignmentFingerprint",
+            "qualificationRunId",
+            "sampleSequence",
+            "simulationInstanceId",
+            "simulationNodeId"
+          ],
+          "properties": {
+            "assignmentFingerprint": {
+              "$ref": "#/$defs/sha256"
+            },
+            "qualificationRunId": {
+              "$ref": "#/$defs/qualificationRunId"
+            },
+            "sampleSequence": {
+              "$ref": "#/$defs/decimal"
+            },
+            "simulationInstanceId": {
+              "$ref": "#/$defs/identity"
+            },
+            "simulationNodeId": {
+              "$ref": "#/$defs/identity"
+            }
+          }
+        }
+      }
+    },
+    "qualificationSnapshotReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "battle_qualification_snapshot_receipt"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "activeSessionCount",
+            "assignmentFingerprint",
+            "committedTick",
+            "installedTicketCount",
+            "metrics",
+            "nodeCount",
+            "qualificationRunId",
+            "runningInstanceCount",
+            "sampleSequence",
+            "simulationInstanceId",
+            "simulationNodeId"
+          ],
+          "properties": {
+            "activeSessionCount": {
+              "$ref": "#/$defs/decimal"
+            },
+            "assignmentFingerprint": {
+              "$ref": "#/$defs/sha256"
+            },
+            "committedTick": {
+              "$ref": "#/$defs/decimal"
+            },
+            "installedTicketCount": {
+              "$ref": "#/$defs/decimal"
+            },
+            "metrics": {
+              "$ref": "#/$defs/qualificationMetrics"
+            },
+            "nodeCount": {
+              "const": "1"
+            },
+            "qualificationRunId": {
+              "$ref": "#/$defs/qualificationRunId"
+            },
+            "runningInstanceCount": {
+              "$ref": "#/$defs/decimal"
+            },
+            "sampleSequence": {
+              "$ref": "#/$defs/decimal"
+            },
+            "simulationInstanceId": {
+              "$ref": "#/$defs/identity"
+            },
+            "simulationNodeId": {
+              "$ref": "#/$defs/identity"
+            }
+          }
+        }
+      }
+    },
+    "qualificationMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "closeAuthentication",
+        "closeInternal",
+        "closeLifecycle",
+        "closeNormal",
+        "closeResource",
+        "closeTimeout",
+        "closeTransport",
+        "droppedPackets",
+        "egressQueueHighWatermark",
+        "expiredMessages",
+        "historyMemoryBytes",
+        "ingressQueueHighWatermark",
+        "instanceMemoryBytes",
+        "kcpEgressBytes",
+        "kcpEgressPackets",
+        "kcpIngressBytes",
+        "kcpIngressPackets",
+        "kcpQueueHighWatermark",
+        "kcpRetransmits",
+        "maximumTickDurationNs",
+        "rawEgressBytes",
+        "rawEgressPackets",
+        "rawIngressBytes",
+        "rawIngressPackets",
+        "rebinds",
+        "rejectedPackets",
+        "rekeys",
+        "tickDebtHighWatermark"
+      ],
+      "properties": {
+        "closeAuthentication": {
+          "$ref": "#/$defs/decimal"
+        },
+        "closeInternal": {
+          "$ref": "#/$defs/decimal"
+        },
+        "closeLifecycle": {
+          "$ref": "#/$defs/decimal"
+        },
+        "closeNormal": {
+          "$ref": "#/$defs/decimal"
+        },
+        "closeResource": {
+          "$ref": "#/$defs/decimal"
+        },
+        "closeTimeout": {
+          "$ref": "#/$defs/decimal"
+        },
+        "closeTransport": {
+          "$ref": "#/$defs/decimal"
+        },
+        "droppedPackets": {
+          "$ref": "#/$defs/decimal"
+        },
+        "egressQueueHighWatermark": {
+          "$ref": "#/$defs/decimal"
+        },
+        "expiredMessages": {
+          "$ref": "#/$defs/decimal"
+        },
+        "historyMemoryBytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "ingressQueueHighWatermark": {
+          "$ref": "#/$defs/decimal"
+        },
+        "instanceMemoryBytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "kcpEgressBytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "kcpEgressPackets": {
+          "$ref": "#/$defs/decimal"
+        },
+        "kcpIngressBytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "kcpIngressPackets": {
+          "$ref": "#/$defs/decimal"
+        },
+        "kcpQueueHighWatermark": {
+          "$ref": "#/$defs/decimal"
+        },
+        "kcpRetransmits": {
+          "$ref": "#/$defs/decimal"
+        },
+        "maximumTickDurationNs": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rawEgressBytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rawEgressPackets": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rawIngressBytes": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rawIngressPackets": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rebinds": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rejectedPackets": {
+          "$ref": "#/$defs/decimal"
+        },
+        "rekeys": {
+          "$ref": "#/$defs/decimal"
+        },
+        "tickDebtHighWatermark": {
+          "$ref": "#/$defs/decimal"
+        }
+      }
     },
     "listenerStatusQuery": {
       "type": "object",

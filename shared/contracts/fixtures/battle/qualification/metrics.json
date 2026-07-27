@@ -1,0 +1,173 @@
+{
+  "formatVersion": 1,
+  "qualificationVersion": "battle-network-qualification-v1",
+  "documentKind": "metrics",
+  "sources": [
+    "client",
+    "control-snapshot",
+    "fault-gateway",
+    "process-sampler"
+  ],
+  "comparisonPolicy": {
+    "bothRunsMustPassBudget": true,
+    "aggregation": "worst-case",
+    "reproducibilityFailurePolicy": "not-qualified",
+    "missingSamplePolicy": "not-qualified"
+  },
+  "metrics": [
+    {
+      "metricId": "uplink-bytes-per-player-second",
+      "source": "fault-gateway",
+      "unit": "bytes-per-second",
+      "budgetSource": "bandwidth-up-per-player-target",
+      "method": "delivered-uplink-gateway-bytes-divided-by-window-and-actors",
+      "window": "measurement",
+      "maximum": 16384,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "downlink-bytes-per-player-second",
+      "source": "fault-gateway",
+      "unit": "bytes-per-second",
+      "budgetSource": "bandwidth-down-per-player-target",
+      "method": "delivered-downlink-gateway-bytes-divided-by-window-and-actors",
+      "window": "measurement",
+      "maximum": 65536,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "downlink-bytes-per-instance-second",
+      "source": "fault-gateway",
+      "unit": "bytes-per-second",
+      "budgetSource": "bandwidth-down-per-instance-target",
+      "method": "delivered-gateway-bytes-divided-by-window",
+      "window": "measurement",
+      "maximum": 524288,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "delivery-age",
+      "source": "fault-gateway",
+      "unit": "microseconds",
+      "budgetSource": "maximum-extrapolation-us",
+      "method": "maximum-gateway-delivery-age",
+      "window": "measurement",
+      "maximum": 150000,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "baseline-recovery",
+      "source": "client",
+      "unit": "microseconds",
+      "budgetSource": "maximum-baseline-age-ticks",
+      "method": "maximum-resync-to-successor-baseline",
+      "window": "measurement",
+      "maximum": 2000000,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "kcp-amplification",
+      "source": "control-snapshot",
+      "unit": "basis-points",
+      "budgetSource": "profile-canonical-report-maximum",
+      "method": "kcp-egress-xmit-divided-by-first-transmissions",
+      "window": "measurement",
+      "maximum": 18000,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "ingress-queue-items",
+      "source": "control-snapshot",
+      "unit": "items",
+      "budgetSource": "queue-capacity-items",
+      "method": "maximum-control-ingress-queue-high-watermark",
+      "window": "measurement",
+      "maximum": 256,
+      "reproducibilityToleranceBasisPoints": 0,
+      "aggregation": "high-watermark"
+    },
+    {
+      "metricId": "egress-queue-items",
+      "source": "control-snapshot",
+      "unit": "items",
+      "budgetSource": "secure-transport-session-queue",
+      "method": "maximum-control-egress-queue-high-watermark",
+      "window": "measurement",
+      "maximum": 256,
+      "reproducibilityToleranceBasisPoints": 0,
+      "aggregation": "high-watermark"
+    },
+    {
+      "metricId": "kcp-queue-messages",
+      "source": "control-snapshot",
+      "unit": "messages",
+      "budgetSource": "kcp-profile-queue-limit",
+      "method": "maximum-control-kcp-queue-high-watermark",
+      "window": "measurement",
+      "maximum": 64,
+      "reproducibilityToleranceBasisPoints": 0,
+      "aggregation": "high-watermark"
+    },
+    {
+      "metricId": "cpu-per-simulation-tick",
+      "source": "control-snapshot",
+      "unit": "microseconds",
+      "budgetSource": "cpu-per-tick-target",
+      "method": "maximum-tick-duration-ns-to-us-ceiling",
+      "window": "measurement",
+      "maximum": 2500,
+      "reproducibilityToleranceBasisPoints": 2000,
+      "aggregation": "p99"
+    },
+    {
+      "metricId": "hard-tick-debt",
+      "source": "control-snapshot",
+      "unit": "ticks",
+      "budgetSource": "simulation-control-runtime-hard-tick-debt",
+      "method": "maximum-control-tick-debt-high-watermark",
+      "window": "measurement",
+      "maximum": 4,
+      "reproducibilityToleranceBasisPoints": 0,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "instance-memory",
+      "source": "control-snapshot",
+      "unit": "bytes",
+      "budgetSource": "memory-per-instance-target",
+      "method": "maximum-control-accounted-instance-bytes",
+      "window": "measurement",
+      "maximum": 67108864,
+      "reproducibilityToleranceBasisPoints": 500,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "history-memory",
+      "source": "control-snapshot",
+      "unit": "bytes",
+      "budgetSource": "history-memory-target",
+      "method": "maximum-control-accounted-history-bytes",
+      "window": "measurement",
+      "maximum": 8388608,
+      "reproducibilityToleranceBasisPoints": 500,
+      "aggregation": "maximum"
+    },
+    {
+      "metricId": "process-working-set-growth",
+      "source": "process-sampler",
+      "unit": "bytes",
+      "budgetSource": "soak-steady-state-growth-limit",
+      "method": "maximum-end-minus-start-positive",
+      "window": "post-warmup-soak",
+      "maximum": 8388608,
+      "reproducibilityToleranceBasisPoints": 1000,
+      "aggregation": "maximum-minus-post-warmup-minimum"
+    }
+  ]
+}

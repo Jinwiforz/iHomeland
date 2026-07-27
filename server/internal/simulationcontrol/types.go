@@ -20,8 +20,8 @@ const (
 	MaximumFrameBytes = 65_536
 	// PendingRequestLimit 是单 session 等待关联结果的 hard limit。
 	PendingRequestLimit = 256
-	// TicketRequestQueueLimit 是低优先级 install/status 等待队列 hard limit。
-	TicketRequestQueueLimit = 64
+	// LowPriorityRequestQueueLimit 是 ticket/snapshot 等待队列 hard limit。
+	LowPriorityRequestQueueLimit = 64
 	// QualifiedActorCapacity 是 B0.3 已资格的单 instance actor 上限。
 	QualifiedActorCapacity = 8
 )
@@ -30,10 +30,30 @@ var (
 	simulationNodeIDPattern     = regexp.MustCompile(`^snode_[A-Za-z0-9_-]{4,80}$`)
 	simulationInstanceIDPattern = regexp.MustCompile(`^sinst_[0-9a-f]{32}$`)
 	requestIDPattern            = regexp.MustCompile(`^sctl_[A-Za-z0-9_-]{16,80}$`)
+	qualificationRunIDPattern   = regexp.MustCompile(`^bqrun_[0-9a-f]{32}$`)
 	resultIDPattern             = regexp.MustCompile(`^sresult_[A-Za-z0-9_-]{4,88}$`)
 	resultKindPattern           = regexp.MustCompile(`^[a-z][a-z0-9.-]{2,95}$`)
 	digestPattern               = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
+
+// QualificationRunID 标识一次隔离且不可复用的 B0.6 资格运行。
+type QualificationRunID string
+
+// NewQualificationRunID 校验资格入口生成的 128-bit run identity。
+func NewQualificationRunID(value string) (QualificationRunID, error) {
+	if !qualificationRunIDPattern.MatchString(value) {
+		return "", errors.New("battle qualification run identity is invalid")
+	}
+	return QualificationRunID(value), nil
+}
+
+// String 返回只用于本机 control correlation 的 run identity。
+func (id QualificationRunID) String() string { return string(id) }
+
+// Valid 报告 run identity 是否符合闭合格式。
+func (id QualificationRunID) Valid() bool {
+	return qualificationRunIDPattern.MatchString(string(id))
+}
 
 // SimulationNodeID 标识一次不可复活 C++ child incarnation。
 type SimulationNodeID string

@@ -181,6 +181,67 @@ bool VerifyRouteHeaders(const nlohmann::json& golden) {
         route_encoded == DecodeHex(route.value("bytes_hex", ""));
 }
 
+/// PopulateSnapshotIdentity 从 canonical decoded 投影设置 full/delta 共享身份字段。
+template <typename Snapshot>
+void PopulateSnapshotIdentity(
+    Snapshot& snapshot,
+    const nlohmann::json& decoded) {
+    snapshot.set_server_tick(decoded["server_tick"].get<std::uint64_t>());
+    snapshot.set_snapshot_sequence(
+        decoded["snapshot_sequence"].get<std::uint64_t>());
+    snapshot.set_baseline_id(decoded["baseline_id"].get<std::uint64_t>());
+    snapshot.set_partition_index(
+        decoded["partition_index"].get<std::uint32_t>());
+    snapshot.set_partition_count(
+        decoded["partition_count"].get<std::uint32_t>());
+    snapshot.set_last_processed_input_tick(
+        decoded["last_processed_input_tick"].get<std::uint64_t>());
+}
+
+/// VerifySnapshotVector 验证 snapshot 的显式 ack presence、值与 canonical bytes。
+template <typename Snapshot>
+bool VerifySnapshotVector(const nlohmann::json& vector) {
+    if (vector.is_null()) {
+        return false;
+    }
+    const auto& decoded = vector["decoded"];
+    Snapshot snapshot;
+    PopulateSnapshotIdentity(snapshot, decoded);
+    std::string encoded;
+    if (!snapshot.SerializeToString(&encoded) ||
+        ByteVector(encoded.begin(), encoded.end()) !=
+            DecodeHex(vector.value("bytes_hex", ""))) {
+        return false;
+    }
+    Snapshot parsed;
+    return parsed.ParseFromString(encoded) &&
+        parsed.has_last_processed_input_tick() &&
+        parsed.last_processed_input_tick() ==
+            decoded["last_processed_input_tick"].get<std::uint64_t>() &&
+        parsed.partition_index() ==
+            decoded["partition_index"].get<std::uint32_t>() &&
+        parsed.partition_count() ==
+            decoded["partition_count"].get<std::uint32_t>();
+}
+
+/// VerifySnapshotAcknowledgements 覆盖 explicit zero、常规值、最大 varint 与 multipart。
+bool VerifySnapshotAcknowledgements(const nlohmann::json& golden) {
+    using ihomeland::battle::v1::BattleDeltaSnapshot;
+    using ihomeland::battle::v1::BattleFullSnapshot;
+    return VerifySnapshotVector<BattleFullSnapshot>(
+               FindVector(golden, "battle-full-snapshot-ack-zero-v1")) &&
+        VerifySnapshotVector<BattleDeltaSnapshot>(
+               FindVector(golden, "battle-delta-snapshot-ack-zero-v1")) &&
+        VerifySnapshotVector<BattleDeltaSnapshot>(
+               FindVector(golden, "battle-delta-snapshot-ack-normal-v1")) &&
+        VerifySnapshotVector<BattleDeltaSnapshot>(
+               FindVector(golden, "battle-delta-snapshot-ack-large-v1")) &&
+        VerifySnapshotVector<BattleFullSnapshot>(
+               FindVector(golden, "battle-full-snapshot-ack-multipart-0-v1")) &&
+        VerifySnapshotVector<BattleFullSnapshot>(
+               FindVector(golden, "battle-full-snapshot-ack-multipart-1-v1"));
+}
+
 /// VerifyProtobuf 使用本次生成的 lite messages 双向消费 canonical payload。
 bool VerifyProtobuf(const nlohmann::json& golden) {
     const auto& probe_vector = FindVector(golden, "battle-probe-protobuf-v1");
@@ -248,6 +309,9 @@ int main() {
     }
     if (!VerifyProtobuf(golden)) {
         return 4;
+    }
+    if (!VerifySnapshotAcknowledgements(golden)) {
+        return 5;
     }
     return 0;
 }

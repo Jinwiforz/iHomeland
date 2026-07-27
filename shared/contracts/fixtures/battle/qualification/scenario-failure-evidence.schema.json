@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-scenario-failure-evidence-v1.json",
+  "title": "iHomeland Battle Network Scenario Failure Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "evidenceKind",
+    "scenarioId",
+    "sourceScenarioId",
+    "workloadId",
+    "actorCount",
+    "failure",
+    "disposition"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "evidenceKind": { "const": "scenario-failure-evidence" },
+    "scenarioId": { "$ref": "#/$defs/stableId" },
+    "sourceScenarioId": { "$ref": "#/$defs/stableId" },
+    "workloadId": { "$ref": "#/$defs/stableId" },
+    "actorCount": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "clientSlot",
+        "pollFailureCode",
+        "snapshotCount",
+        "reliableCount",
+        "latestServerTick",
+        "kcp",
+        "gatewayKcp"
+      ],
+      "properties": {
+        "stage": { "$ref": "#/$defs/stableId" },
+        "clientSlot": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "pollFailureCode": { "type": "integer", "minimum": 1, "maximum": 7 },
+        "snapshotCount": { "$ref": "#/$defs/nonnegative" },
+        "reliableCount": { "$ref": "#/$defs/nonnegative" },
+        "latestServerTick": { "$ref": "#/$defs/nonnegative" },
+        "kcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "closeReason",
+            "secureDatagrams",
+            "inputDatagrams",
+            "inputAckCommands",
+            "inputPushCommands",
+            "outputDatagrams",
+            "reconciledMessages",
+            "queuedMessages",
+            "inflightMessages",
+            "waitingSegments"
+          ],
+          "properties": {
+            "closeReason": { "type": "integer", "minimum": 0, "maximum": 5 },
+            "secureDatagrams": { "$ref": "#/$defs/nonnegative" },
+            "inputDatagrams": { "$ref": "#/$defs/nonnegative" },
+            "inputAckCommands": { "$ref": "#/$defs/nonnegative" },
+            "inputPushCommands": { "$ref": "#/$defs/nonnegative" },
+            "outputDatagrams": { "$ref": "#/$defs/nonnegative" },
+            "reconciledMessages": { "$ref": "#/$defs/nonnegative" },
+            "queuedMessages": { "type": "integer", "minimum": 0, "maximum": 64 },
+            "inflightMessages": { "type": "integer", "minimum": 0, "maximum": 64 },
+            "waitingSegments": { "type": "integer", "minimum": 0, "maximum": 64 }
+          }
+        },
+        "gatewayKcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "uplinkTerminal",
+            "uplinkDelivered",
+            "downlinkTerminal",
+            "downlinkDelivered",
+            "packets"
+          ],
+          "properties": {
+            "uplinkTerminal": { "$ref": "#/$defs/nonnegative" },
+            "uplinkDelivered": { "$ref": "#/$defs/nonnegative" },
+            "downlinkTerminal": { "$ref": "#/$defs/nonnegative" },
+            "downlinkDelivered": { "$ref": "#/$defs/nonnegative" },
+            "packets": {
+              "type": "array",
+              "maxItems": 22,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["direction", "disposition", "count"],
+                "properties": {
+                  "direction": { "enum": ["uplink", "downlink"] },
+                  "disposition": {
+                    "enum": [
+                      "delivered",
+                      "loss",
+                      "burst",
+                      "mtu",
+                      "queue",
+                      "deadline",
+                      "paused",
+                      "mapping-expired",
+                      "write-failed",
+                      "closed",
+                      "source-rejected"
+                    ]
+                  },
+                  "count": { "type": "integer", "minimum": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "disposition": { "const": "failed" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "failure": {
+            "properties": {
+              "stage": { "const": "client-poll-kcp-inflight-expiry" }
+            },
+            "required": ["stage"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "failure": {
+            "properties": {
+              "pollFailureCode": { "const": 7 },
+              "kcp": {
+                "properties": {
+                  "closeReason": { "const": 4 },
+                  "inflightMessages": { "minimum": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "nonnegative": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

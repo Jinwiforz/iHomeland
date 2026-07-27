@@ -390,6 +390,63 @@ func (service *Service) ResolveAdmissionEligibility(ctx context.Context, authent
 	return AdmissionEligibility{intent: intent, purpose: purpose, revision: snapshot.Revision()}, nil
 }
 
+// ResolveBattleEligibility 只读解析当前 joined Visitor 的 BattleTicket 资格。
+//
+// 该查询与 JOIN/RECONNECT WorldAdmission 严格分离：reserved 或 reconnecting
+// membership 不能取得新 BattleTicket，joined membership 也不会被错误解释为新的
+// admission intent。方法不创建 credential、reservation、command 或后台状态。
+func (service *Service) ResolveBattleEligibility(ctx context.Context, authenticated session.AuthenticatedSession, visitID VisitSessionID) (BattleEligibility, error) {
+	if !authenticated.Valid() {
+		return BattleEligibility{}, domainError(OperationResolve, ErrorCodeInvalidArgument)
+	}
+	actor, observedAt, err := service.actorAndTime(ctx, authenticated.AuthContext(), OperationResolve)
+	if err != nil {
+		return BattleEligibility{}, err
+	}
+	snapshot, err := service.find(ctx, visitID, OperationResolve)
+	if err != nil {
+		return BattleEligibility{}, err
+	}
+	assignment, err := service.currentAssignment(ctx, snapshot.WorldID(), observedAt, OperationResolve)
+	if err != nil {
+		return BattleEligibility{}, err
+	}
+	if !assignment.Stamp().Equal(snapshot.Assignment()) {
+		return BattleEligibility{}, domainError(OperationResolve, ErrorCodeStale)
+	}
+	var member MembershipSnapshot
+	for _, candidate := range snapshot.Memberships() {
+		if candidate.VisitorID() == actor.playerID {
+			member = candidate
+			break
+		}
+	}
+	if !member.Valid() {
+		return BattleEligibility{}, domainError(OperationResolve, ErrorCodeNotFound)
+	}
+	if member.SessionID() != authSessionID(actor) || member.Epoch() != authEpoch(actor) {
+		return BattleEligibility{}, domainError(OperationResolve, ErrorCodeStale)
+	}
+	if member.State() != MembershipStateJoined {
+		return BattleEligibility{}, domainError(OperationResolve, ErrorCodeInvalidState)
+	}
+	deadline := earliestDeadline(snapshot.ExpiresAt(), assignment.Lease().ExpiresAt(), authenticated.Deadline())
+	if !observedAt.Before(deadline) {
+		return BattleEligibility{}, domainError(OperationResolve, ErrorCodeExpired)
+	}
+	eligibility := newBattleEligibility(
+		actor.playerID, authSessionID(actor), authEpoch(actor),
+		assignment.Stamp(), deadline, snapshot.Revision(),
+	)
+	if !eligibility.Valid() {
+		return BattleEligibility{}, &Error{
+			operation: OperationResolve,
+			code:      ErrorCodeDependencyDefect,
+		}
+	}
+	return eligibility, nil
+}
+
 // earliestDeadline 返回非空绝对时间中的最早值。
 func earliestDeadline(deadlines ...time.Time) time.Time {
 	var earliest time.Time

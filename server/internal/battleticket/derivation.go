@@ -21,7 +21,7 @@ const (
 	// ticketSecretDomain 隔离 HTTPS credential 的 HMAC。
 	ticketSecretDomain = "ihomeland/battle-ticket/secret/v1"
 	// proofKeyDomain 是 HKDF-SHA-256 expand 的固定 info。
-	proofKeyDomain = "ihomeland/battle-ticket/proof-key/v1"
+	proofKeyDomain = "ihomeland/battle-ticket/proof-key/v2"
 )
 
 // Deriver 使用 server-owned 256-bit key 确定性生成 response-loss 可重放的 ticket material。
@@ -81,17 +81,43 @@ func (deriver *Deriver) Derive(facts Facts) (Material, error) {
 	if err != nil {
 		return Material{}, operationError("derive", ErrorCodeDependencyDefect, err)
 	}
-	secretBytes := secret.Bytes()
-	reader := hkdf.New(sha256.New, secretBytes[:], fingerprintBytes[:], []byte(proofKeyDomain))
-	var proofBytes [secretMaterialBytes]byte
-	if _, err := io.ReadFull(reader, proofBytes[:]); err != nil {
-		return Material{}, operationError("derive", ErrorCodeDependencyDefect, err)
-	}
-	proofKey, err := NewProofKey(proofBytes)
+	proofKey, err := DeriveProofKey(ticketID, secret)
 	if err != nil {
 		return Material{}, operationError("derive", ErrorCodeDependencyDefect, err)
 	}
 	return Material{binding: binding, fingerprint: fingerprint, secret: secret, proofKey: proofKey}, nil
+}
+
+// DeriveProofKey 从 HTTPS 可交付的 ticket ID 与 secret 计算 ClientAuth transcript key。
+//
+// ticket ID 是公开 salt，secret 是 256-bit IKM；完整 binding 继续约束 ticket secret
+// 的服务端派生，但不是独立客户端计算 proof 的输入。
+func DeriveProofKey(ticketID TicketID, secret TicketSecret) (ProofKey, error) {
+	if !ticketID.Valid() || !secret.Valid() {
+		return ProofKey{}, operationError("derive_proof", ErrorCodeInvalidArgument, nil)
+	}
+	return deriveProofKey(ticketID, secret, proofKeyDomain)
+}
+
+// deriveProofKey 只向包内测试暴露 domain 参数，生产调用固定使用 proofKeyDomain。
+func deriveProofKey(ticketID TicketID, secret TicketSecret, domain string) (ProofKey, error) {
+	if !ticketID.Valid() || !secret.Valid() || domain == "" {
+		return ProofKey{}, operationError("derive_proof", ErrorCodeInvalidArgument, nil)
+	}
+	secretBytes := secret.Bytes()
+	defer clear(secretBytes[:])
+	ticketIDBytes := ticketID.Bytes()
+	reader := hkdf.New(sha256.New, secretBytes[:], ticketIDBytes[:], []byte(domain))
+	var proofBytes [secretMaterialBytes]byte
+	if _, err := io.ReadFull(reader, proofBytes[:]); err != nil {
+		return ProofKey{}, operationError("derive_proof", ErrorCodeDependencyDefect, err)
+	}
+	defer clear(proofBytes[:])
+	proofKey, err := NewProofKey(proofBytes)
+	if err != nil {
+		return ProofKey{}, operationError("derive_proof", ErrorCodeDependencyDefect, err)
+	}
+	return proofKey, nil
 }
 
 // String 防止默认格式化泄漏根密钥。

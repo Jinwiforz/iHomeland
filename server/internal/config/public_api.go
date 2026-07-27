@@ -217,8 +217,8 @@ type BattleUDPPolicy struct {
 	SessionQueueItems int `yaml:"sessionQueueItems"`
 	// KCPQueueItems 是 reliable lane 的消息 hard budget。
 	KCPQueueItems int `yaml:"kcpQueueItems"`
-	// MessageExpiry 是 KCP/reassembled message 最大排队寿命。
-	MessageExpiry time.Duration `yaml:"messageExpiry"`
+	// MaximumMessageExpiry 是 KCP route 允许的最大排队寿命，不覆盖registry中的精确值。
+	MaximumMessageExpiry time.Duration `yaml:"maximumMessageExpiry"`
 	// DrainTimeout 限制停止公开输入后的 KCP/egress drain。
 	DrainTimeout time.Duration `yaml:"drainTimeout"`
 }
@@ -364,7 +364,7 @@ func DefaultPublicAPI() PublicAPI {
 			RekeyInterval: 10 * time.Minute, PreviousEpochOverlap: 3 * time.Second,
 			PreAuthRate:    RatePolicy{Requests: 60, Window: time.Minute, Burst: 10},
 			NodeQueueItems: 256, SessionQueueItems: 256, KCPQueueItems: 64,
-			MessageExpiry: 500 * time.Millisecond, DrainTimeout: 3 * time.Second,
+			MaximumMessageExpiry: 2250 * time.Millisecond, DrainTimeout: 3 * time.Second,
 		},
 		WebSocketControl: WebSocketControlPolicy{
 			Path: "/v1/control", Subprotocol: "ihomeland.control.v1",
@@ -503,14 +503,14 @@ func (policy BattleUDPPolicy) validate(environment string, publicAddress string,
 		return errors.New("battleUdp ticket and replay deadlines are invalid")
 	}
 	if policy.CookieRotation != 30*time.Second || policy.RekeyInterval != 10*time.Minute ||
-		policy.PreviousEpochOverlap != 3*time.Second || policy.MessageExpiry != 500*time.Millisecond ||
+		policy.PreviousEpochOverlap != 3*time.Second || policy.MaximumMessageExpiry != 2250*time.Millisecond ||
 		policy.NodeQueueItems != 256 || policy.SessionQueueItems != 256 || policy.KCPQueueItems != 64 {
 		return errors.New("battleUdp must use the qualified B0.5 crypto and queue profile")
 	}
 	if err := policy.PreAuthRate.validate(); err != nil {
 		return fmt.Errorf("battleUdp.preAuthRate: %w", err)
 	}
-	if policy.DrainTimeout < policy.MessageExpiry || policy.DrainTimeout > 10*time.Second {
+	if policy.DrainTimeout < policy.MaximumMessageExpiry || policy.DrainTimeout > 10*time.Second {
 		return errors.New("battleUdp.drainTimeout must be between message expiry and 10s")
 	}
 	return nil

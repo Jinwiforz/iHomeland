@@ -57,7 +57,7 @@ iHomeland 采用“服务器权威状态同步 + 帧编号输入/预测/校正/�
 - `SimulationTick`：某个 SimulationInstance 的单调固定步长。初始化完成得到 `S0`，Tick `T` 只能从完整 `S(T-1)` 产生完整 `S(T)`；只有 simulation worker 可以推进。
 - `InputTick`：客户端为本地预测输入分配的单调 tick；必须与 session、actor、sequence 和 expiry 共同验证。
 - `ServerTick`：权威 snapshot/result 所对应的已完成 SimulationTick，始终标识该 Tick 提交后的状态。
-- `LastProcessedInputTick`：服务器在该 snapshot 中已经接受并处理的本地玩家最大连续 InputTick。
+- `LastProcessedInputTick`：服务器在该 snapshot 中已经应用或以稳定策略终结的本地玩家最大连续 InputTick；字段显式存在且值为 `0` 时，表示当前 mapping generation 尚未终结 InputTick 1。
 - `BaselineTick`：delta snapshot 所依赖的完整或已确认 baseline；客户端没有该 baseline 时不得猜测应用。
 - `SnapshotSequence`：同一网络 session 内的单调序号，用于丢弃旧的 unreliable-sequenced snapshot。
 
@@ -71,7 +71,7 @@ mapped_tick =
   + floor((input_tick - base_input_tick) * input_step_ns / simulation_step_ns)
 ```
 
-`LastProcessedInputTick` 只推进到已接受且已处理的最大连续 `InputTick`；gap、expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。B0.2 已冻结这些参数；C++、wire 与 Unity consumer 必须读取同一 profile，不得使用隐藏默认值。Go/C++ control 与安全 transport 已完成实现资格，但 production UDP 仍必须等待 B0.6 真实网络资格。
+`LastProcessedInputTick` 只推进到已应用或以稳定策略终结的最大连续 `InputTick`；gap、尚未稳定终结的 expiry、duplicate、旧 mapping generation 或旧 assignment generation 不得伪造连续确认。重连、迁移或 generation reset 必须建立新 mapping epoch，并拒绝旧 epoch 输入。Full/delta snapshot 必须显式携带该字段；字段缺失属于不兼容 wire，不能解释为 `0`。同一逻辑 snapshot 的所有 partition 必须冻结同一确认值，receiver 只在完整 partition set 通过 sequence、baseline、generation 与确认一致性校验后发布。B0.2 已冻结这些参数；C++、wire 与 Unity consumer 必须读取同一 profile，不得使用隐藏默认值。Go/C++ control、安全 transport 与代表性 network development-readiness 已完成；production UDP 放量仍必须等待显式最终网络资格。
 
 ### B0.1 冻结模型
 
@@ -108,17 +108,18 @@ mapped_tick =
 |---|---|
 | Tick | `SimulationTick=50 ms`（20 Hz），`InputTick=25 ms`（40 Hz），整数比例 2:1 |
 | 输入窗口 | early 2 Tick、late/gap expiry 6 Tick、continuous hold 4 Tick、bundle depth 3、redundancy 2 |
-| Snapshot | 每 2 SimulationTick（10 Hz）；每 10 个 snapshot 建立 full baseline |
+| Snapshot | 由 committed Tick 驱动；每 2 SimulationTick（10 Hz）至多发布一次，每 10 个正常发布周期建立 full baseline；不按 input arrival 发布，不补发 catch-up burst |
 | 历史与 baseline | history 16 Tick（800 ms）；baseline 最大 40 Tick（2 s），fan-out 10 |
 | 客户端表现 | interpolation 100 ms、maximum extrapolation 150 ms、position correction 80 mm、angle correction 2° |
 | Datagram | 最大 1200 bytes；保守预留 IPv6/UDP 48、secure session 48、AEAD tag 16、raw/KCP header 16/24 bytes，logical payload 上限分别为 1072/1064 bytes |
+| KCP sender expiry | `battle.ability.reliable-event`/`battle.entity.lifecycle` 为 500 ms；`battle.resync.request`/`battle.resync.response` 为 2250 ms；receiver 不复制 sender deadline |
 | 默认容量 | 1 Owner + 4 Visitor 必须通过；当前 profile qualified maximum 为 8 actors |
 | 兼容容量 | 33 actors 已评估但标记 `capacity-gated`；后续 battle admission owner 为 `go-simulation-control-admission` |
 | 预算 | 上行 16 KiB/s/player、下行 64 KiB/s/player、下行 512 KiB/s/instance、CPU 2.5 ms/Tick target、instance memory 64 MiB target、history 8 MiB target、queue 256 items |
 
 CPU、allocator/memory、真实 codec size、真实 socket、AEAD 和 KCP adapter parity 仍是 `implementation_required`；上述 target budget 不是伪造的实现测量。Profile 用 6 个 cases、12 个 fault scenarios 和 24 个结果覆盖 latency、jitter、loss/burst、reorder、duplicate、baseline gap、MTU、KCP retransmit、queue、slow consumer 与 disconnect/drain；28 项隔离失败回归证明摘要、coverage、lane、预算、安全字段和连续只读重放门。
 
-`message-inventory.json` 只冻结 `battle.input.bundle`、full/delta snapshot、probe、entity lifecycle、reliable ability event 与 resync 的 logical kind、direction、唯一 raw/KCP lane、expiry、size/rate 和恢复语义。它不是 production registry，不自行分配 numeric message ID、`.proto`、wire header、listener 或端口；这些已由 B0.5 安全 transport 独立交付并完成 parity。
+`message-inventory.json` 只冻结 `battle.input.bundle`、full/delta snapshot、probe、entity lifecycle、reliable ability event 与 resync 的 logical kind、direction、唯一 raw/KCP lane、sender expiry、size/rate 和恢复语义。它是 application expiry 的 profile 唯一事实源，但不是 production numeric registry；`3000-3007` projection、`.proto`、wire header、listener 与端口由 B0.5 安全 transport 独立交付并保持逐 route parity。
 
 ### 输入 history 与预测 history
 
@@ -368,8 +369,12 @@ battle wire target：它不包含 UDP endpoint、credential、numeric message ID
 `BattleSessionContext` 与 `BattleActorBinding` 只由 Go install control frame 创建，
 PlayerID、role、AssignmentStamp 与 actor slot 不接受 UDP payload 覆盖。合法 input
 intent 进入 `SimulationInstance` 有界 inbox，worker 保持唯一写；snapshot/event 只从
-只读 projection 与 event queue 产生。B0.5 已完成真实 child/loopback 实现资格，正式弱网、
-跨区和大规模压测仍属于 B0.6。
+只读 projection 与 event queue 产生。Snapshot publisher 从同一个 replication commit
+一次冻结 `ServerTick`、mapping generation 与当前 actor 的 `LastProcessedInputTick`，
+禁止分别读取后跨 Tick 拼接。Publisher 基于 committed Tick projection
+以 10 Hz 发布最新状态并按 10 个发布周期建立 full baseline；持续 ingress 不能饿死该
+periodic owner。真实 child/loopback 实现资格与代表性受控弱网验证已经完成；完整容量、
+安全、生命周期与 soak 由显式最终资格裁决，跨区、公网运营商和大规模压测仍需独立证据。
 
 ## 首个可玩竖切的完成定义
 

@@ -79,8 +79,8 @@ type Session struct {
 	laneActive bool
 	// highWaiting 是 lifecycle/health/revoke/result ack 等待者数量。
 	highWaiting int
-	// ticketWaiting 是 install/status 低优先级队列长度，不含 active turn。
-	ticketWaiting int
+	// lowWaiting 是 ticket/snapshot 低优先级队列长度，不含 active turn。
+	lowWaiting int
 	// sequenceMutex 线性化 reader 与 writer 共享 sequence。
 	sequenceMutex sync.Mutex
 	// sequence 是已接受或写入的最后 frame sequence。
@@ -127,7 +127,7 @@ func (session *Session) Call(ctx context.Context, requestID RequestID, kind stri
 	if session == nil || ctx == nil || !requestID.Valid() || expectedKind == "" {
 		return nil, errors.New("simulation control call input is invalid")
 	}
-	release, err := session.enterLane(ctx, ticketLowPriority(kind))
+	release, err := session.enterLane(ctx, lowPriorityRequest(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +167,14 @@ func (session *Session) Call(ctx context.Context, requestID RequestID, kind stri
 		case <-session.terminal:
 			return nil, session.failure()
 		case incoming := <-session.incoming:
+			// select 在 receipt 与取消同时 ready 时不保证分支顺序；读取 ctx 状态使已发生的取消稳定胜出，
+			// 但仍继续消费并校验当前 turn 的 receipt，避免污染下一请求的 sequence。
+			if callerErr == nil {
+				callerErr = ctx.Err()
+				if callerErr != nil {
+					ctx = context.WithoutCancel(ctx)
+				}
+			}
 			if incoming.Kind == "result.proposal" {
 				if err := session.handleProposal(incoming); err != nil {
 					session.fail(&SessionError{Kind: SessionErrorProtocol, cause: err})
@@ -224,8 +232,8 @@ func (session *Session) Send(ctx context.Context, requestID RequestID, kind stri
 
 // enterLane 在单一 pipe turn 前执行 high-first 有界仲裁。
 //
-// Active turn 不可抢占，但结束后所有已等待 high 请求都先于 ticket install/status。
-func (session *Session) enterLane(ctx context.Context, ticket bool) (func(), error) {
+// Active turn 不可抢占，但结束后所有已等待 high 请求都先于 ticket/snapshot。
+func (session *Session) enterLane(ctx context.Context, low bool) (func(), error) {
 	if session == nil || ctx == nil {
 		return nil, errors.New("simulation control lane input is invalid")
 	}
@@ -233,12 +241,12 @@ func (session *Session) enterLane(ctx context.Context, ticket bool) (func(), err
 		return nil, err
 	}
 	session.laneMutex.Lock()
-	if ticket {
-		if session.ticketWaiting >= TicketRequestQueueLimit {
+	if low {
+		if session.lowWaiting >= LowPriorityRequestQueueLimit {
 			session.laneMutex.Unlock()
 			return nil, &SessionError{Kind: SessionErrorBackpressure}
 		}
-		session.ticketWaiting++
+		session.lowWaiting++
 	} else {
 		if session.highWaiting >= PendingRequestLimit {
 			session.laneMutex.Unlock()
@@ -248,10 +256,10 @@ func (session *Session) enterLane(ctx context.Context, ticket bool) (func(), err
 	}
 	registered := true
 	for {
-		if !session.laneActive && (!ticket || session.highWaiting == 0) {
+		if !session.laneActive && (!low || session.highWaiting == 0) {
 			session.laneActive = true
-			if ticket {
-				session.ticketWaiting--
+			if low {
+				session.lowWaiting--
 			} else {
 				session.highWaiting--
 			}
@@ -266,8 +274,8 @@ func (session *Session) enterLane(ctx context.Context, ticket bool) (func(), err
 		case <-ctx.Done():
 			session.laneMutex.Lock()
 			if registered {
-				if ticket {
-					session.ticketWaiting--
+				if low {
+					session.lowWaiting--
 				} else {
 					session.highWaiting--
 				}
@@ -278,8 +286,8 @@ func (session *Session) enterLane(ctx context.Context, ticket bool) (func(), err
 		case <-session.terminal:
 			session.laneMutex.Lock()
 			if registered {
-				if ticket {
-					session.ticketWaiting--
+				if low {
+					session.lowWaiting--
 				} else {
 					session.highWaiting--
 				}
@@ -306,9 +314,11 @@ func (session *Session) broadcastLaneChange() {
 	session.laneChanged = make(chan struct{})
 }
 
-// ticketLowPriority 只把 install/status 查询放入有界低优先级 lane；所有 revoke 保持 high。
-func ticketLowPriority(kind string) bool {
-	return kind == "battle.ticket.install" || kind == "battle.ticket.status.query"
+// lowPriorityRequest 把可丢弃的 ticket/snapshot 查询放入有界低优先级 lane。
+func lowPriorityRequest(kind string) bool {
+	return kind == "battle.ticket.install" ||
+		kind == "battle.ticket.status.query" ||
+		kind == "battle_qualification_snapshot_request"
 }
 
 // Close 终止 pipes 并让 pending call 观察 closed failure。

@@ -13,6 +13,7 @@
 - 定向开发场景登记：`diagnostic-registry.json`
 - 定向开发清单 schema：`diagnostic-checklist.schema.json`
 - 唯一入口：`tools/client-qualification/client-qualification.ps1`
+- 契约身份 owner：`tools/client-qualification/ClientContractIdentity.psm1`
 - 工具失败回归：`tools/client-qualification/client-qualification.tests.ps1`
 - 机器输出：被忽略的 `.local/client-qualification/<run-id>/`
 - 开发诊断输出：被忽略的 `.local/client-diagnostics/<run-id>/`
@@ -20,6 +21,8 @@
 - 换服恢复输出：被忽略的 `.local/client-recovery-diagnostics/<run-id>/`
 
 manifest 只保存稳定 scenario ID、group、execution、mandatory、precondition、budget、expected outcome、build profile 与 evidence owner。证据只保存 scenario ID、pass/fail、证据类型、UTC 时间和冻结 digest；账号、密码、token、Player/World/Visit identity、endpoint、PID、绝对路径、截图路径和原始日志不得写入 manifest、evidence 或 report。
+
+Client contract digest 只绑定客户端实际消费的 proto、HTTP/registry、admission/realtime/client-qualification/battle-wire fixture、simulation-control runtime baseline、Unity package 与 Editor version。B0.3/B0.4/B0.6 服务端资格报告、network profile/model corpus 和可推导 binding 不属于客户端契约；生成报告与消费报告必须调用同一 identity owner，避免服务端证据更新反向触发 Unity 资格循环。
 
 ## 定向开发诊断
 
@@ -93,12 +96,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   -Action prepare-manual -RunId '<run-id>'
 ```
 
-`prepare-manual` 只有在同一 run 的五分钟 soak 证据已经通过后才生成 `manual-checklist.json` 与 `evidence.json`。清单只保存固定步骤代码、`qualification-owner`/`qualification-visitor` 隔离 profile 和相对 artifact 名；账号、密码与运行 identity 仍只存在于 operator 运行环境。Operator 可以是人，也可以是受控自动化代理，但必须真实启动本次 Development Player、两个隔离 profile 和独立服务端/storage，按低敏进程间信号观察完成条件，并且只终止自己持有的精确 PID；不得直接调用测试替身、伪造信号或仅根据进程存活追加记录。完成三项 operator 场景后，在该 run 的 `evidence.json` 中只追加对应记录，再执行：
+`prepare-manual` 只有在同一 run 的五分钟 soak 证据已经通过后才生成 `manual-checklist.json` 与 `evidence.json`。清单只保存固定步骤代码、`qualification-owner`/`qualification-visitor` 隔离 profile 和相对 artifact 名；账号、密码与运行 identity 仍只存在于 operator 运行环境。Operator 可以是人，也可以是受控自动化代理，但必须真实启动本次 Development Player、两个隔离 profile 和独立服务端/storage，按低敏进程间信号观察完成条件，并且只终止自己持有的精确 PID；不得直接调用测试替身、伪造信号或仅根据进程存活追加记录。人工执行三项 operator 场景时，只在该 run 的 `evidence.json` 中追加对应记录；受控本地自动化入口则原子更新 `automatic-evidence.json`，不得把自动观察伪装成人工记录。随后将实际使用的 evidence 文件传给 `finalize`：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\client-qualification\client-qualification.ps1 `
-  -Action finalize -RunId '<run-id>' -EvidencePath '<evidence.json>'
+  -Action finalize -RunId '<run-id>' -EvidencePath '<evidence.json 或 automatic-evidence.json>'
 ```
 
 `finalize` 会重新计算当前 tracked contract 与两种 Player 目录 digest，拒绝旧 build、未知/重复 scenario、`skipped`、missing mandatory、failed record 和 contract 漂移。

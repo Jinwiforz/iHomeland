@@ -36,7 +36,9 @@
 B0.4 Go/C++ control 不占用端口：Go 只启动本机 child，并通过继承 stdin/stdout pipe
 交换 control frame。`--control-stdio` 不得创建 loopback、Unix socket、named pipe
 listener 或临时随机端口。B0.5 的 UDP listener 与该 control pipe 独立，仍由同一
-`SimulationNode` composition owner 创建且每个 node 最多一个。
+`SimulationNode` composition owner 创建且每个 node 最多一个。该 listener 同时拥有
+序列化 receive/send/stop 生命周期；raw、KCP、handshake 与 transport-control 回包都
+必须从原 socket 发出，rebind 只转移已认证 endpoint，不创建服务端第二监听端口。
 
 公开 HTTP 与 WSS control 复用同一个实际 listener：WSS 不是第二个端口，而是该入口的精确 `/v1/control` upgrade path。`publicApi.address` 决定进程 bind，`publicApi.endpoints.wss` 决定客户端可见且写入 ticket 的 advertised endpoint；两者可以因 ingress 或 port mapping 不同，但必须由部署配置显式对应，服务端不得从不受信 Host header 重建 advertised endpoint。
 
@@ -57,15 +59,20 @@ B0.5 已在启用本地/隔离环境 listener 前汇总并验证以下实现证�
 - cookie challenge 与抗放大预算，在地址未验证前 response bytes/requests 严格受限；
 - AEAD algorithm/key derivation/key epoch/nonce discipline、replay window 与 endpoint binding/rebinding 验证；
 - per-IP、per-session、per-message、per-instance 限流，以及 malformed packet fast reject 和有界 queue/memory；
-- raw UDP 与 KCP 复用一个认证 multiplexer、listener 和安全 session 的设计与测试；如拆分 listener，必须有独立运维/安全证据。
+- raw UDP 与 KCP 复用一个认证 multiplexer、listener 和安全 session，并在没有新 ingress 时仍以 10 ms cadence 推进 KCP ACK/重传；如拆分 listener，必须有独立运维/安全证据。
 
-B0.6 在 production 放量前还必须提供可重复网络模拟，覆盖 latency、jitter、loss、
+显式最终网络资格在 production 放量前还必须运行可重复网络模拟，覆盖 latency、jitter、loss、
 reorder、duplicate、burst、pause、MTU、NAT/rebinding 和 forged/replay traffic，并证明
 bandwidth、重传放大、CPU、内存、queue pressure、降级、重连和 shutdown 均在预算内。
+受控资格 gateway 的 frontend/backend UDP endpoint 均由 OS 在单个 run 内临时分配，
+只转发到同一 production listener，不构成项目端口登记、第二个 simulation listener 或
+production fallback。对应 runner 已完成 development-readiness 验证；Run cleanup 必须按
+精确 owner 回收两端临时 endpoint。
 
 环境实际 endpoint 始终由部署配置和 ticket 下发，Unity 不硬编码端口。隔离 loopback
 integration test 可以使用 `127.0.0.1:0` 并从实际 listener 回读端口，不构成 production
-端口分配；B0.6 完成前，任何 production 映射都只能用于部署预演，不能作为放量依据。
+端口分配；显式最终网络资格通过前，任何 production 映射都只能用于部署预演，不能作为
+放量依据。
 
 ## 覆盖与映射
 

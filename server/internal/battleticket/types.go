@@ -125,6 +125,23 @@ func ParseTicketID(value string) (TicketID, error) {
 // Value 返回 UDP/control/store 边界使用的 raw identity。
 func (id TicketID) Value() string { return id.value }
 
+// Bytes 返回 proof key public salt 使用的固定长度 ticket identity 副本。
+//
+// 非法零值返回全零数组；安全派生入口仍会单独验证 identity，调用方不得以全零结果
+// 代替构造校验。
+func (id TicketID) Bytes() [ticketIDMaterialBytes]byte {
+	var fixed [ticketIDMaterialBytes]byte
+	if !strings.HasPrefix(id.value, ticketIDPrefix) {
+		return fixed
+	}
+	material, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(id.value, ticketIDPrefix))
+	if err != nil || len(material) != ticketIDMaterialBytes {
+		return fixed
+	}
+	copy(fixed[:], material)
+	return fixed
+}
+
 // Valid 报告 identity 是否符合 canonical encoding。
 func (id TicketID) Valid() bool {
 	_, err := ParseTicketID(id.value)

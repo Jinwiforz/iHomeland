@@ -96,7 +96,7 @@ S0 及后续服务端 changes 共同维护以下契约入口：
 
 WSS 与 gameplay 独立恢复但共享 Session owner。WSS `Recovering` 只冻结依赖 inbox/hint 完整性的邀请动作，健康 gameplay 与 Scene 不重建；新 control generation 必须经 gameplay 请求完整 world/Visit snapshot 后才恢复能力。Gameplay unexpected disconnect 先撤销旧 mutation、HUD/Scene binding，再按冻结 descriptor 恢复 OwnWorld 或在 grace 内以 `VisitReconnectCommand` 作为 Visitor 新连接唯一首帧。冻结descriptor同时绑定服务端Session identity/epoch与本地generation：同一Session上的access refresh可把generation单调重绑定到current，不同Session、epoch或换账号必须拒绝继承。automatic terminal 后才开放 manual retry；两者共用 45 秒总 deadline 和 session/recovery/target/scene 四重提交 gate，不使用无限重试、延时猜测或 tick 修正。
 
-C3资格按 `automatic -> soak -> prepare-manual -> finalize` 继续同一run：两种Player smoke必须观察App Scope的低敏Running标记；Development soak使用run内绝对存储根、环境传入的一次性测试凭据和三轮双通道故障；人工阶段固定两个隔离profile。Soak/人工secure record只能由Player内正式Session/store owner精确删除，Release smoke发现当前Windows用户已有default record时直接拒绝，不轮换或清理操作者数据。
+C3资格按 `automatic -> soak -> prepare-manual -> finalize` 继续同一run：两种Player smoke必须观察App Scope的低敏Running标记；Development soak使用run内绝对存储根、环境传入的一次性测试凭据和三轮双通道故障；人工阶段固定两个隔离profile。`tools/client-qualification/client-qualification-local.ps1` 只组合已经成功的 automatic run，以 `soak` 或 `operator` closed action 创建隔离 storage、当前 Go server 和 CSPRNG 一次性账号；它只清理精确 PID、profile 与 storage RunId，并在 finally 恢复继承环境。Soak/人工secure record只能由Player内正式Session/store owner精确删除，Release smoke发现当前Windows用户已有default record时直接拒绝，不轮换或清理操作者数据。
 
 ### 5. Account/PersonalWorld/VisitSession Services
 

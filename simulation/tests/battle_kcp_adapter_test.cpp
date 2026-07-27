@@ -1,4 +1,5 @@
 #include "ihomeland/sim/transport/kcp_adapter.hpp"
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 
 #include "ihomeland/battle/v1/battle.pb.h"
 
@@ -91,20 +92,27 @@ void TestProfileAndGolden() {
                     MaximumSegmentPayloadBytes ==
                 1000 &&
             BattleKcpAdapter::QueueItems == 64 &&
-            BattleKcpAdapter::MessageExpiryMilliseconds ==
-                500,
+            BattleKcpAdapter::
+                    ReliableEventExpiryMilliseconds ==
+                500 &&
+            BattleKcpAdapter::ResyncExpiryMilliseconds ==
+                2'250,
         "KCP exact profile constants drifted");
     Require(
         ability != nullptr &&
             ability->maximum_payload_bytes == 512 &&
+            ability->expiry_milliseconds == 500 &&
             lifecycle != nullptr &&
             lifecycle->maximum_rate_per_second == 20 &&
+            lifecycle->expiry_milliseconds == 500 &&
             request != nullptr &&
             request->direction ==
                 ihomeland::sim::BattleRouteDirection::
                     ClientToServer &&
+            request->expiry_milliseconds == 2'250 &&
             response != nullptr &&
             response->maximum_payload_bytes == 768 &&
+            response->expiry_milliseconds == 2'250 &&
             ihomeland::sim::FindBattleKcpRoutePolicy(
                 3008) == nullptr,
         "KCP route projection drifted from registry");
@@ -259,15 +267,18 @@ void TestRoundTripAndParity() {
         "KCP ACK did not release inflight budget");
 }
 
-/// TestQueueAndExpiry 验证64项hard cap、方向gate与500ms终结。
+/// TestQueueAndExpiry 验证64项hard cap、方向gate与分 route 发送 deadline。
 void TestQueueAndExpiry() {
     const auto payload = Ability();
+    auto runtime_metrics =
+        ihomeland::sim::BattleRuntimeMetrics{};
     auto adapter = ihomeland::sim::BattleKcpAdapter(
         Conversation,
         ihomeland::sim::BattleTransportRole::Server,
         [](const std::span<const std::uint8_t>) {},
         [](const ihomeland::sim::BattleKcpMessageView&) {
-        });
+        },
+        &runtime_metrics);
     Require(
         adapter.Queue(
             3006,
@@ -299,14 +310,23 @@ void TestQueueAndExpiry() {
             ihomeland::sim::BattleKcpDisposition::
                 QueueFull,
         "KCP queue exceeded 64-item hard cap");
+    const auto capacity_metrics =
+        runtime_metrics.Snapshot();
+    Require(
+        capacity_metrics.kcp_queue_high_watermark == 64 &&
+            capacity_metrics.rejected_packets == 2,
+        "KCP capacity/reject metrics drifted");
 
+    auto expiry_metrics =
+        ihomeland::sim::BattleRuntimeMetrics{};
     auto queued_expiry =
         ihomeland::sim::BattleKcpAdapter(
             Conversation,
             ihomeland::sim::BattleTransportRole::Server,
             [](const std::span<const std::uint8_t>) {},
             [](const ihomeland::sim::
-                   BattleKcpMessageView&) {});
+                   BattleKcpMessageView&) {},
+            &expiry_metrics);
     Require(
         queued_expiry.Queue(
             3004,
@@ -322,14 +342,48 @@ void TestQueueAndExpiry() {
             queued_expiry.Status().queued_messages == 0 &&
             queued_expiry.Status().emitted_segments == 0,
         "queued KCP message was not terminal at 500ms");
+    Require(
+        expiry_metrics.Snapshot().expired_messages == 1,
+        "queued KCP expiry was not aggregated");
 
+    auto resync_expiry =
+        ihomeland::sim::BattleKcpAdapter(
+            Conversation,
+            ihomeland::sim::BattleTransportRole::Client,
+            [](const std::span<const std::uint8_t>) {},
+            [](const ihomeland::sim::
+                   BattleKcpMessageView&) {});
+    Require(
+        resync_expiry.Queue(
+            3006,
+            1,
+            ResyncRequest(),
+            NowUnixMs) ==
+                ihomeland::sim::BattleKcpDisposition::
+                    Queued &&
+            resync_expiry.Update(
+                NowUnixMs + 2'249) ==
+                ihomeland::sim::BattleKcpDisposition::
+                    Accepted &&
+            resync_expiry.Status().queued_messages == 0 &&
+            !resync_expiry.Status().closed &&
+            resync_expiry.Update(
+                NowUnixMs + 2'250) ==
+                ihomeland::sim::BattleKcpDisposition::
+                    Expired &&
+            resync_expiry.Status().closed,
+        "resync KCP message did not use the 2250ms sender deadline");
+
+    auto retransmit_metrics =
+        ihomeland::sim::BattleRuntimeMetrics{};
     auto inflight_expiry =
         ihomeland::sim::BattleKcpAdapter(
             Conversation,
             ihomeland::sim::BattleTransportRole::Server,
             [](const std::span<const std::uint8_t>) {},
             [](const ihomeland::sim::
-                   BattleKcpMessageView&) {});
+                   BattleKcpMessageView&) {},
+            &retransmit_metrics);
     Require(
         inflight_expiry.Queue(
             3004,
@@ -342,11 +396,21 @@ void TestQueueAndExpiry() {
                 ihomeland::sim::BattleKcpDisposition::
                     Accepted &&
             inflight_expiry.Update(
+                NowUnixMs + 200) ==
+                ihomeland::sim::BattleKcpDisposition::
+                    Accepted &&
+            inflight_expiry.Update(
                 NowUnixMs + 500) ==
                 ihomeland::sim::BattleKcpDisposition::
                     Expired &&
             inflight_expiry.Status().closed,
         "unacknowledged KCP message did not close at deadline");
+    const auto inflight_metrics =
+        retransmit_metrics.Snapshot();
+    Require(
+        inflight_metrics.kcp_retransmits >= 1 &&
+            inflight_metrics.expired_messages == 1,
+        "KCP retransmit/expiry metrics drifted");
 }
 
 }  // namespace

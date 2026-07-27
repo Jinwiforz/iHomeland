@@ -202,6 +202,92 @@ func TestHTTPAcceptComputesDeadlineAndAdmissionEligibility(t *testing.T) {
 	}
 }
 
+// TestBattleEligibilityRequiresCurrentJoinedMembership 验证 battle 与 world admission
+// 使用互斥 membership state，且断线中的 Visitor 不能申请新的 BattleTicket。
+func TestBattleEligibilityRequiresCurrentJoinedMembership(t *testing.T) {
+	fixture := newServiceFixture(t)
+	open, err := fixture.service.Open(
+		context.Background(), fixture.ownerAuth, fixture.ownerBinding,
+		mustCommandID(t, "vcmd_battleOpen"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.clock.Set(fixture.createdAt.Add(time.Second))
+	invited, err := fixture.service.CreateInvite(
+		context.Background(), fixture.ownerAuth, fixture.visitorID,
+		fixture.createdAt.Add(time.Minute), open.Snapshot().Revision(),
+		mustCommandID(t, "vcmd_battleInvite"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticated := newTestAuthenticated(
+		t, "acc_battleVisitor", fixture.visitorID.String(), fixture.clock.Now(),
+	)
+	accepted, err := fixture.service.AcceptInviteFromHTTP(
+		context.Background(), authenticated, invited.Snapshot().ID(),
+		invited.Invite().ID(), invited.Snapshot().Revision(),
+		mustCommandID(t, "vcmd_battleAccept"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligibility, resolveErr := fixture.service.ResolveBattleEligibility(
+		context.Background(), authenticated, accepted.Snapshot().ID(),
+	); eligibility.Valid() || !IsErrorCode(resolveErr, ErrorCodeInvalidState) {
+		t.Fatalf("reserved membership obtained battle eligibility: result=%#v err=%v", eligibility, resolveErr)
+	}
+	intent := accepted.AdmissionIntent()
+	qualification, err := HydrateJoinQualification(
+		intent.VisitSessionID(), intent.VisitorID(), intent.SessionID(),
+		intent.Epoch(), intent.Assignment(), intent.ExpiresAt(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingID := mustBindingID(t, "vbind_battleVisitor")
+	joined, err := fixture.service.Join(
+		context.Background(), authenticated.AuthContext(), accepted.Snapshot().ID(),
+		qualification, bindingID, accepted.Snapshot().Revision(),
+		mustCommandID(t, "vcmd_battleJoin"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eligibility, err := fixture.service.ResolveBattleEligibility(
+		context.Background(), authenticated, joined.Snapshot().ID(),
+	)
+	if err != nil || !eligibility.Valid() ||
+		eligibility.VisitorID() != fixture.visitorID ||
+		eligibility.SessionID() != authenticated.AuthContext().SessionID() ||
+		eligibility.Epoch() != authenticated.AuthContext().Epoch() ||
+		!eligibility.Assignment().Equal(fixture.assignments.snapshot.Stamp()) ||
+		eligibility.Revision() != joined.Snapshot().Revision() {
+		t.Fatalf("joined battle eligibility=%#v err=%v", eligibility, err)
+	}
+	if admission, resolveErr := fixture.service.ResolveAdmissionEligibility(
+		context.Background(), authenticated, joined.Snapshot().ID(),
+	); admission.Valid() || !IsErrorCode(resolveErr, ErrorCodeInvalidState) {
+		t.Fatalf("joined membership reused world admission: result=%#v err=%v", admission, resolveErr)
+	}
+	fixture.clock.Set(fixture.clock.Now().Add(time.Second))
+	reconnectDeadline := fixture.clock.Now().Add(fixture.policy.VisitorReconnectGrace())
+	disconnected, err := fixture.service.VisitorDisconnect(
+		context.Background(), authenticated.AuthContext(), joined.Snapshot().ID(),
+		bindingID, reconnectDeadline, joined.Snapshot().Revision(),
+		mustCommandID(t, "vcmd_battleDisconnect"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligibility, resolveErr := fixture.service.ResolveBattleEligibility(
+		context.Background(), authenticated, disconnected.Snapshot().ID(),
+	); eligibility.Valid() || !IsErrorCode(resolveErr, ErrorCodeInvalidState) {
+		t.Fatalf("reconnecting membership obtained battle eligibility: result=%#v err=%v", eligibility, resolveErr)
+	}
+}
+
 // TestServiceAppliesConfiguredInviteLifetime 验证 application 使用 Policy 上限，而不是只接受领域全局上限。
 func TestServiceAppliesConfiguredInviteLifetime(t *testing.T) {
 	t.Parallel()

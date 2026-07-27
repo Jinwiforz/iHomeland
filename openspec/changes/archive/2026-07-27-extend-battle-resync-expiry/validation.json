@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "extend-battle-resync-expiry",
+  "checks": [
+    {
+      "id": "battle-profile-validate",
+      "reason": "route-owned sender expiry 和 profile v2 是本 change 的事实源"
+    },
+    {
+      "id": "battle-wire-validate",
+      "reason": "numeric route 3006 与 3007 必须保持 2250 ms parity"
+    },
+    {
+      "id": "cpp-resync-targeted",
+      "reason": "KCP sender deadline、receiver reassembly 和 snapshot cadence 直接受影响"
+    },
+    {
+      "id": "go-resync-targeted",
+      "reason": "qualification baseline correlation 与 control observer 直接消费 resync 行为"
+    },
+    {
+      "id": "battle-resync-diagnose",
+      "reason": "baseline gap、KCP retransmit 与相邻 raw loss 是 expiry 修改的代表性真实故障"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "profile 与 secure transport delta contract 必须通过 strict validation"
+    }
+  ]
+}

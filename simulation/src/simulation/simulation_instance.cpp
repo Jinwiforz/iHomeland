@@ -1,6 +1,9 @@
 #include "ihomeland/sim/simulation/simulation_instance.hpp"
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
+
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -18,11 +21,13 @@ SimulationInstance::SimulationInstance(
     SimulationInstanceIdentity identity,
     SimulationInstanceConfig config,
     std::shared_ptr<TickClock> clock,
-    TickObserver observer)
+    TickObserver observer,
+    BattleRuntimeMetrics* runtime_metrics)
     : identity_(std::move(identity)),
       config_(config),
       clock_(std::move(clock)),
       observer_(std::move(observer)),
+      runtime_metrics_(runtime_metrics),
       inbox_(config.inbox_capacity) {
     if (config.tick_step != std::chrono::milliseconds(50) ||
         config.hard_tick_debt == 0 || !clock_ || !observer_) {
@@ -139,10 +144,18 @@ std::size_t SimulationInstance::InboxHighWatermark() const {
     return inbox_.HighWatermark();
 }
 
+std::size_t SimulationInstance::ReservedBytes() const noexcept {
+    return sizeof(*this) +
+           inbox_.ReservedBytes() +
+           pending_commands_.capacity() * sizeof(IngressCommand) +
+           completed_steps_.capacity() * sizeof(StartupStep);
+}
+
 void SimulationInstance::WorkerMain(const std::stop_token stop_token) noexcept {
     try {
         while (clock_->WaitNext(stop_token, config_.tick_step)) {
-            if (clock_->PendingCredits() > config_.hard_tick_debt) {
+            const auto pending_credits = clock_->PendingCredits();
+            if (pending_credits > config_.hard_tick_debt) {
                 state_.store(SimulationInstanceState::Failed);
                 lifecycle_condition_.notify_all();
                 return;
@@ -189,7 +202,16 @@ void SimulationInstance::WorkerMain(const std::stop_token stop_token) noexcept {
                 std::lock_guard lock(inbox_mutex_);
                 queued_total_ -= batch.size();
             }
+            const auto tick_started = std::chrono::steady_clock::now();
             observer_(TickObservation{.tick = tick, .commands = batch});
+            const auto tick_duration =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - tick_started);
+            if (runtime_metrics_ != nullptr) {
+                runtime_metrics_->ObserveTick(
+                    static_cast<std::uint64_t>(tick_duration.count()),
+                    static_cast<std::uint64_t>(pending_credits));
+            }
             committed_tick_.store(tick);
             if (state_.load() == SimulationInstanceState::Draining) {
                 std::lock_guard lock(inbox_mutex_);

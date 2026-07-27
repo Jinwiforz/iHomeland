@@ -11,6 +11,7 @@
 namespace ihomeland::sim {
 
 class BattleKcpAdapter;
+class BattleRuntimeMetrics;
 
 /// BattleMultiplexerDisposition 是 endpoint/authority/AEAD/raw dispatch 的闭合结果。
 enum class BattleMultiplexerDisposition : std::uint8_t {
@@ -30,6 +31,22 @@ enum class BattleMultiplexerDisposition : std::uint8_t {
     KcpAccepted = 7,
     /// KcpRejected 表示KCP segment/profile/deadline gate拒绝。
     KcpRejected = 8,
+    /// ControlAccepted 表示authenticated transport transition已处理。
+    ControlAccepted = 9,
+    /// ControlRejected 表示authenticated control违反closed state machine。
+    ControlRejected = 10,
+    /// CloseRequested 表示authenticated close要求终结session。
+    CloseRequested = 11,
+};
+
+/// BattleControlDispatchDisposition 是 multiplexer 与 session control owner 的窄契约。
+enum class BattleControlDispatchDisposition : std::uint8_t {
+    /// Accepted 表示control state transition成功且session保持active。
+    Accepted = 1,
+    /// Rejected 表示认证后的control payload或transition非法。
+    Rejected = 2,
+    /// CloseRequested 表示control owner要求立即销毁session。
+    CloseRequested = 3,
 };
 
 /// BattleMultiplexerResult 保存不泄漏 secret/binding 的低敏 dispatch disposition。
@@ -47,16 +64,27 @@ class BattleAuthenticatedMultiplexer final {
 public:
     /// AuthorityValidator 必须查询 current session/assignment/target，不得信任 UDP payload。
     using AuthorityValidator = std::function<bool()>;
+    /// ActiveEndpointProvider 返回rebind owner当前唯一remote快照。
+    using ActiveEndpointProvider =
+        std::function<BattleRemoteEndpoint()>;
+    /// ControlHandler 只接收AEAD认证后的control plaintext与observed remote。
+    using ControlHandler =
+        std::function<BattleControlDispatchDisposition(
+            std::span<const std::uint8_t>,
+            const BattleRemoteEndpoint&,
+            std::uint64_t)>;
 
-    /// 构造函数冻结唯一 active endpoint 与 authenticated channel owner。
+    /// 构造函数绑定唯一 endpoint provider、control owner与authenticated channel。
     BattleAuthenticatedMultiplexer(
         BattleSecureChannel& channel,
-        BattleRemoteEndpoint active_endpoint,
+        ActiveEndpointProvider active_endpoint_provider,
         BattleRawDispatcher& raw_dispatcher,
         AuthorityValidator authority_validator,
-        BattleKcpAdapter* kcp_adapter = nullptr);
+        ControlHandler control_handler,
+        BattleKcpAdapter* kcp_adapter = nullptr,
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
-    /// Handle 在解密前验证 endpoint/authority，认证后按 packet kind 唯一分流。
+    /// Handle 对raw/KCP先校验endpoint；candidate仅允许进入AEAD认证的control。
     [[nodiscard]] BattleMultiplexerResult Handle(
         std::span<const std::uint8_t> datagram,
         const BattleRemoteEndpoint& remote,
@@ -66,14 +94,18 @@ public:
 private:
     /// channel_ 同时验证 session/generation/binding/epoch/sequence。
     BattleSecureChannel& channel_;
-    /// active_endpoint_ 是当前唯一允许的 remote IP/port。
-    BattleRemoteEndpoint active_endpoint_;
+    /// active_endpoint_provider_ 读取rebind owner当前唯一remote。
+    ActiveEndpointProvider active_endpoint_provider_;
     /// raw_dispatcher_ 是 raw numeric route 唯一 owner。
     BattleRawDispatcher& raw_dispatcher_;
     /// kcp_adapter_ 是可选但唯一的 reliable lane owner。
     BattleKcpAdapter* kcp_adapter_;
     /// authority_validator_ 每包确认 session、assignment 与 target current。
     AuthorityValidator authority_validator_;
+    /// control_handler_ 独占rebind/rekey/close state transition。
+    ControlHandler control_handler_;
+    /// runtime_metrics_ 可选借用 node 生命周期内的低敏累计 owner。
+    BattleRuntimeMetrics* runtime_metrics_;
 };
 
 }  // namespace ihomeland::sim

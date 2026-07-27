@@ -12,32 +12,34 @@ import (
 )
 
 var knownKinds = map[string]struct{}{
-	"battle.session.closed":        {},
-	"battle.session.revoke":        {},
-	"battle.ticket.install":        {},
-	"battle.ticket.installed":      {},
-	"battle.ticket.revoke":         {},
-	"battle.ticket.revoked":        {},
-	"battle.ticket.status.query":   {},
-	"battle.ticket.status.receipt": {},
-	"instance.drain":               {},
-	"instance.drained":             {},
-	"instance.ready":               {},
-	"instance.start":               {},
-	"instance.status.query":        {},
-	"instance.status.receipt":      {},
-	"instance.stop":                {},
-	"instance.stopped":             {},
-	"node.health.query":            {},
-	"node.health.receipt":          {},
-	"node.hello.challenge":         {},
-	"node.hello.receipt":           {},
-	"node.listener.status.query":   {},
-	"node.listener.status.receipt": {},
-	"node.shutdown":                {},
-	"node.stopped":                 {},
-	"result.ack":                   {},
-	"result.proposal":              {},
+	"battle_qualification_snapshot_receipt": {},
+	"battle_qualification_snapshot_request": {},
+	"battle.session.closed":                 {},
+	"battle.session.revoke":                 {},
+	"battle.ticket.install":                 {},
+	"battle.ticket.installed":               {},
+	"battle.ticket.revoke":                  {},
+	"battle.ticket.revoked":                 {},
+	"battle.ticket.status.query":            {},
+	"battle.ticket.status.receipt":          {},
+	"instance.drain":                        {},
+	"instance.drained":                      {},
+	"instance.ready":                        {},
+	"instance.start":                        {},
+	"instance.status.query":                 {},
+	"instance.status.receipt":               {},
+	"instance.stop":                         {},
+	"instance.stopped":                      {},
+	"node.health.query":                     {},
+	"node.health.receipt":                   {},
+	"node.hello.challenge":                  {},
+	"node.hello.receipt":                    {},
+	"node.listener.status.query":            {},
+	"node.listener.status.receipt":          {},
+	"node.shutdown":                         {},
+	"node.stopped":                          {},
+	"result.ack":                            {},
+	"result.proposal":                       {},
 }
 
 // Frame 是私有 stdio control protocol 的 canonical envelope。
@@ -78,9 +80,13 @@ func NewFrame(kind string, payload any, requestID RequestID, sequence uint64, no
 	if err != nil {
 		return Frame{}, fmt.Errorf("marshal control payload: %w", err)
 	}
+	canonical, err := canonicalObject(raw)
+	if err != nil {
+		return Frame{}, fmt.Errorf("canonicalize control payload: %w", err)
+	}
 	frame := Frame{
 		Kind:          kind,
-		Payload:       raw,
+		Payload:       canonical,
 		RequestID:     requestID,
 		SchemaVersion: SchemaVersion,
 		Sequence:      sequence,

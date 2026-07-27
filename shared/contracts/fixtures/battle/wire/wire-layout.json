@@ -32,6 +32,22 @@
       { "name": "application_sequence", "offset": 8, "width": 8, "encoding": "uint64-be", "constraint": "route-policy" }
     ]
   },
+  "snapshot_acknowledgement": {
+    "message_ids": [3002, 3003],
+    "protobuf_field": "last_processed_input_tick",
+    "field_number": 7,
+    "scalar_type": "uint64",
+    "presence": "explicit-required",
+    "initial_value": 0,
+    "scope": "authenticated-actor-and-mapping-generation",
+    "partition_policy": "identical-across-complete-set-before-publication",
+    "maximum_varint_bytes": 10,
+    "maximum_datagram_bytes": 1200,
+    "route_payload_budgets": {
+      "3002": 1040,
+      "3003": 900
+    }
+  },
   "kcp_segment_header": {
     "size_bytes": 24,
     "byte_order": "little-endian",
@@ -57,9 +73,31 @@
       { "name": "application_sequence", "offset": 8, "width": 8, "encoding": "uint64-be", "constraint": "route-policy" }
     ]
   },
+  "transport_control_envelope": {
+    "size_bytes": 8,
+    "byte_order": "network-big-endian",
+    "authentication": "secure-packet-kind-control",
+    "fields": [
+      { "name": "magic", "offset": 0, "width": 4, "encoding": "ascii", "constraint": "IHBC" },
+      { "name": "version", "offset": 4, "width": 1, "encoding": "uint8", "constraint": "1" },
+      { "name": "kind", "offset": 5, "width": 1, "encoding": "uint8", "constraint": "1-through-8-registered" },
+      { "name": "payload_length", "offset": 6, "width": 2, "encoding": "uint16-be", "constraint": "exact-trailing-bytes" }
+    ]
+  },
+  "transport_control_messages": [
+    { "kind": 1, "name": "rebind-request", "direction": "c2s-current-endpoint", "payload_bytes": 34, "fields": "candidate-address-16,candidate-port-u16be,nonce-16" },
+    { "kind": 2, "name": "rebind-challenge", "direction": "s2c-candidate-endpoint", "payload_bytes": 48, "fields": "current-generation-u32be,next-generation-u32be,nonce-16,expires-at-u64be,cookie-16" },
+    { "kind": 3, "name": "rebind-confirm", "direction": "c2s-candidate-endpoint", "payload_bytes": 48, "fields": "exact-rebind-challenge-payload" },
+    { "kind": 4, "name": "rebind-committed", "direction": "s2c-candidate-before-generation-commit", "payload_bytes": 20, "fields": "next-generation-u32be,nonce-16" },
+    { "kind": 5, "name": "rekey-proposal", "direction": "c2s-current-endpoint", "payload_bytes": 32, "fields": "rollover-nonce-32" },
+    { "kind": 6, "name": "rekey-committed", "direction": "s2c-before-epoch-commit", "payload_bytes": 32, "fields": "exact-rollover-nonce-32" },
+    { "kind": 7, "name": "close-request", "direction": "c2s-current-endpoint", "payload_bytes": 1, "fields": "close-code-u8" },
+    { "kind": 8, "name": "close-acknowledged", "direction": "s2c-before-session-destroy", "payload_bytes": 1, "fields": "exact-close-code-u8" }
+  ],
   "datagram_equation": {
     "raw": "48 secure + 16 raw + protobuf + 16 tag <= 1200",
     "kcp": "48 secure + 24 kcp + segment-payload + 16 tag <= 1200",
+    "control": "48 secure + 8 control + fixed-control-payload + 16 tag <= 1200",
     "ipv6_udp_budget_bytes": 48,
     "ip_fragmentation": "forbidden"
   }

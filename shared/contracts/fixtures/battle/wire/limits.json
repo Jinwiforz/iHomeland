@@ -53,7 +53,7 @@
     "maximum_rto_ms": 200,
     "dead_link_retransmits": 10,
     "message_queue_items": 64,
-    "message_expiry_ms": 500
+    "maximum_message_expiry_ms": 2250
   },
   "resources": {
     "maximum_actors_per_instance": 8,

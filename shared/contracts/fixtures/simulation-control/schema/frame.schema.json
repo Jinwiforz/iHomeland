@@ -30,6 +30,8 @@
     "kind": {
       "type": "string",
       "enum": [
+        "battle_qualification_snapshot_receipt",
+        "battle_qualification_snapshot_request",
         "battle.session.closed",
         "battle.session.revoke",
         "battle.ticket.install",

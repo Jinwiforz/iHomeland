@@ -1,6 +1,6 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "fault-matrix",
   "prng": "lcg32-numerical-recipes",
   "seed": 20260723,

@@ -24,8 +24,8 @@ child 的真实 bind 结果。隔离 loopback 测试可以使用 `127.0.0.1:0` �
 
 ## 容器与生产映射
 
-以下 Docker Compose 片段只说明 bind、NAT 与 advertised endpoint 的映射关系；B0.6
-完成前它只能用于部署预演，不代表 production 网络资格已经通过：
+以下 Docker Compose 片段只说明 bind、NAT 与 advertised endpoint 的映射关系；显式
+最终网络资格通过前它只能用于部署预演，不代表 production 网络资格已经通过：
 
 ```yaml
 services:
@@ -45,3 +45,28 @@ services:
 只有 advertised endpoint 可进入 HTTPS BattleTicket；diagnostic、Redis、MySQL 与
 stdio control 均不得随 UDP 映射暴露。防火墙只允许预期 client ingress，且不允许 UDP
 response 放大、跨 node ticket 或未认证业务 payload。
+
+## 本地资格与故障排查
+
+工具必须使用仓库锁定版本；缺失依赖只允许由统一入口恢复到 `.local/`。Unity 使用
+`client/ProjectSettings/ProjectVersion.txt` 锁定的 Editor，CMake、第三方 C++ source
+和 evidence 均不得从系统默认路径隐式替换。
+
+普通 change 先预览并执行自身的 closed validation plan：
+
+```powershell
+.\tools\quality\quality.ps1 impact -Change <change-name>
+.\tools\quality\quality.ps1 check-change -Change <change-name>
+```
+
+已知网络问题使用 `quality.ps1 diagnose -Scenario <scenario>` 单独定位。只有使用者明确
+冻结里程碑、提交全部预期变化且 worktree clean 后，才执行
+`quality.ps1 qualify -Candidate (git rev-parse HEAD)`；该入口会统一调度 C++、服务端、
+客户端契约和 battle qualification owners。不得手工重放历史 B0.x verify/finalize，
+也不得把旧报告交给下游门禁冒充 current report。
+
+真实协议客户端若以 EOF 终结，先检查 server 是否已因 ticket/session/assignment revoke
+删除对应 session，再检查同 listener send counter、KCP 10 ms periodic update 与
+endpoint/key generation。不得通过增加第二 socket、延长无界 timeout 或关闭 replay
+校验规避失败。MTU、tamper 与 replay 负例必须在后续合法 datagram 仍可处理时才算通过；
+只观察“没有响应”不足以证明 listener 或 session 仍健康。

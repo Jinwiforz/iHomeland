@@ -143,6 +143,8 @@ type RouteEntry struct {
 	SplitPolicy string `json:"splitPolicy,omitempty"`
 	// BindingPolicy 要求 route 精确绑定 server-owned session、endpoint、target 与 generation。
 	BindingPolicy string `json:"bindingPolicy,omitempty"`
+	// AcknowledgementPolicy 冻结 snapshot 对当前 actor/mapping generation 的显式输入确认。
+	AcknowledgementPolicy string `json:"acknowledgementPolicy,omitempty"`
 }
 
 // RouteRegistry 提供后续 dispatcher 消费的完整实时路由集合。

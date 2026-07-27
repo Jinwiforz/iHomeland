@@ -91,6 +91,27 @@ PersonalWorld、WorldInstance、VisitSession 与 placement 构成第一业务里
 
 对应 Unity change 必须等待上述服务端能力和跨端契约冻结，并按 PersonalWorld/VisitSession pure C# Service、WorldAdmission、SceneContext adapter、UI 的顺序接入。Room/Party 只有活动准备或连续组队需求成立时才进入独立 change，不作为访问个人世界的前置条件。
 
+## 统一验证策略
+
+开发反馈与最终资格是两个不同层级：
+
+- 普通实现、修复和重构 change 必须提供 closed `validation.json`，只引用
+  `tools/quality/catalog.json` 中登记的 incremental 或 targeted-expensive check。
+- 默认先运行 `tools/quality/quality.ps1 impact -Change <change-name>` 预览影响面，再运行
+  `check-change`。它只验证当前新增行为以及协议、registry、generated binding、session
+  identity 或 owner contract 的已登记 consumers。
+- 真实网络问题可以用 `diagnose -Scenario <scenario>` 做单场景排障。诊断使用独立 run
+  evidence，可复用同源 ignored binary cache，但永远不能产生最终资格结论。
+- 完整 fault/capacity/security/lifecycle 矩阵、连续两次 verify、长时 soak 与 finalize
+  只在使用者明确要求时运行，并必须以
+  `quality.ps1 qualify -Candidate <current-clean-HEAD>` 冻结当前候选。
+- 准备归档、任务编号较大、修改协议/安全/C++/网络代码或旧报告 stale，都不构成自动执行
+  最终资格的授权。最终资格运行当前产品 capability suites，不按历史 B0.x change
+  顺序重复构建。
+
+这一区分只改变执行时机，不降低长期安全、协议、容量和可观测要求；未运行的最终矩阵必须
+保持未生成或 stale，不能被普通 change 的定向绿色结果冒充。
+
 客户端 C3 资格只能由 `tools/client-qualification/client-qualification.ps1` 聚合。缺陷开发可使用同一入口的`diagnose -Scenario`定向运行相关Unity fixture并构建Development Player；服务端进程替换可使用同目录的`server-restart-recovery.ps1`驱动真实Player、精确listener owner和同一storage run。两类独立diagnostics目录都永远不是资格证据。局部 Unity 绿色、单一Development build、旧exe、截图或口头结果都不能替代完整资格；全部mandatory自动/operator记录必须绑定同一contract与Development/Release build digest，missing、skipped、stale、cleanup failure或contract漂移一律保持not-qualified。Operator 可由人或受控自动化代理执行，但必须操作真实 Player/server/storage、消费固定低敏完成信号并只终止其精确持有的PID，不能直接合成 evidence。完整规则见 `docs/client-v1-qualification.md`。
 
 C3固定分阶段执行 `validate`、`automatic`、`soak`、`prepare-manual` 与 `finalize`。除首次动作外都必须显式携带同一run-id；soak凭据只从当前PowerShell进程环境继承并在运行后移除，不得出现在命令行或证据。Release smoke必须使用没有产品default secure record的干净Windows用户；工具不得为通过门禁而删除或轮换日常lineage。
@@ -182,7 +203,9 @@ Change 完成至少满足：
 - 无密钥、缓存、本机配置和被 Git 跟踪的 generated code
 - README/docs 与实现一致
 
-服务端资格 change 额外要求 Go unit/integration/contract/race、恢复、并发、背压和 shutdown 全部通过。
+普通服务端 change 只要求其 validation plan 登记的相关 Go
+unit/integration/contract、定向 race、恢复、并发、背压和 shutdown checks 通过。只有使用者
+显式发起最终资格时，才要求当前产品的全部 mandatory suites 同时通过。
 
 ## 归档
 

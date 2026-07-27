@@ -56,6 +56,10 @@ type ControllerConfig struct {
 	DrainDeadline time.Duration
 	// StopDeadline 是传给 child 的 bounded stop budget。
 	StopDeadline time.Duration
+	// QualificationRunID 非空时绑定唯一允许读取 snapshot 的资格 run。
+	QualificationRunID QualificationRunID
+	// QualificationMode 必须由资格 Composition Root 显式启用。
+	QualificationMode bool
 }
 
 // Validate 拒绝 incomplete、超资格或未绑定 deadline 的 controller 配置。
@@ -64,7 +68,11 @@ func (config ControllerConfig) Validate() error {
 		config.Build.Validate() != nil || config.Capacity.Validate() != nil ||
 		!config.ConfigIdentity.Valid() || !config.NavigationIdentity.Valid() ||
 		!config.PhysicsIdentity.Valid() || config.DrainDeadline <= 0 ||
-		config.StopDeadline <= 0 {
+		config.StopDeadline <= 0 ||
+		config.QualificationMode !=
+			(config.QualificationRunID != "") ||
+		(config.QualificationMode &&
+			!config.QualificationRunID.Valid()) {
 		return errors.New("simulation controller config is invalid")
 	}
 	return nil
@@ -112,6 +120,8 @@ type Controller struct {
 	revision uint64
 	// healthy 一旦 session terminal 或 shutdown 就不可恢复。
 	healthy bool
+	// qualificationSampleSequence 只在资格 snapshot 成功后单调推进。
+	qualificationSampleSequence uint64
 }
 
 // BootstrapController 完成 nonce hello/build/capacity receipt 后才发布 controller。

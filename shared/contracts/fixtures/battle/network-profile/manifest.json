@@ -1,9 +1,9 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "manifest",
   "schema_path": "schema.json",
-  "schema_sha256": "0e286f57eceb2b12916bbbfa20dc671f88cf08f26bee068d5bb5e4df11b8d10d",
+  "schema_sha256": "54cbfbffd4d8dcf733255120ec80e9ce1bdf53404d28abb99f0e0089a6c6b837",
   "required_requirements": [
     "cadence",
     "capacity",
@@ -20,27 +20,27 @@
     {
       "path": "fault-matrix.json",
       "document_kind": "fault-matrix",
-      "file_sha256": "1212139bfc09a6c929b387e7efa97642f93f8d8872445272b484ea770cc3a1cb"
+      "file_sha256": "3a567aa9fb7854ebc91357e371ce3d42f82736ee6387698d84459ca720747fc2"
     },
     {
       "path": "message-inventory.json",
       "document_kind": "message-inventory",
-      "file_sha256": "d170de2c33b5ce10944d5dd667d5606f5bf6be37be93bf0e14232966d72bf89a"
+      "file_sha256": "1fef778a3aa82d260e8cc494902560b8aa6f789e4a925126d61a30f8e5110625"
     },
     {
       "path": "model-binding.json",
       "document_kind": "model-binding",
-      "file_sha256": "7441b49706bbcbaa04288c672a52ca01d6b377879cd0dcfa91a3f09f32e36cbc"
+      "file_sha256": "7326e85dcd588907cc426a982cafd7031a3780b7754da7e5e88d51c7cf6e28b4"
     },
     {
       "path": "profile.json",
       "document_kind": "profile",
-      "file_sha256": "ca7b251509a9ec37b97615c5dfdc25444f5e5d9c747c6f72a90db1b4bfbbcc4c"
+      "file_sha256": "d1c02711d462bbd3bf723d23e1b6940b56ed619d1e56167e12403a505b1c4722"
     },
     {
       "path": "reports/qualification.json",
       "document_kind": "qualification-report",
-      "file_sha256": "010c1e840f4021047e4d9c32f9e3e44f923b73667e1c3021f69fee66406767a8"
+      "file_sha256": "f6e6e3f7b250f158439e20df9456f42cd62dde365c13494c022cc14f85ce204e"
     }
   ],
   "cases": [
@@ -60,7 +60,7 @@
         "combat-heavy",
         "movement-heavy"
       ],
-      "file_sha256": "7b2236449606dda30b5bfba5af97f8ac519df52a897f90f83990e6a6ee3686db"
+      "file_sha256": "5029cdc8e9b4237397a8c59e16c12a0a2c74ecea3b0550a96ea5655a991c92bf"
     },
     {
       "case_id": "case-cadence-input",
@@ -82,7 +82,7 @@
         "idle",
         "movement-heavy"
       ],
-      "file_sha256": "53ddd360e06d6bc092436253d6139281089e3df9fc420bbd719620f907796a9c"
+      "file_sha256": "5db44d9222d6e5e9662ff86fadc39637ddeb6c848cac289e4c904cb44d4c3794"
     },
     {
       "case_id": "case-mtu-budget",
@@ -99,7 +99,7 @@
       "phases": [
         "boss-burst"
       ],
-      "file_sha256": "55b1ffd1721b55f906b389aecf4721b3bcb2c1d7c4b3afb1d13fea2c7a79d902"
+      "file_sha256": "2c0be58a7a7972325e707f2eb807ca4414f5dd4adc4c0bfbc8048619b56961d0"
     },
     {
       "case_id": "case-negative-contract",
@@ -118,7 +118,7 @@
         "boss-burst",
         "combat-heavy"
       ],
-      "file_sha256": "888028649b5fcab75b1d00a46e913aed163359f45b395af89d2bea1af5e9df09"
+      "file_sha256": "1b98f252321321edd5220536b01dc8a75444d735bcfbd4d82b60de91d7623a2f"
     },
     {
       "case_id": "case-overload-capacity",
@@ -140,7 +140,7 @@
         "idle",
         "movement-heavy"
       ],
-      "file_sha256": "7b364586fec70819b0f36486a57eb88d3331fdcd3b92466d32ef118304998787"
+      "file_sha256": "1a34a637503ab4071c4cdbfcfca1dbe4d9feaeb9328d8f589c8204abf7d257b7"
     },
     {
       "case_id": "case-reliable-kcp",
@@ -158,7 +158,7 @@
         "combat-heavy",
         "disconnect-drain"
       ],
-      "file_sha256": "c4e58e4049444f787aa6784ee10de98ddfb0649fc4c50a33d4f905b254a252c7"
+      "file_sha256": "9cc03e485e27bf407602e04f537791d2d8c4350a8d09ccd7cf1a412eb7a06406"
     }
   ]
 }

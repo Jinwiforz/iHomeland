@@ -1,4 +1,5 @@
 #include "ihomeland/sim/transport/resource_governor.hpp"
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 
 #include <cstdint>
 #include <stdexcept>
@@ -126,8 +127,11 @@ void TestAuthenticatedRates() {
 
 /// TestHardBudgets 验证node/session ingress/egress都固定为256 items。
 void TestHardBudgets() {
+    auto runtime_metrics =
+        ihomeland::sim::BattleRuntimeMetrics{};
     auto governor =
-        ihomeland::sim::BattleResourceGovernor{};
+        ihomeland::sim::BattleResourceGovernor{
+            &runtime_metrics};
     Require(
         governor.ReserveIngress(1, 256).allowed &&
             governor.ReserveIngress(1, 1).rejection ==
@@ -159,6 +163,42 @@ void TestHardBudgets() {
                         BattleResourceRejection::
                             EgressBudget)) == 1,
         "resource metrics exposed wrong low-cardinality accounting");
+    const auto runtime = runtime_metrics.Snapshot();
+    Require(
+        runtime.ingress_queue_high_watermark == 256 &&
+            runtime.egress_queue_high_watermark == 256 &&
+            runtime.rejected_packets == 2,
+        "resource governor did not update runtime metrics owner");
+}
+
+/// TestSessionOwnerCleanup 验证terminal session归还遗留budget且不泄漏registry。
+void TestSessionOwnerCleanup() {
+    auto governor =
+        ihomeland::sim::BattleResourceGovernor{};
+    {
+        auto session =
+            ihomeland::sim::
+                BattleSessionResourceGovernor(
+                    governor,
+                    11,
+                    22);
+        Require(
+            session.ReserveIngress(128).allowed &&
+                session.ReserveEgress(256).allowed,
+            "session owner failed to reserve hard budget");
+    }
+    {
+        auto successor =
+            ihomeland::sim::
+                BattleSessionResourceGovernor(
+                    governor,
+                    12,
+                    22);
+        Require(
+            successor.ReserveIngress(256).allowed &&
+                successor.ReserveEgress(256).allowed,
+            "terminal session leaked node budget");
+    }
 }
 
 }  // namespace
@@ -167,5 +207,6 @@ int main() {
     TestPreAuthFixedState();
     TestAuthenticatedRates();
     TestHardBudgets();
+    TestSessionOwnerCleanup();
     return 0;
 }

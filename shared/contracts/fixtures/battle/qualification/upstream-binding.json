@@ -1,0 +1,65 @@
+{
+  "formatVersion": 1,
+  "qualificationVersion": "battle-network-qualification-v1",
+  "documentKind": "upstream-binding",
+  "sources": [
+    {
+      "owner": "battle-model",
+      "path": "shared/contracts/fixtures/battle/model/manifest.json",
+      "sha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+      "requiredConclusion": "model-qualified"
+    },
+    {
+      "owner": "battle-network-profile",
+      "path": "shared/contracts/fixtures/battle/network-profile/manifest.json",
+      "sha256": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
+      "requiredConclusion": "profile-qualified"
+    },
+    {
+      "owner": "simulation-control",
+      "path": "shared/contracts/fixtures/simulation-control/manifest.json",
+      "sha256": "9e0e10e4b085584aec22c99bbf0e6e6163de893869142f7dd8ef230430dcac6f",
+      "requiredConclusion": "control-qualified-windows-x64"
+    },
+    {
+      "owner": "battle-wire",
+      "path": "shared/contracts/fixtures/battle/wire/manifest.json",
+      "sha256": "9c7eb49798cb821411f222aab5225eb4c472f2892fc1c136806f36673bfedc30",
+      "requiredConclusion": "secure-transport-qualified-windows-x64"
+    },
+    {
+      "owner": "dependency-toolchain",
+      "path": "versions.yaml",
+      "sha256": "46a7f93818dcd6ef5c4cdae3c4c5addb2b405da72c7febdc8832aeebf8949373",
+      "requiredConclusion": "locked"
+    },
+    {
+      "owner": "battle-runtime-config",
+      "path": "server/config/simulation-control.example.yaml",
+      "sha256": "04c8b47db68d7182ce975725b21523e3dacac3cb4e6bc5068a13d845a030fe47",
+      "requiredConclusion": "strict-config"
+    },
+    {
+      "owner": "secure-transport-audit",
+      "path": "openspec/changes/archive/2026-07-27-repair-battle-handshake-runtime/evidence/qualification-audit.md",
+      "sha256": "7168cbb2cdc4ba5472096d855245a34dd6c22a89e1c644f3556a291e7ba4ea28",
+      "requiredConclusion": "secure-transport-qualified-windows-x64"
+    }
+  ],
+  "receipts": {
+    "b03ReleaseBuildSha256": "0d187ec56d808426439d886e4073ce839f8d2e4b0fe79d4055e39f301f77d541",
+    "b03AsanBuildSha256": "d5672885dea860ef698f0e1cda6ed9f0e93b9d4c8141d43e5e77a638a075dfb1",
+    "b03QualificationGateSha256": "bd289bdd408e32180e7fe7ea35b279f85f481ad15dd14ab8690adf7e0fb37c51",
+    "b04QualificationReportSha256": "c7d90d63609c4821622bb57a3454cf1160c13dc9ff851f76b44fbe19366a8ef4",
+    "b05WireCorpusSha256": "106acd5a61ab4a29f8c24e6c970a01e42af81bf6c7288f5d7ab1b37da5471ae3",
+    "b05ImplementationOverlaySha256": "249f70e2d9f470ffaf222e7f28ff4a64edd85013658204591b77048c3b1978a9"
+  },
+  "invariants": {
+    "platform": "windows-x64",
+    "environmentClass": "controlled-local-fault-gateway",
+    "sourceCorpusMode": "read-only",
+    "maximumBattleActors": 8,
+    "simulationTickNanoseconds": 50000000,
+    "publicInternetQualified": false
+  }
+}

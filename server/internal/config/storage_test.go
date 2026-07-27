@@ -100,6 +100,45 @@ func validProductionSimulationControl() SimulationControl {
 	}
 }
 
+// TestSimulationQualificationModeRequiresClosedLocalBinding 验证 production 拒绝、
+// local mode 的 run identity/cadence 成对出现。
+func TestSimulationQualificationModeRequiresClosedLocalBinding(t *testing.T) {
+	t.Parallel()
+
+	local := validProductionSimulationControl()
+	local.QualificationMode = true
+	local.QualificationRunID = "bqrun_0123456789abcdef0123456789abcdef"
+	local.QualificationSampleInterval = time.Second
+	if err := local.validate("local"); err != nil {
+		t.Fatalf("local qualification mode should be valid: %v", err)
+	}
+	if err := local.validate("production"); err == nil {
+		t.Fatal("production accepted qualification mode")
+	}
+	for name, mutate := range map[string]func(*SimulationControl){
+		"missing-run": func(value *SimulationControl) {
+			value.QualificationRunID = ""
+		},
+		"invalid-run": func(value *SimulationControl) {
+			value.QualificationRunID = "bqrun_invalid"
+		},
+		"missing-interval": func(value *SimulationControl) {
+			value.QualificationSampleInterval = 0
+		},
+		"disabled-with-values": func(value *SimulationControl) {
+			value.QualificationMode = false
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := local
+			mutate(&candidate)
+			if err := candidate.validate("local"); err == nil {
+				t.Fatal("invalid qualification config was accepted")
+			}
+		})
+	}
+}
+
 // TestStorageEnvironmentOverridesAreExplicitAndRedacted 验证白名单覆盖并确保非法 secret 原值不进入错误。
 func TestStorageEnvironmentOverridesAreExplicitAndRedacted(t *testing.T) {
 	t.Parallel()

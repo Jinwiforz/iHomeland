@@ -11,12 +11,12 @@
     {
       "owner": "battle-network-profile",
       "manifest_path": "../network-profile/manifest.json",
-      "manifest_sha256": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f"
+      "manifest_sha256": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424"
     },
     {
       "owner": "simulation-control",
       "manifest_path": "../../simulation-control/manifest.json",
-      "manifest_sha256": "a6e5d72de49cad8adc53bb686f2573b37486af54057aa03ece373df6af83f4b1"
+      "manifest_sha256": "9e0e10e4b085584aec22c99bbf0e6e6163de893869142f7dd8ef230430dcac6f"
     }
   ],
   "invariants": {

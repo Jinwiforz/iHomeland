@@ -138,8 +138,8 @@ void VerifyDigest(const std::filesystem::path& path, const std::string& expected
         {"format_version", "profile_version", "document_kind", "schema_path", "schema_sha256",
          "required_requirements", "files", "cases"},
         "profile manifest");
-    if (RequireString(manifest, "format_version") != "1" ||
-        RequireString(manifest, "profile_version") != "battle-network-profile-v1" ||
+    if (RequireString(manifest, "format_version") != "2" ||
+        RequireString(manifest, "profile_version") != "battle-network-profile-v2" ||
         RequireString(manifest, "document_kind") != "manifest") {
         Fail(BattleConfigErrorCode::Schema, "profile manifest identity is unsupported");
     }
@@ -181,8 +181,8 @@ void VerifyDigest(const std::filesystem::path& path, const std::string& expected
          "model_version", "manifest_path", "manifest_sha256", "assumptions_path",
          "assumptions_sha256", "required_requirements", "cases"},
         "model binding");
-    if (RequireString(binding, "format_version") != "1" ||
-        RequireString(binding, "profile_version") != "battle-network-profile-v1" ||
+    if (RequireString(binding, "format_version") != "2" ||
+        RequireString(binding, "profile_version") != "battle-network-profile-v2" ||
         RequireString(binding, "model_format_version") != "1" ||
         RequireString(binding, "model_version") != "battle-model-v1") {
         Fail(BattleConfigErrorCode::Schema, "model binding identity is unsupported");
@@ -311,8 +311,8 @@ BattleRuntimeConfig LoadBattleRuntimeConfig(
          "profile_status", "selected_candidate_id", "candidates", "parameters", "mtu_budget",
          "kcp_profile", "capacity", "workloads", "report_path"},
         "profile");
-    if (RequireString(profile, "format_version") != "1" ||
-        RequireString(profile, "profile_version") != "battle-network-profile-v1" ||
+    if (RequireString(profile, "format_version") != "2" ||
+        RequireString(profile, "profile_version") != "battle-network-profile-v2" ||
         RequireString(profile, "document_kind") != "profile" ||
         RequireString(profile, "profile_status") != "qualified" ||
         RequireString(profile, "selected_candidate_id") != "candidate-20hz" ||

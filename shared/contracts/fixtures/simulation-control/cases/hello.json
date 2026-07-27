@@ -14,7 +14,7 @@
         "runtimeNodeId": "rnode_fixture_1",
         "expectedBuildIdentity": "af433af8fe625d09d8a4d39fbe8e5e6524f006389ef3f921eb301bcc2038767d",
         "expectedModelManifest": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
-        "expectedProfileManifest": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+        "expectedProfileManifest": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
         "instanceCapacity": 4,
         "actorCapacity": 8
       }
@@ -30,7 +30,7 @@
         "runtimeNodeId": "rnode_fixture_1",
         "buildIdentity": "af433af8fe625d09d8a4d39fbe8e5e6524f006389ef3f921eb301bcc2038767d",
         "modelManifest": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
-        "profileManifest": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+        "profileManifest": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
         "platformQualification": "implementation-qualified-windows-x64",
         "instanceCapacity": 4,
         "actorCapacity": 8

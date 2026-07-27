@@ -59,6 +59,10 @@ type Config struct {
 	BattleUDPAdvertisedPort uint16
 	// BattleListenerIdentity 是不可复活 node 的 128-bit lowercase hex identity。
 	BattleListenerIdentity string
+	// QualificationRunID 非空时显式启用只读 B0.6 snapshot。
+	QualificationRunID simulationcontrol.QualificationRunID
+	// QualificationMode 要求 run identity 与 child CLI capability 同时存在。
+	QualificationMode bool
 }
 
 // Validate 拒绝相对路径、缺失 digest 和 silent deadline defaults。
@@ -77,6 +81,11 @@ func (config Config) Validate() error {
 			config.BattleUDPBindPort == 0 || config.BattleUDPAdvertisedPort == 0 ||
 			len(config.BattleListenerIdentity) != 32) {
 		return errors.New("simulation battle UDP process config is invalid")
+	}
+	if config.QualificationMode != (config.QualificationRunID != "") ||
+		(config.QualificationMode &&
+			!config.QualificationRunID.Valid()) {
+		return errors.New("simulation qualification process config is invalid")
 	}
 	return nil
 }
@@ -110,16 +119,7 @@ func Start(config Config, nonce simulationcontrol.Digest, proposals simulationco
 	if err := verifyFile(config.QualificationReceiptPath, config.QualificationReceiptSHA256); err != nil {
 		return nil, fmt.Errorf("simulation qualification verification failed: %w", err)
 	}
-	arguments := []string{"--control-stdio"}
-	if config.BattleUDPEnabled {
-		arguments = append(arguments,
-			"--battle-udp-bind-host", config.BattleUDPBindHost,
-			"--battle-udp-bind-port", strconv.FormatUint(uint64(config.BattleUDPBindPort), 10),
-			"--battle-udp-advertised-host", config.BattleUDPAdvertisedHost,
-			"--battle-udp-advertised-port", strconv.FormatUint(uint64(config.BattleUDPAdvertisedPort), 10),
-			"--battle-listener-identity", config.BattleListenerIdentity,
-		)
-	}
+	arguments := processArguments(config)
 	command := exec.Command(config.BinaryPath, arguments...)
 	command.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
@@ -170,6 +170,28 @@ func Start(config Config, nonce simulationcontrol.Digest, proposals simulationco
 	go pumpStderr(stderr, config.StderrLineLimit, diagnostics)
 	go owner.wait()
 	return owner, nil
+}
+
+// processArguments 从已验证配置生成唯一 closed child CLI。
+func processArguments(config Config) []string {
+	arguments := []string{"--control-stdio"}
+	if config.BattleUDPEnabled {
+		arguments = append(arguments,
+			"--battle-udp-bind-host", config.BattleUDPBindHost,
+			"--battle-udp-bind-port", strconv.FormatUint(uint64(config.BattleUDPBindPort), 10),
+			"--battle-udp-advertised-host", config.BattleUDPAdvertisedHost,
+			"--battle-udp-advertised-port", strconv.FormatUint(uint64(config.BattleUDPAdvertisedPort), 10),
+			"--battle-listener-identity", config.BattleListenerIdentity,
+		)
+	}
+	if config.QualificationMode {
+		arguments = append(
+			arguments,
+			"--battle-qualification-run-id",
+			config.QualificationRunID.String(),
+		)
+	}
+	return arguments
 }
 
 // Session 返回 controller bootstrap 使用的唯一 session。

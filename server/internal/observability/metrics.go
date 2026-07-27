@@ -130,6 +130,10 @@ type Metrics struct {
 	battleNetworkSeconds *prometheus.HistogramVec
 	// battleQueueDepth 记录固定队列的瞬时条目数。
 	battleQueueDepth *prometheus.GaugeVec
+	// battleQualificationControl 只在显式资格模式公开 closed control snapshot。
+	battleQualificationControl *prometheus.GaugeVec
+	// battleQualificationProcess 只在显式资格模式公开 Go/C++ OS process counter。
+	battleQualificationProcess *prometheus.GaugeVec
 }
 
 // NewMetrics 注册运行时固定指标集合；私有 registry 使重复构造不会污染 package global 状态。
@@ -192,8 +196,16 @@ func NewMetrics() *Metrics {
 		battleTrafficBytes:        prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ihomeland_server_battle_transport_bytes_total", Help: "Secure battle transport bytes."}, []string{"direction", "lane"}),
 		battleNetworkSeconds:      prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "ihomeland_server_battle_transport_network_seconds", Help: "Battle transport RTT and jitter samples.", Buckets: prometheus.ExponentialBuckets(0.001, 2, 12)}, []string{"sample"}),
 		battleQueueDepth:          prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "ihomeland_server_battle_transport_queue_items", Help: "Battle transport bounded queue depth."}, []string{"queue"}),
+		battleQualificationControl: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ihomeland_server_battle_qualification_control",
+			Help: "Qualification-only low-sensitive control snapshot values.",
+		}, []string{"metric"}),
+		battleQualificationProcess: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ihomeland_server_battle_qualification_process",
+			Help: "Qualification-only low-sensitive OS process values.",
+		}, []string{"role", "metric"}),
 	}
-	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries, metrics.simulationNodeHealth, metrics.simulationInstances, metrics.simulationCapacity, metrics.simulationControlRequests, metrics.simulationControlSeconds, metrics.simulationControlQueue, metrics.simulationDrains, metrics.simulationResults, metrics.simulationProcessExits, metrics.simulationShutdowns, metrics.battleEvents, metrics.battleTrafficBytes, metrics.battleNetworkSeconds, metrics.battleQueueDepth)
+	metrics.registry.MustRegister(metrics.startupTotal, metrics.shutdownTotal, metrics.taskFailuresTotal, metrics.diagnosticRequests, metrics.lifecycleSeconds, metrics.storagePool, metrics.storageProbeTotal, metrics.storageProbeSeconds, metrics.storageMigrationTotal, metrics.storageOperationTotal, metrics.publicRequestsTotal, metrics.publicRequestSeconds, metrics.publicResponseBytes, metrics.websocketHandshakes, metrics.websocketConnections, metrics.websocketPushes, metrics.websocketPushBytes, metrics.websocketQueues, metrics.websocketQueueItems, metrics.websocketQueueBytes, metrics.websocketHeartbeats, metrics.websocketCloses, metrics.websocketInvalidations, metrics.tcpHandshakes, metrics.tcpConnections, metrics.tcpFrames, metrics.tcpFrameBytes, metrics.tcpDispatches, metrics.tcpDispatchSeconds, metrics.tcpInFlight, metrics.tcpQueues, metrics.tcpQueueItems, metrics.tcpQueueBytes, metrics.tcpPushes, metrics.tcpCloses, metrics.tcpInvalidations, metrics.worldRuntimes, metrics.semanticDeadlines, metrics.worldLeases, metrics.deadlineRuns, metrics.visitLifecycles, metrics.visitDeliveries, metrics.simulationNodeHealth, metrics.simulationInstances, metrics.simulationCapacity, metrics.simulationControlRequests, metrics.simulationControlSeconds, metrics.simulationControlQueue, metrics.simulationDrains, metrics.simulationResults, metrics.simulationProcessExits, metrics.simulationShutdowns, metrics.battleEvents, metrics.battleTrafficBytes, metrics.battleNetworkSeconds, metrics.battleQueueDepth, metrics.battleQualificationControl, metrics.battleQualificationProcess)
 	return metrics
 }
 
@@ -304,6 +316,67 @@ func (metrics *Metrics) SetBattleQueue(queue string, items int) {
 		panic("invalid battle queue depth")
 	}
 	metrics.battleQueueDepth.WithLabelValues(queue).Set(float64(items))
+}
+
+// SetBattleQualificationControlMetric 发布显式资格模式的 closed snapshot 数值。
+func (metrics *Metrics) SetBattleQualificationControlMetric(metric string, value uint64) {
+	requireMetricLabel(
+		metric,
+		"sample-sequence",
+		"committed-tick",
+		"node-count",
+		"running-instance-count",
+		"active-session-count",
+		"installed-ticket-count",
+		"raw-ingress-bytes",
+		"raw-ingress-packets",
+		"raw-egress-bytes",
+		"raw-egress-packets",
+		"kcp-ingress-bytes",
+		"kcp-ingress-packets",
+		"kcp-egress-bytes",
+		"kcp-egress-packets",
+		"dropped-packets",
+		"rejected-packets",
+		"expired-messages",
+		"kcp-retransmits",
+		"ingress-queue-high-watermark",
+		"egress-queue-high-watermark",
+		"kcp-queue-high-watermark",
+		"maximum-tick-duration-ns",
+		"tick-debt-high-watermark",
+		"instance-memory-bytes",
+		"history-memory-bytes",
+		"rebinds",
+		"rekeys",
+		"close-normal",
+		"close-authentication",
+		"close-timeout",
+		"close-resource",
+		"close-lifecycle",
+		"close-transport",
+		"close-internal",
+	)
+	metrics.battleQualificationControl.WithLabelValues(metric).Set(float64(value))
+}
+
+// SetBattleQualificationProcessMetric 发布 Go/C++ 进程的只读 OS counter。
+func (metrics *Metrics) SetBattleQualificationProcessMetric(
+	role string,
+	metric string,
+	value uint64,
+) {
+	requireMetricLabel(role, "go-parent", "cpp-child")
+	requireMetricLabel(
+		metric,
+		"sequence",
+		"monotonic-time-us",
+		"cpu-time-ns",
+		"working-set-bytes",
+		"handle-count",
+		"thread-count",
+	)
+	metrics.battleQualificationProcess.WithLabelValues(role, metric).Set(float64(value))
 }
 
 // SetSimulationNodeHealth 更新唯一 child node 的封闭状态；调用方不得传入 node identity。

@@ -8,7 +8,11 @@ param(
 
     # Preset 选择 tracked Windows 配置，不接受本机自定义参数覆盖锁定 identity。
     [ValidateSet("windows-msvc-debug", "windows-msvc-release", "windows-msvc-asan", "windows-msvc-ci")]
-    [string]$Preset = "windows-msvc-debug"
+    [string]$Preset = "windows-msvc-debug",
+
+    # TestRegex 只缩小 test 动作的 CTest 集合，供 change 影响面验证复用同一 build tree。
+    # 空值继续执行 preset 登记的全部测试；该参数不得用于 qualification verify。
+    [string]$TestRegex = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +23,12 @@ $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 # CppToolModule 承载可单独回归的下载、归档安全和 exact toolchain 原语。
 $CppToolModule = Join-Path $PSScriptRoot "CppTool.psm1"
 Import-Module $CppToolModule -Force
+$CppIdentityModule = Join-Path $PSScriptRoot "CppIdentity.psm1"
+Import-Module $CppIdentityModule -Force
 Set-Location $RepositoryRoot
+if ($TestRegex -and $Command -ne "test") {
+    throw "TestRegex 只允许与 cpp.ps1 test 一起使用"
+}
 
 # Write-CppStatus 输出简短、稳定的阶段状态，便于本地终端和 CI 共用日志。
 function Write-CppStatus {
@@ -125,28 +134,7 @@ function Invoke-WithMsvcEnvironment {
 
 # Get-CppSourceDigest 对 tracked 与待提交的 C++ 输入按相对路径和内容计算稳定摘要，不包含仓库绝对路径。
 function Get-CppSourceDigest {
-    $relativeFiles = @(& git -C $RepositoryRoot ls-files --cached --others --exclude-standard -- versions.yaml simulation tools/cpp)
-    if ($LASTEXITCODE -ne 0) {
-        throw "无法枚举 C++ build identity 输入"
-    }
-    $rows = foreach ($relativePath in ($relativeFiles | Sort-Object -Unique)) {
-        $absolutePath = Join-Path $RepositoryRoot $relativePath
-        if (Test-Path -LiteralPath $absolutePath -PathType Leaf) {
-            $normalizedPath = $relativePath.Replace("\", "/")
-            $fileHash = (Get-FileHash -LiteralPath $absolutePath -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$normalizedPath=$fileHash"
-        }
-    }
-    $payload = ([string]::Join("`n", $rows) + "`n")
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        return ([System.BitConverter]::ToString(
-            $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($payload))
-        ) -replace "-", "").ToLowerInvariant()
-    }
-    finally {
-        $sha256.Dispose()
-    }
+    return Get-CppSourceIdentityDigest -RepositoryRoot $RepositoryRoot
 }
 
 # Write-CppBuildIdentity 把低敏 CMake manifest 与 source/config 摘要绑定为可重复 target identity。
@@ -251,7 +239,8 @@ function Assert-BattleCorpora {
 function Invoke-CMakeAction {
     param(
         [Parameter(Mandatory = $true)][ValidateSet("configure", "build", "test")][string]$Action,
-        [Parameter(Mandatory = $true)][string]$SelectedPreset
+        [Parameter(Mandatory = $true)][string]$SelectedPreset,
+        [string]$SelectedTestRegex = ""
     )
 
     if ($Action -eq "configure") {
@@ -280,7 +269,13 @@ function Invoke-CMakeAction {
                         "-DIHOMELAND_CONTROL_BUILD_IDENTITY=$bootstrapIdentity"
                 }
                 "build" { & $environment.CMake --build --preset $SelectedPreset }
-                "test" { & (Join-Path (Split-Path $environment.CMake -Parent) "ctest.exe") --preset $SelectedPreset }
+                "test" {
+                    $testArguments = @("--preset", $SelectedPreset)
+                    if ($SelectedTestRegex) {
+                        $testArguments += @("-R", $SelectedTestRegex)
+                    }
+                    & (Join-Path (Split-Path $environment.CMake -Parent) "ctest.exe") @testArguments
+                }
             }
             if ($LASTEXITCODE -ne 0) {
                 throw "CMake $Action ($SelectedPreset) 失败，退出码 $LASTEXITCODE"
@@ -390,8 +385,9 @@ switch ($Command) {
         Write-CppStatus "PASS" "CMake build: $Preset" Green
     }
     "test" {
-        Invoke-CMakeAction "test" $Preset
-        Write-CppStatus "PASS" "CTest: $Preset" Green
+        Invoke-CMakeAction "test" $Preset $TestRegex
+        $testScope = if ($TestRegex) { "$Preset, regex=$TestRegex" } else { $Preset }
+        Write-CppStatus "PASS" "CTest: $testScope" Green
     }
     "verify" {
         Invoke-CppVerify

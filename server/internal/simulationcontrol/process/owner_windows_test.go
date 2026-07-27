@@ -8,9 +8,57 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jinwiforz/ihomeland/server/internal/simulationcontrol"
 )
+
+// TestQualificationConfigRequiresExplicitModeAndSingleCLI 验证生产默认关闭且资格参数唯一。
+func TestQualificationConfigRequiresExplicitModeAndSingleCLI(t *testing.T) {
+	t.Parallel()
+	digest, _ := simulationcontrol.NewDigest(strings.Repeat("a", 64))
+	runID, _ := simulationcontrol.NewQualificationRunID(
+		"bqrun_0123456789abcdef0123456789abcdef",
+	)
+	base := Config{
+		BinaryPath:                 filepath.Join(t.TempDir(), "sim.exe"),
+		BinarySHA256:               digest,
+		QualificationReceiptPath:   filepath.Join(t.TempDir(), "receipt.json"),
+		QualificationReceiptSHA256: digest,
+		RequestTimeout:             time.Second,
+		ShutdownTimeout:            time.Second,
+		StderrLineLimit:            256,
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if arguments := processArguments(base); len(arguments) != 1 ||
+		arguments[0] != "--control-stdio" {
+		t.Fatalf("production arguments = %v", arguments)
+	}
+	runOnly := base
+	runOnly.QualificationRunID = runID
+	if err := runOnly.Validate(); err == nil {
+		t.Fatal("qualification run without explicit mode was accepted")
+	}
+	modeOnly := base
+	modeOnly.QualificationMode = true
+	if err := modeOnly.Validate(); err == nil {
+		t.Fatal("qualification mode without run identity was accepted")
+	}
+	qualified := base
+	qualified.QualificationMode = true
+	qualified.QualificationRunID = runID
+	if err := qualified.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	arguments := processArguments(qualified)
+	if len(arguments) != 3 ||
+		arguments[1] != "--battle-qualification-run-id" ||
+		arguments[2] != runID.String() {
+		t.Fatalf("qualification arguments = %v", arguments)
+	}
+}
 
 // TestPumpStderrBoundsPressure 验证大量长行不会阻塞且输出始终截断、去控制字符。
 func TestPumpStderrBoundsPressure(t *testing.T) {

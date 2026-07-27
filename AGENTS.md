@@ -64,6 +64,16 @@ iHomeland 使用 Go Control/Data Plane、后续独立 C++ Game Simulation Server
 - 每完成一个 task 立即勾选；主 specs 同步且 strict 验证通过后才能归档。
 - 不得以开发早期为理由绕过协议、安全、数据、测试或可观测设计。
 
+## 验证层级硬规则
+
+- 功能开发、修复、重构和普通 OpenSpec change 默认只验证当前新增行为及其声明的下游影响面，不得自动升级为历史阶段全资格、完整产品矩阵、连续 verify、长时 soak 或 finalize。
+- 每个活跃实现 change 必须维护 closed `validation.json`；只可引用 `tools/quality/catalog.json` 登记的 check ID，并说明影响原因。
+- 使用者和自动化代理默认只调用 `tools/quality/quality.ps1`：先用 `impact` 预览，再用 `check-change` 执行定向验证；单场景真实网络排障使用显式 `diagnose`。
+- 完整最终资格只允许在使用者明确要求时，通过 `quality.ps1 qualify -Candidate <current-clean-HEAD>` 触发。不得因 change 接近完成、准备归档或属于协议/安全/C++/网络边界而推断授权。
+- 最终资格针对当前产品 capability suites 构建一次冻结候选，不按 B0.3、B0.4、B0.5、B0.6 或未来历史 change 编号重复构建和逐层验收。
+- 12 个网络故障场景、1/5/8 actor、第 9 actor 拒绝、安全矩阵、生命周期矩阵、连续两次 verify、长时 soak 与 finalize 必须保留为可随时调用的最终资格能力，但不是每个功能 change 的默认完成条件。
+- 开发诊断可以复用已验证的 ignored binary cache 或增量 build；每次运行仍必须隔离 credential、endpoint、process、evidence 和 cleanup。最终资格不得消费诊断 cache 或旧 evidence。
+
 ## Git 提交硬规则
 
 - 所有提交必须符合 `docs/git-commit-convention.md`。

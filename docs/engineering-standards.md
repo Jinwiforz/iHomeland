@@ -198,6 +198,11 @@ C++ simulation：
   `implementation-qualified-windows-x64`，不得据此声称 Linux、Go control、网络或
   Unity runtime 已获资格。
 
+上述完整 C++ qualification 是显式最终候选的资格规则，不是每个 C++ change 的默认
+反馈环。普通 change 使用增量 build、受影响 label、必要的定向 ASan/race 与 contract
+parity；完整 comprehensive、1/5/8 actor reference benchmark、全量 ASan 和资格报告只由
+统一最终资格入口触发。定向验证不得删除或降低最终 mandatory suite。
+
 Bug 修复优先增加可复现测试。无法运行测试时必须说明原因与剩余风险。
 
 ## 质量门
@@ -212,3 +217,8 @@ Bug 修复优先增加可复现测试。无法运行测试时必须说明原因�
 - 生成物一致性检查（适用时）
 - 无密钥、缓存和本机文件
 - 文档与实现一致性评审
+
+每个 change 的具体检查由 closed `validation.json` 声明，并通过
+`tools/quality/quality.ps1 impact/check-change` 执行。最终产品资格不是普通 change
+质量门；只有使用者显式对 clean current HEAD 调用 `quality.ps1 qualify` 时，才运行完整
+矩阵、连续 verify、长时 soak 与 finalize。

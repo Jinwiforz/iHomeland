@@ -7,6 +7,8 @@ import (
 
 	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/battleticket"
+	"github.com/jinwiforz/ihomeland/server/internal/placement"
+	"github.com/jinwiforz/ihomeland/server/internal/session"
 	"github.com/jinwiforz/ihomeland/server/internal/simulationcontrol"
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 )
@@ -85,18 +87,42 @@ func (ReservationRequest) GoString() string { return redactedValue }
 
 // VisitAuthority 是 VisitSession owner 投影给 battle admission 的只读 actor 资格。
 //
-// Intent 绑定 actor/session/assignment/deadline；Revision 只用于证明读取了完整权威版本，
+// 字段绑定 actor/session/assignment/deadline；revision 只用于证明读取了完整权威版本，
 // 不进入 BattleTicket，因为 target revision 与完整 assignment 已承担 runtime freshness。
 type VisitAuthority struct {
-	// Intent 是不含 credential 的 current membership 资格。
-	Intent visitsession.AdmissionIntent
-	// Revision 是资格判断读取的 VisitSession CAS 版本。
-	Revision visitsession.Revision
+	visitorID  account.PlayerID
+	sessionID  session.SessionID
+	epoch      session.Epoch
+	assignment placement.AssignmentStamp
+	expiresAt  time.Time
+	revision   visitsession.Revision
+}
+
+// NewVisitAuthority 从 VisitSession owner 的只读结果构造 battle application 投影。
+func NewVisitAuthority(
+	visitorID account.PlayerID,
+	sessionID session.SessionID,
+	epoch session.Epoch,
+	assignment placement.AssignmentStamp,
+	expiresAt time.Time,
+	revision visitsession.Revision,
+) (VisitAuthority, error) {
+	authority := VisitAuthority{
+		visitorID: visitorID, sessionID: sessionID, epoch: epoch,
+		assignment: assignment, expiresAt: expiresAt.UTC().Truncate(time.Microsecond),
+		revision: revision,
+	}
+	if !authority.Valid() {
+		return VisitAuthority{}, errors.New("visit battle authority is incomplete")
+	}
+	return authority, nil
 }
 
 // Valid 报告 Visitor authority 是否来自完整 owner 结果。
 func (authority VisitAuthority) Valid() bool {
-	return authority.Intent.Valid() && authority.Revision.Valid()
+	return authority.visitorID.Valid() && authority.sessionID.Valid() &&
+		authority.epoch.Valid() && authority.assignment.Valid() &&
+		!authority.expiresAt.IsZero() && authority.revision.Valid()
 }
 
 // String 防止 actor、lineage 与 assignment 进入普通日志。

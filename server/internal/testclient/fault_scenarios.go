@@ -36,7 +36,7 @@ func runServerProcessRestart(ctx context.Context, runtime *ScenarioRuntime) (res
 	}
 	defer ticket.Clear()
 	defer admission.Clear()
-	if runtime.Faults == nil || runtime.Faults.Execute(ctx, "server-restart") != nil {
+	if runtime.Faults == nil || runtime.Faults.Execute(ctx, FaultServerRestart) != nil {
 		return errors.New("independent server restart fault failed")
 	}
 	probeContext, cancelProbe := context.WithTimeout(ctx, 2*time.Second)
@@ -91,7 +91,7 @@ func runRedisLossRecovery(ctx context.Context, runtime *ScenarioRuntime) (result
 	}
 	defer ticket.Clear()
 	defer admission.Clear()
-	if runtime.Faults == nil || runtime.Faults.Execute(ctx, "redis-flush") != nil {
+	if runtime.Faults == nil || runtime.Faults.Execute(ctx, FaultRedisFlush) != nil {
 		return errors.New("Redis flush fault failed")
 	}
 	if _, err := runtime.HTTP.WorldBootstrap(ctx, account.actor.AccessToken); err == nil {
@@ -167,7 +167,7 @@ func runMySQLRestartRecovery(ctx context.Context, runtime *ScenarioRuntime) (res
 	_ = connection.Close()
 	defer consumedTicket.Clear()
 	defer consumedAdmission.Clear()
-	if runtime.Faults == nil || runtime.Faults.Execute(ctx, "mysql-restart") != nil {
+	if runtime.Faults == nil || runtime.Faults.Execute(ctx, FaultMySQLRestart) != nil {
 		return errors.New("MySQL restart fault failed")
 	}
 	after, err := worldBootstrapEventually(ctx, runtime.HTTP, account.actor.AccessToken)

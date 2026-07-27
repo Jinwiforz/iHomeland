@@ -81,6 +81,8 @@ server/
       main.go
     qualificationtool/
       main.go
+    battlequalificationtool/ # B0.6 黑盒 harness、evidence 聚合与 finalize
+      main.go
   internal/
     contract/
     fixtures/
@@ -96,6 +98,7 @@ server/
     session/
     account/
     battleentry/
+    battlequalification/    # B0.6 manifest、gateway、client supervisor、runner 与 report
     battleticket/
     battleticketcontrol/
     personalworld/
@@ -271,6 +274,8 @@ shared/
       visit/v1/            # VisitSession 控制、snapshot 与 safe-return
       battle/v1/           # B0.5 battle input/snapshot/control wire source
   contracts/
+    evidence/
+      battle-network/      # 显式最终资格生成的长期低敏 report 与 profile overlay
     http/v1/openapi.yaml
     registry/
       messages.json         # 全部实时消息唯一编号与 owner
@@ -282,6 +287,7 @@ shared/
         model/             # B0.1 纯模型 schema、manifest、assumptions 与 cases
         network-profile/   # B0.2 cadence、lane、MTU、fault matrix、budget 与 canonical report
         wire/              # B0.5 跨端 canonical wire、crypto/KCP 与 malformed corpus
+        qualification/     # B0.6 closed schema、fault/workload/metric/lifecycle 输入
       http/
       realtime/
       qualification/       # Q0 scenario/evidence manifest、endpoint 示例与 contract freeze digest
@@ -290,9 +296,12 @@ shared/
 - `.proto` 是跨端消息源。
 - route/error catalog 是协议源的一部分。
 - HTTP fixtures、realtime golden packets、negative coverage manifest 与 admission semantic corpus 是兼容性基线，必须版本化并由统一工具重复生成和验证。
+- `contracts/evidence/battle-network/` 只保存显式最终资格生成的长期低敏输出，不属于
+  candidate source digest，也不得保存原始日志、credential、endpoint 或 payload。
 - `contracts/fixtures/battle/model/` 是权威 gameplay 模型数据的唯一 owner；B0.2 profile 和后续 C++ harness 只消费其版本化数据，不在网络、C++ 或 Unity 目录复制规则。
 - `contracts/fixtures/battle/network-profile/` 是网络 profile 的唯一 owner；它绑定完整 model digest，冻结 logical kind/lane 和 target budget，但不分配 numeric message ID、wire、listener 或端口。
 - `contracts/fixtures/battle/wire/` 是 B0.5 wire corpus 的唯一 owner；它冻结 `3000-3007`、header/AAD、crypto/KCP vectors 与 negative cases，资格工具只读消费。
+- `contracts/fixtures/battle/qualification/` 是 B0.6 controlled environment 的唯一 tracked input owner；真实 run evidence 只能进入 ignored `.local/battle-qualification/`。
 - `descriptor.bin` 与 registry projection 不落盘；validator 使用刚生成的 Go descriptor registry，并在内存构建路由投影。
 - 不放服务端 domain model 或 Unity 类型。
 
@@ -464,11 +473,22 @@ tools/battle-model/                      # 只读格式/引用/coverage/digest v
 shared/contracts/fixtures/battle/network-profile/ # B0.2 profile、fault matrix 与低敏 report
 tools/battle-network-profile/            # 只读 validator、整数离散事件 simulator 与失败回归
 shared/contracts/fixtures/battle/wire/   # B0.5 canonical wire 与 malformed corpus
-tools/secure-battle-transport/            # B0.5 verify/finalize 与失败回归
-tools/battle-qualification/               # 后续真实进程、故障注入、重连与安全验收
+shared/contracts/fixtures/battle/protocol-client/ # 独立 C++ client 的 closed stdio contract
+tools/secure-battle-transport/            # B0.5 verify/finalize、report 与失败回归
+shared/contracts/fixtures/battle/qualification/ # B0.6 fault/workload/metric/lifecycle contract
+tools/battle-qualification/               # 内部 B0.6 真实进程、故障注入、重连、安全与 finalize owner
+tools/quality/                            # 唯一公共 impact/check-change/diagnose/qualify 编排入口
 ```
 
-`battle-model` validator 只验证纯 gameplay JSON；`battle-network-profile` 在此基础上只重放 logical byte/event、fault、queue 与 deadline，不实现 gameplay evaluator、真实 KCP、socket 或 listener。两个工具都不启动 Docker/Go/Unity/C++、不安装第三方依赖、不写 source corpus，也不依赖 generated code 或本机绝对路径。B0.5 的 `battle/wire/`、numeric registry、listener 与安全 transport 是独立 source/adapter，不反向写入 B0.1/B0.2 corpus。后续资格工具只经公开或受控测试契约驱动真实进程，不导入 C++/Go 内部 gameplay 类型；运行日志、抓包和报告进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence。
+`battle-model` validator 只验证纯 gameplay JSON；`battle-network-profile` 在此基础上只重放 logical byte/event、fault、queue 与 deadline，不实现 gameplay evaluator、真实 KCP、socket 或 listener。两个工具都不启动 Docker/Go/Unity/C++、不安装第三方依赖、不写 source corpus，也不依赖 generated code 或本机绝对路径。B0.5 的 `battle/wire/`、numeric registry、listener 与安全 transport 是独立 source/adapter，不反向写入 B0.1/B0.2 corpus。`battle/protocol-client/` 只冻结 Go supervisor 与独立 C++ executable 的低敏 stdio request/receipt，不是 production gameplay 入口。B0.6 `battlequalificationtool` 只经公开 HTTPS、受控私有 control、child stdio 与 opaque UDP gateway 驱动真实进程，不导入 production transport、simulation gameplay 或 application service 实现；运行日志、packet metadata 和运行态 evidence 进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence；显式最终资格生成的长期 report 与 profile overlay 进入 `shared/contracts/evidence/battle-network/`，历史 change audit 只留在对应归档目录。
+
+每个活跃实现 change 在自身根目录维护 `validation.json`，只引用
+`tools/quality/catalog.json` 的 closed check ID。`tools/quality/quality.ps1` 是使用者与
+自动化代理唯一需要理解的公共质量入口；底层 Go/C++/Proto/storage/server/client/battle
+脚本继续拥有实际校验逻辑。重复 `diagnose` 可在
+`.local/battle-qualification-build-cache/` 按 source/tool identity 复用有 digest receipt
+的 ignored binaries，并通过同卷 hard link 放入全新 run；credential、endpoint、
+evidence 与 cleanup 不复用，最终 `qualify` 也不得读取该诊断缓存。
 
 ## OpenSpec 结构
 
@@ -483,6 +503,7 @@ openspec/
       proposal.md
       design.md
       tasks.md
+      validation.json
       specs/<capability>/spec.md
     archive/
 ```

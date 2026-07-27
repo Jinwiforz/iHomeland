@@ -3,11 +3,11 @@
   "documentKind": "manifest",
   "b03Binding": {
     "qualificationConclusion": "implementation-qualified-windows-x64",
-    "releaseBuildIdentitySha256": "0864e3f42aaa3029600fa31ddae3673fb62b932fa6252022ab9675a62b575424",
-    "asanBuildIdentitySha256": "085b444c82535e3e7d141e41211a2fe468a30ec3af5a803d16edb6c870f3eb13",
-    "qualificationGateReceiptSha256": "32b5d61f2e3d3f700187462540028a05d76a478898684d219e5e27cf038a9b19",
+    "releaseBuildIdentitySha256": "25736721b176154362564923e68ded0be6055eecc468e0d6a24de2b1505f88d3",
+    "asanBuildIdentitySha256": "ce82525f37ced31c4ae2df8ec1440ce66e8bcd73e54804e7cc77faa2a21c78a6",
+    "qualificationGateReceiptSha256": "e7f3fd6ddd78fcbbd3dfcf7c8da89c797565bb635e8e7d4967b883102f9f8010",
     "modelManifestSha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
-    "profileManifestSha256": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+    "profileManifestSha256": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
     "maximumActors": 8,
     "simulationTickNs": 50000000
   },
@@ -15,22 +15,22 @@
     {
       "path": "schema/frame.schema.json",
       "documentKind": "frame-schema",
-      "sha256": "8897d23535a9d8c59d7ced6dce91fa05f091bb417859b6f2a4557d441f73f0ff"
+      "sha256": "e54f776fda571a755042d5b6575eed5f7715a22f2a0248917f7cedcd45c145af"
     },
     {
       "path": "schema/battle-control-payloads.schema.json",
       "documentKind": "battle-control-payload-schema",
-      "sha256": "e257f3c12310c6ba2a1da69f1916da5c0a06ea0dd01f3c33290db053b91334c7"
+        "sha256": "534bf4b6520c9f5d20b8d78fcdfce58e672ebd64b0dd1af64b7cf58a63991271"
     },
     {
       "path": "message-inventory.json",
       "documentKind": "message-inventory",
-      "sha256": "e7ba18bc990bd1064f57d22f5dfc79b28695a1c1548b5f61906053469124da82"
+      "sha256": "9d35c1c39fef0a45e71a76b5dbf94094ba70d90cb34fbee3831230d16eb43bf6"
     },
     {
       "path": "canonical-golden.json",
       "documentKind": "canonical-golden",
-      "sha256": "14dd00c40c70d19549c4eccd3d6aa45b8a21d935bef54026460b58840fb96d77"
+        "sha256": "6d8f4095151f9ad947ebd0abbc5409c14f13a575a000bd43fe91814907f69eb0"
     },
     {
       "path": "runtime/config/control-baseline-v1.json",
@@ -53,13 +53,13 @@
       "caseId": "battle-listener-ticket-session-control",
       "path": "cases/battle-control.json",
       "category": "battle-control",
-      "sha256": "db09c588ec8329abba71d61f79c159ad6c79f49b91f5d8f5a39e2f020e049cb2"
+      "sha256": "05026dbada4bab0a375f20062d2ac37b2a44b96777fd126a4aa170a707763a8b"
     },
     {
       "caseId": "hello-compatible-node",
       "path": "cases/hello.json",
       "category": "hello",
-      "sha256": "601702f8c8ddeca8db06256df8d1b784da800a05a3b4f7bcd6e4add43ed6f966"
+      "sha256": "c80191e2df0961c4bca89aaa343e50b3f73b64ca8de9e5710a2f01dcbfea9e6a"
     },
     {
       "caseId": "instance-lifecycle-replay",

@@ -1,6 +1,6 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "profile",
   "tool_version": "battle-network-profile-tool-v1",
   "profile_status": "qualified",
@@ -477,7 +477,10 @@
     "segment_ceiling_bytes": 1000,
     "message_ceiling_bytes": 1000,
     "queue_limit_messages": 64,
-    "application_expiry_us": 500000,
+    "maximum_route_expiry_us": 2250000,
+    "sender_expiry_policy": "immutable-route-enqueue-deadline",
+    "receiver_reassembly_policy": "kcp-window-and-session-lifecycle",
+    "caller_override_policy": "forbidden",
     "adapter_parity_status": "implementation-required"
   },
   "capacity": {

@@ -317,10 +317,10 @@ func TestSessionTicketQueueHasHardLimit(t *testing.T) {
 	}
 	startCall(0)
 	<-firstEntered
-	for index := 1; index <= TicketRequestQueueLimit; index++ {
+	for index := 1; index <= LowPriorityRequestQueueLimit; index++ {
 		startCall(index)
 	}
-	waitLaneCounts(t, session, 0, TicketRequestQueueLimit)
+	waitLaneCounts(t, session, 0, LowPriorityRequestQueueLimit)
 	overflowID, _ := NewRequestID("sctl_ticket_queue_overflow")
 	_, overflowErr := session.Call(context.Background(), overflowID, "battle.ticket.install",
 		map[string]string{"value": "fixture"}, "battle.ticket.installed")
@@ -338,7 +338,7 @@ func waitLaneCounts(t *testing.T, session *Session, high int, ticket int) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		session.laneMutex.Lock()
-		highWaiting, ticketWaiting := session.highWaiting, session.ticketWaiting
+		highWaiting, ticketWaiting := session.highWaiting, session.lowWaiting
 		session.laneMutex.Unlock()
 		if highWaiting == high && ticketWaiting == ticket {
 			return
@@ -352,7 +352,7 @@ func waitLaneCounts(t *testing.T, session *Session, high int, ticket int) {
 func TestTicketLowPriorityClassification(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"battle.ticket.install", "battle.ticket.status.query"} {
-		if !ticketLowPriority(kind) {
+		if !lowPriorityRequest(kind) {
 			t.Fatalf("%s did not enter low-priority ticket lane", kind)
 		}
 	}
@@ -360,7 +360,7 @@ func TestTicketLowPriorityClassification(t *testing.T) {
 		"battle.ticket.revoke", "battle.session.revoke", "node.health.query",
 		"instance.drain", "instance.stop", "node.shutdown", "result.ack",
 	} {
-		if ticketLowPriority(kind) {
+		if lowPriorityRequest(kind) {
 			t.Fatalf("%s incorrectly entered low-priority ticket lane", kind)
 		}
 	}

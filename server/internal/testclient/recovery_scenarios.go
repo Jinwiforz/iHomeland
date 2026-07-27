@@ -3,6 +3,7 @@ package testclient
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	visitv1 "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/visit/v1"
@@ -121,6 +122,18 @@ func runVisitDisconnectReconnect(ctx context.Context, runtime *ScenarioRuntime) 
 	if err != nil {
 		return err
 	}
+	if runtime.Lifecycle != nil {
+		if err := runtime.Lifecycle.recordPredecessor(
+			"visit-membership",
+			fixture.visitSessionID,
+			fixture.visitor.actor.SessionID,
+			strconv.FormatUint(fixture.visitor.actor.SessionEpoch, 10),
+			strconv.FormatUint(fixture.revision, 10),
+			"joined",
+		); err != nil {
+			return err
+		}
+	}
 	if err := fixture.visitorTCP.Close(); err != nil {
 		return err
 	}
@@ -168,6 +181,19 @@ func runVisitDisconnectReconnect(ctx context.Context, runtime *ScenarioRuntime) 
 	if !ok || response.GetResult() == nil || response.GetResult().GetSnapshot() == nil || membershipState(response.GetResult().GetSnapshot(), fixture.visitor.actor.PlayerID) != visitv1.VisitMembershipState_VISIT_MEMBERSHIP_STATE_JOINED {
 		return errors.New("Visitor RECONNECT did not restore joined membership")
 	}
+	if runtime.Lifecycle != nil {
+		snapshot := response.GetResult().GetSnapshot()
+		if err := runtime.Lifecycle.recordSuccessor(
+			"visit-membership",
+			fixture.visitSessionID,
+			fixture.visitor.actor.SessionID,
+			strconv.FormatUint(fixture.visitor.actor.SessionEpoch, 10),
+			strconv.FormatUint(snapshot.GetRevision(), 10),
+			"joined",
+		); err != nil {
+			return err
+		}
+	}
 	if err := fixture.ownerTCP.Close(); err != nil {
 		return err
 	}
@@ -198,13 +224,68 @@ func runVisitGraceExpiry(ctx context.Context, runtime *ScenarioRuntime) (resultE
 	if err != nil {
 		return err
 	}
+	if runtime.Lifecycle != nil {
+		if err := runtime.Lifecycle.recordPredecessor(
+			"visit-membership",
+			fixture.visitSessionID,
+			fixture.visitor.actor.SessionID,
+			strconv.FormatUint(fixture.visitor.actor.SessionEpoch, 10),
+			strconv.FormatUint(fixture.revision, 10),
+			"joined",
+		); err != nil {
+			return err
+		}
+	}
 	if err := fixture.visitorTCP.Close(); err != nil {
 		return err
 	}
 	_, err = pollVisitSnapshot(ctx, fixture.ownerTCP, func(snapshot *visitv1.VisitSessionSnapshot) bool {
 		return membershipState(snapshot, fixture.visitor.actor.PlayerID) == visitv1.VisitMembershipState_VISIT_MEMBERSHIP_STATE_UNSPECIFIED
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if runtime.Lifecycle != nil {
+		return runtime.Lifecycle.recordTermination()
+	}
+	return nil
+}
+
+// runOwnerGraceExpiry 验证 Owner grace 到期后终止访问并安全返回 Visitor。
+func runOwnerGraceExpiry(ctx context.Context, runtime *ScenarioRuntime) (resultErr error) {
+	fixture, err := setupJoinedVisit(ctx, runtime)
+	if fixture != nil {
+		defer closeScenario(fixture.scenario, &resultErr)
+	}
+	if err != nil {
+		return err
+	}
+	if runtime.Lifecycle != nil {
+		if err := runtime.Lifecycle.recordPredecessor(
+			"visit-owner",
+			fixture.visitSessionID,
+			fixture.owner.actor.SessionID,
+			strconv.FormatUint(fixture.owner.actor.SessionEpoch, 10),
+			strconv.FormatUint(fixture.revision, 10),
+			"open",
+		); err != nil {
+			return err
+		}
+	}
+	if err := fixture.ownerTCP.Close(); err != nil {
+		return err
+	}
+	if err := expectVisitorSafeReturn(
+		ctx,
+		fixture,
+		visitv1.SafeReturnReason_SAFE_RETURN_REASON_OWNER_UNAVAILABLE,
+	); err != nil {
+		return err
+	}
+	if runtime.Lifecycle != nil {
+		return runtime.Lifecycle.recordTermination()
+	}
+	return nil
 }
 
 // pollVisitSnapshot 有界查询公开 snapshot，避免固定 sleep 猜测异步 lifecycle 边界。

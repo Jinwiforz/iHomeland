@@ -3,6 +3,7 @@ package testclient
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -18,6 +20,12 @@ const (
 	defaultHTTPBodyLimit = 1 << 20
 	// defaultHTTPTimeout 是调用方未提供更短 deadline 时的兜底请求预算。
 	defaultHTTPTimeout = 15 * time.Second
+	// battleTicketIDBytes 是 ClientHello opaque lookup identity 的固定宽度。
+	battleTicketIDBytes = 16
+	// battleTicketSecretBytes 是 BattleTicket bearer 的固定 256-bit 宽度。
+	battleTicketSecretBytes = 32
+	// battleWireVersion 是当前唯一可接受的 battle binary wire 版本。
+	battleWireVersion = 1
 )
 
 // HTTPClient 严格消费服务端公开 HTTPS JSON API。
@@ -221,6 +229,166 @@ type WorldAdmissionResponse struct {
 	ExpiresAtMS int64 `json:"expiresAtMs"`
 }
 
+// BattleTicketRequest 是公开 BattleTicket 的 closed target selector。
+type BattleTicketRequest struct {
+	// Kind 是 OWN_WORLD 或 VISIT_WORLD。
+	Kind string `json:"kind"`
+	// VisitSessionID 仅在 VISIT_WORLD 时设置。
+	VisitSessionID string `json:"visitSessionId,omitempty"`
+}
+
+// BattleEndpoint 是 BattleTicket 唯一允许公布的 UDP endpoint。
+type BattleEndpoint struct {
+	// Transport 固定为 UDP。
+	Transport string `json:"transport"`
+	// Host 是 trusted provider 公布的 host。
+	Host string `json:"host"`
+	// Port 是非零 UDP port。
+	Port uint16 `json:"port"`
+}
+
+// BattleWireSuite 是 BattleTicket 冻结的 wire 与密码套件。
+type BattleWireSuite struct {
+	// WireVersion 是 binary envelope 代际。
+	WireVersion uint8 `json:"wireVersion"`
+	// KeyAgreement 固定为 X25519。
+	KeyAgreement string `json:"keyAgreement"`
+	// KDF 固定为 HKDF-SHA-256。
+	KDF string `json:"kdf"`
+	// AEAD 固定为 ChaCha20-Poly1305。
+	AEAD string `json:"aead"`
+}
+
+// battleTicketResponse 是仅存在于 HTTPS decode 栈上的 raw credential DTO。
+type battleTicketResponse struct {
+	// TicketID 是 UDP ClientHello 使用的 opaque lookup identity。
+	TicketID string `json:"ticketId"`
+	// TicketSecret 是必须立即转移到 BattleTicket 的一次性 bearer。
+	TicketSecret string `json:"ticketSecret"`
+	// Endpoint 是受信 advertised UDP endpoint。
+	Endpoint BattleEndpoint `json:"endpoint"`
+	// WireSuite 是客户端必须精确支持的算法集合。
+	WireSuite BattleWireSuite `json:"wireSuite"`
+	// Role 是 OWNER 或 VISITOR。
+	Role string `json:"role"`
+	// TargetKind 是 OWN_WORLD 或 VISIT_WORLD。
+	TargetKind string `json:"targetKind"`
+	// TargetRevision 是签发时冻结的权威 target revision。
+	TargetRevision uint64 `json:"targetRevision"`
+	// ExpiresAtMS 是等于即失效的 Unix milliseconds。
+	ExpiresAtMS int64 `json:"expiresAtMs"`
+}
+
+// BattleTicket 拥有一次 BattleTicket HTTPS response 的 credential 与低敏投影。
+//
+// TicketSecret 不作为公开字段暴露；调用方只能把 ownership 一次性转移给紧邻的
+// battle protocol client。Close 与默认格式化均不会泄漏 credential。
+type BattleTicket struct {
+	// TicketID 是 ClientHello 使用的非秘密 lookup identity。
+	TicketID string
+	// Endpoint 是受信 advertised UDP endpoint。
+	Endpoint BattleEndpoint
+	// WireSuite 是精确 wire 与密码套件。
+	WireSuite BattleWireSuite
+	// Role 是 OWNER 或 VISITOR。
+	Role string
+	// TargetKind 是 OWN_WORLD 或 VISIT_WORLD。
+	TargetKind string
+	// TargetRevision 是签发时冻结的权威 target revision。
+	TargetRevision uint64
+	// ExpiresAtMS 是等于即失效的 Unix milliseconds。
+	ExpiresAtMS int64
+	// secret 是一次性 bearer 的唯一 owner。
+	secret *Secret
+}
+
+// BattleCredential 是向独立协议客户端一次性转移的 fixed binary credential。
+type BattleCredential struct {
+	// TicketID 是 ClientHello 使用的公开 lookup identity。
+	TicketID [battleTicketIDBytes]byte
+	// TicketSecret 是只允许进入 child stdin 一次的 bearer。
+	TicketSecret [battleTicketSecretBytes]byte
+}
+
+// Clear 清零全部 credential bytes；调用方必须在所有路径执行。
+func (credential *BattleCredential) Clear() {
+	if credential == nil {
+		return
+	}
+	clear(credential.TicketID[:])
+	clear(credential.TicketSecret[:])
+}
+
+// TakeCredential 原子消费 BattleTicket bearer 并解码为 fixed binary owner。
+func (ticket *BattleTicket) TakeCredential() (BattleCredential, error) {
+	const (
+		ticketIDPrefix     = "btk1_"
+		ticketSecretPrefix = "bts1_"
+	)
+	var credential BattleCredential
+	if ticket == nil || ticket.secret == nil {
+		return credential, errors.New("battle ticket credential is unavailable")
+	}
+	secret := ticket.secret
+	ticket.secret = nil
+	secretText, err := secret.Take()
+	_ = secret.Close()
+	if err != nil {
+		return credential, err
+	}
+	defer clearString(&secretText)
+	if !strings.HasPrefix(ticket.TicketID, ticketIDPrefix) ||
+		!strings.HasPrefix(secretText, ticketSecretPrefix) {
+		return credential, errors.New("battle ticket credential prefix drifted")
+	}
+	ticketID, err := base64.RawURLEncoding.DecodeString(
+		strings.TrimPrefix(ticket.TicketID, ticketIDPrefix),
+	)
+	if err != nil || len(ticketID) != len(credential.TicketID) {
+		clear(ticketID)
+		return credential, errors.New("battle ticket identity decode failed")
+	}
+	copy(credential.TicketID[:], ticketID)
+	clear(ticketID)
+	secretBytes, err := base64.RawURLEncoding.DecodeString(
+		strings.TrimPrefix(secretText, ticketSecretPrefix),
+	)
+	if err != nil || len(secretBytes) != len(credential.TicketSecret) {
+		clear(secretBytes)
+		credential.Clear()
+		return BattleCredential{}, errors.New("battle ticket secret decode failed")
+	}
+	copy(credential.TicketSecret[:], secretBytes)
+	clear(secretBytes)
+	return credential, nil
+}
+
+// TakeSecret 把 BattleTicket secret ownership 一次性转移给协议客户端。
+func (ticket *BattleTicket) TakeSecret() (*Secret, error) {
+	if ticket == nil || ticket.secret == nil {
+		return nil, errors.New("battle ticket secret is unavailable")
+	}
+	secret := ticket.secret
+	ticket.secret = nil
+	return secret, nil
+}
+
+// Close 清除尚未转移的 BattleTicket secret；重复调用安全。
+func (ticket *BattleTicket) Close() error {
+	if ticket == nil {
+		return nil
+	}
+	ticket.secret.Clear()
+	ticket.secret = nil
+	return nil
+}
+
+// String 返回固定脱敏值，禁止默认格式化泄漏完整 ticket projection。
+func (BattleTicket) String() string { return redactedValue }
+
+// GoString 与 String 保持相同脱敏语义。
+func (BattleTicket) GoString() string { return redactedValue }
+
 // NewHTTPClient 创建使用调用方 TLS transport 的严格公开 API client。
 func NewHTTPClient(baseURL string, client *http.Client) (*HTTPClient, error) {
 	parsed, err := url.Parse(baseURL)
@@ -345,6 +513,45 @@ func (client *HTTPClient) IssueWorldAdmission(ctx context.Context, accessToken *
 	return response, err
 }
 
+// IssueBattleTicket 调用冻结的 issueBattleTicket operation，并立即封装 raw credential。
+func (client *HTTPClient) IssueBattleTicket(ctx context.Context, accessToken *Secret, idempotencyKey string, request BattleTicketRequest) (*BattleTicket, error) {
+	if !validIdempotencyKey(idempotencyKey) ||
+		request.Kind != "OWN_WORLD" && request.Kind != "VISIT_WORLD" ||
+		request.Kind == "OWN_WORLD" && request.VisitSessionID != "" ||
+		request.Kind == "VISIT_WORLD" && !validPublicIdentity(request.VisitSessionID) {
+		return nil, errors.New("battle ticket input is invalid")
+	}
+	var response battleTicketResponse
+	if err := client.doJSON(ctx, http.MethodPost, "/v1/battle/tickets", request, accessToken, idempotencyKey, http.StatusCreated, &response); err != nil {
+		clearString(&response.TicketSecret)
+		return nil, err
+	}
+	ticket, err := takeBattleTicket(&response)
+	clearString(&response.TicketSecret)
+	return ticket, err
+}
+
+// IssueBattleTicketAfterResponseLoss 丢弃首次成功 response，再用同一 key 精确重放。
+//
+// 该方法建模 HTTPS response 已提交但未交付给下游协议 owner：首次 credential 只在
+// 本调用栈中用于常量时间等值检查并立即清除，唯一返回值来自第二次公开请求。
+func (client *HTTPClient) IssueBattleTicketAfterResponseLoss(ctx context.Context, accessToken *Secret, idempotencyKey string, request BattleTicketRequest) (*BattleTicket, error) {
+	first, err := client.IssueBattleTicket(ctx, accessToken, idempotencyKey, request)
+	if err != nil {
+		return nil, err
+	}
+	defer first.Close()
+	replayed, err := client.IssueBattleTicket(ctx, accessToken, idempotencyKey, request)
+	if err != nil {
+		return nil, err
+	}
+	if !sameBattleTicket(first, replayed) {
+		_ = replayed.Close()
+		return nil, errors.New("battle ticket response-loss replay drifted")
+	}
+	return replayed, nil
+}
+
 // doJSON 执行带 deadline、closed response 和稳定公开错误的单次 HTTPS operation。
 func (client *HTTPClient) doJSON(ctx context.Context, method, path string, requestBody any, accessToken *Secret, idempotencyKey string, expectedStatus int, responseBody any) error {
 	if client == nil || client.baseURL == nil || client.client == nil || ctx == nil {
@@ -408,6 +615,86 @@ func (client *HTTPClient) doJSON(ctx context.Context, method, path string, reque
 		return fmt.Errorf("decode qualification HTTP success: %w", err)
 	}
 	return nil
+}
+
+// takeBattleTicket 验证 closed DTO 并把 raw secret 转移到默认脱敏 owner。
+func takeBattleTicket(response *battleTicketResponse) (*BattleTicket, error) {
+	if response == nil || !validBattleTicketID(response.TicketID) ||
+		!validBattleEndpoint(response.Endpoint) ||
+		response.WireSuite != (BattleWireSuite{
+			WireVersion: battleWireVersion, KeyAgreement: "X25519",
+			KDF: "HKDF-SHA-256", AEAD: "ChaCha20-Poly1305",
+		}) ||
+		response.TargetRevision == 0 || response.ExpiresAtMS <= 0 ||
+		response.Role == "OWNER" && response.TargetKind != "OWN_WORLD" ||
+		response.Role == "VISITOR" && response.TargetKind != "VISIT_WORLD" ||
+		response.Role != "OWNER" && response.Role != "VISITOR" {
+		return nil, errors.New("battle ticket response is invalid")
+	}
+	if !validBattleTicketSecret(response.TicketSecret) {
+		return nil, errors.New("battle ticket credential is invalid")
+	}
+	secret, err := NewSecret(response.TicketSecret)
+	if err != nil {
+		return nil, err
+	}
+	return &BattleTicket{
+		TicketID: response.TicketID, Endpoint: response.Endpoint,
+		WireSuite: response.WireSuite, Role: response.Role,
+		TargetKind: response.TargetKind, TargetRevision: response.TargetRevision,
+		ExpiresAtMS: response.ExpiresAtMS, secret: secret,
+	}, nil
+}
+
+// sameBattleTicket 对完整幂等 response 做常量时间 credential 比较。
+func sameBattleTicket(left, right *BattleTicket) bool {
+	if left == nil || right == nil || left.secret == nil || right.secret == nil ||
+		left.TicketID != right.TicketID || left.Endpoint != right.Endpoint ||
+		left.WireSuite != right.WireSuite || left.Role != right.Role ||
+		left.TargetKind != right.TargetKind ||
+		left.TargetRevision != right.TargetRevision ||
+		left.ExpiresAtMS != right.ExpiresAtMS {
+		return false
+	}
+	return left.secret.equal(right.secret)
+}
+
+// validBattleTicketID 校验生产 wire 使用的 fixed 128-bit opaque identity。
+func validBattleTicketID(value string) bool {
+	const prefix = "btk1_"
+	if len(value) <= len(prefix) || value[:len(prefix)] != prefix {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value[len(prefix):])
+	return err == nil && len(decoded) == battleTicketIDBytes &&
+		prefix+base64.RawURLEncoding.EncodeToString(decoded) == value
+}
+
+// validBattleTicketSecret 校验 versioned 256-bit bearer 的 canonical base64url。
+func validBattleTicketSecret(value string) bool {
+	const prefix = "bts1_"
+	if len(value) <= len(prefix) || value[:len(prefix)] != prefix {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value[len(prefix):])
+	defer clear(decoded)
+	return err == nil && len(decoded) == battleTicketSecretBytes &&
+		prefix+base64.RawURLEncoding.EncodeToString(decoded) == value
+}
+
+// validBattleEndpoint 拒绝非 UDP、空 host 与零 port。
+func validBattleEndpoint(endpoint BattleEndpoint) bool {
+	return endpoint.Transport == "UDP" && endpoint.Host != "" &&
+		endpoint.Port != 0 && !strings.ContainsAny(endpoint.Host, "/\\?#")
+}
+
+// clearString 尽早移除可控 DTO 对 raw credential 的引用。
+//
+// Go string backing storage 不能可靠覆零；真实 bytes owner 由 Secret 负责。
+func clearString(value *string) {
+	if value != nil {
+		*value = ""
+	}
 }
 
 // validate 检查公开错误必填字段与有界 retryAfter。

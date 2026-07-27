@@ -96,7 +96,8 @@
       "baselinePolicy": "ESTABLISHES_BASELINE_IDENTITY",
       "recoveryPolicy": "SCHEDULE_NEXT_FULL_WITH_RESYNC_RATE_LIMIT",
       "splitPolicy": "BOUNDED_STATE_PARTITIONS",
-      "bindingPolicy": "SESSION_ENDPOINT_TARGET_GENERATION"
+      "bindingPolicy": "SESSION_ENDPOINT_TARGET_GENERATION",
+      "acknowledgementPolicy": "EXPLICIT_CURRENT_ACTOR_MAPPING_GENERATION_FRONTIER"
     },
     {
       "messageId": 3003,
@@ -117,7 +118,8 @@
       "baselinePolicy": "CONFIRMED_BASELINE_REQUIRED",
       "recoveryPolicy": "WAIT_FOR_DECODABLE_DELTA_OR_RESYNC",
       "splitPolicy": "BOUNDED_STATE_PARTITIONS",
-      "bindingPolicy": "SESSION_ENDPOINT_TARGET_GENERATION"
+      "bindingPolicy": "SESSION_ENDPOINT_TARGET_GENERATION",
+      "acknowledgementPolicy": "EXPLICIT_CURRENT_ACTOR_MAPPING_GENERATION_FRONTIER"
     },
     {
       "messageId": 3004,
@@ -174,7 +176,7 @@
       "maxRatePerSecond": 2,
       "idempotency": "RESYNC_GENERATION",
       "timeoutMs": 0,
-      "expiryMs": 500,
+      "expiryMs": 2250,
       "tickPolicy": "LAST_SERVER_TICK_REQUIRED",
       "sequencePolicy": "SESSION_GENERATION_MONOTONIC",
       "baselinePolicy": "MISSING_BASELINE_IDENTITY",
@@ -195,7 +197,7 @@
       "maxRatePerSecond": 2,
       "idempotency": "RESYNC_GENERATION",
       "timeoutMs": 0,
-      "expiryMs": 500,
+      "expiryMs": 2250,
       "tickPolicy": "SERVER_TICK_REQUIRED",
       "sequencePolicy": "SESSION_GENERATION_MONOTONIC",
       "baselinePolicy": "AUTHORIZES_NEXT_RAW_FULL_BASELINE",

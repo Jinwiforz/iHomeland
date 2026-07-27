@@ -135,6 +135,76 @@ void TestBuildDrift() {
         "build drift lacked low-sensitive diagnostic");
 }
 
+/// TestProductionSnapshotRejected 验证默认 control 不暴露 counters 或第二管理面。
+void TestProductionSnapshotRejected() {
+    std::stringstream input(
+        std::ios::in | std::ios::out | std::ios::binary);
+    AppendFrame(
+        input,
+        Frame(
+            "1",
+            "sctl_stdio_qhello_0001",
+            "node.hello.challenge",
+            R"({"actorCapacity":8,"expectedBuildIdentity":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expectedModelManifest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","expectedProfileManifest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","instanceCapacity":2,"runtimeNodeId":"rnode_stdio_test","simulationNodeId":"snode_stdio_test"})"));
+    AppendFrame(
+        input,
+        Frame(
+            "3",
+            "sctl_stdio_qsnapshot_0001",
+            "battle_qualification_snapshot_request",
+            R"({"assignmentFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","qualificationRunId":"bqrun_0123456789abcdef0123456789abcdef","sampleSequence":"1","simulationInstanceId":"sinst_0123456789abcdef0123456789abcdef","simulationNodeId":"snode_stdio_test"})"));
+    input.seekg(0);
+    std::stringstream output(
+        std::ios::in | std::ios::out | std::ios::binary);
+    std::ostringstream diagnostics;
+    Require(
+        ihomeland::sim::RunControlStdio(
+            input,
+            output,
+            diagnostics,
+            BuildBinding()) == 1,
+        "production snapshot request was accepted");
+    Require(
+        diagnostics.str().find(
+            "qualification snapshot is disabled") !=
+            std::string::npos,
+        "production snapshot rejection lacked stable diagnostic");
+    output.seekg(0);
+    ihomeland::sim::ControlFrame receipt;
+    Require(
+        ihomeland::sim::ControlFrameCodec::Read(output, receipt) &&
+            receipt.kind == "node.hello.receipt",
+        "production snapshot rejection lost hello receipt");
+    Require(
+        !ihomeland::sim::ControlFrameCodec::Read(output, receipt),
+        "production snapshot rejection leaked counters");
+}
+
+/// TestInvalidQualificationRunRejected 验证 capability 在读取 hello 前校验 run identity。
+void TestInvalidQualificationRunRejected() {
+    std::stringstream input(
+        std::ios::in | std::ios::out | std::ios::binary);
+    std::stringstream output(
+        std::ios::in | std::ios::out | std::ios::binary);
+    std::ostringstream diagnostics;
+    const auto qualification =
+        ihomeland::sim::QualificationControlConfig{
+            .run_id = "bqrun_invalid",
+        };
+    Require(
+        ihomeland::sim::RunControlStdio(
+            input,
+            output,
+            diagnostics,
+            BuildBinding(),
+            nullptr,
+            &qualification) == 1,
+        "invalid qualification run identity was accepted");
+    Require(
+        output.str().empty(),
+        "invalid qualification run emitted control output");
+}
+
 /// TestTicketCancelTombstone 验证先到 revoke 与 status 经 closed control frame 幂等。
 void TestTicketCancelTombstone() {
     std::stringstream input(
@@ -218,6 +288,8 @@ int main() {
     try {
         TestHealthyShutdown();
         TestBuildDrift();
+        TestProductionSnapshotRejected();
+        TestInvalidQualificationRunRejected();
         TestTicketCancelTombstone();
         return 0;
     } catch (const std::exception&) {

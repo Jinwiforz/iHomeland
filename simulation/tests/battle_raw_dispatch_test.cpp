@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -86,6 +87,7 @@ template <typename Message>
     message.set_baseline_id(7);
     message.set_partition_index(partition_index);
     message.set_partition_count(partition_count);
+    message.set_last_processed_input_tick(0);
     return Bytes(message);
 }
 
@@ -357,11 +359,23 @@ void TestAuthenticatedMultiplexer() {
             ClientToServer,
         [&](const auto&) { ++accepted; });
     bool authority_current = false;
+    const auto active_endpoint = Endpoint(40000);
     ihomeland::sim::BattleAuthenticatedMultiplexer multiplexer(
         server,
-        Endpoint(40000),
+        [active_endpoint] {
+            return active_endpoint;
+        },
         dispatcher,
-        [&] { return authority_current; });
+        [&] { return authority_current; },
+        [](
+            const std::span<const std::uint8_t>,
+            const ihomeland::sim::
+                BattleRemoteEndpoint&,
+            const std::uint64_t) {
+            return ihomeland::sim::
+                BattleControlDispatchDisposition::
+                    Rejected;
+        });
     const auto raw =
         ihomeland::sim::BattleRawDispatcher::Encode(
             ihomeland::sim::BattleRouteDirection::
@@ -439,8 +453,13 @@ void TestAuthenticatedMultiplexer() {
 }  // namespace
 
 int main() {
-    TestRegistryAndGolden();
-    TestRawPolicy();
-    TestAuthenticatedMultiplexer();
-    return 0;
+    try {
+        TestRegistryAndGolden();
+        TestRawPolicy();
+        TestAuthenticatedMultiplexer();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
 }

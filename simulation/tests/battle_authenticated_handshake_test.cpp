@@ -1,4 +1,5 @@
 #include "ihomeland/sim/core/sha256.hpp"
+#include "ihomeland/sim/control/simulation_node.hpp"
 #include "ihomeland/sim/transport/authenticated_handshake.hpp"
 
 #include <algorithm>
@@ -266,7 +267,8 @@ BuildClientAuth(
 }
 
 /// VerifyServerAccept 以独立client path解密并核对session参数。
-void VerifyServerAccept(
+[[nodiscard]] ihomeland::sim::CryptoProvider::Key32
+VerifyServerAccept(
     ihomeland::sim::CryptoProvider& crypto,
     const ClientFixture& client,
     const std::array<std::uint8_t, 140>& request,
@@ -366,11 +368,17 @@ void VerifyServerAccept(
                 expected_binding_bytes,
                 std::span(*plaintext).subspan(32, 32)),
         "test binding fingerprint drifted");
+    ihomeland::sim::CryptoProvider::Key32 session_seed{};
+    std::ranges::copy_n(
+        schedule.begin() + 44,
+        session_seed.size(),
+        session_seed.begin());
     crypto.SecureZero(shared);
     crypto.SecureZero(schedule);
     crypto.SecureZero(accept_key);
     crypto.SecureZero(accept_nonce);
     crypto.SecureZero(*plaintext);
+    return session_seed;
 }
 
 /// TestProofAcceptReplayAndDrift 验证proof失败不消费、AEAD accept和exact replay。
@@ -426,7 +434,7 @@ void TestProofAcceptReplayAndDrift() {
             NowUnixMs).state ==
             ihomeland::sim::BattleTicketState::Installed,
         "forged proof consumed ticket");
-    const auto accepted = handshake.HandleClientAuth(
+    auto accepted = handshake.HandleClientAuth(
         request,
         remote,
         NowUnixMs);
@@ -436,7 +444,7 @@ void TestProofAcceptReplayAndDrift() {
                     Outcome::Accepted &&
             accepted.response_bytes == 156,
         "valid ClientAuth was not accepted");
-    VerifyServerAccept(
+    auto expected_session_seed = VerifyServerAccept(
         crypto,
         client,
         request,
@@ -444,6 +452,45 @@ void TestProofAcceptReplayAndDrift() {
         proof_key,
         ticket.binding_fingerprint,
         accepted.battle_session_generation);
+    Require(
+        accepted.bootstrap != nullptr &&
+            accepted.bootstrap->ActorSlot() == 2 &&
+            accepted.bootstrap->Role() == 1 &&
+            accepted.bootstrap->KeyEpoch() == 1 &&
+            accepted.bootstrap->EndpointGeneration() == 1 &&
+            accepted.bootstrap->BattleSessionGeneration() ==
+                accepted.battle_session_generation &&
+            accepted.bootstrap->Binding().simulation_instance_id ==
+                accepted.simulation_instance_id &&
+            accepted.bootstrap->Remote().port ==
+                remote.port,
+        "accepted handshake did not transfer exact session bootstrap");
+    bool seed_observed = false;
+    bool consumer_failure_propagated = false;
+    try {
+        accepted.bootstrap->ConsumeSessionSeed(
+            [&](const auto& session_seed) {
+                seed_observed =
+                    session_seed == expected_session_seed;
+                throw std::runtime_error(
+                    "fixture session construction failed");
+            });
+    } catch (const std::runtime_error&) {
+        consumer_failure_propagated = true;
+    }
+    bool second_seed_consume_rejected = false;
+    try {
+        accepted.bootstrap->ConsumeSessionSeed(
+            [](const auto&) {});
+    } catch (const std::logic_error&) {
+        second_seed_consume_rejected = true;
+    }
+    Require(
+        seed_observed &&
+            consumer_failure_propagated &&
+            second_seed_consume_rejected,
+        "failed session construction did not consume and clear bootstrap seed");
+    crypto.SecureZero(expected_session_seed);
     const auto replay = handshake.HandleClientAuth(
         request,
         remote,
@@ -454,7 +501,8 @@ void TestProofAcceptReplayAndDrift() {
                     Outcome::Replayed &&
             replay.response == accepted.response &&
             replay.battle_session_generation ==
-                accepted.battle_session_generation,
+                accepted.battle_session_generation &&
+            replay.bootstrap == nullptr,
         "exact ClientAuth did not replay same accept");
     auto wrong_remote = remote;
     ++wrong_remote.port;
@@ -566,7 +614,12 @@ void TestConcurrentConsume() {
         });
     Require(
         accepted == 1 && replayed == 1 &&
-            results[0].response == results[1].response,
+            results[0].response == results[1].response &&
+            static_cast<std::size_t>(
+                results[0].bootstrap != nullptr) +
+                    static_cast<std::size_t>(
+                        results[1].bootstrap != nullptr) ==
+                1,
         "ticket race created multiple sessions");
     crypto.SecureZero(client.keys.secret_scalar);
 }

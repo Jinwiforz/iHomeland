@@ -8,9 +8,12 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -96,6 +99,18 @@ void SendDatagram(
     Require(
         sent == datagram.size(),
         "loopback UDP send was partial");
+}
+
+/// CanonicalLoopbackRemote 返回 listener output 所需的 IPv4-mapped identity。
+[[nodiscard]] ihomeland::sim::BattleRemoteEndpoint
+CanonicalLoopbackRemote(const std::uint16_t port) {
+    ihomeland::sim::BattleRemoteEndpoint remote{};
+    remote.address[10] = 0xff;
+    remote.address[11] = 0xff;
+    remote.address[12] = 127;
+    remote.address[15] = 1;
+    remote.port = port;
+    return remote;
 }
 
 /// TestValidation 验证 production 与 test endpoint 规则 fail closed。
@@ -229,6 +244,62 @@ void TestLoopbackIngress() {
             observed_remote.address[15] == 1,
         "listener did not canonicalize IPv4 source endpoint");
 
+    const std::array<std::uint8_t, 4> reply{
+        'P', 'O', 'N', 'G'};
+    Require(
+        listener.Send(reply, observed_remote) ==
+            ihomeland::sim::BattleUdpSendDisposition::Queued,
+        "listener did not queue same-socket output");
+    client.non_blocking(true);
+    std::array<std::uint8_t, 16> received{};
+    asio::ip::udp::endpoint reply_source;
+    std::size_t received_bytes = 0;
+    const auto receive_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+               receive_deadline &&
+           received_bytes == 0) {
+        asio::error_code error;
+        received_bytes = client.receive_from(
+            asio::buffer(received),
+            reply_source,
+            0,
+            error);
+        if (error != asio::error::would_block &&
+            error != asio::error::try_again &&
+            error) {
+            throw std::runtime_error(
+                "same-socket UDP receive failed");
+        }
+        if (received_bytes == 0) {
+            std::this_thread::sleep_for(1ms);
+        }
+    }
+    Require(
+        received_bytes == reply.size() &&
+            std::ranges::equal(
+                reply,
+                std::span(received).first(
+                    received_bytes)) &&
+            reply_source.port() ==
+                started.bound_endpoint.port,
+        "listener output did not use the bound receive socket");
+
+    ihomeland::sim::BattleRemoteEndpoint invalid_remote{};
+    Require(
+        listener.Send(reply, invalid_remote) ==
+                ihomeland::sim::BattleUdpSendDisposition::
+                    InvalidRemote &&
+            listener.Send(
+                std::vector<std::uint8_t>(
+                    ihomeland::sim::BattleUdpListener::
+                            MaximumDatagramBytes +
+                        1),
+                observed_remote) ==
+                ihomeland::sim::BattleUdpSendDisposition::
+                    InvalidDatagram,
+        "listener accepted invalid output");
+
     auto conflict_config = LoopbackConfig();
     conflict_config.mode =
         ihomeland::sim::BattleUdpListenerMode::Production;
@@ -252,8 +323,176 @@ void TestLoopbackIngress() {
     listener.Stop();
     listener.Stop();
     Require(
-        !listener.Status().running,
+        !listener.Status().running &&
+            listener.Send(reply, observed_remote) ==
+                ihomeland::sim::BattleUdpSendDisposition::
+                    Stopped,
         "listener did not stop idempotently");
+}
+
+/// TestClosedPeerIcmpIsolation 验证旧远端的 ICMP 不会终止 node-global listener。
+void TestClosedPeerIcmpIsolation() {
+    std::mutex callback_mutex;
+    std::condition_variable callback_ready;
+    std::size_t callback_count = 0;
+    ihomeland::sim::BattleUdpListener listener(
+        LoopbackConfig(),
+        [&](const auto, const auto&) {
+            std::scoped_lock lock(callback_mutex);
+            ++callback_count;
+            callback_ready.notify_all();
+        });
+    listener.Start();
+    const auto started = listener.Status();
+    const asio::ip::udp::endpoint target(
+        asio::ip::make_address_v4(
+            started.bound_endpoint.host),
+        started.bound_endpoint.port);
+
+    asio::io_context doomed_context;
+    asio::ip::udp::socket doomed(
+        doomed_context,
+        asio::ip::udp::v4());
+    SendDatagram(doomed, target, ClientHello());
+    {
+        std::unique_lock lock(callback_mutex);
+        Require(
+            callback_ready.wait_for(
+                lock,
+                2s,
+                [&] { return callback_count == 1; }),
+            "listener did not observe doomed UDP peer");
+    }
+    const auto doomed_port =
+        doomed.local_endpoint().port();
+    doomed.close();
+
+    const std::array<std::uint8_t, 1> terminal_reply{
+        0x01};
+    const auto doomed_remote =
+        CanonicalLoopbackRemote(doomed_port);
+    for (std::size_t copy = 0; copy < 3; ++copy) {
+        Require(
+            listener.Send(
+                terminal_reply,
+                doomed_remote) ==
+                ihomeland::sim::BattleUdpSendDisposition::
+                    Queued,
+            "listener rejected closed-peer regression output");
+    }
+
+    const auto output_deadline =
+        std::chrono::steady_clock::now() + 2s;
+    while (std::chrono::steady_clock::now() <
+               output_deadline &&
+           listener.Status().counters.sent_datagrams < 3 &&
+           !listener.Status().failed) {
+        std::this_thread::sleep_for(1ms);
+    }
+    Require(
+        listener.Status().counters.sent_datagrams == 3,
+        "listener did not complete closed-peer regression output");
+    std::this_thread::sleep_for(100ms);
+
+    asio::io_context survivor_context;
+    asio::ip::udp::socket survivor(
+        survivor_context,
+        asio::ip::udp::v4());
+    SendDatagram(survivor, target, ClientHello());
+    {
+        std::unique_lock lock(callback_mutex);
+        Require(
+            callback_ready.wait_for(
+                lock,
+                2s,
+                [&] { return callback_count == 2; }),
+            "closed peer ICMP stopped later valid UDP ingress");
+    }
+    const auto survived = listener.Status();
+    Require(
+        survived.running &&
+            !survived.failed &&
+            survived.counters.receive_failures == 0,
+        "closed peer ICMP escaped datagram-local isolation");
+    listener.Stop();
+}
+
+/// TestSendPressure 验证 hard queue budget 不会因 executor 被占用而动态扩张。
+void TestSendPressure() {
+    std::mutex callback_mutex;
+    std::condition_variable callback_state;
+    bool callback_entered = false;
+    bool release_callback = false;
+    ihomeland::sim::BattleUdpListener listener(
+        LoopbackConfig(),
+        [&](const auto, const auto&) {
+            std::unique_lock lock(callback_mutex);
+            callback_entered = true;
+            callback_state.notify_all();
+            callback_state.wait(
+                lock,
+                [&] { return release_callback; });
+        });
+    listener.Start();
+    const auto status = listener.Status();
+    asio::io_context client_context;
+    asio::ip::udp::socket client(
+        client_context,
+        asio::ip::udp::v4());
+    SendDatagram(
+        client,
+        asio::ip::udp::endpoint(
+            asio::ip::make_address_v4(
+                status.bound_endpoint.host),
+            status.bound_endpoint.port),
+        ClientHello());
+    {
+        std::unique_lock lock(callback_mutex);
+        Require(
+            callback_state.wait_for(
+                lock,
+                2s,
+                [&] { return callback_entered; }),
+            "listener callback did not enter pressure fixture");
+    }
+
+    ihomeland::sim::BattleRemoteEndpoint remote{};
+    remote.address[10] = 0xff;
+    remote.address[11] = 0xff;
+    remote.address[12] = 127;
+    remote.address[15] = 1;
+    remote.port = 9;
+    const std::array<std::uint8_t, 1> payload{1};
+    for (std::size_t index = 0;
+         index <
+         ihomeland::sim::BattleUdpListener::
+             MaximumPendingSendDatagrams;
+         ++index) {
+        Require(
+            listener.Send(payload, remote) ==
+                ihomeland::sim::BattleUdpSendDisposition::
+                    Queued,
+            "listener queue reached pressure before hard limit");
+    }
+    Require(
+        listener.Send(payload, remote) ==
+            ihomeland::sim::BattleUdpSendDisposition::
+                QueueFull,
+        "listener queue exceeded hard send budget");
+    {
+        std::scoped_lock lock(callback_mutex);
+        release_callback = true;
+    }
+    callback_state.notify_all();
+    listener.Stop();
+    const auto stopped = listener.Status();
+    Require(
+        !stopped.running &&
+            stopped.counters.queued_send_datagrams ==
+                ihomeland::sim::BattleUdpListener::
+                    MaximumPendingSendDatagrams &&
+            stopped.counters.rejected_send_datagrams >= 1,
+        "listener pressure counters drifted");
 }
 
 /// TestNodeOwnership 验证一个 node 生命周期内不能创建第二 socket。
@@ -291,6 +530,8 @@ void TestNodeOwnership() {
 int main() {
     TestValidation();
     TestLoopbackIngress();
+    TestClosedPeerIcmpIsolation();
+    TestSendPressure();
     TestNodeOwnership();
     return 0;
 }

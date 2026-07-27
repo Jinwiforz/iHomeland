@@ -144,14 +144,45 @@ B0.4 MUST 只在 B0.3 的同源 Release/ASan qualification、10 个 model cases�
 
 ### Requirement: 安全 battle transport 必须先于网络资格与 Unity runtime 独立交付
 
-项目 MUST在B0.4主specs同步归档且连续control qualification通过后，独立完成BattleTicket、numeric registry、wire、cookie/AEAD/replay、raw/KCP listener、capacity、lifecycle和implementation qualification。只有`secure-transport-qualified-windows-x64`报告绑定当前model/profile/control/source digest且全部mandatory gate通过，才可开始`qualify-battle-network`；B0.6通过前 MUST NOT实现Unity battle runtime，B0.7通过前 MUST NOT交付产品combat slice。
+项目 MUST 在 B0.4 主 specs 同步归档且 control contract 通过后，独立完成 BattleTicket、
+numeric registry、wire、cookie/AEAD/replay、raw/KCP listener、capacity、lifecycle 和
+implementation correctness。只有 public credential、真实 production listener、
+independent protocol client、定向安全负例、current mapping/assignment fencing 和代表性
+clean/loss/reconnect 网络 smoke 在 current model/profile/control identity 上通过，才可
+开始 Unity battle runtime。完整 12-scenario、1/5/8 capacity、安全/lifecycle、连续
+verify、长时 soak 与 finalize MUST 保留给用户显式冻结的最终资格 candidate，不得成为每个
+后续功能 change 的默认进入或完成条件；Unity gameplay vertical slice 通过前仍不得声明
+产品 combat 或公网网络 qualified。
 
 #### Scenario: 直接提出 Unity battle runtime
 
-- **WHEN**secure transport仅完成设计或loopback happy path，尚无完整B0.5 qualification report
-- **THEN**评审拒绝Unity network/gameplay runtime实现，并要求先完成B0.5及B0.6
+- **WHEN** secure transport 只有设计、内部对象 happy path，公开 BattleTicket 到 production UDP listener 的 input/snapshot 路径或代表性网络 smoke 尚未通过
+- **THEN** 评审拒绝 Unity network/gameplay runtime 实现，并要求先完成安全 transport 与 network development-readiness 定向证据
 
 #### Scenario: B0.5 report 通过
 
 - **WHEN**BattleTicket、安全wire、真实UDP/KCP、失效与全部既有regression在同一identity下通过
 - **THEN**项目只解锁`qualify-battle-network`，不据此声明公网网络或Unity gameplay可发布
+
+#### Scenario: Development-readiness 通过
+
+- **WHEN** 当前 secure transport 的公开 handshake、raw/KCP、input/snapshot、generation fencing、rebind、安全基本负例和代表性 clean/loss/reconnect smoke 通过
+- **THEN** 项目可以开始 Unity gameplay runtime，但不得把未执行的完整 capacity/security/lifecycle/soak 标记为最终资格
+
+### Requirement: 最终产品资格必须独立于历史 change 编号
+
+项目 MUST 将 B0.3 至未来功能 changes 的 unit、contract、parity、sanitizer、integration
+和 system tests维护为当前 capability suites。用户显式冻结里程碑或发布 candidate 时，
+最终资格 MUST 构建一次当前产品并运行这些 current mandatory suites；MUST NOT 为同一
+candidate 按历史 change 编号重复构建、逐层 finalize 或要求编号最大的 change 单独替代
+完整产品验收。
+
+#### Scenario: 长期路线推进到后续 change
+
+- **WHEN** 项目已完成多个后续功能 change 并由用户请求完整最终验收
+- **THEN** 统一工具对当前产品 capability manifest 执行一次完整资格链，历史 B0.x reports 只作为迁移与审计记录，不形成必须逐个重签的线性构建链
+
+#### Scenario: 只验收最后一个新增功能
+
+- **WHEN** 最后一个 change 的定向 tests 通过但当前产品 mandatory capability suites 尚未执行
+- **THEN** 该 change 可以完成开发验收，但不能据此生成完整产品 qualified 结论

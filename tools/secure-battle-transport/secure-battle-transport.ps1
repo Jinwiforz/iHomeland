@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $CorpusRoot = Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\wire"
+# BattleFuzzTimeSeconds 为该聚合入口内唯一显式 fuzz target 提供固定非零预算。
+$BattleFuzzTimeSeconds = 3
 
 # Get-Sha256 返回小写摘要，避免平台或调用方大小写影响 identity。
 function Get-Sha256 {
@@ -101,7 +103,11 @@ function Get-TreeDigest {
 
 # Assert-Binding 验证 B0.3/B0.2/B0.4 上游 corpus 的精确摘要和共同硬不变量。
 function Assert-Binding {
-    param([Parameter(Mandatory = $true)]$Binding)
+    param(
+        [Parameter(Mandatory = $true)]$Binding,
+        # AllowSourceDrift 只供开发期 corpus 检查；B0.5 verify/finalize 仍严格绑定摘要。
+        [switch]$AllowSourceDrift
+    )
 
     Assert-ExactProperties $Binding @(
         "format_version", "corpus_version", "document_kind", "sources", "invariants"
@@ -120,7 +126,8 @@ function Assert-Binding {
         if (-not $resolved.StartsWith($RepositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
             throw "binding path 逃逸仓库：$($source.manifest_path)"
         }
-        if ((Get-Sha256 -Path $resolved) -cne [string]$source.manifest_sha256) {
+        if (-not $AllowSourceDrift -and
+            (Get-Sha256 -Path $resolved) -cne [string]$source.manifest_sha256) {
             throw "binding source 摘要漂移：$($source.owner)"
         }
     }
@@ -170,7 +177,7 @@ function Assert-Limits {
         [int]$Limits.kcp.maximum_rto_ms -ne 200 -or
         [int]$Limits.kcp.dead_link_retransmits -ne 10 -or
         [int]$Limits.kcp.message_queue_items -ne 64 -or
-        [int]$Limits.kcp.message_expiry_ms -ne 500) {
+        [int]$Limits.kcp.maximum_message_expiry_ms -ne 2250) {
         throw "KCP 硬上限漂移"
     }
     if ([int]$Limits.resources.maximum_actors_per_instance -ne 8 -or
@@ -223,13 +230,33 @@ function Assert-WireArtifacts {
 
     Assert-ExactProperties $Layout @(
         "format_version", "corpus_version", "document_kind", "secure_header",
-        "raw_route_header", "kcp_segment_header", "kcp_route_envelope", "datagram_equation"
+        "raw_route_header", "snapshot_acknowledgement", "kcp_segment_header",
+        "kcp_route_envelope", "transport_control_envelope",
+        "transport_control_messages", "datagram_equation"
     ) "wire-layout"
+    Assert-ExactProperties $Layout.snapshot_acknowledgement @(
+        "message_ids", "protobuf_field", "field_number", "scalar_type", "presence",
+        "initial_value", "scope", "partition_policy", "maximum_varint_bytes",
+        "maximum_datagram_bytes", "route_payload_budgets"
+    ) "snapshot acknowledgement"
+    if (@($Layout.snapshot_acknowledgement.message_ids).Count -ne 2 -or
+        [int]$Layout.snapshot_acknowledgement.message_ids[0] -ne 3002 -or
+        [int]$Layout.snapshot_acknowledgement.message_ids[1] -ne 3003 -or
+        $Layout.snapshot_acknowledgement.protobuf_field -cne "last_processed_input_tick" -or
+        [int]$Layout.snapshot_acknowledgement.field_number -ne 7 -or
+        $Layout.snapshot_acknowledgement.presence -cne "explicit-required" -or
+        [int]$Layout.snapshot_acknowledgement.initial_value -ne 0 -or
+        [int]$Layout.snapshot_acknowledgement.maximum_datagram_bytes -ne 1200 -or
+        [int]$Layout.snapshot_acknowledgement.route_payload_budgets."3002" -ne 1040 -or
+        [int]$Layout.snapshot_acknowledgement.route_payload_budgets."3003" -ne 900) {
+        throw "snapshot acknowledgement wire metadata 漂移"
+    }
     foreach ($entry in @(
         @($Layout.secure_header, 48, "network-big-endian"),
         @($Layout.raw_route_header, 16, "network-big-endian"),
         @($Layout.kcp_segment_header, 24, "little-endian"),
-        @($Layout.kcp_route_envelope, 16, "network-big-endian")
+        @($Layout.kcp_route_envelope, 16, "network-big-endian"),
+        @($Layout.transport_control_envelope, 8, "network-big-endian")
     )) {
         $header = $entry[0]
         $expectedSize = [int]$entry[1]
@@ -246,6 +273,31 @@ function Assert-WireArtifacts {
         }
         if ($cursor -ne $expectedSize) {
             throw "wire layout fields 未精确覆盖 $expectedSize bytes"
+        }
+    }
+    $expectedControl = @(
+        @("rebind-request", 1, 34),
+        @("rebind-challenge", 2, 48),
+        @("rebind-confirm", 3, 48),
+        @("rebind-committed", 4, 20),
+        @("rekey-proposal", 5, 32),
+        @("rekey-committed", 6, 32),
+        @("close-request", 7, 1),
+        @("close-acknowledged", 8, 1)
+    )
+    if (@($Layout.transport_control_messages).Count -ne $expectedControl.Count) {
+        throw "transport control message registry 数量漂移"
+    }
+    for ($index = 0; $index -lt $expectedControl.Count; $index++) {
+        $actual = $Layout.transport_control_messages[$index]
+        $expected = $expectedControl[$index]
+        Assert-ExactProperties $actual @(
+            "kind", "name", "direction", "payload_bytes", "fields"
+        ) "transport control message"
+        if ([int]$actual.kind -ne [int]$expected[1] -or
+            $actual.name -cne [string]$expected[0] -or
+            [int]$actual.payload_bytes -ne [int]$expected[2]) {
+            throw "transport control message registry 漂移：$($actual.name)"
         }
     }
 
@@ -297,6 +349,36 @@ function Assert-WireArtifacts {
     foreach ($case in $Malformed.cases) {
         if ([string]$case.expected_reason -cnotmatch '^BATTLE_[A-Z0-9_]+$') {
             throw "malformed corpus stable reason 非法：$($case.case_id)"
+        }
+        $hasBytes = $case.PSObject.Properties.Name -contains "bytes_hex"
+        $hasCount = $case.PSObject.Properties.Name -contains "byte_count"
+        $hasDigest = $case.PSObject.Properties.Name -contains "sha256"
+        if (($hasBytes -or $hasCount -or $hasDigest) -and
+            -not ($hasBytes -and $hasCount -and $hasDigest)) {
+            throw "malformed corpus concrete bytes 必须同时登记 hex、count 与 SHA-256：$($case.case_id)"
+        }
+        if ($hasBytes) {
+            $hex = [string]$case.bytes_hex
+            if ($hex -cnotmatch '^(?:[0-9a-f]{2})+$') {
+                throw "malformed corpus 不是 lowercase even-length hex：$($case.case_id)"
+            }
+            $bytes = [byte[]]::new($hex.Length / 2)
+            for ($index = 0; $index -lt $bytes.Length; $index++) {
+                $bytes[$index] = [Convert]::ToByte($hex.Substring($index * 2, 2), 16)
+            }
+            if ($bytes.Length -ne [int]$case.byte_count) {
+                throw "malformed corpus byte_count 漂移：$($case.case_id)"
+            }
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+                $digest = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+            }
+            finally {
+                $sha.Dispose()
+            }
+            if ($digest -cne [string]$case.sha256) {
+                throw "malformed corpus SHA-256 漂移：$($case.case_id)"
+            }
         }
     }
     if ($Malformed.policy.dispatch_before_complete_validation -cne "forbidden" -or
@@ -415,6 +497,15 @@ function Assert-BattleRegistryParity {
             [int]$route[0].timeoutMs -ne 0) {
             throw "battle route 与 network profile 漂移：$($logical.kind)"
         }
+        $expectedAcknowledgement = if ([int]$route[0].messageId -in @(3002, 3003)) {
+            "EXPLICIT_CURRENT_ACTOR_MAPPING_GENERATION_FRONTIER"
+        }
+        else {
+            $null
+        }
+        if ($route[0].acknowledgementPolicy -cne $expectedAcknowledgement) {
+            throw "battle route acknowledgement policy 漂移：$($logical.kind)"
+        }
     }
 }
 
@@ -425,6 +516,7 @@ function Assert-BattleGeneratedTypeBoundaries {
             Pattern = "generated/proto/ihomeland/battle/v1"
             Paths = @("server")
             Allowed = @(
+                "server/internal/battlequalification/",
                 "server/internal/contract/",
                 "server/internal/fixtures/",
                 "server/internal/testclient/",
@@ -444,13 +536,17 @@ function Assert-BattleGeneratedTypeBoundaries {
             Paths = @("simulation/include", "simulation/src", "simulation/tests")
             Allowed = @(
                 "simulation/include/ihomeland/transport/battle/",
+                "simulation/src/qualification/",
                 "simulation/src/transport/battle/",
+                "simulation/src/transport/battle_route.cpp",
+                "simulation/src/transport/battle_session.cpp",
+                "simulation/src/transport/kcp_adapter.cpp",
                 "simulation/tests/"
             )
         }
     )
     foreach ($rule in $rules) {
-        $arguments = @("grep", "-n", "-I", "-F", $rule.Pattern, "--") + $rule.Paths
+        $arguments = @("grep", "-n", "-I", "--untracked", "-F", $rule.Pattern, "--") + $rule.Paths
         $matches = @(& git -C $RepositoryRoot @arguments)
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
             throw "无法扫描 generated battle type architecture boundary"
@@ -473,6 +569,11 @@ function Assert-BattleGeneratedTypeBoundaries {
 
 # Invoke-CorpusValidation 只读执行 manifest、binding、limit、suite 与 secret policy 的完整验证。
 function Invoke-CorpusValidation {
+    param(
+        # AllowSourceDrift 不放宽 corpus、wire、registry、limits 或 secret policy。
+        [switch]$AllowSourceDrift
+    )
+
     $manifestPath = Join-Path $CorpusRoot "manifest.json"
     $manifest = Read-ClosedJson -Path $manifestPath -ExpectedKind "manifest"
     Assert-ExactProperties $manifest @(
@@ -512,7 +613,9 @@ function Invoke-CorpusValidation {
         $seenKinds[[string]$file.document_kind] = Read-ClosedJson -Path $path -ExpectedKind ([string]$file.document_kind)
     }
 
-    Assert-Binding $seenKinds["model-profile-control-binding"]
+    Assert-Binding `
+        $seenKinds["model-profile-control-binding"] `
+        -AllowSourceDrift:$AllowSourceDrift
     Assert-Limits $seenKinds["limits"]
     Assert-WireSuite $seenKinds["wire-suite"]
     Assert-WireArtifacts $seenKinds["wire-layout"] $seenKinds["canonical-golden"] $seenKinds["malformed-corpus"]
@@ -588,6 +691,14 @@ function New-ImplementationOverlay {
     }
     $versionsDigest = Get-Sha256 -Path (Join-Path $RepositoryRoot "versions.yaml")
     $configDigest = Get-Sha256 -Path (Join-Path $RepositoryRoot "server\config\local.yaml")
+    $protocolClientManifestDigest = Get-Sha256 -Path (
+        Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\protocol-client\manifest.json")
+    $ciBuildIdentityDigest = Get-Sha256 -Path (
+        Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\ihomeland-build-identity.json")
+    $asanBuildIdentityDigest = Get-Sha256 -Path (
+        Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-asan\ihomeland-build-identity.json")
+    $qualificationGateDigest = Get-Sha256 -Path (
+        Join-Path $RepositoryRoot "simulation\out\build\windows-msvc-ci\qualification-gate-receipt.json")
     $overlay = [ordered]@{
         formatVersion = "1"
         qualification = "b0.5-implementation"
@@ -595,10 +706,22 @@ function New-ImplementationOverlay {
         corpusSha256 = $CorpusDigest
         versionsSha256 = $versionsDigest
         configSha256 = $configDigest
+        protocolClient = [ordered]@{
+            manifestSha256 = $protocolClientManifestDigest
+            processBoundary = "independent-cpp-process"
+            supervisorContract = "fixed-stdio-request-receipt"
+        }
+        buildEvidence = [ordered]@{
+            releaseIdentitySha256 = $ciBuildIdentityDigest
+            asanIdentitySha256 = $asanBuildIdentityDigest
+            qualificationGateSha256 = $qualificationGateDigest
+        }
         wire = [ordered]@{ maximumDatagramBytes = 1200; secureHeaderBytes = 48; rawHeaderBytes = 16; aeadTagBytes = 16 }
         kcp = [ordered]@{ parity = "pass"; updateMs = 10; window = 64; fastResend = 2; rtoMinMs = 30; rtoMaxMs = 200; queueItems = 64 }
         measurements = [ordered]@{
             socketHarness = "loopback-pass"
+            socketOwner = "production-listener"
+            realProcessChain = "go-parent-cpp-child-independent-cpp-client"
             cpuBudgetMode = "bounded-test-process"
             memoryBudgetMode = "fixed-buffer-and-queue"
             nodeQueueItems = 256
@@ -623,13 +746,23 @@ function Invoke-Verification {
     Invoke-Checked "client qualification contract gate failed" {
         & (Join-Path $RepositoryRoot "tools\client-qualification\client-qualification.ps1") validate
     }
+    Invoke-Checked "independent battle protocol client contract gate failed" {
+        & (Get-Command pwsh.exe -ErrorAction Stop).Source `
+            -NoLogo `
+            -NoProfile `
+            -File (Join-Path $RepositoryRoot "tools\battle-qualification\protocol-client.tests.ps1") `
+            -RepositoryRoot $RepositoryRoot
+    }
     Invoke-Checked "simulation-control contract gate failed" {
         & (Join-Path $RepositoryRoot "tools\simulation-control\simulation-control.ps1") validate
     }
     Push-Location (Join-Path $RepositoryRoot "server")
     try {
         Invoke-Checked "battle Go unit/contract gate failed" {
-            & go test -count=1 ./internal/battleticket/... ./internal/battleentry/... ./internal/battleticketcontrol/... ./internal/storage/battleticket/... ./internal/transport/httpapi/...
+            & go test -count=1 ./internal/battlequalification/... ./internal/battleticket/... ./internal/battleentry/... ./internal/battleticketcontrol/... ./internal/simulationcontrol/... ./internal/storage/battleticket/... ./internal/transport/httpapi/...
+        }
+        Invoke-Checked "battle Go fuzz gate failed" {
+            & go test ./internal/simulationcontrol -run "^$" -fuzz "FuzzDecodeFrame" -fuzztime "$($BattleFuzzTimeSeconds)s"
         }
         $gccRoot = @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin") |
             Where-Object { Test-Path -LiteralPath (Join-Path $_ "gcc.exe") } |
@@ -643,15 +776,28 @@ function Invoke-Verification {
             $env:CC = "gcc"
             $env:CGO_ENABLED = "1"
             Invoke-Checked "battle Go race gate failed" {
-                & go test -race -count=1 ./internal/battleticket/... ./internal/battleentry/... ./internal/battleticketcontrol/... ./internal/storage/battleticket/... ./internal/transport/httpapi/...
+                & go test -race -count=1 ./internal/battlequalification/... ./internal/battleticket/... ./internal/battleentry/... ./internal/battleticketcontrol/... ./internal/simulationcontrol/... ./internal/storage/battleticket/... ./internal/transport/httpapi/...
             }
         }
         finally {
             $env:PATH, $env:CC, $env:CGO_ENABLED = $oldPath, $oldCC, $oldCGO
         }
+        $previousRealChild = $env:IHOMELAND_SIMULATION_REAL_CHILD
+        try {
+            $env:IHOMELAND_SIMULATION_REAL_CHILD = "1"
+            Invoke-Checked "battle real child/socket gate failed" {
+                & go test -count=1 ./internal/simulationcontrol/process -run "^(TestRealChild|TestRealSession)"
+            }
+        }
+        finally {
+            $env:IHOMELAND_SIMULATION_REAL_CHILD = $previousRealChild
+        }
     }
     finally {
         Pop-Location
+    }
+    Invoke-Checked "battle C++ Release gate failed" {
+        & (Join-Path $RepositoryRoot "tools\cpp\cpp.ps1") test -Preset windows-msvc-ci
     }
     Invoke-Checked "battle C++ ASan gate failed" {
         & (Join-Path $RepositoryRoot "tools\cpp\cpp.ps1") test -Preset windows-msvc-asan
@@ -665,13 +811,13 @@ function Invoke-Verification {
 
 switch ($Action) {
     "validate-corpus" {
-        $digest = Invoke-CorpusValidation
+        $digest = Invoke-CorpusValidation -AllowSourceDrift
         Write-Output "BATTLE_WIRE_CORPUS_VALID digest=$digest"
     }
     "test-corpus" {
         $before = Get-TreeDigest
-        $first = Invoke-CorpusValidation
-        $second = Invoke-CorpusValidation
+        $first = Invoke-CorpusValidation -AllowSourceDrift
+        $second = Invoke-CorpusValidation -AllowSourceDrift
         $after = Get-TreeDigest
         if ($before -cne $first -or $first -cne $second -or $second -cne $after) {
             throw "battle wire validator 连续运行改写了 source corpus"

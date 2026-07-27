@@ -450,7 +450,8 @@ func hasBattleRouteFields(route RouteEntry) bool {
 		route.BaselinePolicy != "" ||
 		route.RecoveryPolicy != "" ||
 		route.SplitPolicy != "" ||
-		route.BindingPolicy != ""
+		route.BindingPolicy != "" ||
+		route.AcknowledgementPolicy != ""
 }
 
 // validateBattleRoute 固定 UDP battle route 的编号、lane、安全 binding 与资源字段完整性。
@@ -489,6 +490,14 @@ func validateBattleRoute(message MessageEntry, route RouteEntry) error {
 		route.SplitPolicy == "" ||
 		route.BindingPolicy != "SESSION_ENDPOINT_TARGET_GENERATION" {
 		return fmt.Errorf("battle message %d has incomplete UDP route policy", message.ID)
+	}
+	const snapshotAcknowledgementPolicy = "EXPLICIT_CURRENT_ACTOR_MAPPING_GENERATION_FRONTIER"
+	if message.ID == 3002 || message.ID == 3003 {
+		if route.AcknowledgementPolicy != snapshotAcknowledgementPolicy {
+			return fmt.Errorf("battle snapshot %d has incomplete acknowledgement policy", message.ID)
+		}
+	} else if route.AcknowledgementPolicy != "" {
+		return fmt.Errorf("battle message %d cannot declare snapshot acknowledgement", message.ID)
 	}
 	switch route.Lane {
 	case "RAW":

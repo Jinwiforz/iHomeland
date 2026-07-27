@@ -106,6 +106,115 @@
         "ability_id": 7,
         "phase": 1
       }
+    },
+    {
+      "vector_id": "battle-full-snapshot-ack-zero-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleFullSnapshot",
+      "bytes_hex": "080110011801200028013800",
+      "byte_count": 12,
+      "sha256": "365a0fc5dbb3c0ed341a1ba5b43af324f5dbfcc7be0c2607656b10894f0b8908",
+      "decoded": {
+        "server_tick": 1,
+        "snapshot_sequence": 1,
+        "baseline_id": 1,
+        "partition_index": 0,
+        "partition_count": 1,
+        "last_processed_input_tick": 0
+      }
+    },
+    {
+      "vector_id": "battle-delta-snapshot-ack-zero-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleDeltaSnapshot",
+      "bytes_hex": "080110011801200028013800",
+      "byte_count": 12,
+      "sha256": "365a0fc5dbb3c0ed341a1ba5b43af324f5dbfcc7be0c2607656b10894f0b8908",
+      "decoded": {
+        "server_tick": 1,
+        "snapshot_sequence": 1,
+        "baseline_id": 1,
+        "partition_index": 0,
+        "partition_count": 1,
+        "last_processed_input_tick": 0
+      }
+    },
+    {
+      "vector_id": "battle-delta-snapshot-ack-normal-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleDeltaSnapshot",
+      "bytes_hex": "08021002180120002801382a",
+      "byte_count": 12,
+      "sha256": "42215fff78f6c3c46139dd7bbb4fc98dce5ee6bf7b49fdc2136f8704825fe36f",
+      "decoded": {
+        "server_tick": 2,
+        "snapshot_sequence": 2,
+        "baseline_id": 1,
+        "partition_index": 0,
+        "partition_count": 1,
+        "last_processed_input_tick": 42
+      }
+    },
+    {
+      "vector_id": "battle-delta-snapshot-ack-large-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleDeltaSnapshot",
+      "bytes_hex": "0803100318012000280138ffffffffffffffffff01",
+      "byte_count": 21,
+      "sha256": "4f35bb04202d81d1e4e438700b401c115551637cc39b9469b7311356420765a0",
+      "decoded": {
+        "server_tick": 3,
+        "snapshot_sequence": 3,
+        "baseline_id": 1,
+        "partition_index": 0,
+        "partition_count": 1,
+        "last_processed_input_tick": 18446744073709551615
+      }
+    },
+    {
+      "vector_id": "battle-full-snapshot-ack-multipart-0-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleFullSnapshot",
+      "bytes_hex": "08041004180220002802388001",
+      "byte_count": 13,
+      "sha256": "9709309741b8b52aaa5ea05a60ec5f778d234085f9f581f1deb4b35f2c6d44b3",
+      "decoded": {
+        "server_tick": 4,
+        "snapshot_sequence": 4,
+        "baseline_id": 2,
+        "partition_index": 0,
+        "partition_count": 2,
+        "last_processed_input_tick": 128
+      }
+    },
+    {
+      "vector_id": "battle-full-snapshot-ack-multipart-1-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleFullSnapshot",
+      "bytes_hex": "08041004180220012802388001",
+      "byte_count": 13,
+      "sha256": "39b2f8b4cb90664a720177b47f9a608aeb2e0b2f0507710f29d344b3181b4737",
+      "decoded": {
+        "server_tick": 4,
+        "snapshot_sequence": 4,
+        "baseline_id": 2,
+        "partition_index": 1,
+        "partition_count": 2,
+        "last_processed_input_tick": 128
+      }
+    },
+    {
+      "vector_id": "battle-ticket-proof-key-v2",
+      "layer": "credential-derivation",
+      "bytes_hex": "40d65068dd108e2d727be477529ec572db2b6df9aa1edc1495b1cefd72d9f517",
+      "byte_count": 32,
+      "sha256": "7722b1c92b1c01de1cbd668c84cf1e4d498a2a85d2d40bffb59c2b2f22719ee8",
+      "decoded": {
+        "algorithm": "HKDF-SHA-256",
+        "ikm_classification": "TEST-ONLY-PUBLIC-VECTOR",
+        "salt": "raw-ticket-id-16",
+        "info": "ihomeland/battle-ticket/proof-key/v2"
+      }
     }
   ],
   "parity_matrix": [

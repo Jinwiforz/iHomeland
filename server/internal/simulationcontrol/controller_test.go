@@ -27,6 +27,8 @@ type fakeControlSession struct {
 	startEntered chan struct{}
 	// releaseStart 允许测试在 probe 完成后释放阻塞的 start receipt。
 	releaseStart chan struct{}
+	// qualificationMutation 选择 snapshot receipt 的单一负例变体。
+	qualificationMutation string
 }
 
 // Call 返回与 request 完整关联的 canonical receipt。
@@ -106,6 +108,39 @@ func (session *fakeControlSession) Call(_ context.Context, requestID RequestID, 
 			State:                 "stopped",
 			WorldInstanceID:       values["worldInstanceId"].(string),
 		})
+	case "battle_qualification_snapshot_request":
+		receipt := qualificationSnapshotWire{
+			ActiveSessionCount:    "0",
+			AssignmentFingerprint: values["assignmentFingerprint"].(string),
+			CommittedTick:         "7",
+			InstalledTicketCount:  "0",
+			Metrics:               zeroQualificationMetricsWire(),
+			NodeCount:             "1",
+			QualificationRunID:    values["qualificationRunId"].(string),
+			RunningInstanceCount:  "1",
+			SampleSequence:        values["sampleSequence"].(string),
+			SimulationInstanceID:  values["simulationInstanceId"].(string),
+			SimulationNodeID:      values["simulationNodeId"].(string),
+		}
+		if session.qualificationMutation == "old-node" {
+			receipt.SimulationNodeID = "snode_stalequalification"
+		}
+		if session.qualificationMutation == "old-sequence" {
+			receipt.SampleSequence = "2"
+		}
+		rawReceipt, marshalErr := json.Marshal(receipt)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		if session.qualificationMutation == "unknown-field" {
+			var object map[string]any
+			if unmarshalErr := json.Unmarshal(rawReceipt, &object); unmarshalErr != nil {
+				return nil, unmarshalErr
+			}
+			object["proofKey"] = strings.Repeat("9", 64)
+			return json.Marshal(object)
+		}
+		return rawReceipt, nil
 	default:
 		return nil, errors.New("unexpected fake control kind: " + kind + "/" + expected)
 	}

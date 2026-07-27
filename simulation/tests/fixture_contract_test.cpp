@@ -238,6 +238,17 @@ void TestOfflineContracts() {
 void TestConfigNegatives() {
     {
         IsolatedCorpus corpus;
+        auto manifest = ReadJson(corpus.ProfileRoot() / "manifest.json");
+        manifest["profile_version"] =
+            "battle-network-profile-v1";
+        WriteJson(corpus.ProfileRoot() / "manifest.json", manifest);
+        RequireConfigError(
+            [&] { static_cast<void>(ihomeland::sim::LoadBattleRuntimeConfig(corpus.ProfileRoot(), corpus.ModelRoot())); },
+            ihomeland::sim::BattleConfigErrorCode::Schema,
+            "profile v1 manifest was accepted");
+    }
+    {
+        IsolatedCorpus corpus;
         auto profile = ReadJson(corpus.ProfileRoot() / "profile.json");
         profile["profile_status"] = "drifted";
         WriteJson(corpus.ProfileRoot() / "profile.json", profile);

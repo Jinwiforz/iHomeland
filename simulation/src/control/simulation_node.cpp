@@ -2,16 +2,20 @@
 
 #include "ihomeland/sim/core/adapter_smoke.hpp"
 #include "ihomeland/sim/core/sha256.hpp"
+#include "ihomeland/sim/simulation/command_ingress.hpp"
 #include "ihomeland/sim/simulation/identity.hpp"
+#include "ihomeland/sim/simulation/input_timeline.hpp"
 #include "ihomeland/sim/simulation/simulation_instance.hpp"
 #include "ihomeland/sim/simulation/tick_clock.hpp"
 
+#define NOMINMAX
 #include <windows.h>
 #include <bcrypt.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -23,6 +27,41 @@ namespace ihomeland::sim {
 namespace {
 
 using namespace std::chrono_literals;
+
+/// QualifiedRuntimePolicy 集中声明 candidate-20hz 已资格 runtime 参数。
+struct QualifiedRuntimePolicy final {
+    /// SimulationTick 是权威 worker 的固定 20 Hz cadence。
+    static constexpr auto SimulationTick = 50ms;
+    /// InputStepNanoseconds 是 client input 的固定 40 Hz cadence。
+    static constexpr std::uint64_t InputStepNanoseconds = 25'000'000;
+    /// SimulationStepNanoseconds 与 SimulationTick 精确一致。
+    static constexpr std::uint64_t SimulationStepNanoseconds = 50'000'000;
+    /// InboxItems 是 instance producer 的 hard queue budget。
+    static constexpr std::size_t InboxItems = 256;
+    /// HardTickDebt 是 worker 可积累的最大显式 clock credits。
+    static constexpr std::uint32_t HardTickDebt = 4;
+    /// InputEarlyWindowTicks 是相对 committed Tick 的提前窗口。
+    static constexpr std::uint32_t InputEarlyWindowTicks = 2;
+    /// InputLateWindowTicks 是相对 mapped Tick 的迟到窗口。
+    static constexpr std::uint32_t InputLateWindowTicks = 6;
+    /// ContinuousHoldTicks 是 B0.2 profile 冻结的连续输入保持窗口。
+    static constexpr std::uint32_t ContinuousHoldTicks = 4;
+    /// InputGapExpiryTicks 是 B0.2 profile 冻结的缺口稳定终结窗口。
+    static constexpr std::uint32_t InputGapExpiryTicks = 6;
+    /// InputDedupeItems 是每个 instance 的 hard dedupe budget。
+    static constexpr std::size_t InputDedupeItems = 256;
+    /// BaseInputTick 是每个 mapping generation 的首个 InputTick。
+    static constexpr std::uint64_t BaseInputTick = 1;
+    /// BaseSimulationTick 是每个 instance timeline 的首个 SimulationTick。
+    static constexpr std::uint64_t BaseSimulationTick = 1;
+    /// InputTicksPerSimulationTick 是两个冻结 cadence 的精确整数比。
+    static constexpr std::uint64_t InputTicksPerSimulationTick =
+        SimulationStepNanoseconds / InputStepNanoseconds;
+    /// MicrosecondsPerMillisecond 用于 raw expiry context 的 checked 单位转换。
+    static constexpr std::uint64_t MicrosecondsPerMillisecond = 1'000;
+    /// InitialActorHealthScaled 是 instance admission 创建 actor 的完整初始生命值。
+    static constexpr std::int64_t InitialActorHealthScaled = 100'000;
+};
 
 /// RequireIdentity 验证 control identity 只含安全 ASCII 且有固定前缀。
 void RequireIdentity(
@@ -236,8 +275,36 @@ struct SimulationNode::Entry final {
     std::shared_ptr<SteadyTickClock> clock;
     /// instance 是唯一 core lifecycle/Tick owner。
     std::unique_ptr<SimulationInstance> instance;
+    /// command_ingress 是该 instance 唯一 validated gameplay 输入边界。
+    std::unique_ptr<CommandIngress> command_ingress;
+    /// input_timeline 只由 instance worker 推进连续输入终结状态。
+    std::shared_ptr<InputTimeline> input_timeline;
+    /// input_acknowledgements 向 replication worker 发布 immutable projection。
+    std::shared_ptr<InputAcknowledgementStore>
+        input_acknowledgements;
     /// drained 标记 ingress 已关闭且 lifecycle result 已生成。
     bool drained{false};
+};
+
+/// BattleRuntimeBinding 是 UDP worker 可查询且由 control lifecycle 更新的窄绑定。
+struct SimulationNode::BattleRuntimeBinding final {
+    /// assignment_fingerprint 绑定 exact placement incarnation。
+    std::string assignment_fingerprint;
+    /// simulation_instance_id 绑定不可复活 worker。
+    std::string simulation_instance_id;
+    /// mapping_generation 绑定 InputTick epoch。
+    std::uint64_t mapping_generation;
+    /// instance 提供 atomic committed Tick snapshot。
+    SimulationInstance* instance;
+    /// command_ingress 是唯一 validated producer port。
+    CommandIngress* command_ingress;
+    /// input_acknowledgements 是 replication 可读取的唯一跨线程确认快照。
+    std::shared_ptr<InputAcknowledgementStore>
+        input_acknowledgements;
+    /// initial_states 是 instance startup 冻结且只由后续 gameplay commit 替换的投影。
+    std::vector<StateProjectionToken> initial_states;
+    /// active 在 drain/stop 开始前一次性关闭。
+    bool active;
 };
 
 /// TicketEntry 保存首次 install identity、locked proof 与不可逆 lifecycle。
@@ -287,6 +354,8 @@ SimulationNode::SimulationNode(SimulationNodeConfig config)
         throw std::invalid_argument("simulation node capacity is invalid");
     }
     entries_.reserve(config_.instance_capacity);
+    battle_runtime_bindings_.reserve(
+        config_.instance_capacity);
     retired_bindings_.reserve(config_.instance_capacity);
     outbox_.reserve(ResultOutboxLimit);
     acked_results_.reserve(ResultOutboxLimit);
@@ -374,15 +443,93 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
             command.config_identity,
             command.navigation_identity,
             command.physics_identity));
+    std::vector<std::uint64_t> actor_ids;
+    std::vector<StateProjectionToken> initial_states;
+    actor_ids.reserve(command.actor_capacity);
+    initial_states.reserve(command.actor_capacity);
+    for (std::size_t slot = 0;
+         slot < command.actor_capacity;
+         ++slot) {
+        const auto actor_id =
+            static_cast<std::uint64_t>(slot) + 1;
+        actor_ids.push_back(actor_id);
+        initial_states.push_back(
+            StateProjectionToken{
+                .actor_id = actor_id,
+                .x_mm = 0,
+                .y_mm = 0,
+                .z_mm = 0,
+                .health_scaled =
+                    QualifiedRuntimePolicy::
+                        InitialActorHealthScaled,
+                .phase = 0,
+                .alive = true,
+            });
+    }
+    const auto input_mapping =
+        InputMappingConfig{
+            .generation =
+                command.mapping_generation,
+            .base_input_tick =
+                QualifiedRuntimePolicy::
+                    BaseInputTick,
+            .base_simulation_tick =
+                QualifiedRuntimePolicy::
+                    BaseSimulationTick,
+            .input_step_ns =
+                QualifiedRuntimePolicy::
+                    InputStepNanoseconds,
+            .simulation_step_ns =
+                QualifiedRuntimePolicy::
+                    SimulationStepNanoseconds,
+            .early_window_ticks =
+                QualifiedRuntimePolicy::
+                    InputEarlyWindowTicks,
+            .late_window_ticks =
+                QualifiedRuntimePolicy::
+                    InputLateWindowTicks,
+        };
+    auto input_timeline =
+        std::make_shared<InputTimeline>(
+            input_mapping,
+            actor_ids,
+            QualifiedRuntimePolicy::
+                ContinuousHoldTicks,
+            QualifiedRuntimePolicy::
+                InputGapExpiryTicks,
+            QualifiedRuntimePolicy::
+                InputDedupeItems);
+    auto input_acknowledgements =
+        std::make_shared<
+            InputAcknowledgementStore>(
+            command.mapping_generation,
+            actor_ids);
     auto instance = std::make_unique<SimulationInstance>(
         std::move(identity),
         SimulationInstanceConfig{
-            .tick_step = 50ms,
-            .inbox_capacity = 256,
-            .hard_tick_debt = 4,
+            .tick_step =
+                QualifiedRuntimePolicy::SimulationTick,
+            .inbox_capacity =
+                QualifiedRuntimePolicy::InboxItems,
+            .hard_tick_debt =
+                QualifiedRuntimePolicy::HardTickDebt,
         },
         clock,
-        [](const TickObservation&) {});
+        [input_timeline,
+         input_acknowledgements](
+            const TickObservation& observation) {
+            static_cast<void>(
+                input_timeline->Resolve(
+                    observation.tick,
+                    observation.commands));
+            const auto acknowledgements =
+                input_timeline->
+                    FreezeAcknowledgements();
+            input_acknowledgements->Publish(
+                observation.tick,
+                acknowledgements);
+        },
+        &runtime_metrics_);
     const std::vector<StartupStep> startup{
         {
             .stage = StartupStage::Fixture,
@@ -409,11 +556,26 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         },
     };
     instance->Start(startup);
+    auto command_ingress =
+        std::make_unique<CommandIngress>(
+            *instance,
+            input_mapping,
+            actor_ids,
+            QualifiedRuntimePolicy::InputDedupeItems);
+    runtime_metrics_.ObserveMemory(
+        instance->ReservedBytes(),
+        0);
     auto entry = std::make_unique<Entry>();
     entry->command = command;
     entry->simulation_instance_id = "sinst_" + core_id.ToLowerHex();
     entry->clock = std::move(clock);
     entry->instance = std::move(instance);
+    entry->command_ingress =
+        std::move(command_ingress);
+    entry->input_timeline =
+        input_timeline;
+    entry->input_acknowledgements =
+        input_acknowledgements;
     const auto receipt = InstanceReadyReceipt{
         .start_request_id = entry->command.start_request_id,
         .assignment_fingerprint = entry->command.assignment.fingerprint,
@@ -422,6 +584,27 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         .seed = entry->command.seed,
         .replayed = false,
     };
+    {
+        std::scoped_lock lock(
+            battle_runtime_binding_mutex_);
+        battle_runtime_bindings_.push_back(
+            BattleRuntimeBinding{
+                .assignment_fingerprint =
+                    entry->command.assignment.fingerprint,
+                .simulation_instance_id =
+                    entry->simulation_instance_id,
+                .mapping_generation =
+                    entry->command.mapping_generation,
+                .instance = entry->instance.get(),
+                .command_ingress =
+                    entry->command_ingress.get(),
+                .input_acknowledgements =
+                    entry->input_acknowledgements,
+                .initial_states =
+                    std::move(initial_states),
+                .active = true,
+            });
+    }
     entries_.push_back(std::move(entry));
     return receipt;
 }
@@ -492,6 +675,22 @@ InstanceStatusReceipt SimulationNode::Drain(
                     ticket->state = BattleTicketState::Revoked;
                     ticket->proof_key.reset();
                 }
+            }
+        }
+        {
+            std::scoped_lock lock(
+                battle_runtime_binding_mutex_);
+            const auto runtime_binding =
+                std::find_if(
+                    battle_runtime_bindings_.begin(),
+                    battle_runtime_bindings_.end(),
+                    [&](const auto& binding) {
+                        return binding.simulation_instance_id ==
+                            entry.simulation_instance_id;
+                    });
+            if (runtime_binding !=
+                battle_runtime_bindings_.end()) {
+                runtime_binding->active = false;
             }
         }
         entry.instance->BeginDrain();
@@ -573,6 +772,22 @@ void SimulationNode::Stop(
             }
         }
     }
+    {
+        std::scoped_lock lock(
+            battle_runtime_binding_mutex_);
+        const auto runtime_binding =
+            std::find_if(
+                battle_runtime_bindings_.begin(),
+                battle_runtime_bindings_.end(),
+                [&](const auto& binding) {
+                    return binding.simulation_instance_id ==
+                        entry.simulation_instance_id;
+                });
+        if (runtime_binding !=
+            battle_runtime_bindings_.end()) {
+            runtime_binding->active = false;
+        }
+    }
     if (!entry.drained && !entry.instance->Stop(deadline)) {
         throw std::runtime_error("simulation instance stop deadline exceeded");
     }
@@ -580,6 +795,16 @@ void SimulationNode::Stop(
         .world_instance_id = world_instance_id,
         .assignment_fingerprint = assignment_fingerprint,
     });
+    {
+        std::scoped_lock lock(
+            battle_runtime_binding_mutex_);
+        std::erase_if(
+            battle_runtime_bindings_,
+            [&](const auto& binding) {
+                return binding.simulation_instance_id ==
+                    entry.simulation_instance_id;
+            });
+    }
     entries_.erase(iterator);
 }
 
@@ -894,10 +1119,8 @@ void SimulationNode::AuthenticateAndConsumeBattleTicket(
     const std::string& expected_advertised_host,
     const std::uint16_t expected_advertised_port,
     const std::uint64_t observed_unix_ms,
-    const std::function<bool(
-        std::span<const std::uint8_t, 32>,
-        const BattleTicketBinding&,
-        const std::string&)>& authenticator) {
+    const BattleTicketAuthenticator::Authenticator&
+        authenticator) {
     RequireIdentity(ticket_id, "btk1_", "BattleTicketID");
     RequireIdentity(
         expected_simulation_node_id,
@@ -1081,9 +1304,226 @@ std::size_t SimulationNode::InstalledOrActiveActors(
     return actors;
 }
 
+CommandIngress*
+SimulationNode::ResolveBattleCommandIngress(
+    const BattleSessionContext& context) noexcept {
+    std::scoped_lock lock(
+        battle_runtime_binding_mutex_);
+    const auto binding = std::find_if(
+        battle_runtime_bindings_.begin(),
+        battle_runtime_bindings_.end(),
+        [&](const auto& candidate) {
+            return candidate.active &&
+                candidate.simulation_instance_id ==
+                    context.SimulationInstanceId() &&
+                candidate.assignment_fingerprint ==
+                    context.AssignmentFingerprint() &&
+                candidate.mapping_generation ==
+                    context.MappingGeneration();
+        });
+    return binding ==
+            battle_runtime_bindings_.end()
+        ? nullptr
+        : binding->command_ingress;
+}
+
+std::optional<BattleReplicationProjection>
+SimulationNode::BattleReplicationSnapshot(
+    const BattleSessionContext& context) const {
+    std::scoped_lock lock(
+        battle_runtime_binding_mutex_);
+    const auto binding = std::find_if(
+        battle_runtime_bindings_.begin(),
+        battle_runtime_bindings_.end(),
+        [&](const auto& candidate) {
+            return candidate.active &&
+                candidate.simulation_instance_id ==
+                    context.SimulationInstanceId() &&
+                candidate.assignment_fingerprint ==
+                    context.AssignmentFingerprint() &&
+                candidate.mapping_generation ==
+                    context.MappingGeneration();
+        });
+    if (binding ==
+        battle_runtime_bindings_.end()) {
+        return std::nullopt;
+    }
+    const auto actor_state = std::find_if(
+        binding->initial_states.begin(),
+        binding->initial_states.end(),
+        [&](const auto& state) {
+            return state.actor_id ==
+                context.Actor().actor_id;
+        });
+    if (actor_state ==
+        binding->initial_states.end()) {
+        return std::nullopt;
+    }
+    const auto acknowledgement =
+        binding->input_acknowledgements->
+            Freeze(
+                context.Actor().actor_id,
+                context.MappingGeneration());
+    if (!acknowledgement.has_value()) {
+        return std::nullopt;
+    }
+    return BattleReplicationProjection{
+        .server_tick = acknowledgement->server_tick,
+        .acknowledgement =
+            acknowledgement->acknowledgement,
+        .states = {*actor_state},
+    };
+}
+
+BattleRawDispatchContext
+SimulationNode::BattleRawContext(
+    const BattleSessionContext& context,
+    const std::uint64_t now_unix_ms) const {
+    if (now_unix_ms == 0 ||
+        now_unix_ms >
+            std::numeric_limits<std::uint64_t>::max() /
+                QualifiedRuntimePolicy::
+                    MicrosecondsPerMillisecond) {
+        throw std::invalid_argument(
+            "battle raw context time is invalid");
+    }
+    std::uint64_t committed_tick = 0;
+    {
+        std::scoped_lock lock(
+            battle_runtime_binding_mutex_);
+        const auto binding = std::find_if(
+            battle_runtime_bindings_.begin(),
+            battle_runtime_bindings_.end(),
+            [&](const auto& candidate) {
+                return candidate.active &&
+                    candidate.simulation_instance_id ==
+                        context.SimulationInstanceId() &&
+                    candidate.assignment_fingerprint ==
+                        context.AssignmentFingerprint() &&
+                    candidate.mapping_generation ==
+                        context.MappingGeneration();
+            });
+        if (binding ==
+            battle_runtime_bindings_.end()) {
+            throw std::runtime_error(
+                "battle raw context instance is stale");
+        }
+        committed_tick =
+            binding->instance->CommittedTick();
+    }
+    const auto oldest_simulation_tick =
+        committed_tick >
+                QualifiedRuntimePolicy::
+                    InputLateWindowTicks
+            ? committed_tick -
+                  QualifiedRuntimePolicy::
+                      InputLateWindowTicks
+            : QualifiedRuntimePolicy::
+                  BaseSimulationTick;
+    if (committed_tick >
+        std::numeric_limits<std::uint64_t>::max() -
+            QualifiedRuntimePolicy::
+                InputEarlyWindowTicks) {
+        throw std::overflow_error(
+            "battle raw context tick overflow");
+    }
+    const auto newest_simulation_tick =
+        committed_tick +
+        QualifiedRuntimePolicy::
+            InputEarlyWindowTicks;
+    const auto first_input_for_tick =
+        [](const std::uint64_t simulation_tick) {
+            return
+                QualifiedRuntimePolicy::
+                    BaseInputTick +
+                (simulation_tick -
+                 QualifiedRuntimePolicy::
+                     BaseSimulationTick) *
+                    QualifiedRuntimePolicy::
+                        InputTicksPerSimulationTick;
+        };
+    const auto oldest_input_tick =
+        first_input_for_tick(
+            oldest_simulation_tick);
+    const auto newest_input_tick =
+        first_input_for_tick(
+            newest_simulation_tick) +
+        QualifiedRuntimePolicy::
+            InputTicksPerSimulationTick -
+        1;
+    const auto now_unix_microseconds =
+        now_unix_ms *
+        QualifiedRuntimePolicy::
+            MicrosecondsPerMillisecond;
+    return BattleRawDispatchContext{
+        .now_unix_microseconds =
+            now_unix_microseconds,
+        .enqueued_unix_microseconds =
+            now_unix_microseconds,
+        .oldest_accepted_tick =
+            oldest_input_tick,
+        .newest_accepted_tick =
+            newest_input_tick,
+    };
+}
+
+bool SimulationNode::BattleSessionCurrent(
+    const BattleSessionContext& context) const noexcept {
+    {
+        std::scoped_lock lock(
+            battle_runtime_binding_mutex_);
+        if (std::ranges::none_of(
+                battle_runtime_bindings_,
+                [&](const auto& candidate) {
+                    return candidate.active &&
+                        candidate.simulation_instance_id ==
+                            context.SimulationInstanceId() &&
+                        candidate.assignment_fingerprint ==
+                            context.AssignmentFingerprint() &&
+                        candidate.mapping_generation ==
+                            context.MappingGeneration();
+                })) {
+            return false;
+        }
+    }
+    std::scoped_lock lock(ticket_mutex_);
+    return std::ranges::any_of(
+        tickets_,
+        [&](const auto& ticket) {
+            const auto& binding =
+                ticket->binding;
+            const auto expected_role =
+                context.Actor().role ==
+                        BattleActorRole::Owner
+                    ? "owner"
+                    : "visitor";
+            return ticket->state ==
+                       BattleTicketState::Consumed &&
+                binding.player_id ==
+                    context.Actor().player_id &&
+                binding.session_id ==
+                    context.AccountSessionId() &&
+                binding.session_epoch ==
+                    context.AccountSessionEpoch() &&
+                binding.role == expected_role &&
+                binding.assignment_fingerprint ==
+                    context.AssignmentFingerprint() &&
+                binding.simulation_instance_id ==
+                    context.SimulationInstanceId() &&
+                binding.mapping_generation ==
+                    context.MappingGeneration() &&
+                binding.target_revision ==
+                    context.TargetRevision() &&
+                binding.actor_slot ==
+                    context.Actor().actor_slot;
+        });
+}
+
 void SimulationNode::StartBattleUdpListener(
     BattleUdpListenerConfig config,
     BattleUdpListener::DatagramHandler handler) {
+    std::scoped_lock listener_lock(
+        battle_udp_listener_mutex_);
     if (!healthy_) {
         throw std::runtime_error("simulation node is draining");
     }
@@ -1098,6 +1538,7 @@ void SimulationNode::StartBattleUdpListener(
             std::move(handler));
         listener->Start();
         battle_udp_listener_ = std::move(listener);
+        battle_udp_listener_stopping_ = false;
     } catch (...) {
         healthy_ = false;
         throw;
@@ -1105,13 +1546,37 @@ void SimulationNode::StartBattleUdpListener(
 }
 
 void SimulationNode::StopBattleUdpListener() noexcept {
-    if (battle_udp_listener_) {
-        battle_udp_listener_->Stop();
+    BattleUdpListener* listener = nullptr;
+    {
+        std::scoped_lock lock(
+            battle_udp_listener_mutex_);
+        battle_udp_listener_stopping_ = true;
+        listener = battle_udp_listener_.get();
     }
+    if (listener != nullptr) {
+        listener->Stop();
+    }
+}
+
+BattleUdpSendDisposition
+SimulationNode::SendBattleUdpDatagram(
+    const std::span<const std::uint8_t> datagram,
+    const BattleRemoteEndpoint& remote) {
+    std::scoped_lock lock(
+        battle_udp_listener_mutex_);
+    if (battle_udp_listener_ == nullptr ||
+        battle_udp_listener_stopping_) {
+        return BattleUdpSendDisposition::Stopped;
+    }
+    return battle_udp_listener_->Send(
+        datagram,
+        remote);
 }
 
 std::optional<BattleUdpListenerStatus>
 SimulationNode::UdpListenerStatus() const {
+    std::scoped_lock lock(
+        battle_udp_listener_mutex_);
     if (!battle_udp_listener_) {
         return std::nullopt;
     }
@@ -1165,6 +1630,68 @@ std::size_t SimulationNode::RunningInstances() const noexcept {
 
 const SimulationNodeConfig& SimulationNode::Config() const noexcept {
     return config_;
+}
+
+BattleQualificationSnapshotReceipt
+SimulationNode::QualificationSnapshot(
+    const std::string& simulation_instance_id,
+    const std::string& assignment_fingerprint,
+    const std::uint64_t observed_unix_ms) {
+    if (observed_unix_ms == 0) {
+        throw std::invalid_argument(
+            "qualification snapshot time is invalid");
+    }
+    const auto iterator = std::find_if(
+        entries_.begin(),
+        entries_.end(),
+        [&](const auto& entry) {
+            return entry->simulation_instance_id == simulation_instance_id;
+        });
+    if (iterator == entries_.end() ||
+        (*iterator)->command.assignment.fingerprint !=
+            assignment_fingerprint) {
+        throw std::runtime_error(
+            "qualification snapshot instance binding is stale");
+    }
+
+    std::size_t active_sessions = 0;
+    std::size_t installed_tickets = 0;
+    {
+        std::lock_guard lock(ticket_mutex_);
+        for (const auto& ticket : tickets_) {
+            if (ticket->binding.simulation_instance_id !=
+                    simulation_instance_id ||
+                ((ticket->state == BattleTicketState::Installed ||
+                  ticket->state == BattleTicketState::Consumed) &&
+                 observed_unix_ms >=
+                     ticket->binding.expires_at_unix_ms)) {
+                continue;
+            }
+            if (ticket->state == BattleTicketState::Consumed) {
+                ++active_sessions;
+            } else if (ticket->state == BattleTicketState::Installed) {
+                ++installed_tickets;
+            }
+        }
+    }
+
+    const auto& entry = **iterator;
+    return BattleQualificationSnapshotReceipt{
+        .simulation_node_id = config_.simulation_node_id,
+        .simulation_instance_id = entry.simulation_instance_id,
+        .assignment_fingerprint =
+            entry.command.assignment.fingerprint,
+        .committed_tick = entry.instance->CommittedTick(),
+        .node_count = 1,
+        .running_instance_count = entries_.size(),
+        .active_session_count = active_sessions,
+        .installed_ticket_count = installed_tickets,
+        .metrics = runtime_metrics_.Snapshot(),
+    };
+}
+
+BattleRuntimeMetrics& SimulationNode::RuntimeMetrics() noexcept {
+    return runtime_metrics_;
 }
 
 }  // namespace ihomeland::sim

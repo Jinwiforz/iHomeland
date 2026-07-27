@@ -1,0 +1,90 @@
+{
+  "formatVersion": 1,
+  "qualificationVersion": "battle-network-qualification-v1",
+  "documentKind": "lifecycle-security",
+  "attackBudget": {
+    "maximumSenders": 16,
+    "maximumPacketsPerSecondPerSender": 200,
+    "maximumDurationMilliseconds": 30000,
+    "maximumTotalBytes": 67108864,
+    "legitimateActorCount": 5,
+    "availabilityPolicy": "legitimate-workload-remains-within-budget"
+  },
+  "securityCases": [
+    "aad-tamper",
+    "ciphertext-tamper",
+    "cookie-less-amplification",
+    "future-sequence",
+    "kcp-expiry",
+    "malformed-flood",
+    "old-epoch",
+    "oversize-datagram",
+    "proof-forgery",
+    "rate-exhaustion",
+    "rebind-hijack",
+    "replay-duplicate",
+    "spoofed-source",
+    "ticket-replay",
+    "too-old-sequence",
+    "wrong-direction",
+    "wrong-lane"
+  ],
+  "lifecycleCases": [
+    "assignment-replacement",
+    "child-crash-restart",
+    "go-restart",
+    "network-pause-resume",
+    "owner-grace-expiry",
+    "session-epoch-invalidation",
+    "shutdown-drain-deadline",
+    "valid-endpoint-rebind",
+    "visitor-leave",
+    "visitor-reconnect"
+  ],
+  "lifecycleOwners": {
+    "assignment-replacement": "process-supervisor",
+    "child-crash-restart": "process-supervisor",
+    "go-restart": "process-supervisor",
+    "network-pause-resume": "fault-gateway",
+    "owner-grace-expiry": "public-protocol",
+    "session-epoch-invalidation": "public-protocol",
+    "shutdown-drain-deadline": "process-supervisor",
+    "valid-endpoint-rebind": "fault-gateway",
+    "visitor-leave": "public-protocol",
+    "visitor-reconnect": "public-protocol"
+  },
+  "lifecycleModes": {
+    "assignment-replacement": "replaced",
+    "child-crash-restart": "replaced",
+    "go-restart": "replaced",
+    "network-pause-resume": "preserved",
+    "owner-grace-expiry": "terminated",
+    "session-epoch-invalidation": "terminated",
+    "shutdown-drain-deadline": "terminated",
+    "valid-endpoint-rebind": "preserved",
+    "visitor-leave": "terminated",
+    "visitor-reconnect": "replaced"
+  },
+  "soak": {
+    "workloadId": "default-coop",
+    "durationMilliseconds": 1800000,
+    "sampleIntervalMilliseconds": 1000,
+    "warmupMilliseconds": 60000,
+    "rekeyIntervalMilliseconds": 600000,
+    "minimumObservedRekeys": 2,
+    "cleanupMilliseconds": 30000,
+    "requiredInvariants": [
+      "bounded-memory",
+      "bounded-pending-handshakes",
+      "bounded-queues",
+      "current-assignment-only",
+      "current-endpoint-only",
+      "current-session-generation-only",
+      "monotonic-input-tick",
+      "monotonic-packet-sequence",
+      "monotonic-server-tick",
+      "no-nonce-reuse",
+      "no-stale-target-revival"
+    ]
+  }
+}

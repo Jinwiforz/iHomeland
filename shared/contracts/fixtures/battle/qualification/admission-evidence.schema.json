@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-admission-capacity-evidence-v1.json",
+  "title": "iHomeland Battle Admission Capacity Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "evidenceKind",
+    "membershipCount",
+    "admittedBattleActors",
+    "capacityRejected",
+    "visitRevisionPreserved",
+    "disposition"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "evidenceKind": { "const": "admission-capacity-evidence" },
+    "membershipCount": { "const": 33 },
+    "admittedBattleActors": { "const": 8 },
+    "capacityRejected": { "const": true },
+    "visitRevisionPreserved": { "const": true },
+    "disposition": { "const": "passed" }
+  }
+}

@@ -116,40 +116,6 @@ void WriteUint32BE(
         first.port == second.port;
 }
 
-/// LockedSessionSeed 在 replay/session owner 内保存 VirtualLock 的派生 seed。
-class LockedSessionSeed final {
-public:
-    /// 构造函数锁页并复制非零 seed。
-    explicit LockedSessionSeed(
-        const CryptoProvider::Key32& source) {
-        if (IsAllZero(source) ||
-            VirtualLock(material_.data(), material_.size()) == 0) {
-            throw std::runtime_error(
-                "battle session seed lock failed");
-        }
-        locked_ = true;
-        std::ranges::copy(source, material_.begin());
-    }
-
-    /// 析构函数先清零再解锁。
-    ~LockedSessionSeed() {
-        SecureZeroMemory(material_.data(), material_.size());
-        if (locked_) {
-            static_cast<void>(
-                VirtualUnlock(material_.data(), material_.size()));
-        }
-    }
-
-    LockedSessionSeed(const LockedSessionSeed&) = delete;
-    LockedSessionSeed& operator=(const LockedSessionSeed&) = delete;
-
-private:
-    /// material_ 由后续 packet key schedule owner消费。
-    CryptoProvider::Key32 material_{};
-    /// locked_ 防止无效 VirtualUnlock。
-    bool locked_{false};
-};
-
 /// SecretWiper 保证异常路径也清零 caller-owned temporary。
 class SecretWiper final {
 public:
@@ -176,6 +142,182 @@ private:
 };
 
 }  // namespace
+
+/// SessionBootstrap::Impl 保存唯一 locked seed 与不可变 session authority。
+struct BattleAuthenticatedHandshake::SessionBootstrap::Impl final {
+    /// 析构函数先清零 seed 再释放 locked page。
+    ~Impl() {
+        SecureZeroMemory(
+            session_seed.data(),
+            session_seed.size());
+        if (seed_locked) {
+            static_cast<void>(VirtualUnlock(
+                session_seed.data(),
+                session_seed.size()));
+        }
+    }
+
+    /// session_seed 只允许 ConsumeSessionSeed 同步借用一次。
+    CryptoProvider::Key32 session_seed{};
+    /// binding_fingerprint 绑定完整 Go authority facts。
+    CryptoProvider::Key32 binding_fingerprint{};
+    /// session_id 是 ServerAccept 公开给 authenticated client 的 runtime identity。
+    std::array<std::uint8_t, 16> session_id{};
+    /// battle_session_generation 是 process-local incarnation。
+    std::uint32_t battle_session_generation{};
+    /// key_epoch 是 secure channel initial epoch。
+    std::uint32_t key_epoch{};
+    /// endpoint_generation 是 secure AAD initial endpoint generation。
+    std::uint32_t endpoint_generation{};
+    /// actor_slot 是 install 冻结的 0..7 slot。
+    std::uint8_t actor_slot{};
+    /// role 是 owner=1、visitor=2 的 closed projection。
+    std::uint8_t role{};
+    /// binding 是 Go 安装的完整 immutable authority facts。
+    BattleTicketBinding binding;
+    /// remote 是 ticket 被消费时已通过 cookie 验证的 endpoint。
+    BattleRemoteEndpoint remote{};
+    /// seed_locked 保护对应 VirtualUnlock。
+    bool seed_locked{false};
+    /// seed_consumed 防止第二个 secure channel 读取同一 seed。
+    bool seed_consumed{false};
+};
+
+BattleAuthenticatedHandshake::SessionBootstrap::SessionBootstrap(
+    const CryptoProvider::Key32& session_seed,
+    CryptoProvider::Key32 binding_fingerprint,
+    std::array<std::uint8_t, 16> session_id,
+    const std::uint32_t battle_session_generation,
+    const std::uint32_t key_epoch,
+    const std::uint32_t endpoint_generation,
+    const std::uint8_t actor_slot,
+    const std::uint8_t role,
+    BattleTicketBinding binding,
+    const BattleRemoteEndpoint remote)
+    : impl_(std::make_unique<Impl>()) {
+    if (IsAllZero(session_seed) ||
+        IsAllZero(binding_fingerprint) ||
+        IsAllZero(session_id) ||
+        battle_session_generation == 0 ||
+        key_epoch != 1 ||
+        endpoint_generation != 1 ||
+        actor_slot >= 8 ||
+        (role != 1 && role != 2) ||
+        binding.actor_slot != actor_slot ||
+        ((role == 1 && binding.role != "owner") ||
+         (role == 2 && binding.role != "visitor")) ||
+        binding.simulation_instance_id.empty() ||
+        remote.port == 0 ||
+        IsAllZero(remote.address) ||
+        VirtualLock(
+            impl_->session_seed.data(),
+            impl_->session_seed.size()) == 0) {
+        throw std::invalid_argument(
+            "battle session bootstrap is invalid");
+    }
+    impl_->seed_locked = true;
+    std::ranges::copy(
+        session_seed,
+        impl_->session_seed.begin());
+    impl_->binding_fingerprint =
+        std::move(binding_fingerprint);
+    impl_->session_id = std::move(session_id);
+    impl_->battle_session_generation =
+        battle_session_generation;
+    impl_->key_epoch = key_epoch;
+    impl_->endpoint_generation = endpoint_generation;
+    impl_->actor_slot = actor_slot;
+    impl_->role = role;
+    impl_->binding = std::move(binding);
+    impl_->remote = remote;
+}
+
+BattleAuthenticatedHandshake::SessionBootstrap::
+    ~SessionBootstrap() = default;
+
+BattleAuthenticatedHandshake::SessionBootstrap::SessionBootstrap(
+    SessionBootstrap&& source) noexcept = default;
+
+BattleAuthenticatedHandshake::SessionBootstrap&
+BattleAuthenticatedHandshake::SessionBootstrap::operator=(
+    SessionBootstrap&& source) noexcept = default;
+
+void BattleAuthenticatedHandshake::SessionBootstrap::
+ConsumeSessionSeed(
+    const SessionSeedConsumer& consumer) {
+    if (impl_ == nullptr ||
+        impl_->seed_consumed ||
+        !consumer) {
+        throw std::logic_error(
+            "battle session seed is unavailable");
+    }
+    impl_->seed_consumed = true;
+    try {
+        consumer(impl_->session_seed);
+    } catch (...) {
+        SecureZeroMemory(
+            impl_->session_seed.data(),
+            impl_->session_seed.size());
+        throw;
+    }
+    SecureZeroMemory(
+        impl_->session_seed.data(),
+        impl_->session_seed.size());
+}
+
+const CryptoProvider::Key32&
+BattleAuthenticatedHandshake::SessionBootstrap::
+BindingFingerprint() const noexcept {
+    return impl_->binding_fingerprint;
+}
+
+const std::array<std::uint8_t, 16>&
+BattleAuthenticatedHandshake::SessionBootstrap::
+SessionId() const noexcept {
+    return impl_->session_id;
+}
+
+std::uint32_t
+BattleAuthenticatedHandshake::SessionBootstrap::
+BattleSessionGeneration() const noexcept {
+    return impl_->battle_session_generation;
+}
+
+std::uint32_t
+BattleAuthenticatedHandshake::SessionBootstrap::
+KeyEpoch() const noexcept {
+    return impl_->key_epoch;
+}
+
+std::uint32_t
+BattleAuthenticatedHandshake::SessionBootstrap::
+EndpointGeneration() const noexcept {
+    return impl_->endpoint_generation;
+}
+
+std::uint8_t
+BattleAuthenticatedHandshake::SessionBootstrap::
+ActorSlot() const noexcept {
+    return impl_->actor_slot;
+}
+
+std::uint8_t
+BattleAuthenticatedHandshake::SessionBootstrap::
+Role() const noexcept {
+    return impl_->role;
+}
+
+const BattleTicketBinding&
+BattleAuthenticatedHandshake::SessionBootstrap::
+Binding() const noexcept {
+    return impl_->binding;
+}
+
+const BattleRemoteEndpoint&
+BattleAuthenticatedHandshake::SessionBootstrap::
+Remote() const noexcept {
+    return impl_->remote;
+}
 
 /// ParsedClientAuth 是 cookie 后才允许进入 registry lookup 的固定字段。
 struct BattleAuthenticatedHandshake::ParsedClientAuth final {
@@ -210,20 +352,20 @@ struct BattleAuthenticatedHandshake::ReplayEntry final {
     std::uint32_t generation;
     /// expires_at_unix_ms 限制 replay 与 session seed 生命周期。
     std::uint64_t expires_at_unix_ms;
-    /// session_seed 保存后续方向 key schedule 的唯一根。
-    std::unique_ptr<LockedSessionSeed> session_seed;
+    /// bootstrap 只在首次 accepted result 转移，replay entry 不保留 seed。
+    std::unique_ptr<SessionBootstrap> bootstrap;
 };
 
 BattleAuthenticatedHandshake::BattleAuthenticatedHandshake(
     CryptoProvider& crypto,
     BattleHandshakeCookieGate& cookie_gate,
-    SimulationNode& node,
+    BattleTicketAuthenticator& ticket_authenticator,
     std::string simulation_node_id,
     std::string advertised_host,
     const std::uint16_t advertised_port)
     : crypto_(crypto),
       cookie_gate_(cookie_gate),
-      node_(node),
+      ticket_authenticator_(ticket_authenticator),
       simulation_node_id_(std::move(simulation_node_id)),
       advertised_host_(std::move(advertised_host)),
       advertised_port_(advertised_port) {
@@ -300,7 +442,7 @@ BattleAuthenticatedHandshake::HandleClientAuth(
     pending->request_digest = request_digest;
     pending->generation = next_generation_;
     try {
-        node_.AuthenticateAndConsumeBattleTicket(
+        ticket_authenticator_.AuthenticateAndConsumeBattleTicket(
                 ticket_id,
                 simulation_node_id_,
                 advertised_host_,
@@ -473,9 +615,27 @@ BattleAuthenticatedHandshake::HandleClientAuth(
                         response.begin() +
                             AcceptAadBytes +
                             AcceptPlaintextBytes);
-                    pending->session_seed =
-                        std::make_unique<LockedSessionSeed>(
-                            session_seed);
+                    std::array<std::uint8_t, 16>
+                        session_id{};
+                    std::ranges::copy_n(
+                        plaintext.begin(),
+                        session_id.size(),
+                        session_id.begin());
+                    pending->bootstrap =
+                        std::make_unique<SessionBootstrap>(
+                            session_seed,
+                            fingerprint,
+                            session_id,
+                            pending->generation,
+                            1,
+                            1,
+                            binding.actor_slot,
+                            static_cast<std::uint8_t>(
+                                binding.role == "owner"
+                                    ? 1
+                                    : 2),
+                            binding,
+                            remote);
                     pending->simulation_instance_id =
                         binding.simulation_instance_id;
                     pending->actor_slot =
@@ -487,22 +647,25 @@ BattleAuthenticatedHandshake::HandleClientAuth(
     } catch (...) {
         return result;
     }
-    ++next_generation_;
-    replays_.push_back(std::move(pending));
-    const auto& established = *replays_.back();
+    Result accepted{};
     try {
-        result.outcome = Outcome::Accepted;
-        result.response = established.response;
-        result.response_bytes = result.response.size();
-        result.simulation_instance_id =
-            established.simulation_instance_id;
-        result.actor_slot = established.actor_slot;
-        result.battle_session_generation =
-            established.generation;
+        accepted.outcome = Outcome::Accepted;
+        accepted.response = pending->response;
+        accepted.response_bytes =
+            accepted.response.size();
+        accepted.simulation_instance_id =
+            pending->simulation_instance_id;
+        accepted.actor_slot = pending->actor_slot;
+        accepted.battle_session_generation =
+            pending->generation;
+        accepted.bootstrap =
+            std::move(pending->bootstrap);
     } catch (...) {
         return Result{};
     }
-    return result;
+    replays_.push_back(std::move(pending));
+    ++next_generation_;
+    return accepted;
 }
 
 std::unique_ptr<BattleAuthenticatedHandshake::ParsedClientAuth>

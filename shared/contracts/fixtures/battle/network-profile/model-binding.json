@@ -1,6 +1,6 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "model-binding",
   "model_format_version": "1",
   "model_version": "battle-model-v1",

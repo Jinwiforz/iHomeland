@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-scenario-evidence-v1.json",
+  "title": "iHomeland Battle Network Scenario Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "evidenceKind",
+    "scenarioId",
+    "sourceScenarioId",
+    "workloadId",
+    "actorCount",
+    "phases",
+    "gateway",
+    "clients",
+    "metrics",
+    "transitions",
+    "closure",
+    "disposition"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "evidenceKind": { "enum": ["scenario-run-evidence", "soak-run-evidence"] },
+    "scenarioId": { "$ref": "#/$defs/stableId" },
+    "sourceScenarioId": { "$ref": "#/$defs/stableId" },
+    "workloadId": { "$ref": "#/$defs/stableId" },
+    "actorCount": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/stableId" }
+    },
+    "gateway": { "$ref": "#/$defs/gateway" },
+    "clients": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/client" }
+    },
+    "metrics": { "$ref": "#/$defs/metricWindow" },
+    "transitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientRebinds", "controlRebinds", "clientRekeys", "controlRekeys"],
+      "properties": {
+        "clientRebinds": { "type": "integer", "minimum": 0 },
+        "controlRebinds": { "type": "integer", "minimum": 0 },
+        "clientRekeys": { "type": "integer", "minimum": 0 },
+        "controlRekeys": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clientClosedSessions",
+        "controlNormalCloseReasons",
+        "controlUnexpectedCloseReasons",
+        "remainingActiveSessions",
+        "remainingInstalledTickets"
+      ],
+      "properties": {
+        "clientClosedSessions": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "controlNormalCloseReasons": { "type": "integer", "minimum": 1 },
+        "controlUnexpectedCloseReasons": { "const": 0 },
+        "remainingActiveSessions": { "const": 0 },
+        "remainingInstalledTickets": { "const": 0 }
+      }
+    },
+    "soakInvariants": {
+      "type": "array",
+      "minItems": 11,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/stableId" }
+    },
+    "soakSummary": { "$ref": "#/$defs/soakSummary" },
+    "disposition": { "const": "passed" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "evidenceKind": { "const": "soak-run-evidence" }
+        }
+      },
+      "then": {
+        "required": ["soakInvariants", "soakSummary"]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            { "required": ["soakInvariants"] },
+            { "required": ["soakSummary"] }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "soakSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleCount",
+        "maximumActiveSessions",
+        "maximumInstalledTickets",
+        "maximumIngressQueueItems",
+        "maximumEgressQueueItems",
+        "maximumKcpQueueMessages",
+        "maximumTickDebt",
+        "maximumGoWorkingSetBytes",
+        "maximumCppWorkingSetBytes",
+        "monotonicCountersPassed"
+      ],
+      "properties": {
+        "sampleCount": { "type": "integer", "minimum": 1 },
+        "maximumActiveSessions": { "type": "integer", "minimum": 0 },
+        "maximumInstalledTickets": { "type": "integer", "minimum": 0 },
+        "maximumIngressQueueItems": { "type": "integer", "minimum": 0 },
+        "maximumEgressQueueItems": { "type": "integer", "minimum": 0 },
+        "maximumKcpQueueMessages": { "type": "integer", "minimum": 0 },
+        "maximumTickDebt": { "type": "integer", "minimum": 0 },
+        "maximumGoWorkingSetBytes": { "type": "integer", "minimum": 1 },
+        "maximumCppWorkingSetBytes": { "type": "integer", "minimum": 1 },
+        "monotonicCountersPassed": { "const": true }
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packets", "maximumScheduledAgeUs", "maximumDeliveryAgeUs"],
+      "properties": {
+        "packets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/packet" }
+        },
+        "maximumScheduledAgeUs": { "type": "integer", "minimum": 0 },
+        "maximumDeliveryAgeUs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "packet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "direction",
+        "clientSlot",
+        "packetKind",
+        "disposition",
+        "count",
+        "bytes"
+      ],
+      "properties": {
+        "direction": { "enum": ["uplink", "downlink"] },
+        "clientSlot": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "packetKind": { "enum": ["unknown", "handshake", "raw", "kcp", "control"] },
+        "disposition": {
+          "enum": [
+            "delivered",
+            "loss",
+            "burst",
+            "mtu",
+            "queue",
+            "deadline",
+            "paused",
+            "mapping-expired",
+            "write-failed",
+            "closed",
+            "source-rejected"
+          ]
+        },
+        "count": { "type": "integer", "minimum": 1 },
+        "bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clientSlot",
+        "sentDatagrams",
+        "snapshotCount",
+        "reliableCount",
+        "latestServerTick",
+        "latestApplicationSequence",
+        "latestSnapshotSequence",
+        "baselineId",
+        "lastProcessedInputTick",
+        "maximumSnapshotGapUs",
+        "maximumBaselineRecoveryUs"
+      ],
+      "properties": {
+        "clientSlot": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "sentDatagrams": { "type": "integer", "minimum": 1 },
+        "snapshotCount": { "type": "integer", "minimum": 1 },
+        "reliableCount": { "type": "integer", "minimum": 0 },
+        "latestServerTick": { "type": "integer", "minimum": 1 },
+        "latestApplicationSequence": { "type": "integer", "minimum": 1 },
+        "latestSnapshotSequence": { "type": "integer", "minimum": 1 },
+        "baselineId": { "type": "integer", "minimum": 1 },
+        "lastProcessedInputTick": { "type": "integer", "minimum": 1 },
+        "maximumSnapshotGapUs": { "type": "integer", "minimum": 1 },
+        "maximumBaselineRecoveryUs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metricWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/$defs/metricSnapshot" },
+        "end": { "$ref": "#/$defs/metricSnapshot" }
+      }
+    },
+    "metricSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control", "processes"],
+      "properties": {
+        "control": { "$ref": "#/$defs/controlMetrics" },
+        "processes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["go-parent", "cpp-child"],
+          "properties": {
+            "go-parent": { "$ref": "#/$defs/processMetrics" },
+            "cpp-child": { "$ref": "#/$defs/processMetrics" }
+          }
+        }
+      }
+    },
+    "controlMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample-sequence",
+        "committed-tick",
+        "node-count",
+        "running-instance-count",
+        "active-session-count",
+        "installed-ticket-count",
+        "raw-ingress-bytes",
+        "raw-ingress-packets",
+        "raw-egress-bytes",
+        "raw-egress-packets",
+        "kcp-ingress-bytes",
+        "kcp-ingress-packets",
+        "kcp-egress-bytes",
+        "kcp-egress-packets",
+        "dropped-packets",
+        "rejected-packets",
+        "expired-messages",
+        "kcp-retransmits",
+        "ingress-queue-high-watermark",
+        "egress-queue-high-watermark",
+        "kcp-queue-high-watermark",
+        "maximum-tick-duration-ns",
+        "tick-debt-high-watermark",
+        "instance-memory-bytes",
+        "history-memory-bytes",
+        "rebinds",
+        "rekeys",
+        "close-normal",
+        "close-authentication",
+        "close-timeout",
+        "close-resource",
+        "close-lifecycle",
+        "close-transport",
+        "close-internal"
+      ],
+      "properties": {
+        "sample-sequence": { "$ref": "#/$defs/nonnegative" },
+        "committed-tick": { "$ref": "#/$defs/nonnegative" },
+        "node-count": { "$ref": "#/$defs/nonnegative" },
+        "running-instance-count": { "$ref": "#/$defs/nonnegative" },
+        "active-session-count": { "$ref": "#/$defs/nonnegative" },
+        "installed-ticket-count": { "$ref": "#/$defs/nonnegative" },
+        "raw-ingress-bytes": { "$ref": "#/$defs/nonnegative" },
+        "raw-ingress-packets": { "$ref": "#/$defs/nonnegative" },
+        "raw-egress-bytes": { "$ref": "#/$defs/nonnegative" },
+        "raw-egress-packets": { "$ref": "#/$defs/nonnegative" },
+        "kcp-ingress-bytes": { "$ref": "#/$defs/nonnegative" },
+        "kcp-ingress-packets": { "$ref": "#/$defs/nonnegative" },
+        "kcp-egress-bytes": { "$ref": "#/$defs/nonnegative" },
+        "kcp-egress-packets": { "$ref": "#/$defs/nonnegative" },
+        "dropped-packets": { "$ref": "#/$defs/nonnegative" },
+        "rejected-packets": { "$ref": "#/$defs/nonnegative" },
+        "expired-messages": { "$ref": "#/$defs/nonnegative" },
+        "kcp-retransmits": { "$ref": "#/$defs/nonnegative" },
+        "ingress-queue-high-watermark": { "$ref": "#/$defs/nonnegative" },
+        "egress-queue-high-watermark": { "$ref": "#/$defs/nonnegative" },
+        "kcp-queue-high-watermark": { "$ref": "#/$defs/nonnegative" },
+        "maximum-tick-duration-ns": { "$ref": "#/$defs/nonnegative" },
+        "tick-debt-high-watermark": { "$ref": "#/$defs/nonnegative" },
+        "instance-memory-bytes": { "$ref": "#/$defs/nonnegative" },
+        "history-memory-bytes": { "$ref": "#/$defs/nonnegative" },
+        "rebinds": { "$ref": "#/$defs/nonnegative" },
+        "rekeys": { "$ref": "#/$defs/nonnegative" },
+        "close-normal": { "$ref": "#/$defs/nonnegative" },
+        "close-authentication": { "$ref": "#/$defs/nonnegative" },
+        "close-timeout": { "$ref": "#/$defs/nonnegative" },
+        "close-resource": { "$ref": "#/$defs/nonnegative" },
+        "close-lifecycle": { "$ref": "#/$defs/nonnegative" },
+        "close-transport": { "$ref": "#/$defs/nonnegative" },
+        "close-internal": { "$ref": "#/$defs/nonnegative" }
+      }
+    },
+    "processMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "monotonic-time-us",
+        "cpu-time-ns",
+        "working-set-bytes",
+        "handle-count",
+        "thread-count"
+      ],
+      "properties": {
+        "sequence": { "$ref": "#/$defs/nonnegative" },
+        "monotonic-time-us": { "$ref": "#/$defs/nonnegative" },
+        "cpu-time-ns": { "$ref": "#/$defs/nonnegative" },
+        "working-set-bytes": { "$ref": "#/$defs/nonnegative" },
+        "handle-count": { "$ref": "#/$defs/nonnegative" },
+        "thread-count": { "$ref": "#/$defs/nonnegative" }
+      }
+    },
+    "nonnegative": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

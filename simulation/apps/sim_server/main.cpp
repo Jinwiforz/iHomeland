@@ -73,6 +73,77 @@ ParseListenerIdentity(const std::string_view value) noexcept {
     return result;
 }
 
+/// ControlOptions 保存解析后且尚未做语义校验的本机 control 选项。
+struct ControlOptions final {
+    /// bind_host 是 listener 实际绑定的数字地址。
+    std::optional<std::string> bind_host;
+    /// bind_port 是 listener 实际绑定的固定端口文本。
+    std::optional<std::string> bind_port;
+    /// advertised_host 是 BattleTicket 对外声明的数字地址。
+    std::optional<std::string> advertised_host;
+    /// advertised_port 是 BattleTicket 对外声明的固定端口文本。
+    std::optional<std::string> advertised_port;
+    /// listener_identity 是不可复活 listener identity 文本。
+    std::optional<std::string> listener_identity;
+    /// qualification_run_id 仅由 B0.6 资格入口显式传入。
+    std::optional<std::string> qualification_run_id;
+};
+
+/// AssignOption 拒绝重复选项，避免命令行顺序覆盖安全边界。
+[[nodiscard]] bool AssignOption(
+    std::optional<std::string>& target,
+    const std::string_view value) {
+    if (target.has_value()) {
+        return false;
+    }
+    target.emplace(value);
+    return true;
+}
+
+/// ParseControlOptions 解析闭合 name/value 集合并拒绝未知或缺值选项。
+[[nodiscard]] std::optional<ControlOptions> ParseControlOptions(
+    const int argument_count,
+    const char* const arguments[]) {
+    ControlOptions options;
+    for (int index = 2; index < argument_count; index += 2) {
+        if (index + 1 >= argument_count) {
+            return std::nullopt;
+        }
+        const auto name = std::string_view{arguments[index]};
+        const auto value = std::string_view{arguments[index + 1]};
+        bool assigned = false;
+        if (name == "--battle-udp-bind-host") {
+            assigned = AssignOption(options.bind_host, value);
+        } else if (name == "--battle-udp-bind-port") {
+            assigned = AssignOption(options.bind_port, value);
+        } else if (name == "--battle-udp-advertised-host") {
+            assigned = AssignOption(options.advertised_host, value);
+        } else if (name == "--battle-udp-advertised-port") {
+            assigned = AssignOption(options.advertised_port, value);
+        } else if (name == "--battle-listener-identity") {
+            assigned = AssignOption(options.listener_identity, value);
+        } else if (name == "--battle-qualification-run-id") {
+            assigned =
+                AssignOption(options.qualification_run_id, value);
+        }
+        if (!assigned) {
+            return std::nullopt;
+        }
+    }
+    const auto listener_fields =
+        static_cast<unsigned int>(options.bind_host.has_value()) +
+        static_cast<unsigned int>(options.bind_port.has_value()) +
+        static_cast<unsigned int>(options.advertised_host.has_value()) +
+        static_cast<unsigned int>(options.advertised_port.has_value()) +
+        static_cast<unsigned int>(options.listener_identity.has_value());
+    constexpr unsigned int listener_field_count = 5;
+    if (listener_fields != 0 &&
+        listener_fields != listener_field_count) {
+        return std::nullopt;
+    }
+    return options;
+}
+
 }  // namespace
 
 /// main 提供离线 smoke 与由 Go 显式配置的私有 control/唯一 UDP listener 入口。
@@ -80,35 +151,44 @@ int main(const int argument_count, const char* const arguments[]) {
     if (argument_count == 2 && std::string_view{arguments[1]} == "--smoke") {
         return RunSmoke();
     }
-    if ((argument_count == 2 || argument_count == 12) &&
+    if (argument_count >= 2 &&
         std::string_view{arguments[1]} == "--control-stdio") {
         if (!ConfigureControlStdioBinary()) {
             std::cerr << "simulation control stdio binary mode failed\n";
             return 1;
         }
+        const auto options =
+            ParseControlOptions(argument_count, arguments);
+        if (!options) {
+            std::cerr << "simulation control arguments are invalid\n";
+            return 2;
+        }
         std::optional<ihomeland::sim::BattleUdpListenerConfig> listener;
-        if (argument_count == 12) {
-            if (std::string_view{arguments[2]} != "--battle-udp-bind-host" ||
-                std::string_view{arguments[4]} != "--battle-udp-bind-port" ||
-                std::string_view{arguments[6]} != "--battle-udp-advertised-host" ||
-                std::string_view{arguments[8]} != "--battle-udp-advertised-port" ||
-                std::string_view{arguments[10]} != "--battle-listener-identity") {
-                std::cerr << "simulation battle UDP arguments are invalid\n";
-                return 2;
-            }
-            const auto bind_port = ParsePort(arguments[5]);
-            const auto advertised_port = ParsePort(arguments[9]);
-            const auto identity = ParseListenerIdentity(arguments[11]);
+        if (options->bind_host) {
+            const auto bind_port = ParsePort(*options->bind_port);
+            const auto advertised_port =
+                ParsePort(*options->advertised_port);
+            const auto identity =
+                ParseListenerIdentity(*options->listener_identity);
             if (!bind_port || !advertised_port || !identity) {
                 std::cerr << "simulation battle UDP values are invalid\n";
                 return 2;
             }
             listener = ihomeland::sim::BattleUdpListenerConfig{
-                .bind_endpoint = {arguments[3], *bind_port},
-                .advertised_endpoint = {arguments[7], *advertised_port},
+                .bind_endpoint = {*options->bind_host, *bind_port},
+                .advertised_endpoint =
+                    {*options->advertised_host, *advertised_port},
                 .listener_identity = *identity,
                 .mode = ihomeland::sim::BattleUdpListenerMode::Production,
             };
+        }
+        std::optional<ihomeland::sim::QualificationControlConfig>
+            qualification;
+        if (options->qualification_run_id) {
+            qualification.emplace(
+                ihomeland::sim::QualificationControlConfig{
+                    .run_id = *options->qualification_run_id,
+                });
         }
         return ihomeland::sim::RunControlStdio(
             std::cin,
@@ -121,8 +201,11 @@ int main(const int argument_count, const char* const arguments[]) {
                 .platform_qualification =
                     "implementation-qualified-windows-x64",
             },
-            listener ? &*listener : nullptr);
+            listener ? &*listener : nullptr,
+            qualification ? &*qualification : nullptr);
     }
-    std::cerr << "usage: ihomeland-sim-server --smoke|--control-stdio [battle UDP config]\n";
+    std::cerr
+        << "usage: ihomeland-sim-server --smoke|--control-stdio "
+           "[battle UDP config] [--battle-qualification-run-id <run>]\n";
     return 2;
 }

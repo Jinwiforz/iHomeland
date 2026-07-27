@@ -383,8 +383,11 @@
             "document_kind",
             "secure_header",
             "raw_route_header",
+            "snapshot_acknowledgement",
             "kcp_segment_header",
             "kcp_route_envelope",
+            "transport_control_envelope",
+            "transport_control_messages",
             "datagram_equation"
           ],
           "properties": {
@@ -403,11 +406,74 @@
             "raw_route_header": {
               "type": "object"
             },
+            "snapshot_acknowledgement": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "message_ids",
+                "protobuf_field",
+                "field_number",
+                "scalar_type",
+                "presence",
+                "initial_value",
+                "scope",
+                "partition_policy",
+                "maximum_varint_bytes",
+                "maximum_datagram_bytes",
+                "route_payload_budgets"
+              ],
+              "properties": {
+                "message_ids": {
+                  "const": [3002, 3003]
+                },
+                "protobuf_field": {
+                  "const": "last_processed_input_tick"
+                },
+                "field_number": {
+                  "const": 7
+                },
+                "scalar_type": {
+                  "const": "uint64"
+                },
+                "presence": {
+                  "const": "explicit-required"
+                },
+                "initial_value": {
+                  "const": 0
+                },
+                "scope": {
+                  "const": "authenticated-actor-and-mapping-generation"
+                },
+                "partition_policy": {
+                  "const": "identical-across-complete-set-before-publication"
+                },
+                "maximum_varint_bytes": {
+                  "const": 10
+                },
+                "maximum_datagram_bytes": {
+                  "const": 1200
+                },
+                "route_payload_budgets": {
+                  "const": {
+                    "3002": 1040,
+                    "3003": 900
+                  }
+                }
+              }
+            },
             "kcp_segment_header": {
               "type": "object"
             },
             "kcp_route_envelope": {
               "type": "object"
+            },
+            "transport_control_envelope": {
+              "type": "object"
+            },
+            "transport_control_messages": {
+              "type": "array",
+              "minItems": 8,
+              "maxItems": 8
             },
             "datagram_equation": {
               "type": "object"
@@ -482,6 +548,7 @@
             "document_kind",
             "x25519",
             "hkdf_sha256",
+            "battle_ticket_proof_key",
             "hmac_sha256",
             "chacha20_poly1305",
             "parity_implementations"
@@ -571,6 +638,45 @@
                 "okm_hex": {
                   "type": "string",
                   "pattern": "^[0-9a-f]{84}$"
+                }
+              }
+            },
+            "battle_ticket_proof_key": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "derivation_identity",
+                "ikm_classification",
+                "ikm_hex",
+                "ticket_id_salt_hex",
+                "output_bytes",
+                "okm_hex"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "derivation_identity": {
+                  "const": "ihomeland/battle-ticket/proof-key/v2"
+                },
+                "ikm_classification": {
+                  "const": "TEST-ONLY-PUBLIC-VECTOR"
+                },
+                "ikm_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "ticket_id_salt_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                },
+                "output_bytes": {
+                  "const": 32
+                },
+                "okm_hex": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
                 }
               }
             },
@@ -708,6 +814,17 @@
                   "mutation": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "bytes_hex": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]+$"
+                  },
+                  "byte_count": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sha256": {
+                    "$ref": "#/$defs/sha256"
                   },
                   "expected_reason": {
                     "type": "string",

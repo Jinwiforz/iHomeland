@@ -25,7 +25,13 @@ const (
 	minimumTimeout = 10 * time.Millisecond
 	// maximumTimeout 防止错误配置让进程长时间保持不确定状态。
 	maximumTimeout = time.Minute
+	// minimumQualificationSampleInterval 避免私有 control 被采样任务饱和。
+	minimumQualificationSampleInterval = 100 * time.Millisecond
+	// maximumQualificationSampleInterval 保证一秒默认 cadence 可被可靠覆盖。
+	maximumQualificationSampleInterval = 10 * time.Second
 )
+
+var qualificationRunIDPattern = regexp.MustCompile(`^bqrun_[0-9a-f]{32}$`)
 
 // LookupEnv 返回环境键是否存在及其原始值。
 //
@@ -128,6 +134,12 @@ type SimulationControl struct {
 	ShutdownTimeout time.Duration `yaml:"shutdownTimeout"`
 	// StderrLineBytes 是低敏 child diagnostic 单行上限。
 	StderrLineBytes int `yaml:"stderrLineBytes"`
+	// QualificationMode 只允许受控 B0.6 Composition Root 启用只读采样。
+	QualificationMode bool `yaml:"qualificationMode"`
+	// QualificationRunID 是 B0.6 run-local 128-bit identity。
+	QualificationRunID string `yaml:"qualificationRunId"`
+	// QualificationSampleInterval 是 control/process 四源采样节奏。
+	QualificationSampleInterval time.Duration `yaml:"qualificationSampleInterval"`
 }
 
 // Default 返回只适合本地启动且默认不暴露到外部网卡的安全配置。
@@ -284,6 +296,17 @@ func (config SimulationControl) validate(environment string) error {
 	if config.HealthTimeout >= config.HealthInterval ||
 		config.StderrLineBytes < 64 || config.StderrLineBytes > 4096 {
 		return errors.New("simulationControl health or stderr policy is invalid")
+	}
+	qualificationEnabled := config.QualificationMode
+	if qualificationEnabled != (config.QualificationRunID != "") ||
+		(qualificationEnabled &&
+			!qualificationRunIDPattern.MatchString(config.QualificationRunID)) ||
+		(!qualificationEnabled && config.QualificationSampleInterval != 0) ||
+		(qualificationEnabled &&
+			(config.QualificationSampleInterval < minimumQualificationSampleInterval ||
+				config.QualificationSampleInterval > maximumQualificationSampleInterval)) ||
+		(environment == "production" && qualificationEnabled) {
+		return errors.New("simulationControl qualification mode is invalid")
 	}
 	return nil
 }

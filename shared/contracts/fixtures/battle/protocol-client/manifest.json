@@ -1,0 +1,19 @@
+{
+  "formatVersion": 1,
+  "contractVersion": "battle-protocol-client-v1",
+  "documentKind": "manifest",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "2605498b5aae9a0ee941804c1fc5a173452dc870283199d2b4c511a6ba972d87"
+    },
+    {
+      "path": "contract.json",
+      "sha256": "30ea5e5f9008b5bcdc3f8f26d91be2356aba1962196cbc85ee6e2a70493989c9"
+    },
+    {
+      "path": "schema.json",
+      "sha256": "150affc854e6fbeeccfa484e52cf010d31810fe90f06642b3ba75ec20f4be147"
+    }
+  ]
+}

@@ -3,6 +3,8 @@
 #include "ihomeland/sim/simulation/simulation_instance.hpp"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -221,6 +223,9 @@ void TestWorkerBoundary() {
     }
     Require(instance.CommittedTick() == 2, "committed Tick accounting drifted");
     Require(instance.InboxHighWatermark() == 3, "inbox high-watermark drifted");
+    Require(
+        instance.ReservedBytes() > sizeof(instance),
+        "instance reserved memory accounting omitted bounded containers");
 
     instance.BeginDrain();
     Require(
@@ -392,17 +397,130 @@ void TestInputTimeline() {
     Require(
         gap_expired[0].last_processed_input_tick == 4 && gap_expired[0].held,
         "gap expiry did not advance contiguous confirmation");
+    const auto frozen =
+        first.FreezeAcknowledgements();
+    Require(
+        frozen.size() == 1 &&
+            frozen[0].actor_id == 42 &&
+            frozen[0].mapping_generation == 11 &&
+            frozen[0].last_processed_input_tick == 4,
+        "input acknowledgement projection was not immutable and generation scoped");
     const auto neutral = first.Resolve(5, {});
     Require(
         neutral[0].continuous_payload == "0|0|0" && !neutral[0].held &&
             neutral[0].discrete_sequences.empty(),
         "continuous hold did not return to neutral");
-    first.Reset();
+    auto successor = mapping;
+    successor.generation = 12;
+    first.ReplaceMapping(successor);
     const auto reset = first.Resolve(1, {});
+    const auto successor_projection =
+        first.FreezeAcknowledgements();
     Require(
         reset[0].last_processed_input_tick == 0 &&
-            reset[0].continuous_payload == "0|0|0",
-        "input timeline reset retained old generation state");
+            reset[0].continuous_payload == "0|0|0" &&
+            successor_projection[0]
+                    .mapping_generation ==
+                12 &&
+            successor_projection[0]
+                    .last_processed_input_tick ==
+                0,
+        "input timeline successor retained old generation state");
+}
+
+/// TestInputAcknowledgementStore 验证跨线程投影只接受完整同 generation 单调集合。
+void TestInputAcknowledgementStore() {
+    ihomeland::sim::InputAcknowledgementStore
+        store(11, {7, 3});
+    constexpr std::uint64_t InitialServerTick = 5;
+    constexpr std::uint64_t FinalServerTick = 1'000;
+    const std::array<
+        ihomeland::sim::
+            InputAcknowledgementProjection,
+        2> initial{{
+        {3, 11, InitialServerTick * 2},
+        {7, 11, InitialServerTick * 3},
+    }};
+    store.Publish(InitialServerTick, initial);
+    const auto projection =
+        store.Freeze(7, 11);
+    Require(
+        projection.has_value() &&
+            projection->server_tick ==
+                InitialServerTick &&
+            projection->acknowledgement
+                    .last_processed_input_tick ==
+                InitialServerTick * 3 &&
+            !store.Freeze(7, 12).has_value(),
+        "input acknowledgement store exposed stale generation");
+    std::atomic<bool> publishing{true};
+    std::atomic<bool> consistent{true};
+    std::jthread publisher([&] {
+        for (std::uint64_t server_tick =
+                 InitialServerTick + 1;
+             server_tick <= FinalServerTick;
+             ++server_tick) {
+            const std::array<
+                ihomeland::sim::
+                    InputAcknowledgementProjection,
+                2> next{{
+                {3, 11, server_tick * 2},
+                {7, 11, server_tick * 3},
+            }};
+            store.Publish(server_tick, next);
+        }
+        publishing.store(
+            false,
+            std::memory_order_release);
+    });
+    while (publishing.load(
+        std::memory_order_acquire)) {
+        const auto snapshot =
+            store.Freeze(7, 11);
+        if (!snapshot.has_value() ||
+            snapshot->acknowledgement
+                    .last_processed_input_tick !=
+                snapshot->server_tick * 3) {
+            consistent.store(
+                false,
+                std::memory_order_relaxed);
+            break;
+        }
+    }
+    publisher.join();
+    Require(
+        consistent.load(
+            std::memory_order_relaxed),
+        "input acknowledgement snapshot combined different commits");
+    const std::array<
+        ihomeland::sim::
+            InputAcknowledgementProjection,
+        2> regressed{{
+        {3, 11, 3},
+        {7, 11, 6},
+    }};
+    bool rejected = false;
+    try {
+        store.Publish(
+            FinalServerTick + 1,
+            regressed);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    Require(
+        rejected,
+        "input acknowledgement store accepted regression");
+    rejected = false;
+    try {
+        store.Publish(
+            FinalServerTick,
+            initial);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    Require(
+        rejected,
+        "input acknowledgement store accepted stale server Tick");
 }
 
 /// TestHardTickDebt 验证显式 clock backlog 超过 hard limit 时实例 fail closed。
@@ -524,6 +642,7 @@ int main() {
         TestWorkerBoundary();
         TestCommandBoundaryRejections();
         TestInputTimeline();
+        TestInputAcknowledgementStore();
         TestHardTickDebt();
         TestStopDeadline();
         TestRepeatedInstances();

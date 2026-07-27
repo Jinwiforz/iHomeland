@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +28,8 @@ type ScenarioRuntime struct {
 	Evidence map[string]bool
 	// Faults 通过资格入口请求 owner 校验的封闭 process/storage 故障。
 	Faults *FileFaultController
+	// Lifecycle 仅在 B0.6 生命周期场景中接收内存投影，不改变公开协议行为。
+	Lifecycle *LifecycleRecorder
 }
 
 // ScenarioFunction 执行一个 manifest ID 对应的唯一资格场景。
@@ -41,6 +44,9 @@ type accountCredential struct {
 	// password 默认脱敏并在场景结束清除。
 	password *Secret
 }
+
+// scenarioActorRegistrar 创建一个由 ScenarioContext 拥有的认证 actor。
+type scenarioActorRegistrar func(*ScenarioContext, *ScenarioRuntime) (accountCredential, error)
 
 // runAuthSessionLifecycle 验证 register/login/refresh/config/logout 与旧 bearer 失效。
 func runAuthSessionLifecycle(ctx context.Context, runtime *ScenarioRuntime) (resultErr error) {
@@ -113,6 +119,15 @@ func runWSSSessionInvalidation(ctx context.Context, runtime *ScenarioRuntime) (r
 		_ = connection.Close()
 		return err
 	}
+	if runtime.Lifecycle != nil {
+		if err := runtime.Lifecycle.recordPredecessor(
+			"auth-session",
+			account.actor.SessionID,
+			strconv.FormatUint(account.actor.SessionEpoch, 10),
+		); err != nil {
+			return err
+		}
+	}
 	if err := runtime.HTTP.Logout(ctx, account.actor.AccessToken); err != nil {
 		return err
 	}
@@ -131,6 +146,9 @@ func runWSSSessionInvalidation(ctx context.Context, runtime *ScenarioRuntime) (r
 		}
 	case <-ctx.Done():
 		return errors.New("WSS session invalidation close timed out")
+	}
+	if runtime.Lifecycle != nil {
+		return runtime.Lifecycle.recordTermination()
 	}
 	return nil
 }
@@ -275,6 +293,34 @@ func registerScenarioActor(scenario *ScenarioContext, runtime *ScenarioRuntime) 
 		return accountCredential{}, err
 	}
 	return accountCredential{actor: actor, username: identity, password: password}, nil
+}
+
+// registerAndLoginScenarioActor 通过两个真实 HTTPS operation 建立新的 login session lineage。
+func registerAndLoginScenarioActor(scenario *ScenarioContext, runtime *ScenarioRuntime) (accountCredential, error) {
+	account, err := registerScenarioActor(scenario, runtime)
+	if err != nil {
+		return accountCredential{}, err
+	}
+	password, err := account.password.Reveal()
+	if err != nil {
+		return accountCredential{}, err
+	}
+	response, err := runtime.HTTP.Login(scenario, LoginRequest{
+		Username: account.username,
+		Password: password,
+	})
+	if err != nil {
+		return accountCredential{}, err
+	}
+	if response.Account.AccountID != account.actor.AccountID ||
+		response.Session.SessionID == account.actor.SessionID {
+		return accountCredential{}, errors.New("battle actor login lineage is invalid")
+	}
+	account.actor.ClearCredentials()
+	if err := applyAuthResponse(account.actor, &response); err != nil {
+		return accountCredential{}, err
+	}
+	return account, nil
 }
 
 // applyAuthResponse 把 HTTP raw token 转移到 actor，并立即清空 DTO 中可控的 credential 引用。

@@ -3,7 +3,7 @@
   "corpus_version": "battle-wire-v1",
   "document_kind": "manifest",
   "schema_path": "schema.json",
-  "schema_sha256": "bacfb4650c5378236de74c870940a8ae9725467624a720a437c969cb48b43cae",
+  "schema_sha256": "0f31d67c337490c517bdb90ed4635e9b69ee17b2a7188aeb3376f79bca0e56ba",
   "required_domains": [
     "binding",
     "crypto",
@@ -19,37 +19,37 @@
     {
       "path": "crypto-vectors.json",
       "document_kind": "crypto-vectors",
-      "sha256": "a81f574fd41e8f3047f570982b6d5f155cef1ee889abfca3c9fc36e56dd9d32f"
+      "sha256": "469aed585ef993293828a519fe8a20c97dc2e228e4c491f847f2a43aed2376b3"
     },
     {
       "path": "canonical-golden.json",
       "document_kind": "canonical-golden",
-      "sha256": "27f3ca871b078f478fde9e482061539dd52d2760058a1c5bc35ed46e84abfeb7"
+      "sha256": "b618ff675075fe1905c65098669d742516e3404fc406eb7ddf279189ac62eb66"
     },
     {
       "path": "limits.json",
       "document_kind": "limits",
-      "sha256": "8e8c56aa536ef42b687ca011d534b906726979aec03624e85339246789105026"
+      "sha256": "c47046e655d36d7df089fb0c8697c17471fe9a4bb2f65de4ab717edca1d9a5ca"
     },
     {
       "path": "malformed-corpus.json",
       "document_kind": "malformed-corpus",
-      "sha256": "e74000fcda934299da3d377d100f8f8f147aa9e6839e4c750ddc95bcf149ed9e"
+      "sha256": "e98c8211e39aec4899094232873b9130306c24b7f635ba18316a840f726a3f0c"
     },
     {
       "path": "model-profile-control-binding.json",
       "document_kind": "model-profile-control-binding",
-      "sha256": "dedbd125e63fa3a95293ceb8568d9c1cd3b1f1c5412e067d45834c1bc4cd488a"
+      "sha256": "dfc7afc0b771c3dced00a0410cf9d6c8ae84339f7ba8ff7c60c68ffcdbfc51d5"
     },
     {
       "path": "secret-policy.json",
       "document_kind": "secret-policy",
-      "sha256": "36e170deade12bf2ef815e3f5948b357d6d20fd279bf085d1afcd3c4adc06acf"
+      "sha256": "f1a1c62eb260994437baaa0388454a6574664c1a28aae9d71290191e29911f85"
     },
     {
       "path": "wire-layout.json",
       "document_kind": "wire-layout",
-      "sha256": "81c3470122c5c34237d111768b08df71989532cee99b7fb3715e8ff86caba01a"
+      "sha256": "14ab4bb8ea57a004d236efd639bb31bbbc012acc08684e4adbf14c2a4a1bd4c5"
     },
     {
       "path": "wire-suite.json",

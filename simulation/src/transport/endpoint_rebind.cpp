@@ -1,5 +1,6 @@
 #include "ihomeland/sim/transport/endpoint_rebind.hpp"
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 #include <algorithm>
 #include <limits>
 #include <mutex>
@@ -95,6 +96,8 @@ struct BattleEndpointRebinder::Impl final {
     CryptoProvider* crypto;
     /// channel 是既有session secure state。
     BattleSecureChannel* channel;
+    /// runtime_metrics 可选借用 node 生命周期内的低敏累计 owner。
+    BattleRuntimeMetrics* runtime_metrics;
     /// active_endpoint 是当前唯一remote。
     BattleRemoteEndpoint active_endpoint;
     /// generation 是current endpoint generation。
@@ -136,7 +139,8 @@ BattleEndpointRebinder::BattleEndpointRebinder(
     CryptoProvider& crypto,
     BattleSecureChannel& channel,
     const BattleRemoteEndpoint initial_endpoint,
-    const std::uint32_t initial_generation) {
+    const std::uint32_t initial_generation,
+    BattleRuntimeMetrics* runtime_metrics) {
     auto key = CryptoProvider::Key32{};
     crypto.RandomFill(key);
     ValidateBinding(
@@ -146,6 +150,7 @@ BattleEndpointRebinder::BattleEndpointRebinder(
     impl_ = std::make_unique<Impl>();
     impl_->crypto = &crypto;
     impl_->channel = &channel;
+    impl_->runtime_metrics = runtime_metrics;
     impl_->active_endpoint = initial_endpoint;
     impl_->generation = initial_generation;
     impl_->cookie_key = key;
@@ -157,7 +162,8 @@ BattleEndpointRebinder::BattleEndpointRebinder(
     BattleSecureChannel& channel,
     const BattleRemoteEndpoint initial_endpoint,
     const std::uint32_t initial_generation,
-    const CryptoProvider::Key32& fixture_key)
+    const CryptoProvider::Key32& fixture_key,
+    BattleRuntimeMetrics* runtime_metrics)
     : impl_(std::make_unique<Impl>()) {
     ValidateBinding(
         initial_endpoint,
@@ -165,6 +171,7 @@ BattleEndpointRebinder::BattleEndpointRebinder(
         fixture_key);
     impl_->crypto = &crypto;
     impl_->channel = &channel;
+    impl_->runtime_metrics = runtime_metrics;
     impl_->active_endpoint = initial_endpoint;
     impl_->generation = initial_generation;
     impl_->cookie_key = fixture_key;
@@ -266,7 +273,8 @@ BattleEndpointRebinder::Confirm(
     const BattleRemoteEndpoint& candidate_remote,
     const BattleRebindChallenge& challenge,
     const bool authenticated,
-    const std::uint64_t now_unix_ms) {
+    const std::uint64_t now_unix_ms,
+    CommitBarrier before_commit) {
     std::scoped_lock lock(impl_->mutex);
     if (!authenticated) {
         return BattleRebindDisposition::
@@ -305,6 +313,11 @@ BattleEndpointRebinder::Confirm(
         return BattleRebindDisposition::
             InvalidChallenge;
     }
+    if (before_commit &&
+        !before_commit(challenge)) {
+        return BattleRebindDisposition::
+            OutputUnavailable;
+    }
     if (!impl_->channel->CommitEndpointGeneration(
             impl_->generation,
             challenge.next_generation)) {
@@ -314,6 +327,9 @@ BattleEndpointRebinder::Confirm(
     impl_->active_endpoint = candidate_remote;
     impl_->generation = challenge.next_generation;
     impl_->pending.reset();
+    if (impl_->runtime_metrics != nullptr) {
+        impl_->runtime_metrics->RecordRebind();
+    }
     return BattleRebindDisposition::Committed;
 }
 

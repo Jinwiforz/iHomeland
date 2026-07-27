@@ -21,6 +21,7 @@
 namespace ihomeland::sim {
 
 class CommandIngress;
+class BattleRuntimeMetrics;
 
 /// SimulationInstanceState 是实例唯一 owner 的闭合生命周期。
 enum class SimulationInstanceState : std::uint8_t {
@@ -138,7 +139,8 @@ public:
         SimulationInstanceIdentity identity,
         SimulationInstanceConfig config,
         std::shared_ptr<TickClock> clock,
-        TickObserver observer);
+        TickObserver observer,
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
     /// 析构函数请求 worker 停止并逆序释放已成功 startup resources。
     ~SimulationInstance();
@@ -169,6 +171,9 @@ public:
     /// InboxHighWatermark 返回不包含 payload 的 queue 使用峰值。
     [[nodiscard]] std::size_t InboxHighWatermark() const;
 
+    /// ReservedBytes 返回 instance 与固定容量容器的实际预留 accounting。
+    [[nodiscard]] std::size_t ReservedBytes() const noexcept;
+
 private:
     friend class CommandIngress;
 
@@ -189,6 +194,8 @@ private:
     std::shared_ptr<TickClock> clock_;
     /// observer_ 只在唯一 worker 调用。
     TickObserver observer_;
+    /// runtime_metrics_ 可选借用 node 生命周期内的低敏累计 owner。
+    BattleRuntimeMetrics* runtime_metrics_;
     /// inbox_ 由 inbox_mutex_ 保护。
     BoundedInbox<IngressCommand> inbox_;
     /// queued_total_ 统计 inbox 与 worker future queue 的合计，受 inbox_mutex_ 保护。

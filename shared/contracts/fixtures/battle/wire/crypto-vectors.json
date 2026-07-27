@@ -19,6 +19,15 @@
     "prk_hex": "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5",
     "okm_hex": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
   },
+  "battle_ticket_proof_key": {
+    "source": "iHomeland proof-key/v2 public test vector",
+    "derivation_identity": "ihomeland/battle-ticket/proof-key/v2",
+    "ikm_classification": "TEST-ONLY-PUBLIC-VECTOR",
+    "ikm_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "ticket_id_salt_hex": "000102030405060708090a0b0c0d0e0f",
+    "output_bytes": 32,
+    "okm_hex": "40d65068dd108e2d727be477529ec572db2b6df9aa1edc1495b1cefd72d9f517"
+  },
   "hmac_sha256": {
     "source": "RFC 4231 test case 1",
     "key_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",

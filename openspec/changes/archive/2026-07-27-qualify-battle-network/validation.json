@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "qualify-battle-network",
+  "checks": [
+    {
+      "id": "battle-profile-validate",
+      "reason": "资格 corpus 必须继续只读绑定 current network profile"
+    },
+    {
+      "id": "battle-wire-validate",
+      "reason": "独立客户端与 runner 必须继续消费 closed secure wire contract"
+    },
+    {
+      "id": "simulation-control-validate",
+      "reason": "qualification metrics 必须保持私有只读 control contract"
+    },
+    {
+      "id": "battle-qualification-validate",
+      "reason": "gateway、runner、failure regression 与 scope gate 是本 change 的直接产出"
+    },
+    {
+      "id": "battle-qualification-representative",
+      "reason": "baseline fault、五人容量、单个安全负例与 rebind 分别证明四类 runner 可用，不执行完整矩阵"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "tooling 交付边界与代表性场景要求必须通过 strict validation"
+    }
+  ]
+}

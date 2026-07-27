@@ -1,0 +1,273 @@
+{
+  "formatVersion": 1,
+  "contractVersion": "battle-protocol-client-v1",
+  "documentKind": "contract",
+  "framing": {
+    "prefixBytes": 4,
+    "prefixEncoding": "uint32-big-endian-body-length",
+    "headerBytes": 28,
+    "maximumBodyBytes": 65536,
+    "byteOrder": "network-big-endian",
+    "magic": "IHBQ",
+    "version": 1,
+    "fields": [
+      { "name": "magic", "offset": 0, "width": 4, "constraint": "ascii-IHBQ" },
+      { "name": "version", "offset": 4, "width": 1, "constraint": "one" },
+      { "name": "kind", "offset": 5, "width": 1, "constraint": "registered-kind" },
+      { "name": "flags", "offset": 6, "width": 2, "constraint": "zero" },
+      { "name": "sequence", "offset": 8, "width": 8, "constraint": "positive-exact-next" },
+      { "name": "deadlineUnixMs", "offset": 16, "width": 8, "constraint": "positive-request-zero-receipt" },
+      { "name": "payloadLength", "offset": 24, "width": 4, "constraint": "exact-trailing-bytes" }
+    ],
+    "partialReadPolicy": "read-exact-or-fail-closed",
+    "unknownKindPolicy": "terminate-without-receipt",
+    "unknownFlagPolicy": "terminate-without-receipt",
+    "sequenceExhaustionPolicy": "terminate-after-last-receipt",
+    "deadlinePolicy": "reject-equal-or-expired-before-side-effect"
+  },
+  "kinds": [
+    { "name": "describe-request", "value": 1, "direction": "supervisor-to-client", "payload": "empty", "sensitivity": "low" },
+    { "name": "shutdown-request", "value": 2, "direction": "supervisor-to-client", "payload": "empty", "sensitivity": "low" },
+    { "name": "session-start-request", "value": 3, "direction": "supervisor-to-client", "payload": "session-start-v1", "sensitivity": "secret" },
+    { "name": "workload-command-request", "value": 4, "direction": "supervisor-to-client", "payload": "workload-command-v1", "sensitivity": "low" },
+    { "name": "network-transition-request", "value": 5, "direction": "supervisor-to-client", "payload": "network-transition-v1", "sensitivity": "low" },
+    { "name": "poll-request", "value": 6, "direction": "supervisor-to-client", "payload": "poll-v1", "sensitivity": "low" },
+    { "name": "describe-receipt", "value": 129, "direction": "client-to-supervisor", "payload": "describe-receipt-v1", "sensitivity": "low" },
+    { "name": "shutdown-receipt", "value": 130, "direction": "client-to-supervisor", "payload": "empty", "sensitivity": "low" },
+    { "name": "session-event", "value": 131, "direction": "client-to-supervisor", "payload": "session-event-v1", "sensitivity": "low" },
+    { "name": "workload-event", "value": 132, "direction": "client-to-supervisor", "payload": "workload-event-v1", "sensitivity": "low" },
+    { "name": "network-transition-event", "value": 133, "direction": "client-to-supervisor", "payload": "network-transition-event-v1", "sensitivity": "low" },
+    { "name": "poll-receipt", "value": 134, "direction": "client-to-supervisor", "payload": "poll-receipt-v1", "sensitivity": "low" }
+  ],
+  "payloads": {
+    "sessionStart": {
+      "encoding": "closed-field-table-v1",
+      "maximumBytes": 512,
+      "exactBytes": 76,
+      "byteOrder": "network-big-endian",
+      "addressEncoding": "16-byte-ipv4-mapped-or-ipv6",
+      "requiredFields": [
+        "clientSlot",
+        "numericHost",
+        "port",
+        "ticketId",
+        "ticketSecret",
+        "ticketExpiresAtUnixMs"
+      ],
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "addressFamily", "offset": 1, "width": 1, "constraint": "four-or-six" },
+        { "name": "port", "offset": 2, "width": 2, "constraint": "nonzero-uint16" },
+        { "name": "numericHost", "offset": 4, "width": 16, "constraint": "ipv4-mapped-or-ipv6" },
+        { "name": "ticketId", "offset": 20, "width": 16, "constraint": "opaque" },
+        { "name": "ticketSecret", "offset": 36, "width": 32, "constraint": "https-bearer-secret" },
+        { "name": "ticketExpiresAtUnixMs", "offset": 68, "width": 8, "constraint": "positive-uint64" }
+      ],
+      "credentialFields": ["ticketSecret"],
+      "proofKeyDerivation": {
+        "algorithm": "HKDF-SHA-256",
+        "ikm": "ticketSecretRaw32",
+        "salt": "ticketIdRaw16",
+        "info": "ihomeland/battle-ticket/proof-key/v2",
+        "outputBytes": 32,
+        "legacyPolicy": "reject"
+      },
+      "credentialIngress": "inherited-stdin-once",
+      "credentialRetention": "locked-memory-until-handshake-terminal",
+      "credentialCleanup": "secure-zero-on-success-failure-timeout-and-exit"
+    },
+    "sessionEvent": {
+      "encoding": "closed-field-table-v1",
+      "successBytes": 2,
+      "failureBytes": 3,
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "success-one-through-eight-failure-zero-or-one-through-eight" },
+        { "name": "state", "offset": 1, "width": 1, "constraint": "established-one-or-failed-two" },
+        { "name": "failureCode", "offset": 2, "width": 1, "constraint": "absent-on-success-one-through-ten-on-failure" }
+      ],
+      "failureCodeRegistry": [
+        { "name": "invalid-request", "value": 1 },
+        { "name": "deadline", "value": 2 },
+        { "name": "socket", "value": 3 },
+        { "name": "handshake-setup", "value": 4 },
+        { "name": "retry-exchange", "value": 5 },
+        { "name": "retry-validation", "value": 6 },
+        { "name": "accept-exchange", "value": 7 },
+        { "name": "accept-validation", "value": 8 },
+        { "name": "transport-setup", "value": 9 },
+        { "name": "unknown", "value": 10 }
+      ]
+    },
+    "workloadCommand": {
+      "encoding": "closed-field-table-v1",
+      "maximumBytes": 32,
+      "exactBytes": 32,
+      "byteOrder": "network-big-endian",
+      "allowedOperations": ["input-bundle", "probe", "resync-request"],
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "operation", "offset": 1, "width": 1, "constraint": "one-through-three" },
+        { "name": "commandKind", "offset": 2, "width": 1, "constraint": "operation-dependent" },
+        { "name": "repeatCount", "offset": 3, "width": 1, "constraint": "one-through-thirty-two" },
+        { "name": "applicationSequence", "offset": 4, "width": 8, "constraint": "positive-uint64" },
+        { "name": "applicationTick", "offset": 12, "width": 8, "constraint": "positive-uint64" },
+        { "name": "valueA", "offset": 20, "width": 4, "constraint": "operation-dependent-int32" },
+        { "name": "valueB", "offset": 24, "width": 4, "constraint": "operation-dependent-int32" },
+        { "name": "deliveryMutation", "offset": 28, "width": 1, "constraint": "zero-through-twelve" },
+        { "name": "reserved", "offset": 29, "width": 3, "constraint": "zero" }
+      ],
+      "allowedDeliveryMutations": [
+        "unmodified",
+        "exact-replay",
+        "tampered-tag",
+        "oversize-prefix",
+        "aad-tampered",
+        "ciphertext-tampered",
+        "future-sequence",
+        "too-old-sequence",
+        "wrong-direction",
+        "wrong-lane",
+        "rebind-hijack",
+        "kcp-expired",
+        "malformed-prefix"
+      ],
+      "forbiddenAuthorityFields": [
+        "authoritativeTransform",
+        "authoritativeHit",
+        "damage",
+        "reward",
+        "playerId"
+      ]
+    },
+    "networkTransition": {
+      "encoding": "closed-field-table-v1",
+      "maximumBytes": 24,
+      "exactBytes": 24,
+      "byteOrder": "network-big-endian",
+      "allowedOperations": ["rebind", "rekey", "close", "old-epoch-probe"],
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "operation", "offset": 1, "width": 1, "constraint": "one-through-four" },
+        { "name": "addressFamily", "offset": 2, "width": 1, "constraint": "rebind-four-or-six-otherwise-zero" },
+        { "name": "reserved", "offset": 3, "width": 1, "constraint": "zero" },
+        { "name": "port", "offset": 4, "width": 2, "constraint": "rebind-nonzero-otherwise-zero" },
+        { "name": "reserved", "offset": 6, "width": 2, "constraint": "zero" },
+        { "name": "numericHost", "offset": 8, "width": 16, "constraint": "rebind-ipv4-mapped-or-ipv6-otherwise-zero" }
+      ]
+    },
+    "poll": {
+      "encoding": "closed-field-table-v1",
+      "maximumBytes": 8,
+      "exactBytes": 8,
+      "byteOrder": "network-big-endian",
+      "maximumWaitMilliseconds": 1000,
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "maximumEvents", "offset": 1, "width": 1, "constraint": "one-through-thirty-two" },
+        { "name": "reserved", "offset": 2, "width": 2, "constraint": "zero" },
+        { "name": "waitMilliseconds", "offset": 4, "width": 4, "constraint": "one-through-one-thousand" }
+      ]
+    },
+    "workloadEvent": {
+      "encoding": "closed-field-table-v1",
+      "exactBytes": 32,
+      "byteOrder": "network-big-endian",
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "eventKind", "offset": 1, "width": 1, "constraint": "one-through-four" },
+        { "name": "operation", "offset": 2, "width": 1, "constraint": "zero-or-one-through-three" },
+        { "name": "count", "offset": 3, "width": 1, "constraint": "zero-through-uint8" },
+        { "name": "packetSequence", "offset": 4, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "applicationSequence", "offset": 12, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "applicationTick", "offset": 20, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "reserved", "offset": 28, "width": 4, "constraint": "zero" }
+      ]
+    },
+    "networkTransitionEvent": {
+      "encoding": "closed-field-table-v1",
+      "exactBytes": 8,
+      "byteOrder": "network-big-endian",
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "operation", "offset": 1, "width": 1, "constraint": "one-through-four" },
+        { "name": "committed", "offset": 2, "width": 1, "constraint": "zero-or-one" },
+        { "name": "failureCode", "offset": 3, "width": 1, "constraint": "zero-on-success-one-through-thirty-five-on-failure" },
+        { "name": "generation", "offset": 4, "width": 4, "constraint": "zero-on-failure-or-close-otherwise-positive-uint32" }
+      ]
+    },
+    "pollReceipt": {
+      "encoding": "closed-field-table-v1",
+      "exactBytes": 144,
+      "byteOrder": "network-big-endian",
+      "fieldTable": [
+        { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+        { "name": "eventCount", "offset": 1, "width": 1, "constraint": "zero-through-thirty-two" },
+        { "name": "failureCode", "offset": 2, "width": 1, "constraint": "zero-success-one-through-seven-failure" },
+        { "name": "kcpCloseReason", "offset": 3, "width": 1, "constraint": "zero-through-five" },
+        { "name": "reserved", "offset": 4, "width": 4, "constraint": "zero" },
+        { "name": "snapshotCount", "offset": 8, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "reliableCount", "offset": 16, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "latestServerTick", "offset": 24, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "latestApplicationSequence", "offset": 32, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "latestSnapshotSequence", "offset": 40, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "baselineId", "offset": 48, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "lastProcessedInputTick", "offset": 56, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "baselineGapCount", "offset": 64, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "secureKcpDatagrams", "offset": 72, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "kcpInputDatagrams", "offset": 80, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "kcpInputAckCommands", "offset": 88, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "kcpInputPushCommands", "offset": 96, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "kcpOutputDatagrams", "offset": 104, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "kcpReconciledMessages", "offset": 112, "width": 8, "constraint": "nonnegative-uint64" },
+        { "name": "kcpQueuedMessages", "offset": 120, "width": 8, "constraint": "zero-through-sixty-four" },
+        { "name": "kcpInflightMessages", "offset": 128, "width": 8, "constraint": "zero-through-sixty-four" },
+        { "name": "kcpWaitingSegments", "offset": 136, "width": 8, "constraint": "zero-through-sixty-four" }
+      ]
+    }
+  },
+  "outputPolicy": {
+    "allowedData": [
+      "clientSlot",
+      "eventKind",
+      "packetSequence",
+      "applicationSequence",
+      "serverTick",
+      "snapshotSequence",
+      "baselineId",
+      "partitionIndex",
+      "partitionCount",
+      "closeReason",
+      "operation",
+      "failureCode",
+      "lastProcessedInputTick",
+      "baselineGapCount",
+      "kcpCloseReason",
+      "secureKcpDatagrams",
+      "kcpInputDatagrams",
+      "kcpInputAckCommands",
+      "kcpInputPushCommands",
+      "kcpOutputDatagrams",
+      "kcpReconciledMessages",
+      "kcpQueuedMessages",
+      "kcpInflightMessages",
+      "kcpWaitingSegments",
+      "counter"
+    ],
+    "forbiddenData": [
+      "credential",
+      "ticket",
+      "proof",
+      "trafficKey",
+      "cookieKey",
+      "bindingFingerprint",
+      "wirePayload",
+      "playerId",
+      "remoteEndpoint",
+      "ipAddress",
+      "absolutePath"
+    ],
+    "stderrPolicy": "stable-category-only",
+    "malformedInputPolicy": "exit-two-without-echo",
+    "unexpectedEofPolicy": "exit-two-without-echo"
+  }
+}

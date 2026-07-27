@@ -1,0 +1,104 @@
+{
+  "formatVersion": 1,
+  "qualificationVersion": "battle-network-qualification-v1",
+  "documentKind": "manifest",
+  "schemaPath": "schema.json",
+  "schemaSha256": "6ddafc03d5925c4b79167ed594c3c8267931ef02e27fa94623f7dbed127fc2d8",
+  "reportSchemaPath": "report.schema.json",
+  "reportSchemaSha256": "0a65ba0d2ae614015f48ae015644e3db580e5ef98ce44ab2373f0c8b6f3b0845",
+  "scenarioEvidenceSchemaPath": "scenario-evidence.schema.json",
+  "scenarioEvidenceSchemaSha256": "68c26d46a40ad442123ca04572df712308ef05b93664689a719823263f21e8eb",
+  "scenarioFailureEvidenceSchemaPath": "scenario-failure-evidence.schema.json",
+  "scenarioFailureEvidenceSchemaSha256": "225c519ff4ef6a634676cc3c0d2fe4952928ef5102810f84b1ea265443e35e8f",
+  "admissionEvidenceSchemaPath": "admission-evidence.schema.json",
+  "admissionEvidenceSchemaSha256": "ca0c40215d3f40915428b17c59016d47eb346102374ae0e4e36b1a0f9b7545df",
+  "gateEvidenceSchemaPath": "gate-evidence.schema.json",
+  "gateEvidenceSchemaSha256": "e84c095b3ae1794ede4aedd522e13297c744b7ab02c7d9fd2ba284856e62aff2",
+  "runEvidenceSchemaPath": "run-evidence.schema.json",
+  "runEvidenceSchemaSha256": "7ef7fab4cb7cb82b6c1bbbd0a5eae416847d372872d10cc3ea1145a969408ff9",
+  "profileOverlaySchemaPath": "profile-overlay.schema.json",
+  "profileOverlaySchemaSha256": "735b6e24503e728fc6e62293a67524c2ed1a493b302d7b5e119518dbd5976383",
+  "requiredDomains": [
+    "capacity",
+    "entry-evidence",
+    "fault-matrix",
+    "lifecycle",
+    "metrics",
+    "redaction",
+    "reproducibility",
+    "security",
+    "soak"
+  ],
+  "files": [
+    {
+      "path": "admission-evidence.schema.json",
+      "documentKind": "admission-evidence-schema",
+      "sha256": "ca0c40215d3f40915428b17c59016d47eb346102374ae0e4e36b1a0f9b7545df"
+    },
+    {
+      "path": "README.md",
+      "documentKind": "documentation",
+      "sha256": "6394630ddae6678d6dd4eb26f56b730e7de4571ab87837ff949f2f2b3f19a059"
+    },
+    {
+      "path": "fault-execution.json",
+      "documentKind": "fault-execution",
+      "sha256": "1326cc53ca3ffec0f8e19f55f29f533ddabe21244099c3ebd16ccb3d6a59b06e"
+    },
+    {
+      "path": "gate-evidence.schema.json",
+      "documentKind": "gate-evidence-schema",
+      "sha256": "e84c095b3ae1794ede4aedd522e13297c744b7ab02c7d9fd2ba284856e62aff2"
+    },
+    {
+      "path": "lifecycle-security.json",
+      "documentKind": "lifecycle-security",
+      "sha256": "7e0a459224845534e0ea25720d0305b6f1860e597ca710345bf1809bcbd1c747"
+    },
+    {
+      "path": "metrics.json",
+      "documentKind": "metrics",
+      "sha256": "8f7104d043fb57066090c300ce7de141baad7fe98d17928e51830485644fd55f"
+    },
+    {
+      "path": "profile-overlay.schema.json",
+      "documentKind": "profile-overlay-schema",
+      "sha256": "735b6e24503e728fc6e62293a67524c2ed1a493b302d7b5e119518dbd5976383"
+    },
+    {
+      "path": "report.schema.json",
+      "documentKind": "report-schema",
+      "sha256": "0a65ba0d2ae614015f48ae015644e3db580e5ef98ce44ab2373f0c8b6f3b0845"
+    },
+    {
+      "path": "run-evidence.schema.json",
+      "documentKind": "run-evidence-schema",
+      "sha256": "7ef7fab4cb7cb82b6c1bbbd0a5eae416847d372872d10cc3ea1145a969408ff9"
+    },
+    {
+      "path": "scenario-evidence.schema.json",
+      "documentKind": "scenario-evidence-schema",
+      "sha256": "68c26d46a40ad442123ca04572df712308ef05b93664689a719823263f21e8eb"
+    },
+    {
+      "path": "scenario-failure-evidence.schema.json",
+      "documentKind": "scenario-failure-evidence-schema",
+      "sha256": "225c519ff4ef6a634676cc3c0d2fe4952928ef5102810f84b1ea265443e35e8f"
+    },
+    {
+      "path": "schema.json",
+      "documentKind": "source-schema",
+      "sha256": "6ddafc03d5925c4b79167ed594c3c8267931ef02e27fa94623f7dbed127fc2d8"
+    },
+    {
+      "path": "upstream-binding.json",
+      "documentKind": "upstream-binding",
+      "sha256": "f93d9dc90ca1c9775f40766b275da73c9eca089cca7941c8513ff9a6e747e973"
+    },
+    {
+      "path": "workloads.json",
+      "documentKind": "workloads",
+      "sha256": "6660cd763c93ea8062fd47beef6b77ccbb77fcc8334cae9d47055562ca7a5e69"
+    }
+  ]
+}

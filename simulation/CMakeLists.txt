@@ -138,9 +138,7 @@ target_include_directories(ihomeland_battle_handshake_adapter
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
 )
 target_link_libraries(ihomeland_battle_handshake_adapter
-    PUBLIC
-        iHomeland::BattleCrypto
-        ihomeland_sim_control_adapter
+    PUBLIC iHomeland::BattleCrypto
 )
 ihomeland_configure_project_target(
     ihomeland_battle_handshake_adapter)
@@ -265,6 +263,24 @@ target_link_libraries(
 ihomeland_configure_project_target(
     ihomeland_battle_rebind_adapter)
 
+add_library(ihomeland_battle_transport_control_adapter STATIC
+    src/transport/battle_transport_control.cpp
+)
+add_library(iHomeland::BattleTransportControl ALIAS
+    ihomeland_battle_transport_control_adapter)
+target_include_directories(
+    ihomeland_battle_transport_control_adapter
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+)
+target_link_libraries(
+    ihomeland_battle_transport_control_adapter
+    PUBLIC
+        iHomeland::BattleRebind
+        iHomeland::BattleUdpListener)
+ihomeland_configure_project_target(
+    ihomeland_battle_transport_control_adapter)
+
 add_library(ihomeland_battle_session_adapter STATIC
     src/transport/battle_session.cpp
 )
@@ -285,6 +301,29 @@ target_link_libraries(
 ihomeland_configure_project_target(
     ihomeland_battle_session_adapter)
 
+add_library(ihomeland_battle_transport_runtime_adapter STATIC
+    src/transport/battle_transport_runtime.cpp
+)
+add_library(iHomeland::BattleTransportRuntime ALIAS
+    ihomeland_battle_transport_runtime_adapter)
+target_include_directories(
+    ihomeland_battle_transport_runtime_adapter
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+)
+target_link_libraries(
+    ihomeland_battle_transport_runtime_adapter
+    PUBLIC
+        iHomeland::BattleHandshake
+        iHomeland::BattleMultiplexer
+        iHomeland::BattleResource
+        iHomeland::BattleRebind
+        iHomeland::BattleTransportControl
+        iHomeland::BattleSession
+        iHomeland::BattleUdpListener)
+ihomeland_configure_project_target(
+    ihomeland_battle_transport_runtime_adapter)
+
 add_library(ihomeland_sim_control_adapter STATIC
     src/control/control_frame.cpp
     src/control/control_server.cpp
@@ -294,6 +333,7 @@ add_library(iHomeland::SimulationControl ALIAS ihomeland_sim_control_adapter)
 target_link_libraries(ihomeland_sim_control_adapter
     PUBLIC iHomeland::SimulationCore
     PRIVATE
+        iHomeland::BattleTransportRuntime
         iHomeland::BattleUdpListener
         ihomeland_sim_jolt_adapter
         ihomeland_sim_detour_adapter
@@ -315,7 +355,7 @@ target_link_libraries(ihomeland-sim-server
 target_compile_definitions(ihomeland-sim-server PRIVATE
     "IHOMELAND_CONTROL_BUILD_IDENTITY=\"${IHOMELAND_CONTROL_BUILD_IDENTITY}\""
     "IHOMELAND_CONTROL_MODEL_MANIFEST=\"65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1\""
-    "IHOMELAND_CONTROL_PROFILE_MANIFEST=\"ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f\""
+    "IHOMELAND_CONTROL_PROFILE_MANIFEST=\"c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424\""
 )
 ihomeland_configure_project_target(ihomeland-sim-server)
 
@@ -355,7 +395,96 @@ target_compile_definitions(ihomeland-sim-qualification PRIVATE
 )
 ihomeland_configure_project_target(ihomeland-sim-qualification)
 
+add_library(ihomeland_battle_protocol_client_core OBJECT
+    src/qualification/battle_protocol_handshake.cpp
+    src/qualification/battle_protocol_secure.cpp
+    src/qualification/battle_protocol_raw.cpp
+    src/qualification/battle_protocol_kcp.cpp
+)
+target_include_directories(
+    ihomeland_battle_protocol_client_core
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+)
+target_link_libraries(
+    ihomeland_battle_protocol_client_core
+    PRIVATE
+        iHomeland::BattleCrypto
+        iHomeland::BattleProtocol
+        iHomeland::Kcp
+)
+ihomeland_configure_project_target(
+    ihomeland_battle_protocol_client_core)
+
+add_executable(ihomeland-battle-protocol-client
+    apps/battle_protocol_client/main.cpp
+    $<TARGET_OBJECTS:ihomeland_battle_protocol_client_core>
+)
+target_link_libraries(
+    ihomeland-battle-protocol-client
+    PRIVATE
+        iHomeland::BattleCrypto
+        iHomeland::BattleProtocol
+        iHomeland::Kcp
+        ws2_32
+)
+target_compile_definitions(
+    ihomeland-battle-protocol-client
+    PRIVATE
+        "IHOMELAND_PROTOCOL_CLIENT_BUILD_IDENTITY=\"${IHOMELAND_CONTROL_BUILD_IDENTITY}\""
+)
+ihomeland_configure_project_target(
+    ihomeland-battle-protocol-client)
+
+# 资格客户端必须保持独立实现；该 closed gate 防止后续便捷链接悄然引入服务端
+# transport、simulation 或 gameplay adapter。
+get_target_property(
+    IHOMELAND_PROTOCOL_CLIENT_LINK_LIBRARIES
+    ihomeland-battle-protocol-client
+    LINK_LIBRARIES)
+get_target_property(
+    IHOMELAND_PROTOCOL_CLIENT_CORE_LINK_LIBRARIES
+    ihomeland_battle_protocol_client_core
+    LINK_LIBRARIES)
+set(IHOMELAND_PROTOCOL_CLIENT_ALLOWED_LINK_LIBRARIES
+    "iHomeland::BattleCrypto;iHomeland::BattleProtocol;iHomeland::Kcp;ws2_32")
+set(IHOMELAND_PROTOCOL_CLIENT_CORE_ALLOWED_LINK_LIBRARIES
+    "iHomeland::BattleCrypto;iHomeland::BattleProtocol;iHomeland::Kcp")
+if(NOT IHOMELAND_PROTOCOL_CLIENT_LINK_LIBRARIES STREQUAL
+       IHOMELAND_PROTOCOL_CLIENT_ALLOWED_LINK_LIBRARIES OR
+   NOT IHOMELAND_PROTOCOL_CLIENT_CORE_LINK_LIBRARIES STREQUAL
+       IHOMELAND_PROTOCOL_CLIENT_CORE_ALLOWED_LINK_LIBRARIES)
+    message(FATAL_ERROR
+        "ihomeland-battle-protocol-client link scope 越过 qualification primitive allowlist")
+endif()
+
 if(BUILD_TESTING)
+    add_executable(
+        ihomeland_battle_protocol_client_test
+        tests/battle_protocol_client_test.cpp
+        $<TARGET_OBJECTS:ihomeland_battle_protocol_client_core>
+    )
+    target_link_libraries(
+        ihomeland_battle_protocol_client_test
+        PRIVATE
+            iHomeland::BattleCrypto
+            iHomeland::BattleProtocol
+            iHomeland::Kcp
+            iHomeland::BattleKcp
+            iHomeland::BattleSecureDatagram
+            iHomeland::BattleTransportRuntime
+            iHomeland::SimulationControl
+    )
+    ihomeland_configure_project_target(
+        ihomeland_battle_protocol_client_test)
+    add_test(
+        NAME battle.qualification.protocol-client
+        COMMAND ihomeland_battle_protocol_client_test)
+    set_tests_properties(
+        battle.qualification.protocol-client
+        PROPERTIES LABELS
+        "unit;contract;integration;battle;network;qualification;crypto;negative;architecture")
+
     add_executable(ihomeland_battle_protocol_test tests/battle_protocol_test.cpp)
     target_link_libraries(ihomeland_battle_protocol_test
         PRIVATE iHomeland::BattleProtocol nlohmann_json::nlohmann_json)
@@ -385,7 +514,9 @@ if(BUILD_TESTING)
         tests/battle_authenticated_handshake_test.cpp)
     target_link_libraries(
         ihomeland_battle_authenticated_handshake_test
-        PRIVATE iHomeland::BattleHandshake)
+        PRIVATE
+            iHomeland::BattleHandshake
+            iHomeland::SimulationControl)
     ihomeland_configure_project_target(
         ihomeland_battle_authenticated_handshake_test)
     add_test(
@@ -474,6 +605,21 @@ if(BUILD_TESTING)
         PROPERTIES LABELS
         "unit;contract;integration;battle;network;negative;backpressure")
 
+    add_executable(ihomeland_battle_runtime_metrics_test
+        tests/battle_runtime_metrics_test.cpp)
+    target_link_libraries(
+        ihomeland_battle_runtime_metrics_test
+        PRIVATE iHomeland::SimulationCore)
+    ihomeland_configure_project_target(
+        ihomeland_battle_runtime_metrics_test)
+    add_test(
+        NAME battle.observability.runtime-metrics
+        COMMAND ihomeland_battle_runtime_metrics_test)
+    set_tests_properties(
+        battle.observability.runtime-metrics
+        PROPERTIES LABELS
+        "unit;contract;battle;network;qualification;concurrency;negative")
+
     add_executable(ihomeland_battle_endpoint_rebind_test
         tests/battle_endpoint_rebind_test.cpp)
     target_link_libraries(
@@ -488,6 +634,21 @@ if(BUILD_TESTING)
         battle.transport.endpoint-rebind
         PROPERTIES LABELS
         "unit;contract;integration;battle;network;negative;replay")
+
+    add_executable(ihomeland_battle_transport_control_test
+        tests/battle_transport_control_test.cpp)
+    target_link_libraries(
+        ihomeland_battle_transport_control_test
+        PRIVATE iHomeland::BattleTransportControl)
+    ihomeland_configure_project_target(
+        ihomeland_battle_transport_control_test)
+    add_test(
+        NAME battle.transport.control
+        COMMAND ihomeland_battle_transport_control_test)
+    set_tests_properties(
+        battle.transport.control
+        PROPERTIES LABELS
+        "unit;contract;integration;battle;network;crypto;negative;replay")
 
     add_executable(ihomeland_battle_session_test
         tests/battle_session_test.cpp)

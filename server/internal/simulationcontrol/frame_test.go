@@ -55,6 +55,41 @@ func TestCanonicalGolden(t *testing.T) {
 	}
 }
 
+// TestNewFrameCanonicalizesNestedStruct 验证 caller DTO 声明顺序不会泄漏到 wire。
+func TestNewFrameCanonicalizesNestedStruct(t *testing.T) {
+	t.Parallel()
+	requestID, _ := NewRequestID("sctl_health0000000001")
+	nonce, _ := NewDigest(strings.Repeat("1", 64))
+	payload := struct {
+		Zeta   string `json:"zeta"`
+		Nested struct {
+			Zeta  string `json:"zeta"`
+			Alpha string `json:"alpha"`
+		} `json:"nested"`
+		Alpha string `json:"alpha"`
+	}{
+		Zeta:  "last",
+		Alpha: "first",
+	}
+	payload.Nested.Zeta = "nested-last"
+	payload.Nested.Alpha = "nested-first"
+
+	frame, err := NewFrame(
+		"node.health.query",
+		payload,
+		requestID,
+		1,
+		nonce,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = `{"alpha":"first","nested":{"alpha":"nested-first","zeta":"nested-last"},"zeta":"last"}`
+	if string(frame.Payload) != expected {
+		t.Fatalf("canonical payload = %s", frame.Payload)
+	}
+}
+
 // TestDecodeFrameRejectsMalformed 覆盖 fragmentation、duplicate、unknown 与 canonical failure。
 func TestDecodeFrameRejectsMalformed(t *testing.T) {
 	t.Parallel()

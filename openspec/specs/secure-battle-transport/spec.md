@@ -8,12 +8,12 @@
 
 ### Requirement: BattleTicket 必须绑定 current target 且只能安装和消费一次
 
-Go MUST 只为有效 HTTPS AuthContext、current PersonalWorld/VisitSession role、current active `SimulationTarget` 和未超过 8-actor battle capacity 的 actor 签发短期 BattleTicket。Ticket MUST 绑定 SessionID/epoch、PlayerID、role、world/visit、完整 AssignmentStamp fingerprint、SimulationNodeID、SimulationInstanceID、mapping generation、target revision、actor slot、wire/model/profile/config identity、受信 advertised UDP endpoint、issuance identity 和绝对 expiry；它 MUST NOT 与 WSS/TCP ConnectionTicket、WorldAdmission 或 GAMEPLAY scope 互换。Go MUST 在 Redis 保存 digest/handle-only 的幂等 issuance record，并在 HTTPS 成功前把派生 proof key 与完整 binding 幂等安装到 exact C++ child；任一侧部分失败 MUST 有界撤销或返回非成功。
+Go MUST 只为有效 HTTPS AuthContext、current PersonalWorld/VisitSession role、current active `SimulationTarget` 和未超过 8-actor battle capacity 的 actor 签发短期 BattleTicket。Ticket MUST 绑定 SessionID/epoch、PlayerID、role、world/visit、完整 AssignmentStamp fingerprint、SimulationNodeID、SimulationInstanceID、mapping generation、target revision、actor slot、wire/model/profile/config identity、受信 advertised UDP endpoint、issuance identity 和绝对 expiry；它 MUST NOT 与 WSS/TCP ConnectionTicket、WorldAdmission 或 GAMEPLAY scope 互换。Go MUST 在 Redis 保存 digest/handle-only 的幂等 issuance record，并在 HTTPS 成功前把派生 proof key 与完整 binding 幂等安装到 exact C++ child；任一侧部分失败 MUST 有界撤销或返回非成功。Proof key MUST 只由 raw ticket secret、raw ticket ID 和 versioned public derivation domain 计算，使独立客户端可以仅凭 HTTPS response 派生相同 proof；完整 binding fingerprint MUST NOT 成为客户端派生 proof 的前置输入或经 Go parent 注入客户端。
 
 #### Scenario: Owner 取得 BattleTicket
 
 - **WHEN** 有效 Owner session 请求自己的 current PersonalWorld battle target，target healthy/ready 且 actor capacity 可用
-- **THEN** Go 从权威 owner 派生完整 binding，exact child 预留 actor slot 并确认 install 后，HTTPS 返回一次性 ticket secret、ticket ID、advertised endpoint、wire suite 与 expiry
+- **THEN** Go 从权威 owner 派生完整 binding，exact child 预留 actor slot并确认 install 后，HTTPS 返回一次性 ticket secret、ticket ID、advertised endpoint、wire suite 与 expiry，客户端可从这些公开 response 字段独立派生 exact proof
 
 #### Scenario: 第九个 actor 请求 battle
 
@@ -23,7 +23,7 @@ Go MUST 只为有效 HTTPS AuthContext、current PersonalWorld/VisitSession role
 #### Scenario: Ticket 安装后 HTTP response 丢失
 
 - **WHEN** Redis issuance 与 child install 已成功但 HTTPS response 丢失，客户端以相同 actor、target 和 idempotency key 重试
-- **THEN** issuer 重放相同 credential/binding/expiry 且 child 返回相同 actor slot，不创建第二个 ticket 或容量占用
+- **THEN** issuer 重放相同 credential/binding/expiry 且 child 返回相同 actor slot，不创建第二个 ticket 或容量占用，重放 response 仍派生相同 proof
 
 #### Scenario: Assignment 在消费前被替换
 
@@ -32,12 +32,17 @@ Go MUST 只为有效 HTTPS AuthContext、current PersonalWorld/VisitSession role
 
 ### Requirement: 握手必须先验证地址再分配安全会话
 
-C++ listener MUST 使用 stateless cookie retry 和 PSK-authenticated ephemeral X25519 handshake。Ticket secret MUST 只经 HTTPS 返回且不得出现在 UDP；ClientHello MUST 只携带非秘密 ticket ID、client nonce、ephemeral public key 和有界 padding。合法 cookie 前，server MUST NOT 查询或消费 ticket、执行 X25519、创建 BattleSession/KCP/actor queue，且返回 bytes MUST 不超过对应 request bytes。ClientAuth MUST 绑定原 ClientHello、cookie、remote endpoint 和完整 transcript proof；成功后 MUST 原子消费 installed ticket 并以 AEAD 保护 ServerAccept。Exact retry MAY 重放同一 accept，字段漂移或新 transcript MUST 拒绝。
+C++ listener MUST 使用 stateless cookie retry 和 PSK-authenticated ephemeral X25519 handshake。Ticket secret MUST 只经 HTTPS 返回且不得出现在 UDP；ClientHello MUST 只携带非秘密 ticket ID、client nonce、ephemeral public key 和有界 padding。合法 cookie 前，server MUST NOT 查询或消费 ticket、执行 X25519、创建 BattleSession/KCP/actor queue，且返回 bytes MUST 不超过对应 request bytes。ClientAuth MUST 绑定原 ClientHello、cookie、remote endpoint 和由 raw ticket secret、raw ticket ID、versioned domain 派生的完整 transcript proof；成功后 MUST 原子消费 installed ticket并以 AEAD保护ServerAccept。ServerAccept MUST 认证携带 authoritative binding fingerprint，客户端只有在成功解密后才能锁定该 binding；Go parent MUST NOT向客户端注入 proof key、binding fingerprint 或其他 private control material。Exact retry MAY重放同一accept，字段漂移或新transcript MUST拒绝。
 
 #### Scenario: 未验证地址发送小包
 
 - **WHEN** 未知 remote endpoint 发送缺少 padding 或 cookie 的 ClientHello
 - **THEN** listener 至多返回不大于请求的 stateless Retry 或静默丢弃，不分配 session、KCP、actor queue 或执行 expensive key agreement
+
+#### Scenario: 公开客户端派生 proof
+
+- **WHEN** 独立客户端取得 canonical HTTPS ticket ID/secret 且没有 private binding 或 control access
+- **THEN** 客户端按 versioned derivation 生成与 C++ installed ticket 相同的 proof key，并能完成 ClientAuth；改变 ticket ID、secret 或 domain 任一项均失败
 
 #### Scenario: 伪造 ticket proof
 
@@ -47,7 +52,7 @@ C++ listener MUST 使用 stateless cookie retry 和 PSK-authenticated ephemeral 
 #### Scenario: ServerAccept 丢失
 
 - **WHEN** ticket 已消费且 ServerAccept 丢失，客户端从同一 endpoint 重放完全相同的 ClientAuth
-- **THEN** C++ 从有界 handshake replay state 返回同一 session generation 与 accept，不创建第二个 actor 或重置 nonce/replay 状态
+- **THEN** C++ 从有界 handshake replay state 返回同一 session generation 与 accept，不创建第二个 actor、再次转移 session seed 或重置 nonce/replay 状态
 
 ### Requirement: 每个 datagram 必须加密认证并执行 nonce 与 replay discipline
 
@@ -70,7 +75,7 @@ BattleSession MUST 使用 RFC 7748 X25519、RFC 5869 HKDF-SHA-256/HMAC-SHA-256 �
 
 ### Requirement: Battle wire 与 numeric route 必须唯一、闭合且符合 MTU
 
-Battle wire MUST 提供 versioned binary envelope、`battle/v1` Protobuf payload 和唯一 numeric registry。`battle.input.bundle` 至 `battle.resync.response` 的 8 个 logical kind MUST 一一映射到 `3000-3007`、固定 direction 和唯一 raw 或 KCP lane；route MUST 登记 owner、QoS、max encoded/logical size、rate、expiry、tick/sequence、idempotency、baseline/recovery 和 assignment/session binding。Datagram MUST 不超过 1200 bytes 并遵守 48-byte IP/UDP、48-byte secure header、16-byte AEAD tag、16-byte raw 或 24-byte KCP budget；IP fragmentation、通用 Any、未登记 compression、lane fallback 和 payload identity override MUST 禁止。
+Battle wire MUST 提供 versioned binary envelope、`battle/v1` Protobuf payload 和唯一 numeric registry。`battle.input.bundle` 至 `battle.resync.response` 的 8 个 logical kind MUST 一一映射到 `3000-3007`、固定 direction 和唯一 raw 或 KCP lane；route MUST 登记 owner、QoS、max encoded/logical size、rate、精确 sender expiry、tick/sequence、idempotency、baseline/recovery 和 assignment/session binding。Numeric registry 的 expiry MUST 与 `battle-network-profile-v2` message inventory 逐项一致，其中 message 3006 与 3007 使用 2250 ms，其他 route 保持各自既有值。Datagram MUST 不超过 1200 bytes 并遵守 48-byte IP/UDP、48-byte secure header、16-byte AEAD tag、16-byte raw 或 24-byte KCP budget；IP fragmentation、通用 Any、未登记 compression、lane fallback 和 payload identity override MUST 禁止。
 
 #### Scenario: Snapshot 通过 KCP 发送
 
@@ -85,26 +90,103 @@ Battle wire MUST 提供 versioned binary envelope、`battle/v1` Protobuf payload
 #### Scenario: Go/C++/C# fixture parity
 
 - **WHEN** 三种实现消费同一 header/protobuf/AAD/crypto/KCP canonical fixture
-- **THEN** message ID、bytes、digest、decode result 和 negative disposition 一致，unknown field/version 或 registry 漂移使验证失败
+- **THEN** message ID、bytes、digest、decode result、route expiry 和 negative disposition 一致，unknown field/version 或 registry 漂移使验证失败
+
+#### Scenario: Resync route 仍使用旧 deadline
+
+- **WHEN** numeric registry、wire fixture 或任一语言 projection 把 message 3006 或 3007 登记为 500 ms
+- **THEN** profile parity 失败，不生成或启动不一致的 runtime route table
 
 ### Requirement: 单 UDP multiplexer 必须有界承载 raw 与 KCP
 
-每个 SimulationNode MUST 只由 C++ 拥有一个 Asio UDP listener；raw、KCP 和 transport-control MUST 共享该 socket 和 authenticated BattleSession。Bind 与 advertised endpoint MUST 分别由 Go 严格配置，production MUST 拒绝 port 0、隐式 Host 推导、地址冲突和自动换端口；本地推荐值为可覆盖的 `58445/udp`，loopback test MAY 使用 `127.0.0.1:0`。KCP adapter MUST 精确使用 profile 登记的 10 ms update、window 64、fast resend 2、RTO 30–200 ms、dead-link 10、1000-byte ceiling、queue 64 与 500 ms expiry，并在 reassembly 后再次验证 application route 和 deadline。
+每个 SimulationNode MUST 只由 C++ 拥有一个 Asio UDP listener；raw、KCP 和 transport-control MUST 共享该 socket 和 authenticated BattleSession。Listener MUST 同时拥有 receive 与 serialized send lifecycle，但不得拥有 ticket、crypto、session、KCP 或 gameplay state；node-global authenticated runtime MUST 对该 listener 收到的 ClientHello、ClientAuth 与 secure datagram 执行完整分派，并把 Retry、ServerAccept、raw/KCP/control output 送回同一 socket。Bind 与 advertised endpoint MUST 分别由 Go 严格配置，production MUST 拒绝 port 0、隐式 Host 推导、地址冲突和自动换端口；本地推荐值为可覆盖的 `58445/udp`，loopback test MAY 使用 `127.0.0.1:0`。KCP adapter MUST 精确使用 profile 登记的 10 ms update、window 64、fast resend 2、RTO 30–200 ms、dead-link 10、1000-byte ceiling和 queue 64；sender application expiry MUST 从 immutable numeric route policy 解析，message 3004/3005 使用 500 ms，message 3006/3007 使用 2250 ms。Receiver reassembly MUST 由 KCP receive window、queue 与 session lifecycle 有界，完整重组后校验 exact route、sequence、Tick 与 generation，不得从首个 segment 推导 sender deadline。Windows listener MUST 在首次 receive 前禁用把无连接 UDP 的 ICMP Port Unreachable 映射成 socket 级 `WSAECONNRESET` 的行为；远端不可达只属于对应 datagram，MUST NOT 终止 node-global listener。该 socket policy 无法建立时启动 MUST fail closed。
 
 #### Scenario: Production UDP bind 失败
 
 - **WHEN** 配置的 battle UDP address 被占用、advertised endpoint 非法或 listener identity 与 ticket endpoint 不一致
 - **THEN** simulation node 启动失败、process 保持 non-ready 并逆序回滚，不随机选择其他 port 或下发不可达 endpoint
 
-#### Scenario: KCP message 到达时已过期
+#### Scenario: 真实 listener 完成安全会话
 
-- **WHEN** 可靠 message 经重传完成 reassembly 但已超过 registry application expiry
-- **THEN** message 以稳定 expired 终结，不进入 simulation、不继续阻塞 queue 且不回退 raw/TCP/WSS
+- **WHEN** 已安装 ticket 的独立客户端通过 advertised endpoint 向 production child 唯一 listener 发送 ClientHello、Retry 后的 ClientAuth 和 secure raw/KCP packet
+- **THEN** 同一 listener 返回 Retry、ServerAccept 与 secure output，runtime 只创建一个绑定 exact seed/session/endpoint/actor/instance 的 active session，且 packet 经过既有 multiplexer 后才进入 simulation
+
+#### Scenario: 旧 UDP 远端不可达
+
+- **WHEN** listener 已向随后关闭的客户端端口排队 terminal response 冗余副本，并在 ICMP 返回后收到另一个合法客户端的 ClientHello
+- **THEN** listener 继续运行、socket receive failure 不增加且后续 ClientHello 正常进入唯一 authenticated runtime；旧远端 ICMP 不得关闭 listener 或阻断新 session
+
+#### Scenario: KCP sender message 已过期
+
+- **WHEN** 可靠 message 在 sender queued/inflight 状态超过 registry application expiry
+- **THEN** sender 以稳定 inflight expiry 终结，不继续发送、不进入 simulation且不回退 raw/TCP/WSS
+
+#### Scenario: Receiver 首个 segment 先于完整重组到达
+
+- **WHEN** receiver 收到后续 ordered message 的首个 segment，但完整 delivery 等待前序 segment
+- **THEN** receiver 不启动 application reassembly timer，继续受 KCP window/queue 与 session lifecycle 硬上限约束
 
 #### Scenario: 一个 instance 尝试创建第二 listener
 
 - **WHEN** runtime、配置或 test 为 raw、KCP 或某个 SimulationInstance 单独 bind socket
 - **THEN** architecture gate 失败；所有 lane 必须经 node-global authenticated multiplexer
+
+#### Scenario: KCP caller 尝试覆盖 deadline
+
+- **WHEN** application caller 提供与 numeric route 不一致的 expiry 或绝对 deadline
+- **THEN** adapter fail closed 并记录低敏 route policy reason，不发送、截断或延长该消息
+
+#### Scenario: Listener shutdown 与 send completion 并发
+
+- **WHEN** node drain/stop 或 listener failure 发生时仍有排队 send 与 active session
+- **THEN** runtime 先停止新 admission/receive dispatch，按 deadline 终结 pending output，清零全部 session secret并等待同一 socket worker 退出，不在 cleanup 后执行迟到 callback
+
+### Requirement: Snapshot 必须显式确认当前 actor 的连续输入前沿
+
+`BattleFullSnapshot` 与 `BattleDeltaSnapshot` MUST 携带显式 presence 的 `last_processed_input_tick`，表示接收该 snapshot 的已认证 BattleSession actor 在当前 mapping generation 内已经应用或以稳定结果终结的最大连续 InputTick。值 `0` MUST 只表示该 generation 尚未终结任何从 1 开始的输入；字段缺失 MUST 被当前 wire identity 的 decoder 视为不兼容，而不是解释为 `0`。该字段 MUST 来自 simulation replication 冻结点，不得由 ServerTick、到达顺序、payload identity 或客户端声明推导。
+
+#### Scenario: snapshot 确认 gap 之前的输入
+
+- **WHEN** 当前 actor 的 InputTick 100 已终结、101 仍未决且 102 已终结，replication 生成 full 或 delta snapshot
+- **THEN** `last_processed_input_tick` 必须为 100；只有 101 被应用或按稳定 policy 终结后，后续 snapshot 才能越过该 gap
+
+#### Scenario: mapping generation 尚无输入
+
+- **WHEN** 新 BattleSession mapping generation 已建立但尚未终结 InputTick 1
+- **THEN** snapshot 必须显式编码 `last_processed_input_tick = 0`，receiver 能区分该值与字段缺失的旧 producer
+
+#### Scenario: reconnect 后旧确认到达
+
+- **WHEN** 当前 session 已进入更高 mapping generation，而旧 generation 的 snapshot 或输入随后到达
+- **THEN** receiver 拒绝旧 generation 数据，新 generation 的确认游标从 0 独立推进且不得继承旧值
+
+### Requirement: Snapshot partition 必须冻结一致的输入确认
+
+同一逻辑 snapshot 的所有 partition MUST 冻结相同的 snapshot sequence、baseline identity、mapping generation 和 `last_processed_input_tick`。Receiver MUST 在完整 partition set 通过数量、索引、身份、大小与确认游标一致性校验后才发布确认；缺片、重复冲突或游标漂移 MUST fail closed。新增字段 MUST 保持现有 1200-byte datagram、route max encoded/logical size、raw lane 和安全封装预算；sender MUST 通过登记 partition policy 拆分或稳定拒绝，不得扩大 MTU 或切换 lane。
+
+#### Scenario: partition 游标发生漂移
+
+- **WHEN** 同一 snapshot sequence 的两个 partition 携带不同 `last_processed_input_tick`
+- **THEN** receiver 拒绝整个 partition set，不选择任一片的值、不发布 observer state 且不淘汰客户端输入历史
+
+#### Scenario: 新字段触发额外 partition
+
+- **WHEN** 增加确认字段使 snapshot 无法在原 partition 数量内满足 route payload ceiling
+- **THEN** sender 按冻结 split policy 增加 partition 或稳定拒绝，完整 datagram 仍不超过 1200 bytes 且继续使用登记 raw lane
+
+### Requirement: 输入确认必须通过跨语言协议资格
+
+Go、C++ 与 C# MUST 对 full/delta snapshot 的 `last_processed_input_tick` 字段编号、presence、零值、大 varint、partition identity、bytes、digest、decode result 和 negative disposition 保持一致。独立 C++ 协议客户端 MUST 只在完整且已认证的 snapshot 通过 generation/baseline/partition 校验后输出该游标；Go qualification correlation MUST 以 actor、mapping generation 与 InputTick 关联 input 和确认，不得从 ServerTick 或日志文本推测。B0.6 的 own/visit、loss/reorder/duplicate、reconnect 与 backpressure workload MUST 证明游标不越过未决 gap、不跨 generation 串联且能回收已终结输入。
+
+#### Scenario: 跨语言显式零值 fixture
+
+- **WHEN** Go、C++ 与 C# 消费显式编码 `last_processed_input_tick = 0` 的相同 canonical full/delta fixture
+- **THEN** 三种实现报告相同 presence、值、canonical bytes 与 digest，删除该字段的 negative fixture 一致失败
+
+#### Scenario: qualification 关联一批输入
+
+- **WHEN** 一个已认证 snapshot 在当前 actor/mapping generation 内把确认游标从 40 推进到 44
+- **THEN** correlation 可将 41 至 44 的已终结输入归入该确认窗口，但不得确认 44 之后或其他 actor/generation 的输入
 
 ### Requirement: BattleSessionContext 必须唯一绑定 actor 并保护 SimulationInstance
 
@@ -165,14 +247,19 @@ Session epoch 递增、logout/forced logout/ban、assignment replacement/lease e
 
 ### Requirement: B0.5 必须通过跨语言安全 transport 实现资格门
 
-本 capability MUST 提供 versioned schema/manifest、Go/C++/C# fixtures、threat model、dependency lock、真实 child/loopback UDP harness 和唯一 qualification report。Mandatory gates MUST 覆盖 wire/crypto/KCP parity、ticket response-loss/consume、forged/replay/amplification/reorder/duplicate/expiry/MTU/backpressure/rebind/rollover/shutdown、own/visit、8/9 actor、assignment/session 失效、child crash/Go restart，以及 B0.3/B0.4、server v1、client v1 和 OpenSpec strict regression。报告 MUST 绑定 source/binary/toolchain/dependency/model/profile/control/wire/registry/config/fixture digest 且保持低敏；只可声明 `secure-transport-qualified-windows-x64`，不得替代 B0.6 网络发布资格。
+本 capability MUST 提供 versioned schema/manifest、Go/C++/C# fixtures、threat model、dependency lock、真实 child/loopback UDP harness 和唯一 qualification report。Mandatory gates MUST 覆盖客户端仅从 HTTPS ticket ID/secret 派生 proof、production child 唯一 listener 真实完成 handshake 和 secure raw/KCP/control、`battle-network-profile-v2` binding、输入确认与 wire/crypto/KCP route-expiry parity、ticket response-loss/consume、forged/replay/amplification/reorder/duplicate/expiry/MTU/backpressure/rebind/rollover/shutdown、own/visit、8/9 actor、assignment/session 失效、child crash/Go restart，以及 B0.3/B0.4、server v1、client v1 和 OpenSpec strict regression。报告 MUST 绑定 source/binary/toolchain/dependency/model/profile/control/wire/registry/config/fixture digest 且保持低敏；只可声明 `secure-transport-qualified-windows-x64`，不得替代 B0.6 网络发布资格。任何只调用内部 handshake/transport 对象而未经过 production composition root 和 listener 的 loopback harness MUST NOT 满足真实 socket gate。
 
 #### Scenario: 完整 B0.5 verify 通过
 
-- **WHEN** 当前源码的全部 mandatory gate 连续运行通过且报告 digest 一致
+- **WHEN** current source 的全部 mandatory gate 连续运行通过，真实 child/socket evidence 证明公开 credential 路径、唯一 listener、active session composition、profile v2 route expiry 与输入确认 parity，且报告 digest 一致
 - **THEN** B0.5 可声明 secure transport implementation-qualified 并仅解锁 `qualify-battle-network`
 
-#### Scenario: 只有 loopback happy path 通过
+#### Scenario: 500 ms 与 2250 ms route parity
 
-- **WHEN** 真实 socket 能完成 handshake 和 input，但安全 negative、KCP parity、8/9 actor、失效或既有 v1 regression 任一未通过
+- **WHEN** adapter parity corpus 分别发送一般可靠事件和 resync request/response
+- **THEN** 前者在 500 ms 后稳定 sender expired，后者只在 2250 ms 后 sender expired，且两类消息共享同一有界 KCP conversation
+
+#### Scenario: 只有内部 loopback happy path 通过
+
+- **WHEN** 内部对象 harness 能完成 handshake/input，但 production child listener 没有回包、没有 active session，或 profile/输入确认 parity、安全 negative、KCP parity、8/9 actor、失效、既有 v1 regression 任一未通过
 - **THEN** qualification 保持未完成，UDP listener 不得作为 production-ready 或 Unity runtime 进入证据

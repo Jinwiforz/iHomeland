@@ -57,9 +57,32 @@ struct BattleRawRoutePolicy final {
     BattleRawSplitPolicy split_policy;
 };
 
+/// BattleKcpRoutePolicy 是3004..3007可靠route的closed registry projection。
+struct BattleKcpRoutePolicy final {
+    /// ReliableEventExpiryMilliseconds 是3004/3005业务价值窗口。
+    static constexpr std::uint32_t ReliableEventExpiryMilliseconds = 500;
+    /// ResyncExpiryMilliseconds 是3006/3007恢复事务窗口。
+    static constexpr std::uint32_t ResyncExpiryMilliseconds = 2'250;
+
+    /// message_id 是 battle owner range 内唯一 numeric identity。
+    std::uint32_t message_id;
+    /// direction 是该 route 唯一允许方向。
+    BattleRouteDirection direction;
+    /// maximum_payload_bytes 是 Protobuf encoded hard ceiling。
+    std::uint16_t maximum_payload_bytes;
+    /// maximum_rate_per_second 由外层资源治理执行。
+    std::uint16_t maximum_rate_per_second;
+    /// expiry_milliseconds 是该 route 唯一 application deadline。
+    std::uint32_t expiry_milliseconds;
+};
+
 /// FindBattleRawRoutePolicy 返回3000..3003 raw registry projection。
 [[nodiscard]] const BattleRawRoutePolicy*
 FindBattleRawRoutePolicy(std::uint32_t message_id) noexcept;
+
+/// FindBattleKcpRoutePolicy 返回3004..3007 KCP registry projection。
+[[nodiscard]] const BattleKcpRoutePolicy*
+FindBattleKcpRoutePolicy(std::uint32_t message_id) noexcept;
 
 /// BattleRawFrameView 是 callback 期间有效的已验证 raw route view。
 struct BattleRawFrameView final {

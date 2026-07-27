@@ -1,10 +1,10 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "qualification-report",
   "tool_version": "battle-network-profile-tool-v1",
   "profile_status": "qualified",
-  "source_digest": "d20f143d797b3e9bafddf32e0271c6a54a5ae8988579263ce2553c07a0d3e0fe",
+  "source_digest": "dd825ed90b1905327d933a6b5f97e325376c2298a704fd16135ec69cedc29aec",
   "seed": 20260723,
   "candidate_results": [
     {

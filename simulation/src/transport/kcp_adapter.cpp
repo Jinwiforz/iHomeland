@@ -1,5 +1,6 @@
 #include "ihomeland/sim/transport/kcp_adapter.hpp"
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 #include "ihomeland/battle/v1/battle.pb.h"
 
 #include <ikcp.h>
@@ -24,33 +25,6 @@ constexpr std::uint8_t KcpPush = 81;
 constexpr std::uint8_t KcpAck = 82;
 constexpr std::uint8_t KcpWindowAsk = 83;
 constexpr std::uint8_t KcpWindowTell = 84;
-
-constexpr std::array<BattleKcpRoutePolicy, 4> KcpRoutes{{
-    {
-        .message_id = 3004,
-        .direction = BattleRouteDirection::ServerToClient,
-        .maximum_payload_bytes = 512,
-        .maximum_rate_per_second = 20,
-    },
-    {
-        .message_id = 3005,
-        .direction = BattleRouteDirection::ServerToClient,
-        .maximum_payload_bytes = 512,
-        .maximum_rate_per_second = 20,
-    },
-    {
-        .message_id = 3006,
-        .direction = BattleRouteDirection::ClientToServer,
-        .maximum_payload_bytes = 128,
-        .maximum_rate_per_second = 2,
-    },
-    {
-        .message_id = 3007,
-        .direction = BattleRouteDirection::ServerToClient,
-        .maximum_payload_bytes = 768,
-        .maximum_rate_per_second = 2,
-    },
-}};
 
 /// ReadUint16LE 读取 KCP little-endian window。
 [[nodiscard]] std::uint16_t ReadUint16LE(
@@ -230,24 +204,13 @@ struct PayloadTick final {
 
 }  // namespace
 
-const BattleKcpRoutePolicy* FindBattleKcpRoutePolicy(
-    const std::uint32_t message_id) noexcept {
-    const auto found = std::ranges::find(
-        KcpRoutes,
-        message_id,
-        &BattleKcpRoutePolicy::message_id);
-    return found == KcpRoutes.end() ?
-        nullptr :
-        &*found;
-}
-
 /// BattleKcpAdapter::Impl 隔离KCP 2.1.1 handle与有界application状态。
 struct BattleKcpAdapter::Impl final {
     /// PendingMessage 是尚未交给KCP的immutable route frame。
     struct PendingMessage final {
         /// frame 是16-byte route envelope加Protobuf。
         std::vector<std::uint8_t> frame;
-        /// deadline_unix_ms 是500ms application终点。
+        /// deadline_unix_ms 是 immutable route policy 推导的绝对终点。
         std::uint64_t deadline_unix_ms;
     };
 
@@ -263,16 +226,26 @@ struct BattleKcpAdapter::Impl final {
         std::vector<std::uint8_t> payload;
     };
 
+    /// SeenSegment 保存固定 window 内已输出 PUSH sequence。
+    struct SeenSegment final {
+        /// sequence 是 KCP segment sequence。
+        std::uint32_t sequence{};
+        /// used 表示 slot 已观察至少一次。
+        bool used{};
+    };
+
     /// 构造函数创建exact conv handle并锁定profile参数。
     Impl(
         const std::uint32_t value,
         const BattleTransportRole role,
         SegmentOutput output,
-        MessageHandler handler)
+        MessageHandler handler,
+        BattleRuntimeMetrics* metrics)
         : conversation(value),
           local_role(role),
           segment_output(std::move(output)),
-          message_handler(std::move(handler)) {
+          message_handler(std::move(handler)),
+          runtime_metrics(metrics) {
         kcp = ikcp_create(conversation, this);
         if (kcp == nullptr ||
             ikcp_setmtu(
@@ -337,6 +310,43 @@ struct BattleKcpAdapter::Impl final {
             const auto* first =
                 reinterpret_cast<const std::uint8_t*>(
                     buffer);
+            std::size_t offset = 0;
+            while (offset + KcpHeaderBytes <=
+                   static_cast<std::size_t>(length)) {
+                const auto* header = first + offset;
+                const auto payload_bytes =
+                    ReadUint32LE(header + 20);
+                const auto remaining_bytes =
+                    static_cast<std::size_t>(length) -
+                    offset -
+                    KcpHeaderBytes;
+                if (payload_bytes > remaining_bytes) {
+                    self->closed = true;
+                    return -1;
+                }
+                if (header[4] == KcpPush) {
+                    const auto sequence =
+                        ReadUint32LE(header + 12);
+                    auto& slot = self->seen_segments.at(
+                        sequence % WindowSegments);
+                    if (slot.used &&
+                        slot.sequence == sequence &&
+                        self->runtime_metrics != nullptr) {
+                        self->runtime_metrics->
+                            RecordKcpRetransmits(1);
+                    }
+                    slot = SeenSegment{
+                        .sequence = sequence,
+                        .used = true,
+                    };
+                }
+                offset += KcpHeaderBytes +
+                          payload_bytes;
+            }
+            if (offset != static_cast<std::size_t>(length)) {
+                self->closed = true;
+                return -1;
+            }
             self->pending_outputs.emplace_back(
                 first,
                 first + length);
@@ -436,6 +446,8 @@ struct BattleKcpAdapter::Impl final {
     SegmentOutput segment_output;
     /// message_handler 是validated reliable route唯一入口。
     MessageHandler message_handler;
+    /// runtime_metrics 可选借用 node 生命周期内的低敏累计 owner。
+    BattleRuntimeMetrics* runtime_metrics;
     /// kcp 是私有第三方handle。
     ikcpcb* kcp{};
     /// queued_messages 在固定64项预算内等待send。
@@ -449,8 +461,6 @@ struct BattleKcpAdapter::Impl final {
     std::uint64_t last_update_unix_ms{};
     /// clock_origin_unix_ms 把64-bit absolute deadline clock映射为KCP 32-bit relative clock。
     std::uint64_t clock_origin_unix_ms{};
-    /// receive_started_unix_ms 是当前未完成message首个PUSH时间。
-    std::uint64_t receive_started_unix_ms{};
     /// last_received_sequence 阻止可靠route replay/回退。
     std::uint64_t last_received_sequence{};
     /// expired_messages 是低敏累计终结计数。
@@ -459,6 +469,8 @@ struct BattleKcpAdapter::Impl final {
     std::uint64_t emitted_segments{};
     /// received_messages 是低敏累计application计数。
     std::uint64_t received_messages{};
+    /// seen_segments 以 KCP window 固定内存识别首次输出与重传。
+    std::array<SeenSegment, WindowSegments> seen_segments{};
     /// closed 是dead-link/deadline/callback failure终态。
     bool closed{false};
     /// mutex 串行化third-party handle与全部queue。
@@ -469,12 +481,14 @@ BattleKcpAdapter::BattleKcpAdapter(
     const std::uint32_t conversation,
     const BattleTransportRole local_role,
     SegmentOutput segment_output,
-    MessageHandler message_handler)
+    MessageHandler message_handler,
+    BattleRuntimeMetrics* runtime_metrics)
     : impl_(std::make_unique<Impl>(
           conversation,
           local_role,
           std::move(segment_output),
-          std::move(message_handler))) {
+          std::move(message_handler),
+          runtime_metrics)) {
     if (conversation == 0 ||
         !impl_->segment_output ||
         !impl_->message_handler) {
@@ -503,8 +517,11 @@ BattleKcpDisposition BattleKcpAdapter::Queue(
         now_unix_ms == 0 ||
         now_unix_ms >
             std::numeric_limits<std::uint64_t>::max() -
-                MessageExpiryMilliseconds ||
+                policy->expiry_milliseconds ||
         !ParsePayload(message_id, payload).valid) {
+        if (impl_->runtime_metrics != nullptr) {
+            impl_->runtime_metrics->RecordReject();
+        }
         return BattleKcpDisposition::RouteRejected;
     }
     std::scoped_lock lock(impl_->mutex);
@@ -514,6 +531,9 @@ BattleKcpDisposition BattleKcpAdapter::Queue(
     if (impl_->queued_messages.size() +
             impl_->inflight_deadlines.size() >=
         QueueItems) {
+        if (impl_->runtime_metrics != nullptr) {
+            impl_->runtime_metrics->RecordReject();
+        }
         return BattleKcpDisposition::QueueFull;
     }
     std::vector<std::uint8_t> frame(
@@ -535,8 +555,13 @@ BattleKcpDisposition BattleKcpAdapter::Queue(
             .frame = std::move(frame),
             .deadline_unix_ms =
                 now_unix_ms +
-                MessageExpiryMilliseconds,
+                policy->expiry_milliseconds,
         });
+    if (impl_->runtime_metrics != nullptr) {
+        impl_->runtime_metrics->ObserveKcpQueue(
+            impl_->queued_messages.size() +
+            impl_->inflight_deadlines.size());
+    }
     return BattleKcpDisposition::Queued;
 }
 
@@ -600,35 +625,23 @@ BattleKcpDisposition BattleKcpAdapter::Input(
         if (!ValidateSegment(
                 segment,
                 impl_->conversation)) {
+            if (impl_->runtime_metrics != nullptr) {
+                impl_->runtime_metrics->RecordReject();
+            }
             return BattleKcpDisposition::InvalidSegment;
-        }
-        bool has_push = false;
-        for (std::size_t offset = 0;
-             offset < segment.size();) {
-            has_push = has_push ||
-                       segment[offset + 4] == KcpPush;
-            offset += KcpHeaderBytes +
-                      ReadUint32LE(
-                          segment.data() +
-                          offset + 20);
-        }
-        if (has_push &&
-            impl_->receive_started_unix_ms == 0) {
-            impl_->receive_started_unix_ms =
-                now_unix_ms;
         }
         if (ikcp_input(
                 impl_->kcp,
                 reinterpret_cast<const char*>(
                     segment.data()),
                 static_cast<long>(segment.size())) < 0) {
+            if (impl_->runtime_metrics != nullptr) {
+                impl_->runtime_metrics->RecordReject();
+            }
             return BattleKcpDisposition::InvalidSegment;
         }
         impl_->ClampRto();
         impl_->ReconcileInflight();
-        const auto receive_started_unix_ms =
-            impl_->receive_started_unix_ms;
-        bool drained_message = false;
         for (;;) {
             const auto message_bytes =
                 ikcp_peeksize(impl_->kcp);
@@ -652,27 +665,15 @@ BattleKcpDisposition BattleKcpAdapter::Input(
                 impl_->closed = true;
                 return BattleKcpDisposition::Closed;
             }
-            drained_message = true;
-            if (receive_started_unix_ms == 0 ||
-                now_unix_ms <
-                    receive_started_unix_ms ||
-                now_unix_ms -
-                        receive_started_unix_ms >
-                    MessageExpiryMilliseconds) {
-                ++impl_->expired_messages;
-                disposition =
-                    BattleKcpDisposition::Expired;
-                continue;
-            }
             auto parsed = impl_->ParseReceived(frame);
             if (!parsed.has_value()) {
                 impl_->closed = true;
+                if (impl_->runtime_metrics != nullptr) {
+                    impl_->runtime_metrics->RecordReject();
+                }
                 return BattleKcpDisposition::RouteRejected;
             }
             messages.push_back(std::move(*parsed));
-        }
-        if (drained_message) {
-            impl_->receive_started_unix_ms = 0;
         }
     }
     for (const auto& message : messages) {
@@ -688,6 +689,14 @@ BattleKcpDisposition BattleKcpAdapter::Input(
                 });
             std::scoped_lock lock(impl_->mutex);
             ++impl_->received_messages;
+            if (impl_->runtime_metrics != nullptr) {
+                impl_->runtime_metrics->ObserveKcpQueue(
+                    impl_->queued_messages.size() +
+                    impl_->inflight_deadlines.size() +
+                    static_cast<std::size_t>(std::max(
+                        0,
+                        ikcp_waitsnd(impl_->kcp))));
+            }
         } catch (...) {
             std::scoped_lock lock(impl_->mutex);
             impl_->closed = true;
@@ -724,20 +733,36 @@ BattleKcpDisposition BattleKcpAdapter::Update(
             impl_->closed = true;
             return BattleKcpDisposition::ClockInvalid;
         }
-        if (!impl_->inflight_deadlines.empty() &&
-            now_unix_ms >=
-                impl_->inflight_deadlines.front() &&
+        if (std::ranges::any_of(
+                impl_->inflight_deadlines,
+                [now_unix_ms](const std::uint64_t deadline) {
+                    return now_unix_ms >= deadline;
+                }) &&
             ikcp_waitsnd(impl_->kcp) > 0) {
             ++impl_->expired_messages;
+            if (impl_->runtime_metrics != nullptr) {
+                impl_->runtime_metrics->RecordExpiry();
+            }
             impl_->closed = true;
             return BattleKcpDisposition::Expired;
         }
-        while (!impl_->queued_messages.empty() &&
-               now_unix_ms >=
-                   impl_->queued_messages.front().
-                       deadline_unix_ms) {
-            impl_->queued_messages.pop_front();
-            ++impl_->expired_messages;
+        const auto queued_before_expiry =
+            impl_->queued_messages.size();
+        std::erase_if(
+            impl_->queued_messages,
+            [now_unix_ms](const Impl::PendingMessage& message) {
+                return now_unix_ms >=
+                    message.deadline_unix_ms;
+            });
+        const auto expired_queued =
+            queued_before_expiry -
+            impl_->queued_messages.size();
+        if (expired_queued != 0) {
+            impl_->expired_messages += expired_queued;
+            if (impl_->runtime_metrics != nullptr) {
+                impl_->runtime_metrics->RecordExpiry(
+                    expired_queued);
+            }
             disposition = BattleKcpDisposition::Expired;
         }
         while (!impl_->queued_messages.empty()) {
@@ -776,6 +801,14 @@ BattleKcpDisposition BattleKcpAdapter::Update(
         }
         outputs = std::move(impl_->pending_outputs);
         impl_->pending_outputs.clear();
+        if (impl_->runtime_metrics != nullptr) {
+            impl_->runtime_metrics->ObserveKcpQueue(
+                impl_->queued_messages.size() +
+                impl_->inflight_deadlines.size() +
+                static_cast<std::size_t>(std::max(
+                    0,
+                    ikcp_waitsnd(impl_->kcp))));
+        }
     }
     for (const auto& output : outputs) {
         try {

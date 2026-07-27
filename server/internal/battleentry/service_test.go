@@ -294,12 +294,13 @@ func (roles *fakeVisitRoles) ResolveBattleAuthority(_ context.Context, authentic
 	}
 	auth := authenticated.AuthContext()
 	playerID, _ := account.NewPlayerID(auth.Principal().PlayerID())
-	intent, err := visitsession.HydrateAdmissionIntent(visitID, playerID, auth.SessionID(),
-		auth.Epoch(), roles.assignment, roles.deadline)
+	authority, err := NewVisitAuthority(
+		playerID, auth.SessionID(), auth.Epoch(), roles.assignment, roles.deadline, roles.revision,
+	)
 	if err != nil {
 		return VisitAuthority{}, err
 	}
-	return VisitAuthority{Intent: intent, Revision: roles.revision}, nil
+	return authority, nil
 }
 
 type fakeTargets struct {

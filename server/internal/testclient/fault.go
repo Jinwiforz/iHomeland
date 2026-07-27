@@ -10,8 +10,34 @@ import (
 	"time"
 )
 
-var allowedFaults = map[string]bool{
-	"server-restart": true, "redis-flush": true, "redis-restart": true, "mysql-restart": true,
+const (
+	// FaultServerRestart 是 server v1 资格使用的整体进程替换。
+	FaultServerRestart = "server-restart"
+	// FaultRedisFlush 清空可恢复 Redis 运行态。
+	FaultRedisFlush = "redis-flush"
+	// FaultRedisRestart 重启当前资格 run 拥有的 Redis。
+	FaultRedisRestart = "redis-restart"
+	// FaultMySQLRestart 重启当前资格 run 拥有的 MySQL。
+	FaultMySQLRestart = "mysql-restart"
+	// FaultAssignmentReplacement 替换 Go/C++ incarnation 并要求 assignment 前进。
+	FaultAssignmentReplacement = "assignment-replacement"
+	// FaultChildCrashRestart 终止精确 C++ child，并由外部 owner 恢复整个进程图。
+	FaultChildCrashRestart = "child-crash-restart"
+	// FaultGoRestart 替换精确 Go parent 及其 owned child。
+	FaultGoRestart = "go-restart"
+	// FaultShutdownDrainDeadline 触发 supervised failure 并验证有界 drain/shutdown。
+	FaultShutdownDrainDeadline = "shutdown-drain-deadline"
+)
+
+var allowedFaults = map[string]struct{}{
+	FaultServerRestart:         {},
+	FaultRedisFlush:            {},
+	FaultRedisRestart:          {},
+	FaultMySQLRestart:          {},
+	FaultAssignmentReplacement: {},
+	FaultChildCrashRestart:     {},
+	FaultGoRestart:             {},
+	FaultShutdownDrainDeadline: {},
 }
 
 // FaultRequest 是 testclient 与 PowerShell owner 之间的低敏单槽请求。
@@ -58,7 +84,7 @@ func NewFileFaultController(directory string) (*FileFaultController, error) {
 
 // Execute 请求唯一 owner 执行故障，并等待同 sequence 的有界响应。
 func (controller *FileFaultController) Execute(ctx context.Context, kind string) error {
-	if controller == nil || ctx == nil || !allowedFaults[kind] {
+	if _, allowed := allowedFaults[kind]; controller == nil || ctx == nil || !allowed {
 		return errors.New("qualification fault request is invalid")
 	}
 	controller.mutex.Lock()

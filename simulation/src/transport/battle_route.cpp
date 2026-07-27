@@ -55,6 +55,45 @@ constexpr std::array<BattleRawRoutePolicy, 4> RawRoutes{{
     },
 }};
 
+constexpr std::array<BattleKcpRoutePolicy, 4> KcpRoutes{{
+    {
+        .message_id = 3004,
+        .direction = BattleRouteDirection::ServerToClient,
+        .maximum_payload_bytes = 512,
+        .maximum_rate_per_second = 20,
+        .expiry_milliseconds =
+            BattleKcpRoutePolicy::
+                ReliableEventExpiryMilliseconds,
+    },
+    {
+        .message_id = 3005,
+        .direction = BattleRouteDirection::ServerToClient,
+        .maximum_payload_bytes = 512,
+        .maximum_rate_per_second = 20,
+        .expiry_milliseconds =
+            BattleKcpRoutePolicy::
+                ReliableEventExpiryMilliseconds,
+    },
+    {
+        .message_id = 3006,
+        .direction = BattleRouteDirection::ClientToServer,
+        .maximum_payload_bytes = 128,
+        .maximum_rate_per_second = 2,
+        .expiry_milliseconds =
+            BattleKcpRoutePolicy::
+                ResyncExpiryMilliseconds,
+    },
+    {
+        .message_id = 3007,
+        .direction = BattleRouteDirection::ServerToClient,
+        .maximum_payload_bytes = 768,
+        .maximum_rate_per_second = 2,
+        .expiry_milliseconds =
+            BattleKcpRoutePolicy::
+                ResyncExpiryMilliseconds,
+    },
+}};
+
 /// ReadUint16BE 读取 canonical raw payload length。
 [[nodiscard]] std::uint16_t ReadUint16BE(
     const std::uint8_t* input) noexcept {
@@ -170,6 +209,8 @@ struct PayloadProjection final {
             if (!parse(message) ||
                 message.server_tick() == 0 ||
                 message.snapshot_sequence() == 0 ||
+                !message
+                     .has_last_processed_input_tick() ||
                 message.partition_count() == 0 ||
                 message.partition_index() >=
                     message.partition_count()) {
@@ -190,6 +231,8 @@ struct PayloadProjection final {
             if (!parse(message) ||
                 message.server_tick() == 0 ||
                 message.snapshot_sequence() == 0 ||
+                !message
+                     .has_last_processed_input_tick() ||
                 message.partition_count() == 0 ||
                 message.partition_index() >=
                     message.partition_count()) {
@@ -236,6 +279,17 @@ const BattleRawRoutePolicy* FindBattleRawRoutePolicy(
         message_id,
         &BattleRawRoutePolicy::message_id);
     return found == RawRoutes.end() ?
+        nullptr :
+        &*found;
+}
+
+const BattleKcpRoutePolicy* FindBattleKcpRoutePolicy(
+    const std::uint32_t message_id) noexcept {
+    const auto found = std::ranges::find(
+        KcpRoutes,
+        message_id,
+        &BattleKcpRoutePolicy::message_id);
+    return found == KcpRoutes.end() ?
         nullptr :
         &*found;
 }

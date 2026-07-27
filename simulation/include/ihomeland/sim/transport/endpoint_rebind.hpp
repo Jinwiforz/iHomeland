@@ -5,10 +5,13 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 
 namespace ihomeland::sim {
+
+class BattleRuntimeMetrics;
 
 /// BattleRebindChallenge 是绑定candidate endpoint与generation的短期cookie。
 struct BattleRebindChallenge final {
@@ -46,6 +49,8 @@ enum class BattleRebindDisposition : std::uint8_t {
     Expired = 8,
     /// GenerationExhausted 表示endpoint generation不能再推进。
     GenerationExhausted = 9,
+    /// OutputUnavailable 表示commit acknowledgement未能排入唯一listener。
+    OutputUnavailable = 10,
 };
 
 /// BattleRebindResult 保存稳定decision与可选challenge。
@@ -62,6 +67,10 @@ struct BattleRebindResult final {
 /// key、packet sequence、replay window或KCP。
 class BattleEndpointRebinder final {
 public:
+    /// CommitBarrier 在endpoint generation切换前排队旧generation acknowledgement。
+    using CommitBarrier = std::function<bool(
+        const BattleRebindChallenge&)>;
+
     /// ChallengeLifetimeMilliseconds 固定candidate confirm deadline。
     static constexpr std::uint64_t
         ChallengeLifetimeMilliseconds = 3'000;
@@ -71,7 +80,8 @@ public:
         CryptoProvider& crypto,
         BattleSecureChannel& channel,
         BattleRemoteEndpoint initial_endpoint,
-        std::uint32_t initial_generation);
+        std::uint32_t initial_generation,
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
     /// fixture构造函数接受公开测试key。
     BattleEndpointRebinder(
@@ -79,7 +89,8 @@ public:
         BattleSecureChannel& channel,
         BattleRemoteEndpoint initial_endpoint,
         std::uint32_t initial_generation,
-        const CryptoProvider::Key32& fixture_key);
+        const CryptoProvider::Key32& fixture_key,
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
     /// 析构函数清零cookie key。
     ~BattleEndpointRebinder();
@@ -102,7 +113,8 @@ public:
         const BattleRemoteEndpoint& candidate_remote,
         const BattleRebindChallenge& challenge,
         bool authenticated,
-        std::uint64_t now_unix_ms);
+        std::uint64_t now_unix_ms,
+        CommitBarrier before_commit = {});
 
     /// ActiveEndpoint 返回当前唯一remote快照。
     [[nodiscard]] BattleRemoteEndpoint

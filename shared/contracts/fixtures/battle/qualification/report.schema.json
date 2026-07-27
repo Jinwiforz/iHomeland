@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-qualification-report-v1.json",
+  "title": "iHomeland Battle Network Qualification Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "qualificationVersion",
+    "reportKind",
+    "qualification",
+    "runs",
+    "scenarioResults",
+    "metricResults",
+    "completeness",
+    "cleanup",
+    "scope"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "qualificationVersion": { "const": "battle-network-qualification-v1" },
+    "reportKind": {
+      "enum": ["diagnostic", "run-evidence", "soak-evidence", "final"]
+    },
+    "qualification": {
+      "enum": [
+        "battle-network-qualified-windows-x64-controlled",
+        "diagnostic-only",
+        "not-qualified",
+        "pending"
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceSha256",
+        "binarySha256",
+        "toolchainSha256",
+        "dependencySha256",
+        "modelSha256",
+        "profileSha256",
+        "controlSha256",
+        "wireSha256",
+        "configSha256",
+        "environmentSha256",
+        "faultSha256",
+        "workloadSha256"
+      ],
+      "properties": {
+        "sourceSha256": { "$ref": "#/$defs/sha256" },
+        "binarySha256": { "$ref": "#/$defs/sha256" },
+        "toolchainSha256": { "$ref": "#/$defs/sha256" },
+        "dependencySha256": { "$ref": "#/$defs/sha256" },
+        "modelSha256": { "$ref": "#/$defs/sha256" },
+        "profileSha256": { "$ref": "#/$defs/sha256" },
+        "controlSha256": { "$ref": "#/$defs/sha256" },
+        "wireSha256": { "$ref": "#/$defs/sha256" },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "environmentSha256": { "$ref": "#/$defs/sha256" },
+        "faultSha256": { "$ref": "#/$defs/sha256" },
+        "workloadSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "evidenceSha256", "disposition"],
+        "properties": {
+          "role": { "enum": ["run-a", "run-b", "soak"] },
+          "evidenceSha256": { "$ref": "#/$defs/sha256" },
+          "disposition": { "enum": ["failed", "passed"] }
+        }
+      }
+    },
+    "scenarioResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scenarioId",
+          "workloadId",
+          "disposition",
+          "evidenceSha256"
+        ],
+        "properties": {
+          "scenarioId": { "$ref": "#/$defs/stableId" },
+          "workloadId": { "$ref": "#/$defs/stableId" },
+          "disposition": {
+            "enum": [
+              "failed",
+              "passed",
+              "skipped",
+              "stale",
+              "unclassified",
+              "unsupported"
+            ]
+          },
+          "evidenceSha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "metricResults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "metricId",
+          "unit",
+          "budget",
+          "runAMeasured",
+          "runBMeasured",
+          "soakMeasured",
+          "worstCase",
+          "disposition"
+        ],
+        "properties": {
+          "metricId": { "$ref": "#/$defs/stableId" },
+          "unit": { "$ref": "#/$defs/stableId" },
+          "budget": { "type": "integer", "minimum": 0 },
+          "runAMeasured": { "type": "integer", "minimum": 0 },
+          "runBMeasured": { "type": "integer", "minimum": 0 },
+          "soakMeasured": { "type": "integer", "minimum": 0 },
+          "worstCase": { "type": "integer", "minimum": 0 },
+          "disposition": { "enum": ["failed", "passed"] }
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "missing",
+        "failed",
+        "skipped",
+        "stale",
+        "unsupported",
+        "unclassified"
+      ],
+      "properties": {
+        "missing": { "$ref": "#/$defs/stableIdArray" },
+        "failed": { "$ref": "#/$defs/stableIdArray" },
+        "skipped": { "$ref": "#/$defs/stableIdArray" },
+        "stale": { "$ref": "#/$defs/stableIdArray" },
+        "unsupported": { "$ref": "#/$defs/stableIdArray" },
+        "unclassified": { "$ref": "#/$defs/stableIdArray" }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disposition",
+        "remainingProcesses",
+        "remainingListeners",
+        "remainingContainers",
+        "reusableCredentials"
+      ],
+      "properties": {
+        "disposition": { "enum": ["failed", "passed"] },
+        "remainingProcesses": { "type": "integer", "minimum": 0 },
+        "remainingListeners": { "type": "integer", "minimum": 0 },
+        "remainingContainers": { "type": "integer", "minimum": 0 },
+        "reusableCredentials": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "environmentClass",
+        "publicInternetQualified",
+        "unityRuntimeQualified",
+        "unlocks"
+      ],
+      "properties": {
+        "platform": { "const": "windows-x64" },
+        "environmentClass": { "const": "controlled-local-fault-gateway" },
+        "publicInternetQualified": { "const": false },
+        "unityRuntimeQualified": { "const": false },
+        "unlocks": { "const": ["implement-unity-gameplay-runtime"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "qualification": {
+            "const": "battle-network-qualified-windows-x64-controlled"
+          }
+        },
+        "required": ["qualification"]
+      },
+      "then": {
+        "required": ["identity"],
+        "properties": {
+          "runs": {
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "completeness": {
+            "properties": {
+              "missing": { "maxItems": 0 },
+              "failed": { "maxItems": 0 },
+              "skipped": { "maxItems": 0 },
+              "stale": { "maxItems": 0 },
+              "unsupported": { "maxItems": 0 },
+              "unclassified": { "maxItems": 0 }
+            }
+          },
+          "cleanup": {
+            "properties": {
+              "disposition": { "const": "passed" },
+              "remainingProcesses": { "const": 0 },
+              "remainingListeners": { "const": 0 },
+              "remainingContainers": { "const": 0 },
+              "reusableCredentials": { "const": 0 }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "stableIdArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/stableId" }
+    }
+  }
+}

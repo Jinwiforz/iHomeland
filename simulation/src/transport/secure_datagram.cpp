@@ -1,5 +1,6 @@
 #include "ihomeland/sim/transport/secure_datagram.hpp"
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 #define NOMINMAX
 #include <windows.h>
 
@@ -316,7 +317,8 @@ BattleSecureChannel::BattleSecureChannel(
     const std::uint32_t key_epoch,
     const std::uint64_t next_send_sequence,
     const std::uint64_t epoch_started_unix_ms,
-    const std::uint64_t sent_packets_current_epoch)
+    const std::uint64_t sent_packets_current_epoch,
+    BattleRuntimeMetrics* runtime_metrics)
     : crypto_(crypto),
       local_role_(local_role),
       identity_(std::move(identity)),
@@ -325,6 +327,7 @@ BattleSecureChannel::BattleSecureChannel(
       epoch_started_unix_ms_(epoch_started_unix_ms),
       sent_packets_current_epoch_(
           sent_packets_current_epoch),
+      runtime_metrics_(runtime_metrics),
       replay_(std::make_unique<ReplayWindow>()) {
     if ((local_role_ != BattleTransportRole::Client &&
          local_role_ != BattleTransportRole::Server) ||
@@ -477,6 +480,16 @@ BattleSecureChannel::SealResult BattleSecureChannel::Seal(
     std::ranges::copy(
         encrypted.tag,
         result.datagram.end() - AeadTagBytes);
+    if (runtime_metrics_ != nullptr &&
+        (packet_kind == BattlePacketKind::Raw ||
+         packet_kind == BattlePacketKind::Kcp)) {
+        runtime_metrics_->RecordDatagram(
+            BattleMetricDirection::Egress,
+            packet_kind == BattlePacketKind::Raw
+                ? BattleMetricLane::Raw
+                : BattleMetricLane::Kcp,
+            result.datagram.size());
+    }
     return result;
 }
 
@@ -592,6 +605,16 @@ BattleSecureChannel::OpenResult BattleSecureChannel::Open(
         static_cast<BattlePacketKind>(kind);
     result.packet_sequence = sequence;
     result.plaintext = std::move(*plaintext);
+    if (runtime_metrics_ != nullptr &&
+        (result.packet_kind == BattlePacketKind::Raw ||
+         result.packet_kind == BattlePacketKind::Kcp)) {
+        runtime_metrics_->RecordDatagram(
+            BattleMetricDirection::Ingress,
+            result.packet_kind == BattlePacketKind::Raw
+                ? BattleMetricLane::Raw
+                : BattleMetricLane::Kcp,
+            datagram.size());
+    }
     return result;
 }
 
@@ -685,6 +708,9 @@ bool BattleSecureChannel::CommitAuthenticatedRollover(
     epoch_started_unix_ms_ = now_unix_ms;
     rollover_deadline_unix_ms_ = 0;
     send_exhausted_ = false;
+    if (runtime_metrics_ != nullptr) {
+        runtime_metrics_->RecordRekey();
+    }
     return true;
 }
 

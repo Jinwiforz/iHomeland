@@ -1,6 +1,6 @@
 {
-  "format_version": "1",
-  "profile_version": "battle-network-profile-v1",
+  "format_version": "2",
+  "profile_version": "battle-network-profile-v2",
   "document_kind": "case",
   "case_id": "case-reliable-kcp",
   "category": "reliable",
@@ -23,7 +23,9 @@
   "assertions": [
     "application-expiry-enforced",
     "ordered-delivery-bounded",
+    "resync-expiry-candidates-selected",
     "retransmit-amplification-reported",
+    "route-expiry-isolated",
     "runtime-adapter-parity-required"
   ]
 }

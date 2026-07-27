@@ -54,12 +54,29 @@
       "packetDispatchStopped"
     ]
   },
+  "qualificationSnapshot": {
+    "requestKind": "battle_qualification_snapshot_request",
+    "receiptKind": "battle_qualification_snapshot_receipt",
+    "mode": "explicit-run-only",
+    "sampleSequence": "starts-at-one-and-advances-only-after-valid-receipt",
+    "identityFields": [
+      "qualificationRunId",
+      "sampleSequence",
+      "simulationNodeId",
+      "simulationInstanceId",
+      "assignmentFingerprint"
+    ],
+    "counterPolicy": "closed-low-sensitive-monotonic-and-read-does-not-reset",
+    "productionDisposition": "rejected"
+  },
   "expectations": [
     "frame-size-at-most-65536",
     "nonce-and-sequence-validated-before-dispatch",
     "all-payloads-closed",
     "request-replay-compares-all-immutable-fields",
     "proof-key-only-on-ticket-install",
-    "secret-never-in-fixture-log-report-or-storage"
+    "secret-never-in-fixture-log-report-or-storage",
+    "qualification-snapshot-does-not-create-listener-or-file-management-plane",
+    "qualification-snapshot-rejects-production-old-run-old-node-and-out-of-order-sample"
   ]
 }

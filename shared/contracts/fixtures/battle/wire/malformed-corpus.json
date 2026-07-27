@@ -26,6 +26,17 @@
     { "case_id": "kcp-cross-lane-route", "layer": "kcp-route-envelope", "mutation": "message-id-3002", "expected_reason": "BATTLE_ROUTE_LANE_MISMATCH" },
     { "case_id": "protobuf-unknown-field", "layer": "protobuf", "mutation": "append-field-15-varint", "expected_reason": "BATTLE_PAYLOAD_UNKNOWN_FIELD" },
     { "case_id": "protobuf-enum-unknown", "layer": "protobuf", "mutation": "enum-value-255", "expected_reason": "BATTLE_PAYLOAD_ENUM_INVALID" },
+    {
+      "case_id": "snapshot-ack-presence-missing",
+      "layer": "protobuf",
+      "mutation": "remove-field-7",
+      "bytes_hex": "08011001180120002801",
+      "byte_count": 10,
+      "sha256": "55e6a0d98fe10d90fe3af1e24b1af428af5facb1f865f5bdab5b51594a7923b3",
+      "expected_reason": "BATTLE_SNAPSHOT_ACK_MISSING"
+    },
+    { "case_id": "snapshot-ack-partition-drift", "layer": "protobuf", "mutation": "same-snapshot-field-7-differs", "expected_reason": "BATTLE_SNAPSHOT_ACK_PARTITION_DRIFT" },
+    { "case_id": "snapshot-ack-stale-generation", "layer": "protobuf", "mutation": "authenticated-session-generation-predecessor", "expected_reason": "BATTLE_SNAPSHOT_GENERATION_STALE" },
     { "case_id": "datagram-over-mtu", "layer": "datagram", "mutation": "1201-bytes", "expected_reason": "BATTLE_DATAGRAM_TOO_LARGE" }
   ],
   "policy": {

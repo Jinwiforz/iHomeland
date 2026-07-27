@@ -1,5 +1,6 @@
 #include "ihomeland/sim/transport/resource_governor.hpp"
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 #include <algorithm>
 #include <limits>
 #include <memory>
@@ -46,9 +47,13 @@ struct IpBucket final {
 /// Reject 累计稳定原因并返回拒绝。
 [[nodiscard]] BattleResourceDecision Reject(
     BattleResourceMetrics& metrics,
+    BattleRuntimeMetrics* runtime_metrics,
     const BattleResourceRejection rejection) noexcept {
     ++metrics.rejected.at(
         static_cast<std::size_t>(rejection));
+    if (runtime_metrics != nullptr) {
+        runtime_metrics->RecordReject();
+    }
     return {.allowed = false, .rejection = rejection};
 }
 
@@ -124,12 +129,17 @@ struct BattleResourceGovernor::Impl final {
     std::size_t node_egress{};
     /// metrics 仅保存低基数累计。
     BattleResourceMetrics metrics{};
+    /// runtime_metrics 可选借用 node 生命周期内的低敏累计 owner。
+    BattleRuntimeMetrics* runtime_metrics{};
     /// mutex 串行化fixed tables与budgets。
     mutable std::mutex mutex;
 };
 
-BattleResourceGovernor::BattleResourceGovernor()
-    : impl_(std::make_unique<Impl>()) {}
+BattleResourceGovernor::BattleResourceGovernor(
+    BattleRuntimeMetrics* runtime_metrics)
+    : impl_(std::make_unique<Impl>()) {
+    impl_->runtime_metrics = runtime_metrics;
+}
 
 BattleResourceGovernor::~BattleResourceGovernor() =
     default;
@@ -152,6 +162,7 @@ BattleResourceGovernor::AllowPreAuthIp(
                     now_unix_ms)) {
                 return Reject(
                     impl_->metrics,
+                    impl_->runtime_metrics,
                     BattleResourceRejection::IpRate);
             }
             ++impl_->metrics.accepted;
@@ -168,6 +179,7 @@ BattleResourceGovernor::AllowPreAuthIp(
     if (free == nullptr || now_unix_ms == 0) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::
                 RegistryCapacity);
     }
@@ -194,6 +206,7 @@ BattleResourceGovernor::AllowTicket(
     if (ticket_handle == 0 || now_unix_ms == 0) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::TicketRate);
     }
     auto* free = static_cast<TokenBucket*>(nullptr);
@@ -209,6 +222,7 @@ BattleResourceGovernor::AllowTicket(
                     now_unix_ms)) {
                 return Reject(
                     impl_->metrics,
+                    impl_->runtime_metrics,
                     BattleResourceRejection::
                         TicketRate);
             }
@@ -222,6 +236,7 @@ BattleResourceGovernor::AllowTicket(
     if (free == nullptr) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::
                 RegistryCapacity);
     }
@@ -250,6 +265,7 @@ BattleResourceGovernor::AllowMessage(
         std::scoped_lock lock(impl_->mutex);
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::MessageRate);
     }
     std::scoped_lock lock(impl_->mutex);
@@ -300,7 +316,10 @@ BattleResourceGovernor::AllowMessage(
         160,
         BattleResourceRejection::SessionRate);
     if (session != BattleResourceRejection::None) {
-        return Reject(impl_->metrics, session);
+        return Reject(
+            impl_->metrics,
+            impl_->runtime_metrics,
+            session);
     }
     const auto message = consume_table(
         impl_->message_buckets,
@@ -311,7 +330,10 @@ BattleResourceGovernor::AllowMessage(
             message_rate_per_second * 2U),
         BattleResourceRejection::MessageRate);
     if (message != BattleResourceRejection::None) {
-        return Reject(impl_->metrics, message);
+        return Reject(
+            impl_->metrics,
+            impl_->runtime_metrics,
+            message);
     }
     const auto instance = consume_table(
         impl_->instance_buckets,
@@ -321,7 +343,10 @@ BattleResourceGovernor::AllowMessage(
         256,
         BattleResourceRejection::InstanceRate);
     if (instance != BattleResourceRejection::None) {
-        return Reject(impl_->metrics, instance);
+        return Reject(
+            impl_->metrics,
+            impl_->runtime_metrics,
+            instance);
     }
     ++impl_->metrics.accepted;
     return {true, BattleResourceRejection::None};
@@ -364,6 +389,7 @@ BattleResourceGovernor::ReserveIngress(
     if (budget == nullptr) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::
                 RegistryCapacity);
     }
@@ -372,6 +398,7 @@ BattleResourceGovernor::ReserveIngress(
         items > NodeItems - impl_->node_ingress) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::IngressBudget);
     }
     budget->ingress += items;
@@ -380,6 +407,10 @@ BattleResourceGovernor::ReserveIngress(
         std::max(
             impl_->metrics.ingress_high_watermark,
             impl_->node_ingress);
+    if (impl_->runtime_metrics != nullptr) {
+        impl_->runtime_metrics->ObserveIngressQueue(
+            impl_->node_ingress);
+    }
     ++impl_->metrics.accepted;
     return {true, BattleResourceRejection::None};
 }
@@ -411,6 +442,7 @@ BattleResourceGovernor::ReserveEgress(
     if (budget == nullptr) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::
                 RegistryCapacity);
     }
@@ -419,6 +451,7 @@ BattleResourceGovernor::ReserveEgress(
         items > NodeItems - impl_->node_egress) {
         return Reject(
             impl_->metrics,
+            impl_->runtime_metrics,
             BattleResourceRejection::EgressBudget);
     }
     budget->egress += items;
@@ -427,6 +460,10 @@ BattleResourceGovernor::ReserveEgress(
         std::max(
             impl_->metrics.egress_high_watermark,
             impl_->node_egress);
+    if (impl_->runtime_metrics != nullptr) {
+        impl_->runtime_metrics->ObserveEgressQueue(
+            impl_->node_egress);
+    }
     ++impl_->metrics.accepted;
     return {true, BattleResourceRejection::None};
 }
@@ -451,6 +488,106 @@ BattleResourceMetrics
 BattleResourceGovernor::Metrics() const noexcept {
     std::scoped_lock lock(impl_->mutex);
     return impl_->metrics;
+}
+
+void BattleResourceGovernor::ReleaseSession(
+    const std::uint64_t session_handle) noexcept {
+    if (session_handle == 0) {
+        return;
+    }
+    std::scoped_lock lock(impl_->mutex);
+    for (auto& entry : impl_->session_buckets) {
+        if (entry.used &&
+            entry.handle == session_handle) {
+            entry = {};
+        }
+    }
+    for (auto& entry : impl_->message_buckets) {
+        if (entry.used &&
+            entry.handle == session_handle) {
+            entry = {};
+        }
+    }
+    for (auto& entry : impl_->budgets) {
+        if (entry.used &&
+            entry.handle == session_handle) {
+            impl_->node_ingress -=
+                std::min(
+                    impl_->node_ingress,
+                    entry.ingress);
+            impl_->node_egress -=
+                std::min(
+                    impl_->node_egress,
+                    entry.egress);
+            entry = {};
+        }
+    }
+}
+
+BattleSessionResourceGovernor::
+BattleSessionResourceGovernor(
+    BattleResourceGovernor& node_governor,
+    const std::uint64_t session_handle,
+    const std::uint64_t instance_handle)
+    : node_governor_(&node_governor),
+      session_handle_(session_handle),
+      instance_handle_(instance_handle) {
+    if (session_handle_ == 0 ||
+        instance_handle_ == 0) {
+        throw std::invalid_argument(
+            "battle session resource binding is invalid");
+    }
+}
+
+BattleSessionResourceGovernor::
+~BattleSessionResourceGovernor() {
+    if (node_governor_ != nullptr) {
+        node_governor_->ReleaseSession(
+            session_handle_);
+    }
+}
+
+BattleResourceDecision
+BattleSessionResourceGovernor::AllowMessage(
+    const std::uint32_t message_id,
+    const std::uint16_t message_rate_per_second,
+    const std::uint64_t now_unix_ms) {
+    return node_governor_->AllowMessage(
+        session_handle_,
+        instance_handle_,
+        message_id,
+        message_rate_per_second,
+        now_unix_ms);
+}
+
+BattleResourceDecision
+BattleSessionResourceGovernor::ReserveIngress(
+    const std::size_t items) {
+    return node_governor_->ReserveIngress(
+        session_handle_,
+        items);
+}
+
+void BattleSessionResourceGovernor::ReleaseIngress(
+    const std::size_t items) noexcept {
+    node_governor_->ReleaseIngress(
+        session_handle_,
+        items);
+}
+
+BattleResourceDecision
+BattleSessionResourceGovernor::ReserveEgress(
+    const std::size_t items) {
+    return node_governor_->ReserveEgress(
+        session_handle_,
+        items);
+}
+
+void BattleSessionResourceGovernor::ReleaseEgress(
+    const std::size_t items) noexcept {
+    node_governor_->ReleaseEgress(
+        session_handle_,
+        items);
 }
 
 }  // namespace ihomeland::sim

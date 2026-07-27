@@ -79,6 +79,11 @@ public:
     /// HighWatermark 返回生命周期内最大同时排队数。
     [[nodiscard]] std::size_t HighWatermark() const noexcept { return high_watermark_; }
 
+    /// ReservedBytes 返回构造时一次性分配的 slot storage accounting。
+    [[nodiscard]] std::size_t ReservedBytes() const noexcept {
+        return slots_.capacity() * sizeof(std::optional<Value>);
+    }
+
 private:
     /// slots_ 在构造后长度固定，optional 控制 value 生命周期。
     std::vector<std::optional<Value>> slots_;

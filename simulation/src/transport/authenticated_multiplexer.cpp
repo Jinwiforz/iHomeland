@@ -1,5 +1,6 @@
 #include "ihomeland/sim/transport/authenticated_multiplexer.hpp"
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 #include "ihomeland/sim/transport/kcp_adapter.hpp"
 
 #include <algorithm>
@@ -25,18 +26,26 @@ namespace {
 BattleAuthenticatedMultiplexer::
 BattleAuthenticatedMultiplexer(
     BattleSecureChannel& channel,
-    BattleRemoteEndpoint active_endpoint,
+    ActiveEndpointProvider active_endpoint_provider,
     BattleRawDispatcher& raw_dispatcher,
     AuthorityValidator authority_validator,
-    BattleKcpAdapter* kcp_adapter)
+    ControlHandler control_handler,
+    BattleKcpAdapter* kcp_adapter,
+    BattleRuntimeMetrics* runtime_metrics)
     : channel_(channel),
-      active_endpoint_(active_endpoint),
+      active_endpoint_provider_(
+          std::move(active_endpoint_provider)),
       raw_dispatcher_(raw_dispatcher),
       kcp_adapter_(kcp_adapter),
       authority_validator_(std::move(
-          authority_validator)) {
-    if (active_endpoint_.port == 0 ||
-        !authority_validator_) {
+          authority_validator)),
+      control_handler_(std::move(
+          control_handler)),
+      runtime_metrics_(runtime_metrics) {
+    if (!active_endpoint_provider_ ||
+        !authority_validator_ ||
+        !control_handler_ ||
+        active_endpoint_provider_().port == 0) {
         throw std::invalid_argument(
             "battle multiplexer binding is invalid");
     }
@@ -57,13 +66,30 @@ BattleAuthenticatedMultiplexer::Handle(
         .raw_disposition =
             BattleRawDisposition::InvalidEnvelope,
     };
-    if (!SameEndpoint(remote, active_endpoint_)) {
+    const auto active_endpoint =
+        active_endpoint_provider_();
+    const auto from_active_endpoint =
+        SameEndpoint(remote, active_endpoint);
+    const auto declared_control =
+        datagram.size() >
+            BattleSecureChannel::SecureHeaderBytes &&
+        datagram[5] ==
+            static_cast<std::uint8_t>(
+                BattlePacketKind::Control);
+    if (!from_active_endpoint &&
+        !declared_control) {
+        if (runtime_metrics_ != nullptr) {
+            runtime_metrics_->RecordReject();
+        }
         return result;
     }
     if (!authority_validator_()) {
         result.disposition =
             BattleMultiplexerDisposition::
                 AuthorityRejected;
+        if (runtime_metrics_ != nullptr) {
+            runtime_metrics_->RecordReject();
+        }
         return result;
     }
     auto opened = channel_.Open(
@@ -75,6 +101,46 @@ BattleAuthenticatedMultiplexer::Handle(
         result.disposition =
             BattleMultiplexerDisposition::
                 SecureRejected;
+        if (runtime_metrics_ != nullptr) {
+            runtime_metrics_->RecordReject();
+        }
+        return result;
+    }
+    if (opened.packet_kind ==
+        BattlePacketKind::Control) {
+        const auto control_disposition =
+            control_handler_(
+                opened.plaintext,
+                remote,
+                now_unix_ms);
+        result.disposition =
+            control_disposition ==
+                    BattleControlDispatchDisposition::
+                        Accepted ?
+                BattleMultiplexerDisposition::
+                    ControlAccepted :
+            control_disposition ==
+                    BattleControlDispatchDisposition::
+                        CloseRequested ?
+                BattleMultiplexerDisposition::
+                    CloseRequested :
+                BattleMultiplexerDisposition::
+                    ControlRejected;
+        if (runtime_metrics_ != nullptr &&
+            result.disposition ==
+                BattleMultiplexerDisposition::
+                    ControlRejected) {
+            runtime_metrics_->RecordReject();
+        }
+        return result;
+    }
+    if (!from_active_endpoint) {
+        result.disposition =
+            BattleMultiplexerDisposition::
+                EndpointMismatch;
+        if (runtime_metrics_ != nullptr) {
+            runtime_metrics_->RecordReject();
+        }
         return result;
     }
     if (opened.packet_kind == BattlePacketKind::Kcp) {
@@ -82,6 +148,9 @@ BattleAuthenticatedMultiplexer::Handle(
             result.disposition =
                 BattleMultiplexerDisposition::
                     LaneUnavailable;
+            if (runtime_metrics_ != nullptr) {
+                runtime_metrics_->RecordReject();
+            }
             return result;
         }
         const auto kcp_disposition =
@@ -101,6 +170,9 @@ BattleAuthenticatedMultiplexer::Handle(
         result.disposition =
             BattleMultiplexerDisposition::
                 LaneUnavailable;
+        if (runtime_metrics_ != nullptr) {
+            runtime_metrics_->RecordReject();
+        }
         return result;
     }
     result.raw_disposition =
@@ -112,6 +184,11 @@ BattleAuthenticatedMultiplexer::Handle(
                 BattleRawDisposition::Accepted ?
             BattleMultiplexerDisposition::RawAccepted :
             BattleMultiplexerDisposition::RawRejected;
+    if (runtime_metrics_ != nullptr &&
+        result.disposition ==
+            BattleMultiplexerDisposition::RawRejected) {
+        runtime_metrics_->RecordReject();
+    }
     return result;
 }
 

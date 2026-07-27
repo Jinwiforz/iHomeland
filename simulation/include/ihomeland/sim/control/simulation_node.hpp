@@ -1,5 +1,9 @@
 #pragma once
 
+#include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
+#include "ihomeland/sim/transport/battle_ticket_authenticator.hpp"
+#include "ihomeland/sim/transport/battle_session.hpp"
+#include "ihomeland/sim/transport/battle_transport_runtime.hpp"
 #include "ihomeland/sim/transport/udp_listener.hpp"
 
 #include <chrono>
@@ -132,60 +136,6 @@ enum class BattleTicketState : std::uint8_t {
     Expired = 4,
 };
 
-/// BattleTicketBinding 是 Go authority facts 在 exact child 的不可变投影。
-struct BattleTicketBinding final {
-    /// player_id 来自认证 Session，不接受 UDP payload 覆盖。
-    std::string player_id;
-    /// session_id 绑定账号 session lineage。
-    std::string session_id;
-    /// session_epoch 是撤销屏障。
-    std::uint64_t session_epoch;
-    /// role 只允许 owner 或 visitor。
-    std::string role;
-    /// personal_world_id 绑定持久世界。
-    std::string personal_world_id;
-    /// visit_session_id 仅 Visitor 非空。
-    std::string visit_session_id;
-    /// world_instance_id 绑定 placement runtime。
-    std::string world_instance_id;
-    /// runtime_node_id 必须匹配本 node registration。
-    std::string runtime_node_id;
-    /// assignment_generation 是 current placement generation。
-    std::uint64_t assignment_generation;
-    /// fencing_token 绑定完整 AssignmentStamp。
-    std::uint64_t fencing_token;
-    /// assignment_fingerprint 必须匹配运行 instance。
-    std::string assignment_fingerprint;
-    /// simulation_node_id 必须匹配本 child incarnation。
-    std::string simulation_node_id;
-    /// simulation_instance_id 绑定不可复活 worker。
-    std::string simulation_instance_id;
-    /// mapping_generation 绑定 InputTick timeline。
-    std::uint64_t mapping_generation;
-    /// target_revision 绑定 Go current target revision。
-    std::uint64_t target_revision;
-    /// model_identity 绑定冻结 model。
-    std::string model_identity;
-    /// profile_identity 绑定冻结 network profile。
-    std::string profile_identity;
-    /// config_identity 绑定 checked runtime config。
-    std::string config_identity;
-    /// wire_identity 绑定 battle wire corpus。
-    std::string wire_identity;
-    /// actor_slot 是 0..7 的 exact instance slot。
-    std::uint8_t actor_slot;
-    /// advertised_host 是 ticket 唯一允许的 UDP host。
-    std::string advertised_host;
-    /// advertised_port 是 ticket 唯一允许的 UDP port。
-    std::uint16_t advertised_port;
-    /// issue_id 绑定 HTTP response-loss identity。
-    std::string issue_id;
-    /// issued_at_unix_ms 是首次冻结签发时刻。
-    std::uint64_t issued_at_unix_ms;
-    /// expires_at_unix_ms 是等于即失效的绝对 deadline。
-    std::uint64_t expires_at_unix_ms;
-};
-
 /// BattleTicketInstallCommand 是 private control 唯一可安装的 secret-bearing 输入。
 struct BattleTicketInstallCommand final {
     /// install_request_id 绑定 control request replay。
@@ -216,8 +166,30 @@ struct BattleTicketReceipt final {
     bool replayed;
 };
 
+/// BattleQualificationSnapshotReceipt 是 exact instance 的只读低敏运行态投影。
+struct BattleQualificationSnapshotReceipt final {
+    /// simulation_node_id 绑定当前 child incarnation。
+    std::string simulation_node_id;
+    /// simulation_instance_id 绑定当前不可复活 worker。
+    std::string simulation_instance_id;
+    /// assignment_fingerprint 绑定当前 placement stamp。
+    std::string assignment_fingerprint;
+    /// committed_tick 是读取时已完整提交的最后 Tick。
+    std::uint64_t committed_tick;
+    /// node_count 对单 child snapshot 固定为一。
+    std::size_t node_count;
+    /// running_instance_count 是当前 node 占用 slots。
+    std::size_t running_instance_count;
+    /// active_session_count 是已消费且未终结 BattleTicket 数。
+    std::size_t active_session_count;
+    /// installed_ticket_count 是尚未消费的 BattleTicket 数。
+    std::size_t installed_ticket_count;
+    /// metrics 是不清零的 transport/simulation 累计与峰值。
+    BattleRuntimeMetricsSnapshot metrics;
+};
+
 /// SimulationNode 拥有一个 child 内全部 SimulationInstance 与 result outbox。
-class SimulationNode final {
+class SimulationNode final : public BattleTicketAuthenticator {
 public:
     /// ResultOutboxLimit 是每个 node 的 hard pending result 数量。
     static constexpr std::size_t ResultOutboxLimit = 256;
@@ -287,10 +259,8 @@ public:
         const std::string& expected_advertised_host,
         std::uint16_t expected_advertised_port,
         std::uint64_t observed_unix_ms,
-        const std::function<bool(
-            std::span<const std::uint8_t, 32>,
-            const BattleTicketBinding&,
-            const std::string&)>& authenticator);
+        const BattleTicketAuthenticator::Authenticator&
+            authenticator) override;
 
     /// RevokeBattleTicket 以 request identity 幂等终结 exact ticket。
     [[nodiscard]] BattleTicketReceipt RevokeBattleTicket(
@@ -305,6 +275,30 @@ public:
         const std::string& simulation_instance_id,
         std::uint64_t observed_unix_ms);
 
+    /// ResolveBattleCommandIngress 返回 exact active instance 的唯一输入边界。
+    ///
+    /// 返回值只允许由 node-global BattleTransportRuntime 在其 session lock 内借用；
+    /// control owner 必须先撤销对应 runtime session，再 drain 或销毁 instance。
+    [[nodiscard]] CommandIngress*
+    ResolveBattleCommandIngress(
+        const BattleSessionContext& context) noexcept;
+
+    /// BattleReplicationSnapshot 冻结 exact active instance 的 committed 只读投影。
+    [[nodiscard]] std::optional<
+        BattleReplicationProjection>
+    BattleReplicationSnapshot(
+        const BattleSessionContext& context) const;
+
+    /// BattleRawContext 从 exact active instance 构造当前 InputTick 接受窗口。
+    [[nodiscard]] BattleRawDispatchContext
+    BattleRawContext(
+        const BattleSessionContext& context,
+        std::uint64_t now_unix_ms) const;
+
+    /// BattleSessionCurrent 验证 session 仍绑定 current instance 与 consumed ticket。
+    [[nodiscard]] bool BattleSessionCurrent(
+        const BattleSessionContext& context) const noexcept;
+
     /// StartBattleUdpListener 创建并启动本 node 生命周期内唯一 UDP listener。
     ///
     /// 任一 bind/start 失败会使 node fail closed，禁止改端口重试。
@@ -314,6 +308,12 @@ public:
 
     /// StopBattleUdpListener 幂等停止 node-global UDP ingress。
     void StopBattleUdpListener() noexcept;
+
+    /// SendBattleUdpDatagram 把 owned copy 排队到 node-global listener 的同一 socket。
+    [[nodiscard]] BattleUdpSendDisposition
+    SendBattleUdpDatagram(
+        std::span<const std::uint8_t> datagram,
+        const BattleRemoteEndpoint& remote);
 
     /// UdpListenerStatus 返回已创建 listener 的低敏状态；未创建时为空。
     [[nodiscard]] std::optional<BattleUdpListenerStatus>
@@ -331,8 +331,21 @@ public:
     /// Config 返回不可变 node registration。
     [[nodiscard]] const SimulationNodeConfig& Config() const noexcept;
 
+    /// QualificationSnapshot 返回 exact current instance 的只读低敏投影。
+    ///
+    /// qualification mode、run identity 与 sample sequence 由 control owner 在调用前验证。
+    [[nodiscard]] BattleQualificationSnapshotReceipt
+    QualificationSnapshot(
+        const std::string& simulation_instance_id,
+        const std::string& assignment_fingerprint,
+        std::uint64_t observed_unix_ms);
+
+    /// RuntimeMetrics 返回供 node-owned transport adapters 借用的唯一累计 owner。
+    [[nodiscard]] BattleRuntimeMetrics& RuntimeMetrics() noexcept;
+
 private:
     struct Entry;
+    struct BattleRuntimeBinding;
     struct TicketEntry;
     struct RevokeTombstone;
     /// RetiredBinding 保存同一 node incarnation 内不可复活的 exact runtime tombstone。
@@ -347,6 +360,10 @@ private:
     SimulationNodeConfig config_;
     /// entries_ 的 concrete type 隐藏 core worker ownership。
     std::vector<std::unique_ptr<Entry>> entries_;
+    /// battle_runtime_bindings_ 是 UDP worker 可查询的窄只读 instance registry。
+    std::vector<BattleRuntimeBinding> battle_runtime_bindings_;
+    /// battle_runtime_binding_mutex_ 隔离 control lifecycle 与 UDP session resolution。
+    mutable std::mutex battle_runtime_binding_mutex_;
     /// retired_bindings_ 支持 exact stop replay并拒绝同 node 内复活 WorldInstanceID。
     std::vector<RetiredBinding> retired_bindings_;
     /// outbox_ 保存等待 Go ack 的 immutable proposals。
@@ -361,8 +378,14 @@ private:
     mutable std::mutex ticket_mutex_;
     /// battle_udp_listener_ 是 raw、KCP 与 transport-control 唯一 socket owner。
     std::unique_ptr<BattleUdpListener> battle_udp_listener_;
+    /// battle_udp_listener_mutex_ 串行化 startup publish、send、status 与 stop fence。
+    mutable std::mutex battle_udp_listener_mutex_;
     /// battle_udp_listener_created_ 阻止失败后改端口或停止后创建第二 listener。
     bool battle_udp_listener_created_{false};
+    /// battle_udp_listener_stopping_ 在 join 前阻止新的 send 取得 listener。
+    bool battle_udp_listener_stopping_{false};
+    /// runtime_metrics_ 聚合本 node transport 与 simulation 的低敏单调计数。
+    BattleRuntimeMetrics runtime_metrics_;
     /// healthy_ 一旦进入 shutdown 就不可恢复。
     bool healthy_{true};
 };

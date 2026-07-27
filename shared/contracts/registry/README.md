@@ -29,6 +29,7 @@
 - route `maxSize` 限制完整编码 envelope，不得超过全局 1 MiB frame 上限。
 - command schema 禁止声明 actor/account/player/user、session/epoch、world/instance、role、endpoint、fencing 或 assignment stamp 等可覆盖受信上下文的字段；Owner 控制面的 `target_visitor_id` 是明确允许的业务目标。
 - 未登记 world/visit interaction 必须在 registry gate 默认拒绝，不能转交通用 action/mutation handler。
+- Battle snapshot 的 `acknowledgementPolicy` 要求 full/delta payload 显式携带当前 authenticated actor、当前 mapping generation 的连续终结前沿；字段缺失、旧 generation 或同一 partition set 内确认漂移必须拒绝，不能按 protobuf 默认零值继续处理。
 
 ## 示例
 

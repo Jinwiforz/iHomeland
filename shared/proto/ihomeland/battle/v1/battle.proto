@@ -186,6 +186,9 @@ message BattleFullSnapshot {
   uint32 partition_count = 5;
   // entities 按 entity_id、entity_generation 排序，禁止跨分区重复。
   repeated BattleEntityState entities = 6;
+  // last_processed_input_tick 显式确认当前认证 actor 在本 mapping generation 内
+  // 已连续终结的最大 InputTick；显式 0 表示尚未终结 InputTick 1，缺失必须拒绝。
+  uint64 last_processed_input_tick = 7;
 }
 
 // BattleDeltaSnapshot 携带相对 confirmed baseline 的可替换 raw lane state。
@@ -203,6 +206,9 @@ message BattleDeltaSnapshot {
   uint32 partition_count = 5;
   // deltas 按 entity_id、entity_generation 排序，禁止跨分区重复。
   repeated BattleEntityDelta deltas = 6;
+  // last_processed_input_tick 显式确认当前认证 actor 在本 mapping generation 内
+  // 已连续终结的最大 InputTick；显式 0 表示尚未终结 InputTick 1，缺失必须拒绝。
+  uint64 last_processed_input_tick = 7;
 }
 
 // BattleAbilityReliableEvent 是 ability 生命周期的 s2c KCP 可靠有序事件。

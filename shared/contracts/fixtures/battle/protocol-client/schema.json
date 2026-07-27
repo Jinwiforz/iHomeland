@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-protocol-client-source-v1.json",
+  "oneOf": [
+    { "$ref": "#/$defs/contract" },
+    { "$ref": "#/$defs/manifest" }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "frameField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "offset", "width", "constraint"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+        "offset": { "type": "integer", "minimum": 0 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "constraint": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" }
+      }
+    },
+    "framing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prefixBytes",
+        "prefixEncoding",
+        "headerBytes",
+        "maximumBodyBytes",
+        "byteOrder",
+        "magic",
+        "version",
+        "fields",
+        "partialReadPolicy",
+        "unknownKindPolicy",
+        "unknownFlagPolicy",
+        "sequenceExhaustionPolicy",
+        "deadlinePolicy"
+      ],
+      "properties": {
+        "prefixBytes": { "const": 4 },
+        "prefixEncoding": { "const": "uint32-big-endian-body-length" },
+        "headerBytes": { "const": 28 },
+        "maximumBodyBytes": { "const": 65536 },
+        "byteOrder": { "const": "network-big-endian" },
+        "magic": { "const": "IHBQ" },
+        "version": { "const": 1 },
+        "fields": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": { "$ref": "#/$defs/frameField" }
+        },
+        "partialReadPolicy": { "const": "read-exact-or-fail-closed" },
+        "unknownKindPolicy": { "const": "terminate-without-receipt" },
+        "unknownFlagPolicy": { "const": "terminate-without-receipt" },
+        "sequenceExhaustionPolicy": { "const": "terminate-after-last-receipt" },
+        "deadlinePolicy": { "const": "reject-equal-or-expired-before-side-effect" }
+      }
+    },
+    "kind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value", "direction", "payload", "sensitivity"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z]+(?:-[a-z]+)*$" },
+        "value": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "direction": {
+          "enum": ["client-to-supervisor", "supervisor-to-client"]
+        },
+        "payload": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "sensitivity": { "enum": ["low", "secret"] }
+      }
+    },
+    "sessionStart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoding",
+        "maximumBytes",
+        "exactBytes",
+        "byteOrder",
+        "addressEncoding",
+        "requiredFields",
+        "fieldTable",
+        "credentialFields",
+        "proofKeyDerivation",
+        "credentialIngress",
+        "credentialRetention",
+        "credentialCleanup"
+      ],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "maximumBytes": { "const": 512 },
+        "exactBytes": { "const": 76 },
+        "byteOrder": { "const": "network-big-endian" },
+        "addressEncoding": { "const": "16-byte-ipv4-mapped-or-ipv6" },
+        "requiredFields": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "credentialFields": {
+          "const": ["ticketSecret"]
+        },
+        "proofKeyDerivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "ikm", "salt", "info", "outputBytes", "legacyPolicy"],
+          "properties": {
+            "algorithm": { "const": "HKDF-SHA-256" },
+            "ikm": { "const": "ticketSecretRaw32" },
+            "salt": { "const": "ticketIdRaw16" },
+            "info": { "const": "ihomeland/battle-ticket/proof-key/v2" },
+            "outputBytes": { "const": 32 },
+            "legacyPolicy": { "const": "reject" }
+          }
+        },
+        "fieldTable": {
+          "const": [
+            { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+            { "name": "addressFamily", "offset": 1, "width": 1, "constraint": "four-or-six" },
+            { "name": "port", "offset": 2, "width": 2, "constraint": "nonzero-uint16" },
+            { "name": "numericHost", "offset": 4, "width": 16, "constraint": "ipv4-mapped-or-ipv6" },
+            { "name": "ticketId", "offset": 20, "width": 16, "constraint": "opaque" },
+            { "name": "ticketSecret", "offset": 36, "width": 32, "constraint": "https-bearer-secret" },
+            { "name": "ticketExpiresAtUnixMs", "offset": 68, "width": 8, "constraint": "positive-uint64" }
+          ]
+        },
+        "credentialIngress": { "const": "inherited-stdin-once" },
+        "credentialRetention": { "const": "locked-memory-until-handshake-terminal" },
+        "credentialCleanup": { "const": "secure-zero-on-success-failure-timeout-and-exit" }
+      }
+    },
+    "workloadCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "maximumBytes", "exactBytes", "byteOrder", "allowedOperations", "fieldTable", "allowedDeliveryMutations", "forbiddenAuthorityFields"],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "maximumBytes": { "const": 32 },
+        "exactBytes": { "const": 32 },
+        "byteOrder": { "const": "network-big-endian" },
+        "allowedOperations": {
+          "const": ["input-bundle", "probe", "resync-request"]
+        },
+        "fieldTable": {
+          "const": [
+            { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+            { "name": "operation", "offset": 1, "width": 1, "constraint": "one-through-three" },
+            { "name": "commandKind", "offset": 2, "width": 1, "constraint": "operation-dependent" },
+            { "name": "repeatCount", "offset": 3, "width": 1, "constraint": "one-through-thirty-two" },
+            { "name": "applicationSequence", "offset": 4, "width": 8, "constraint": "positive-uint64" },
+            { "name": "applicationTick", "offset": 12, "width": 8, "constraint": "positive-uint64" },
+            { "name": "valueA", "offset": 20, "width": 4, "constraint": "operation-dependent-int32" },
+            { "name": "valueB", "offset": 24, "width": 4, "constraint": "operation-dependent-int32" },
+            { "name": "deliveryMutation", "offset": 28, "width": 1, "constraint": "zero-through-twelve" },
+            { "name": "reserved", "offset": 29, "width": 3, "constraint": "zero" }
+          ]
+        },
+        "allowedDeliveryMutations": {
+          "const": [
+            "unmodified",
+            "exact-replay",
+            "tampered-tag",
+            "oversize-prefix",
+            "aad-tampered",
+            "ciphertext-tampered",
+            "future-sequence",
+            "too-old-sequence",
+            "wrong-direction",
+            "wrong-lane",
+            "rebind-hijack",
+            "kcp-expired",
+            "malformed-prefix"
+          ]
+        },
+        "forbiddenAuthorityFields": {
+          "const": ["authoritativeTransform", "authoritativeHit", "damage", "reward", "playerId"]
+        }
+      }
+    },
+    "sessionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoding",
+        "successBytes",
+        "failureBytes",
+        "fieldTable",
+        "failureCodeRegistry"
+      ],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "successBytes": { "const": 2 },
+        "failureBytes": { "const": 3 },
+        "fieldTable": {
+          "const": [
+            { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "success-one-through-eight-failure-zero-or-one-through-eight" },
+            { "name": "state", "offset": 1, "width": 1, "constraint": "established-one-or-failed-two" },
+            { "name": "failureCode", "offset": 2, "width": 1, "constraint": "absent-on-success-one-through-ten-on-failure" }
+          ]
+        },
+        "failureCodeRegistry": {
+          "const": [
+            { "name": "invalid-request", "value": 1 },
+            { "name": "deadline", "value": 2 },
+            { "name": "socket", "value": 3 },
+            { "name": "handshake-setup", "value": 4 },
+            { "name": "retry-exchange", "value": 5 },
+            { "name": "retry-validation", "value": 6 },
+            { "name": "accept-exchange", "value": 7 },
+            { "name": "accept-validation", "value": 8 },
+            { "name": "transport-setup", "value": 9 },
+            { "name": "unknown", "value": 10 }
+          ]
+        }
+      }
+    },
+    "networkTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "maximumBytes", "exactBytes", "byteOrder", "allowedOperations", "fieldTable"],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "maximumBytes": { "const": 24 },
+        "exactBytes": { "const": 24 },
+        "byteOrder": { "const": "network-big-endian" },
+        "allowedOperations": {
+          "const": ["rebind", "rekey", "close", "old-epoch-probe"]
+        },
+        "fieldTable": {
+          "const": [
+            { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+            { "name": "operation", "offset": 1, "width": 1, "constraint": "one-through-four" },
+            { "name": "addressFamily", "offset": 2, "width": 1, "constraint": "rebind-four-or-six-otherwise-zero" },
+            { "name": "reserved", "offset": 3, "width": 1, "constraint": "zero" },
+            { "name": "port", "offset": 4, "width": 2, "constraint": "rebind-nonzero-otherwise-zero" },
+            { "name": "reserved", "offset": 6, "width": 2, "constraint": "zero" },
+            { "name": "numericHost", "offset": 8, "width": 16, "constraint": "rebind-ipv4-mapped-or-ipv6-otherwise-zero" }
+          ]
+        }
+      }
+    },
+    "poll": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "maximumBytes", "exactBytes", "byteOrder", "maximumWaitMilliseconds", "fieldTable"],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "maximumBytes": { "const": 8 },
+        "exactBytes": { "const": 8 },
+        "byteOrder": { "const": "network-big-endian" },
+        "maximumWaitMilliseconds": { "const": 1000 },
+        "fieldTable": {
+          "const": [
+            { "name": "clientSlot", "offset": 0, "width": 1, "constraint": "one-through-eight" },
+            { "name": "maximumEvents", "offset": 1, "width": 1, "constraint": "one-through-thirty-two" },
+            { "name": "reserved", "offset": 2, "width": 2, "constraint": "zero" },
+            { "name": "waitMilliseconds", "offset": 4, "width": 4, "constraint": "one-through-one-thousand" }
+          ]
+        }
+      }
+    },
+    "workloadEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "exactBytes", "byteOrder", "fieldTable"],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "exactBytes": { "const": 32 },
+        "byteOrder": { "const": "network-big-endian" },
+        "fieldTable": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/frameField" }
+        }
+      }
+    },
+    "networkTransitionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "exactBytes", "byteOrder", "fieldTable"],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "exactBytes": { "const": 8 },
+        "byteOrder": { "const": "network-big-endian" },
+        "fieldTable": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/frameField" }
+        }
+      }
+    },
+    "pollReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "exactBytes", "byteOrder", "fieldTable"],
+      "properties": {
+        "encoding": { "const": "closed-field-table-v1" },
+        "exactBytes": { "const": 144 },
+        "byteOrder": { "const": "network-big-endian" },
+        "fieldTable": {
+          "type": "array",
+          "minItems": 22,
+          "maxItems": 22,
+          "items": { "$ref": "#/$defs/frameField" }
+        }
+      }
+    },
+    "payloads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionStart", "sessionEvent", "workloadCommand", "networkTransition", "poll", "workloadEvent", "networkTransitionEvent", "pollReceipt"],
+      "properties": {
+        "sessionStart": { "$ref": "#/$defs/sessionStart" },
+        "sessionEvent": { "$ref": "#/$defs/sessionEvent" },
+        "workloadCommand": { "$ref": "#/$defs/workloadCommand" },
+        "networkTransition": { "$ref": "#/$defs/networkTransition" },
+        "poll": { "$ref": "#/$defs/poll" },
+        "workloadEvent": { "$ref": "#/$defs/workloadEvent" },
+        "networkTransitionEvent": { "$ref": "#/$defs/networkTransitionEvent" },
+        "pollReceipt": { "$ref": "#/$defs/pollReceipt" }
+      }
+    },
+    "outputPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowedData",
+        "forbiddenData",
+        "stderrPolicy",
+        "malformedInputPolicy",
+        "unexpectedEofPolicy"
+      ],
+      "properties": {
+        "allowedData": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "forbiddenData": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "stderrPolicy": { "const": "stable-category-only" },
+        "malformedInputPolicy": { "const": "exit-two-without-echo" },
+        "unexpectedEofPolicy": { "const": "exit-two-without-echo" }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "contractVersion",
+        "documentKind",
+        "framing",
+        "kinds",
+        "payloads",
+        "outputPolicy"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "contractVersion": { "const": "battle-protocol-client-v1" },
+        "documentKind": { "const": "contract" },
+        "framing": { "$ref": "#/$defs/framing" },
+        "kinds": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/kind" }
+        },
+        "payloads": { "$ref": "#/$defs/payloads" },
+        "outputPolicy": { "$ref": "#/$defs/outputPolicy" }
+      }
+    },
+    "manifestFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formatVersion", "contractVersion", "documentKind", "files"],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "contractVersion": { "const": "battle-protocol-client-v1" },
+        "documentKind": { "const": "manifest" },
+        "files": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/manifestFile" }
+        }
+      }
+    }
+  }
+}

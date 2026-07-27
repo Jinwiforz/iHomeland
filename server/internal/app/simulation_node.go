@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/jinwiforz/ihomeland/server/internal/battlequalification/processmetrics"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
@@ -32,6 +35,8 @@ type simulationNodeObserver interface {
 	ObserveSimulationResult(string)
 	ObserveSimulationProcessExit(string)
 	ObserveSimulationShutdown(string)
+	SetBattleQualificationControlMetric(string, uint64)
+	SetBattleQualificationProcessMetric(string, string, uint64)
 }
 
 // simulationNodeComponent 拥有精确 C++ child、pipes、registry、result inbox 与监督任务。
@@ -58,6 +63,10 @@ type simulationNodeComponent struct {
 	owner *simulationprocess.Owner
 	// controller 持有 node/instance registry。
 	controller *simulationcontrol.Controller
+	// goProcessSampler 只在显式 qualification mode 读取 parent OS counters。
+	goProcessSampler *processmetrics.Sampler
+	// childProcessSampler 只在显式 qualification mode 读取 exact child OS counters。
+	childProcessSampler *processmetrics.Sampler
 	// resultMutex 保护 coordinator bind 与同步消费。
 	resultMutex sync.Mutex
 	// results 在 public placement store 构造后绑定。
@@ -123,6 +132,15 @@ func newSimulationNodeComponent(settings config.SimulationControl, battle config
 	if err != nil {
 		return nil, err
 	}
+	var qualificationRunID simulationcontrol.QualificationRunID
+	if settings.QualificationMode {
+		qualificationRunID, err = simulationcontrol.NewQualificationRunID(
+			settings.QualificationRunID,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 	bindHost, bindPortText, err := net.SplitHostPort(battle.BindAddress)
 	if err != nil {
 		return nil, err
@@ -157,6 +175,8 @@ func newSimulationNodeComponent(settings config.SimulationControl, battle config
 			PhysicsIdentity:    physicsIdentity,
 			DrainDeadline:      settings.DrainTimeout,
 			StopDeadline:       settings.ShutdownTimeout,
+			QualificationMode:  settings.QualificationMode,
+			QualificationRunID: qualificationRunID,
 		},
 		processConfig: simulationprocess.Config{
 			BinaryPath:                 settings.BinaryPath,
@@ -172,6 +192,8 @@ func newSimulationNodeComponent(settings config.SimulationControl, battle config
 			BattleUDPAdvertisedHost:    battle.Advertised.Host,
 			BattleUDPAdvertisedPort:    uint16(battle.Advertised.Port),
 			BattleListenerIdentity:     hex.EncodeToString(listenerDigest[:16]),
+			QualificationMode:          settings.QualificationMode,
+			QualificationRunID:         qualificationRunID,
 		},
 		inbox: simulationcontrol.NewProposalInbox(),
 	}, nil
@@ -216,16 +238,50 @@ func (component *simulationNodeComponent) Start(ctx context.Context) error {
 	component.metrics.SetSimulationCapacity("actors", component.settings.ActorCapacity)
 	component.owner = owner
 	component.controller = controller
+	if component.settings.QualificationMode {
+		goSampler, samplerErr := processmetrics.New(os.Getpid())
+		if samplerErr != nil {
+			_ = controller.Shutdown(context.Background())
+			_ = owner.Terminate(context.Background())
+			return errors.New("start qualification Go process sampler")
+		}
+		childSampler, samplerErr := processmetrics.New(owner.ProcessID())
+		if samplerErr != nil {
+			_ = goSampler.Close()
+			_ = controller.Shutdown(context.Background())
+			_ = owner.Terminate(context.Background())
+			return errors.New("start qualification child process sampler")
+		}
+		component.goProcessSampler = goSampler
+		component.childProcessSampler = childSampler
+	}
 	if err := component.tasks.Go("process_wait", component.waitProcess); err != nil {
+		_ = component.closeQualificationSamplers()
 		_ = controller.Shutdown(context.Background())
 		_ = owner.Terminate(context.Background())
 		return err
 	}
 	if err := component.tasks.Go("health", component.runHealth); err != nil {
 		_ = component.tasks.Stop(context.Background(), errors.New("simulation health task startup failed"))
+		_ = component.closeQualificationSamplers()
 		_ = controller.Shutdown(context.Background())
 		_ = owner.Terminate(context.Background())
 		return err
+	}
+	if component.settings.QualificationMode {
+		if err := component.tasks.Go(
+			"qualification_sampling",
+			component.runQualificationSampling,
+		); err != nil {
+			_ = component.tasks.Stop(
+				context.Background(),
+				errors.New("simulation qualification sampling startup failed"),
+			)
+			_ = component.closeQualificationSamplers()
+			_ = controller.Shutdown(context.Background())
+			_ = owner.Terminate(context.Background())
+			return err
+		}
 	}
 	return nil
 }
@@ -356,6 +412,7 @@ func (component *simulationNodeComponent) Stop(ctx context.Context) error {
 		return errors.New("simulation node stop context is invalid")
 	}
 	taskErr := component.tasks.Stop(ctx, errors.New("simulation node component stopped"))
+	samplerErr := component.closeQualificationSamplers()
 	component.metrics.SetSimulationNodeHealth("draining")
 	var lifecycleErr error
 	if component.controller != nil {
@@ -388,7 +445,7 @@ func (component *simulationNodeComponent) Stop(ctx context.Context) error {
 			component.metrics.ObserveSimulationProcessExit("terminated")
 		}
 	}
-	result := errors.Join(taskErr, lifecycleErr)
+	result := errors.Join(taskErr, samplerErr, lifecycleErr)
 	component.metrics.SetSimulationInstances(0)
 	component.metrics.SetSimulationNodeHealth("stopped")
 	shutdownOutcome := "clean"
@@ -400,6 +457,140 @@ func (component *simulationNodeComponent) Stop(ctx context.Context) error {
 	}
 	component.metrics.ObserveSimulationShutdown(shutdownOutcome)
 	return result
+}
+
+// runQualificationSampling 以配置 cadence 采集 exact control 与 Go/C++ OS counters。
+func (component *simulationNodeComponent) runQualificationSampling(ctx context.Context) error {
+	if component == nil || !component.settings.QualificationMode ||
+		component.controller == nil ||
+		component.goProcessSampler == nil ||
+		component.childProcessSampler == nil {
+		return errors.New("qualification sampler is not initialized")
+	}
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+			if err := component.sampleQualificationWindow(ctx); err != nil {
+				return err
+			}
+			timer.Reset(component.settings.QualificationSampleInterval)
+		}
+	}
+}
+
+// sampleQualificationWindow 发布一轮 process samples，并从稳定排序的 current instances
+// 选择一个读取 control。公开 admission 会先启动参与者各自的 PersonalWorld，因此零个或
+// 多个实例都是合法生命周期状态；node-global transport counters 不依赖所选实例。
+func (component *simulationNodeComponent) sampleQualificationWindow(ctx context.Context) error {
+	goSample, err := component.goProcessSampler.Sample()
+	if err != nil {
+		return errors.New("sample qualification Go process")
+	}
+	childSample, err := component.childProcessSampler.Sample()
+	if err != nil {
+		return errors.New("sample qualification child process")
+	}
+	component.observeProcessSample("go-parent", goSample)
+	component.observeProcessSample("cpp-child", childSample)
+
+	stamps := component.controller.Stamps()
+	if len(stamps) == 0 {
+		return nil
+	}
+	snapshotContext, cancel := context.WithTimeout(
+		ctx,
+		min(component.settings.RequestTimeout, component.settings.QualificationSampleInterval),
+	)
+	defer cancel()
+	snapshot, err := component.controller.QualificationSnapshot(
+		snapshotContext,
+		component.controllerConfig.QualificationRunID,
+		stamps[0],
+	)
+	if err != nil {
+		return fmt.Errorf("sample qualification control snapshot: %w", err)
+	}
+	component.observeQualificationSnapshot(snapshot)
+	return nil
+}
+
+// observeProcessSample 将 OS sample 映射到固定、无 identity 的 metric 集合。
+func (component *simulationNodeComponent) observeProcessSample(
+	role string,
+	sample processmetrics.Sample,
+) {
+	values := map[string]uint64{
+		"sequence":          sample.Sequence,
+		"monotonic-time-us": sample.MonotonicTimeUS,
+		"cpu-time-ns":       sample.CPUTimeNS,
+		"working-set-bytes": sample.WorkingSetBytes,
+		"handle-count":      uint64(sample.HandleCount),
+		"thread-count":      uint64(sample.ThreadCount),
+	}
+	for metric, value := range values {
+		component.metrics.SetBattleQualificationProcessMetric(role, metric, value)
+	}
+}
+
+// observeQualificationSnapshot 将 private receipt 映射为 closed diagnostic metric。
+func (component *simulationNodeComponent) observeQualificationSnapshot(
+	snapshot simulationcontrol.BattleQualificationSnapshot,
+) {
+	values := map[string]uint64{
+		"sample-sequence":              snapshot.SampleSequence,
+		"committed-tick":               snapshot.CommittedTick,
+		"node-count":                   snapshot.NodeCount,
+		"running-instance-count":       snapshot.RunningInstanceCount,
+		"active-session-count":         snapshot.ActiveSessionCount,
+		"installed-ticket-count":       snapshot.InstalledTicketCount,
+		"raw-ingress-bytes":            snapshot.Metrics.RawIngressBytes,
+		"raw-ingress-packets":          snapshot.Metrics.RawIngressPackets,
+		"raw-egress-bytes":             snapshot.Metrics.RawEgressBytes,
+		"raw-egress-packets":           snapshot.Metrics.RawEgressPackets,
+		"kcp-ingress-bytes":            snapshot.Metrics.KCPIngressBytes,
+		"kcp-ingress-packets":          snapshot.Metrics.KCPIngressPackets,
+		"kcp-egress-bytes":             snapshot.Metrics.KCPEgressBytes,
+		"kcp-egress-packets":           snapshot.Metrics.KCPEgressPackets,
+		"dropped-packets":              snapshot.Metrics.DroppedPackets,
+		"rejected-packets":             snapshot.Metrics.RejectedPackets,
+		"expired-messages":             snapshot.Metrics.ExpiredMessages,
+		"kcp-retransmits":              snapshot.Metrics.KCPRetransmits,
+		"ingress-queue-high-watermark": snapshot.Metrics.IngressQueueHighWatermark,
+		"egress-queue-high-watermark":  snapshot.Metrics.EgressQueueHighWatermark,
+		"kcp-queue-high-watermark":     snapshot.Metrics.KCPQueueHighWatermark,
+		"maximum-tick-duration-ns":     snapshot.Metrics.MaximumTickDurationNS,
+		"tick-debt-high-watermark":     snapshot.Metrics.TickDebtHighWatermark,
+		"instance-memory-bytes":        snapshot.Metrics.InstanceMemoryBytes,
+		"history-memory-bytes":         snapshot.Metrics.HistoryMemoryBytes,
+		"rebinds":                      snapshot.Metrics.Rebinds,
+		"rekeys":                       snapshot.Metrics.Rekeys,
+		"close-normal":                 snapshot.Metrics.CloseNormal,
+		"close-authentication":         snapshot.Metrics.CloseAuthentication,
+		"close-timeout":                snapshot.Metrics.CloseTimeout,
+		"close-resource":               snapshot.Metrics.CloseResource,
+		"close-lifecycle":              snapshot.Metrics.CloseLifecycle,
+		"close-transport":              snapshot.Metrics.CloseTransport,
+		"close-internal":               snapshot.Metrics.CloseInternal,
+	}
+	for metric, value := range values {
+		component.metrics.SetBattleQualificationControlMetric(metric, value)
+	}
+}
+
+// closeQualificationSamplers 逆序释放只读 process handles；重复调用安全。
+func (component *simulationNodeComponent) closeQualificationSamplers() error {
+	if component == nil {
+		return nil
+	}
+	childErr := component.childProcessSampler.Close()
+	goErr := component.goProcessSampler.Close()
+	component.childProcessSampler = nil
+	component.goProcessSampler = nil
+	return errors.Join(childErr, goErr)
 }
 
 // flushResults 同步执行 receipt-first decision，避免 drain 返回后 proposal 未落库。

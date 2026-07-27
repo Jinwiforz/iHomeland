@@ -1,0 +1,629 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ihomeland.local/schemas/battle-network-qualification-source-v1.json",
+  "title": "iHomeland Battle Network Qualification Source",
+  "oneOf": [
+    { "$ref": "#/$defs/manifest" },
+    { "$ref": "#/$defs/upstreamBinding" },
+    { "$ref": "#/$defs/faultExecution" },
+    { "$ref": "#/$defs/workloads" },
+    { "$ref": "#/$defs/metrics" },
+    { "$ref": "#/$defs/lifecycleSecurity" }
+  ],
+  "$defs": {
+    "sourceEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formatVersion", "qualificationVersion", "documentKind"],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": {
+          "enum": [
+            "fault-execution",
+            "lifecycle-security",
+            "manifest",
+            "metrics",
+            "upstream-binding",
+            "workloads"
+          ]
+        }
+      }
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "qualificationVersion",
+        "documentKind",
+        "schemaPath",
+        "schemaSha256",
+        "reportSchemaPath",
+        "reportSchemaSha256",
+        "scenarioEvidenceSchemaPath",
+        "scenarioEvidenceSchemaSha256",
+        "scenarioFailureEvidenceSchemaPath",
+        "scenarioFailureEvidenceSchemaSha256",
+        "admissionEvidenceSchemaPath",
+        "admissionEvidenceSchemaSha256",
+        "gateEvidenceSchemaPath",
+        "gateEvidenceSchemaSha256",
+        "runEvidenceSchemaPath",
+        "runEvidenceSchemaSha256",
+        "profileOverlaySchemaPath",
+        "profileOverlaySchemaSha256",
+        "requiredDomains",
+        "files"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": { "const": "manifest" },
+        "schemaPath": { "const": "schema.json" },
+        "schemaSha256": { "$ref": "#/$defs/sha256" },
+        "reportSchemaPath": { "const": "report.schema.json" },
+        "reportSchemaSha256": { "$ref": "#/$defs/sha256" },
+        "scenarioEvidenceSchemaPath": { "const": "scenario-evidence.schema.json" },
+        "scenarioEvidenceSchemaSha256": { "$ref": "#/$defs/sha256" },
+        "scenarioFailureEvidenceSchemaPath": { "const": "scenario-failure-evidence.schema.json" },
+        "scenarioFailureEvidenceSchemaSha256": { "$ref": "#/$defs/sha256" },
+        "admissionEvidenceSchemaPath": { "const": "admission-evidence.schema.json" },
+        "admissionEvidenceSchemaSha256": { "$ref": "#/$defs/sha256" },
+        "gateEvidenceSchemaPath": { "const": "gate-evidence.schema.json" },
+        "gateEvidenceSchemaSha256": { "$ref": "#/$defs/sha256" },
+        "runEvidenceSchemaPath": { "const": "run-evidence.schema.json" },
+        "runEvidenceSchemaSha256": { "$ref": "#/$defs/sha256" },
+        "profileOverlaySchemaPath": { "const": "profile-overlay.schema.json" },
+        "profileOverlaySchemaSha256": { "$ref": "#/$defs/sha256" },
+        "requiredDomains": {
+          "type": "array",
+          "minItems": 9,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/stableId" }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 14,
+          "maxItems": 14,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "documentKind", "sha256"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._/-]+$"
+              },
+              "documentKind": { "$ref": "#/$defs/stableId" },
+              "sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      }
+    },
+    "upstreamBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "qualificationVersion",
+        "documentKind",
+        "sources",
+        "receipts",
+        "invariants"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": { "const": "upstream-binding" },
+        "sources": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["owner", "path", "sha256", "requiredConclusion"],
+            "properties": {
+              "owner": { "$ref": "#/$defs/stableId" },
+              "path": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._/-]+$"
+              },
+              "sha256": { "$ref": "#/$defs/sha256" },
+              "requiredConclusion": { "$ref": "#/$defs/stableId" }
+            }
+          }
+        },
+        "receipts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "b03ReleaseBuildSha256",
+            "b03AsanBuildSha256",
+            "b03QualificationGateSha256",
+            "b04QualificationReportSha256",
+            "b05WireCorpusSha256",
+            "b05ImplementationOverlaySha256"
+          ],
+          "properties": {
+            "b03ReleaseBuildSha256": { "$ref": "#/$defs/sha256" },
+            "b03AsanBuildSha256": { "$ref": "#/$defs/sha256" },
+            "b03QualificationGateSha256": { "$ref": "#/$defs/sha256" },
+            "b04QualificationReportSha256": { "$ref": "#/$defs/sha256" },
+            "b05WireCorpusSha256": { "$ref": "#/$defs/sha256" },
+            "b05ImplementationOverlaySha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "invariants": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "platform",
+            "environmentClass",
+            "sourceCorpusMode",
+            "maximumBattleActors",
+            "simulationTickNanoseconds",
+            "publicInternetQualified"
+          ],
+          "properties": {
+            "platform": { "const": "windows-x64" },
+            "environmentClass": { "const": "controlled-local-fault-gateway" },
+            "sourceCorpusMode": { "const": "read-only" },
+            "maximumBattleActors": { "const": 8 },
+            "simulationTickNanoseconds": { "const": 50000000 },
+            "publicInternetQualified": { "const": false }
+          }
+        }
+      }
+    },
+    "faultExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "qualificationVersion",
+        "documentKind",
+        "profileVersion",
+        "seed",
+        "prng",
+        "requiredDirections",
+        "schedulerOrder",
+        "gatewayPolicy",
+        "executionPolicy",
+        "scenarios"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": { "const": "fault-execution" },
+        "profileVersion": { "const": "battle-network-profile-v2" },
+        "seed": { "type": "integer", "minimum": 1 },
+        "prng": { "const": "lcg32-numerical-recipes" },
+        "requiredDirections": {
+          "const": ["downlink", "uplink"]
+        },
+        "schedulerOrder": {
+          "const": [
+            "due-time",
+            "direction",
+            "client-slot",
+            "receive-sequence",
+            "copy-index"
+          ]
+        },
+        "gatewayPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maximumDatagramBytes",
+            "globalQueueItems",
+            "ingressQueueItems",
+            "evidenceQueueItems",
+            "packetLifetimeMilliseconds",
+            "reorderAdvanceMicroseconds",
+            "schedulerPollMicroseconds",
+            "mappingLateDeliveryMilliseconds",
+            "bandwidthMode"
+          ],
+          "properties": {
+            "maximumDatagramBytes": { "const": 1200 },
+            "globalQueueItems": { "const": 4096 },
+            "ingressQueueItems": { "const": 4096 },
+            "evidenceQueueItems": { "const": 32768 },
+            "packetLifetimeMilliseconds": { "const": 500 },
+            "reorderAdvanceMicroseconds": { "const": 10000 },
+            "schedulerPollMicroseconds": { "const": 1000 },
+            "mappingLateDeliveryMilliseconds": { "const": 3000 },
+            "bandwidthMode": { "const": "measure-only-no-shaping" }
+          }
+        },
+        "executionPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "warmupMilliseconds",
+            "measurementMilliseconds",
+            "scenarioDeadlineMilliseconds",
+            "cleanupMilliseconds",
+            "faultShapePolicy",
+            "payloadPolicy",
+            "unsupportedPolicy"
+          ],
+          "properties": {
+            "warmupMilliseconds": { "type": "integer", "minimum": 1000 },
+            "measurementMilliseconds": { "type": "integer", "minimum": 60000 },
+            "scenarioDeadlineMilliseconds": { "type": "integer", "minimum": 61000 },
+            "cleanupMilliseconds": { "type": "integer", "minimum": 10000 },
+            "faultShapePolicy": { "const": "repeat-source-pattern" },
+            "payloadPolicy": { "const": "opaque" },
+            "unsupportedPolicy": { "const": "fail-closed" }
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scenarioId",
+              "sourceScenarioId",
+              "sourceDurationTicks",
+              "sourceWorkloads",
+              "sourcePhases",
+              "impairments",
+              "actorCount",
+              "mandatory"
+            ],
+            "properties": {
+              "scenarioId": { "$ref": "#/$defs/stableId" },
+              "sourceScenarioId": { "$ref": "#/$defs/stableId" },
+              "sourceDurationTicks": { "type": "integer", "minimum": 1 },
+              "sourceWorkloads": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/stableId" }
+              },
+              "sourcePhases": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/stableId" }
+              },
+              "impairments": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/stableId" }
+              },
+              "actorCount": { "const": 5 },
+              "mandatory": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    "workloads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "qualificationVersion",
+        "documentKind",
+        "simulationTickNanoseconds",
+        "inputTickNanoseconds",
+        "snapshotIntervalTicks",
+        "workloads",
+        "messageCadence"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": { "const": "workloads" },
+        "simulationTickNanoseconds": { "const": 50000000 },
+        "inputTickNanoseconds": { "const": 25000000 },
+        "snapshotIntervalTicks": { "const": 2 },
+        "workloads": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "workloadId",
+              "classification",
+              "ownerCount",
+              "visitorCount",
+              "battleActorCount",
+              "expectedDisposition",
+              "phases"
+            ],
+            "properties": {
+              "workloadId": { "$ref": "#/$defs/stableId" },
+              "classification": {
+                "enum": [
+                  "admission-policy",
+                  "compatibility-policy",
+                  "mandatory-network",
+                  "network-capacity"
+                ]
+              },
+              "ownerCount": { "const": 1 },
+              "visitorCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+              "battleActorCount": { "type": "integer", "minimum": 1, "maximum": 9 },
+              "expectedDisposition": { "$ref": "#/$defs/stableId" },
+              "phases": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/stableId" }
+              }
+            }
+          }
+        },
+        "messageCadence": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "logicalKind",
+              "lane",
+              "direction",
+              "maximumRatePerSecond",
+              "maximumLogicalBytes"
+            ],
+            "properties": {
+              "logicalKind": {
+                "type": "string",
+                "pattern": "^battle(?:\\.[a-z][a-z-]*)+$"
+              },
+              "lane": { "enum": ["kcp", "raw"] },
+              "direction": { "enum": ["downlink", "uplink"] },
+              "maximumRatePerSecond": { "type": "integer", "minimum": 1 },
+              "maximumLogicalBytes": { "type": "integer", "minimum": 1, "maximum": 1072 }
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "qualificationVersion",
+        "documentKind",
+        "sources",
+        "comparisonPolicy",
+        "metrics"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": { "const": "metrics" },
+        "sources": {
+          "const": [
+            "client",
+            "control-snapshot",
+            "fault-gateway",
+            "process-sampler"
+          ]
+        },
+        "comparisonPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "bothRunsMustPassBudget",
+            "aggregation",
+            "reproducibilityFailurePolicy",
+            "missingSamplePolicy"
+          ],
+          "properties": {
+            "bothRunsMustPassBudget": { "const": true },
+            "aggregation": { "const": "worst-case" },
+            "reproducibilityFailurePolicy": { "const": "not-qualified" },
+            "missingSamplePolicy": { "const": "not-qualified" }
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "minItems": 14,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "metricId",
+              "source",
+              "unit",
+              "budgetSource",
+              "method",
+              "window",
+              "maximum",
+              "reproducibilityToleranceBasisPoints",
+              "aggregation"
+            ],
+            "properties": {
+              "metricId": { "$ref": "#/$defs/stableId" },
+              "source": {
+                "enum": [
+                  "client",
+                  "control-snapshot",
+                  "fault-gateway",
+                  "process-sampler"
+                ]
+              },
+              "unit": { "$ref": "#/$defs/stableId" },
+              "budgetSource": { "$ref": "#/$defs/stableId" },
+              "method": { "$ref": "#/$defs/stableId" },
+              "window": {
+                "enum": ["measurement", "post-warmup-soak"]
+              },
+              "maximum": { "type": "integer", "minimum": 0 },
+              "reproducibilityToleranceBasisPoints": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "aggregation": { "$ref": "#/$defs/stableId" }
+            }
+          }
+        }
+      }
+    },
+    "lifecycleSecurity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "qualificationVersion",
+        "documentKind",
+        "attackBudget",
+        "securityCases",
+        "lifecycleCases",
+        "lifecycleOwners",
+        "lifecycleModes",
+        "soak"
+      ],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "qualificationVersion": { "const": "battle-network-qualification-v1" },
+        "documentKind": { "const": "lifecycle-security" },
+        "attackBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maximumSenders",
+            "maximumPacketsPerSecondPerSender",
+            "maximumDurationMilliseconds",
+            "maximumTotalBytes",
+            "legitimateActorCount",
+            "availabilityPolicy"
+          ],
+          "properties": {
+            "maximumSenders": { "type": "integer", "minimum": 1, "maximum": 64 },
+            "maximumPacketsPerSecondPerSender": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "maximumDurationMilliseconds": { "type": "integer", "minimum": 1000, "maximum": 60000 },
+            "maximumTotalBytes": { "type": "integer", "minimum": 1, "maximum": 134217728 },
+            "legitimateActorCount": { "const": 5 },
+            "availabilityPolicy": { "const": "legitimate-workload-remains-within-budget" }
+          }
+        },
+        "securityCases": {
+          "type": "array",
+          "minItems": 17,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/stableId" }
+        },
+        "lifecycleCases": {
+          "type": "array",
+          "minItems": 10,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/stableId" }
+        },
+        "lifecycleOwners": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assignment-replacement",
+            "child-crash-restart",
+            "go-restart",
+            "network-pause-resume",
+            "owner-grace-expiry",
+            "session-epoch-invalidation",
+            "shutdown-drain-deadline",
+            "valid-endpoint-rebind",
+            "visitor-leave",
+            "visitor-reconnect"
+          ],
+          "properties": {
+            "assignment-replacement": { "const": "process-supervisor" },
+            "child-crash-restart": { "const": "process-supervisor" },
+            "go-restart": { "const": "process-supervisor" },
+            "network-pause-resume": { "const": "fault-gateway" },
+            "owner-grace-expiry": { "const": "public-protocol" },
+            "session-epoch-invalidation": { "const": "public-protocol" },
+            "shutdown-drain-deadline": { "const": "process-supervisor" },
+            "valid-endpoint-rebind": { "const": "fault-gateway" },
+            "visitor-leave": { "const": "public-protocol" },
+            "visitor-reconnect": { "const": "public-protocol" }
+          }
+        },
+        "lifecycleModes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assignment-replacement",
+            "child-crash-restart",
+            "go-restart",
+            "network-pause-resume",
+            "owner-grace-expiry",
+            "session-epoch-invalidation",
+            "shutdown-drain-deadline",
+            "valid-endpoint-rebind",
+            "visitor-leave",
+            "visitor-reconnect"
+          ],
+          "properties": {
+            "assignment-replacement": { "const": "replaced" },
+            "child-crash-restart": { "const": "replaced" },
+            "go-restart": { "const": "replaced" },
+            "network-pause-resume": { "const": "preserved" },
+            "owner-grace-expiry": { "const": "terminated" },
+            "session-epoch-invalidation": { "const": "terminated" },
+            "shutdown-drain-deadline": { "const": "terminated" },
+            "valid-endpoint-rebind": { "const": "preserved" },
+            "visitor-leave": { "const": "terminated" },
+            "visitor-reconnect": { "const": "replaced" }
+          }
+        },
+        "soak": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "workloadId",
+            "durationMilliseconds",
+            "sampleIntervalMilliseconds",
+            "warmupMilliseconds",
+            "rekeyIntervalMilliseconds",
+            "minimumObservedRekeys",
+            "cleanupMilliseconds",
+            "requiredInvariants"
+          ],
+          "properties": {
+            "workloadId": { "const": "default-coop" },
+            "durationMilliseconds": { "const": 1800000 },
+            "sampleIntervalMilliseconds": { "const": 1000 },
+            "warmupMilliseconds": { "const": 60000 },
+            "rekeyIntervalMilliseconds": { "const": 600000 },
+            "minimumObservedRekeys": { "minimum": 2, "type": "integer" },
+            "cleanupMilliseconds": { "minimum": 30000, "type": "integer" },
+            "requiredInvariants": {
+              "type": "array",
+              "minItems": 11,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/stableId" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

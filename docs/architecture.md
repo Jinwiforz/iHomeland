@@ -343,6 +343,29 @@ Unity 使用 Composition Root + App Scope + Scene Scope：
 
 Go Composition Root 是 BattleTicket、Redis issuance、exact C++ child/control 与公开
 HTTP route 的唯一装配 owner。C++ `SimulationNode` 是 UDP listener、ticket/session
-registry、raw/KCP multiplexer 和 simulation ingress 的唯一运行时 owner。安全套件固定为
-X25519、HKDF-SHA-256 与 ChaCha20-Poly1305；B0.5 只声明实现资格，B0.6 网络故障资格仍
-是后置门。
+registry、raw/KCP/control multiplexer 和 simulation ingress/projection port 的唯一运行时
+owner。`BattleTransportRuntime` 在线程安全的 listener callback 后复制有界 datagram，
+由单 worker 串行处理 handshake、session、AEAD、rebind/rekey/close，并按 profile 的
+10 ms cadence 推进全部 session KCP ACK/重传。Worker 使用单调 deadline 调度，持续
+ingress 不能饿死 periodic update，延迟恢复后也不补发 catch-up burst；它不持有或生成
+gameplay 状态。`SimulationNode` 只通过 committed replication projection port 提供
+snapshot，transport 按每 2 个 20 Hz committed Tick 发布 10 Hz raw snapshot，并在每
+10 个正常发布周期建立 full baseline，再执行 raw/KCP 编码、预算和同 listener 回包。
+Snapshot 发布不由 input arrival 驱动；合法 resync 可以强制 current Tick full baseline。
+
+安全套件固定为 X25519、HKDF-SHA-256 与 ChaCha20-Poly1305。ticket proof key 使用
+raw ticket secret 作为 IKM、raw ticket ID 作为 salt，并绑定
+`ihomeland/battle-ticket/proof-key/v2`；旧 domain 一律拒绝。安全传输与网络
+development-readiness 已完成，公网放量或产品 qualified 结论仍必须通过显式最终资格。
+
+`battle-network-profile-v2` 将 KCP sender application expiry 的唯一所有权下沉到
+numeric route：一般可靠事件/生命周期为 500 ms，resync request/response 为 2250 ms。
+Producer queue 与 KCP queued/inflight 状态读取同一 immutable policy；receiver 只受
+KCP window/queue 与 session lifecycle 约束，不从首个 segment 伪造 sender deadline。
+
+B0.6 使用每客户端独立 mapping 的 opaque UDP fault gateway、独立 C++ 协议客户端、
+qualification-only 私有 control snapshot 和 OS process sampler 交叉核对。Gateway
+不解密 payload；`delivery-age` 只计算成功 socket write 的
+`DeliveredAt - ReceivedAt`，intentional loss 与客户端 snapshot receipt gap 分别由
+disposition、cadence 和 baseline recovery 证据解释。唯一操作流程见
+`docs/battle-network-qualification.md`。

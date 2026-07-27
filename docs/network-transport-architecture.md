@@ -188,10 +188,24 @@ raw/KCP wire 与端口 owner。
 ### B0.5 UDP 安全通道
 
 每个 SimulationNode 只创建一个 Asio UDP listener，raw 与 KCP 复用 authenticated
-multiplexer。48-byte secure header 使用 direction-isolated AEAD key、32-bit epoch 与
+multiplexer，transport-control 也只使用该 listener，不创建 rebind 或 KCP 专用 socket。
+Listener 独占 receive/send/stop executor，runtime 独占 handshake/session/crypto/KCP，
+simulation worker 仍是 gameplay 唯一写者。48-byte secure header 使用 direction-isolated AEAD key、32-bit epoch 与
 64-bit sequence；256-packet replay window、stateless cookie、endpoint rebind confirm
 和 10 分钟/`2^20` packet rekey 均 fail closed。KCP 固定 10 ms update、window 64、
-fast resend 2、RTO 30–200 ms、dead-link 10、1000-byte segment ceiling。
+fast resend 2、RTO 30–200 ms、dead-link 10、1000-byte segment ceiling。Runtime worker
+即使没有新 datagram 也按 10 ms 定时推进 KCP，避免 ACK、首包和重传依赖下一次 ingress。
+
+Windows 无连接 UDP 默认会把发往已关闭远端产生的 ICMP Port Unreachable 映射成
+下一次 receive 的 `WSAECONNRESET`。它是单个远端 datagram 的失败，不是
+node-global listener 的终局。唯一 listener 必须在 bind/首次 receive 前通过
+`SIO_UDP_CONNRESET` 关闭该映射；配置失败即启动失败。真实 loopback 回归必须证明
+terminal response 的有界冗余命中已关闭旧端口后，listener 仍能接收新客户端握手。
+
+独立 `ihomeland-battle-protocol-client` 只从 inherited stdin 接收一次 ticket ID/secret，
+本地完成 proof derivation、握手、AEAD、raw baseline、KCP 与 control state；stdout 只
+返回定长低敏 receipt。资格 mutation 只允许 `exact-replay`、`tampered-tag` 和
+`oversize-prefix` 三种闭合 UDP delivery，不允许注入 endpoint、traffic key 或权威状态。
 
 B0.5 资格只证明当前 Windows x64 实现、跨语言 wire/crypto/KCP parity 与真实
 child/loopback UDP 安全边界，不证明 B0.6 的公网 fault matrix、NAT 包络或生产容量。
@@ -218,12 +232,14 @@ B0.2 logical inventory 只允许承载：
 | 方向 | 初始消息类别 | 交付语义 |
 |---|---|---|
 | S2C | `battle.entity.lifecycle`、`battle.ability.reliable-event` | 分别最大 512 bytes、20/s、500 ms expiry；可去重且不能替代 Go 结算事实 |
-| C2S | `battle.resync.request` | 最大 128 bytes、2/s、500 ms expiry；携带缺失 baseline identity |
-| S2C | `battle.resync.response` | 最大 768 bytes、2/s、500 ms expiry；只授权有界 full baseline 恢复 |
+| C2S | `battle.resync.request` | 最大 128 bytes、2/s、2250 ms sender expiry；携带缺失 baseline identity |
+| S2C | `battle.resync.response` | 最大 768 bytes、2/s、2250 ms sender expiry；只授权有界 full baseline 恢复 |
 
 KCP 只提供 ARQ。握手、身份、加密、重放保护、拥塞预算、限流和 endpoint rebinding 仍由项目负责。应用层必须继续校验 tick、sequence、过期与合法性。
 
-冻结 profile 使用 10 ms update、send/receive window 64、fast resend 2、RTO 30–200 ms、dead link 10、segment/message ceiling 1000 bytes、queue 64 和 application expiry 500 ms。B0.5 已补证真实 KCP core 的时钟、segment 与 adapter parity；B0.6 继续验证 fault matrix 下的重传放大和容量预算。
+冻结 profile v2 使用 10 ms update、send/receive window 64、fast resend 2、RTO 30–200 ms、dead link 10、segment/message ceiling 1000 bytes 和 queue 64。Sender application expiry 由 numeric route 唯一拥有：`3004/3005` 保持 500 ms，`3006/3007` 使用 2250 ms；producer queue 与 KCP queued/inflight 状态都必须读取同一 route policy，caller 不得覆盖。Receiver 不复制 sender deadline，重组资源由 KCP window/queue 与 session lifecycle 有界管理，完整消息仍需校验 route、sequence、Tick 与 generation。
+
+Snapshot publisher 从 simulation owner 的 committed Tick 投影驱动 10 Hz raw 发布，每 2 个 20 Hz Tick 至多发布一次、每 10 个正常发布周期生成 full baseline。持续 ingress 不能饿死 periodic worker；调度延迟只发送最新 projection，不补发 catch-up burst。合法 resync 可在同一 committed Tick 强制一个 full baseline，并启动固定 30 Tick 的 recovery window；窗口内每 10 Tick 最多补充一个 raw full，重复 resync 不续期，调度延迟不追赶。该冗余保持既有 2/s 上限，不能延长 raw snapshot freshness。
 
 同一 message id 只能登记 raw UDP 或 KCP 其中一个 lane，禁止为了“保险”双写。调用方不得运行时选择 lane，也不得在 raw 超时后把相同消息静默转入 KCP/TCP；改变 QoS 必须变更 registry、兼容性和网络资格基线。
 
@@ -257,7 +273,8 @@ B0.2 logical kind 是 battle registry 的强制输入；B0.5 已建立 8 个 log
 Battle 输入、snapshot 与历史查询还必须遵守：
 
 - C2S input 含 `InputTick`、单调 command sequence、assignment/instance binding 和 expiry evidence，不含最终 transform、target hit、damage 或 reward。
-- S2C snapshot 含 `ServerTick`、`SnapshotSequence`、full/delta kind、适用时的 `BaselineTick`，以及本地 actor 的 `LastProcessedInputTick`。
+- S2C snapshot 含 `ServerTick`、`SnapshotSequence`、full/delta kind、适用时的 `BaselineTick`，以及显式 presence 的本地 actor `LastProcessedInputTick`。`ServerTick`、mapping generation 与确认游标必须来自同一个 replication commit，禁止组合旧 Tick 和新确认；值 `0` 表示当前 mapping generation 尚未终结 InputTick 1，字段缺失必须 fail closed。
+- 同一逻辑 snapshot 的 partition 必须冻结相同 sequence、baseline identity、mapping generation 与 `LastProcessedInputTick`；receiver 只有在完整集合通过索引、数量和上述事实的一致性校验后才能发布确认。
 - 客户端缺少 baseline、跨 generation 或收到旧 sequence 时不得猜测合并；恢复路径由 registry 唯一定义。
 - history query 只由服务器 gameplay system 发起。客户端最多提供经 tick mapping 与 clamp 的观察 tick evidence，不能指定任意历史帧或读取历史状态。
 - Tick 宽度、wrap/epoch、tick duration、输入窗口、snapshot cadence、baseline 周期和 history window 必须由 simulation model/network profile 冻结后进入 schema。

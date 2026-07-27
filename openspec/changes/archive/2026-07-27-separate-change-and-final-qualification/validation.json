@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "change": "separate-change-and-final-qualification",
+  "checks": [
+    {
+      "id": "quality-contract",
+      "reason": "统一入口、closed catalog 和 validation plan 边界由本 change 直接修改"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "新 capability 与两项长期规格变更必须通过 strict validation"
+    }
+  ]
+}

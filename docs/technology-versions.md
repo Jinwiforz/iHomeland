@@ -159,6 +159,12 @@ qualification 只由 Release CI binary 生成，避免调试或 sanitizer instru
 系统依赖或未锁定 fallback。升级任一依赖必须重跑 wire/crypto/KCP parity、Release/ASan
 与 B0.5 failure regression；B0.6 网络报告不能替代依赖完整性验证。
 
+B0.6 不引入新的网络、抓包或故障注入依赖。Fault gateway 使用项目锁定 Go 工具链与
+标准 UDP API，C++ 黑盒客户端复用同一组锁定 KCP/libsodium/Protobuf primitives，但由
+architecture gate 禁止链接 production transport/gameplay adapter。真实资格需要本机
+Windows x64、项目局部 Go/CMake/MSVC/Windows SDK 缓存与 storage harness 所需 Docker；
+缺项应先通过各自统一入口恢复，不允许在资格脚本中临时使用系统同名工具或在线 fallback。
+
 ### 后续仍未引入的依赖
 
 | 能力 | 计划依赖 | 唯一版本 owner | 引入门禁 |

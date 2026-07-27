@@ -7,6 +7,8 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [Console]::OutputEncoding
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ToolPath = Join-Path $PSScriptRoot "client-qualification.ps1"
+$LocalToolPath = Join-Path $PSScriptRoot "client-qualification-local.ps1"
+$ContractIdentityModule = Join-Path $PSScriptRoot "ClientContractIdentity.psm1"
 $TestParent = Join-Path $RepositoryRoot ".local\client-qualification-tool-tests"
 $TestRoot = Join-Path $TestParent ([guid]::NewGuid().ToString("N"))
 
@@ -23,6 +25,32 @@ function Assert-Throws {
     catch { $failed = $true }
     if (-not $failed) { throw $Message }
 }
+
+Import-Module $ContractIdentityModule -Force
+$contractPathSpecs = @(Get-ClientContractPathSpecs)
+foreach ($required in @(
+        "shared/proto",
+        "shared/contracts/registry",
+        "shared/contracts/fixtures/client-qualification",
+        "shared/contracts/fixtures/battle/wire",
+        "shared/contracts/fixtures/simulation-control/runtime",
+        "client/Packages",
+        "client/ProjectSettings/ProjectVersion.txt"
+    )) {
+    Assert-True ($contractPathSpecs -contains $required) "client contract identity omitted a consumed input"
+}
+foreach ($excluded in @(
+        "shared/contracts/fixtures/battle/qualification",
+        "shared/contracts/fixtures/battle/network-profile",
+        "shared/contracts/fixtures/battle/model",
+        "shared/contracts/fixtures/simulation-control/manifest.json"
+    )) {
+    Assert-True ($contractPathSpecs -notcontains $excluded) "client contract identity included server qualification evidence"
+}
+$contractIdentity = Get-ClientContractDigest -RepositoryRoot $RepositoryRoot
+Assert-True (
+    $contractIdentity -cmatch '^[0-9a-f]{64}$'
+) "client contract identity is not a canonical SHA-256"
 
 # Import-ToolFunctions通过PowerShell AST装载指定函数，不执行资格入口主流程或创建第二套实现。
 function Import-ToolFunctions {
@@ -276,7 +304,8 @@ try {
 
     $fakeBuild = Join-Path $TestRoot "fake-build"
     [System.IO.Directory]::CreateDirectory($fakeBuild) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSHOME "powershell.exe") -Destination (Join-Path $fakeBuild "iHomeland.exe")
+    $currentHostPath = (Get-Process -Id $PID).Path
+    Copy-Item -LiteralPath $currentHostPath -Destination (Join-Path $fakeBuild "iHomeland.exe")
     $script:OwnedProcesses = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
     $script:CleanupFailure = ""
     Assert-Throws {
@@ -295,12 +324,96 @@ try {
     Assert-True (
         $toolText -notmatch 'openspec\.cmd validate qualify-client-v1') `
         "qualification governance still depends on an archived change name"
+    Assert-True (
+        $toolText -match
+            'Invoke-OwnedProcess \$PowerShellHostPath .+client-qualification\.tests\.ps1') `
+        "qualification tool regression is not owned by the current PowerShell 7 host"
     $cleanupFunction = [regex]::Match(
         $toolText,
         '(?s)function Invoke-PlayerStorageCleanup\s*\{.*?\n\}')
     Assert-True $cleanupFunction.Success "storage cleanup owner function is missing"
     Assert-True ($cleanupFunction.Value -match 'ihomelandQualificationMode.+cleanup') "storage cleanup does not route through Player owner"
     Assert-True ($cleanupFunction.Value -notmatch 'Remove-Item|Directory\]::Delete|File\]::Delete') "qualification tool directly deletes secure records"
+
+    $localScriptBytes = [System.IO.File]::ReadAllBytes($LocalToolPath)
+    Assert-True (
+        $localScriptBytes.Length -ge 3 -and
+        $localScriptBytes[0] -eq 0xEF -and
+        $localScriptBytes[1] -eq 0xBB -and
+        $localScriptBytes[2] -eq 0xBF) `
+        "client local qualification script lost its Windows PowerShell 5.1 UTF-8 BOM"
+    $localTokens = $null
+    $localErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $LocalToolPath,
+        [ref]$localTokens,
+        [ref]$localErrors) | Out-Null
+    Assert-True (@($localErrors).Count -eq 0) "client local qualification composition is not parseable"
+    $localToolText = [System.IO.File]::ReadAllText($LocalToolPath)
+    Assert-True (
+        $localToolText -match 'ValidateSet\("soak", "operator"\)') `
+        "client local qualification action contract is not closed"
+    Assert-True (
+        $localToolText -match
+            'Join-Path \$RunDirectory "automatic-evidence\.json"') `
+        "client local qualification is not bound to the qualification owner's automatic evidence"
+    Assert-True (
+        $localToolText.Contains(
+            '("operator-attempts\" + [Guid]::NewGuid().ToString("N"))') -and
+        $localToolText.Contains(
+            '$root = Join-Path $AttemptRoot "product-fault"') -and
+        $localToolText.Contains(
+            '$root = Join-Path $AttemptRoot "server-restart"')) `
+        "client local operator does not isolate coordination state per attempt"
+    Assert-True (
+        $localToolText -match 'Stop-Process\s+`\s*\r?\n\s*-Id \$playerProcess\.Id' -and
+        $localToolText -match 'Stop-Process -Id \$ServerProcess\.Id') `
+        "client local qualification cleanup is not bound to exact owned PIDs"
+    Assert-True (
+        $localToolText -match '(?s)-Action down\s+`\s*\r?\n\s*-RunId \$StorageRunId') `
+        "client local qualification storage cleanup lost exact run ownership"
+    Assert-True (
+        $localToolText -match '(?s)foreach \(\$name in \$EnvironmentNames\).*PreviousEnvironment\[\$name\]') `
+        "client local qualification does not restore inherited environment"
+    Assert-True (
+        $localToolText -match '"PSModulePath"' -and
+        $localToolText -match
+            '\$env:PSModulePath\s*=\s*\(@\(\$windowsPowerShellModuleRoot\)\s*\+\s*\$moduleEntries\)') `
+        "client local qualification does not prioritize and restore Windows PowerShell modules"
+    Assert-True (
+        $localToolText -match '(?s)& powershell\.exe.+-EncodedCommand \$encodedGoBuildCommand' -and
+        $localToolText -notmatch '(?m)^\s*& \$GoTool\b') `
+        "client local qualification does not isolate the process-level Go CLI"
+    Assert-True (
+        $localToolText -match '(?s)& \$PowerShell7Path.+-File \$QualificationTool.+-Action soak' -and
+        $localToolText -notmatch '(?m)^\s*& \$QualificationTool\b') `
+        "client local qualification does not isolate the qualification CLI"
+    Assert-True (
+        $localToolText -match
+            '@\(\$powerShell7ModuleRoot\)\s*\+\s*\$powerShell7ModuleEntries') `
+        "client local qualification does not prioritize PowerShell 7 modules for the qualification CLI"
+    Assert-True (
+        $localToolText -match '\[Security\.Cryptography\.SHA256\]::Create\(\)' -and
+        $localToolText -match '\[IO\.File\]::OpenRead\(\$Path\)' -and
+        $localToolText -notmatch 'Get-FileHash') `
+        "client local qualification hash still depends on ambient PowerShell modules"
+    $localStartOperatorFunction = [regex]::Match(
+        $localToolText,
+        '(?s)function Start-OperatorPlayer\s*\{.*?\n\}')
+    Assert-True $localStartOperatorFunction.Success "client local Player owner function is missing"
+    Assert-True (
+        $localStartOperatorFunction.Value -notmatch
+            'IHOMELAND_QUALIFICATION_(USERNAME|PASSWORD)|Credential\.(Username|Password)') `
+        "client local qualification leaked credentials into process arguments"
+    foreach ($scenarioId in @(
+        "two-player-product-flow",
+        "two-player-channel-faults",
+        "two-player-server-restart"
+    )) {
+        Assert-True (
+            $localToolText.Contains('"' + $scenarioId + '"')) `
+            "client local qualification lost mandatory operator evidence: $scenarioId"
+    }
 
     Write-Host "[OK] Client qualification tool regression tests passed."
 }

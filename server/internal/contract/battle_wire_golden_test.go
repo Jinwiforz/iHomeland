@@ -19,6 +19,26 @@ type battleWireGoldenDocument struct {
 	Vectors []battleWireVector `json:"vectors"`
 }
 
+// battleWireMalformedDocument 是负例 corpus 的只读投影。
+type battleWireMalformedDocument struct {
+	// Cases 保存跨语言共享的稳定拒绝样本。
+	Cases []battleWireMalformedCase `json:"cases"`
+}
+
+// battleWireMalformedCase 保存可直接解码负例的 bytes 与稳定 reason。
+type battleWireMalformedCase struct {
+	// CaseID 是跨语言共享的负例 identity。
+	CaseID string `json:"case_id"`
+	// BytesHex 是存在具体 payload 时的 canonical bytes。
+	BytesHex string `json:"bytes_hex"`
+	// ByteCount 是具体 payload 的冻结长度。
+	ByteCount int `json:"byte_count"`
+	// SHA256 是具体 payload 的冻结摘要。
+	SHA256 string `json:"sha256"`
+	// ExpectedReason 是 closed rejection identity。
+	ExpectedReason string `json:"expected_reason"`
+}
+
 // battleWireVector 保存单个 canonical byte sequence 及其预期解码字段。
 type battleWireVector struct {
 	// VectorID 是跨语言共享的稳定 case identity。
@@ -83,6 +103,12 @@ type battleWireDecoded struct {
 	ProbeSequence uint64 `json:"probe_sequence"`
 	// LatestSnapshotSequence 是 BattleProbe 已应用的 snapshot sequence。
 	LatestSnapshotSequence uint64 `json:"latest_snapshot_sequence"`
+	// SnapshotSequence 是 full/delta snapshot 的 logical identity。
+	SnapshotSequence uint64 `json:"snapshot_sequence"`
+	// BaselineID 是 full 建立或 delta 引用的 baseline identity。
+	BaselineID uint64 `json:"baseline_id"`
+	// LastProcessedInputTick 是显式存在的 mapping-generation-scoped 确认。
+	LastProcessedInputTick uint64 `json:"last_processed_input_tick"`
 	// ClientMonotonicTimeUS 是 BattleProbe 的本地单调时钟采样。
 	ClientMonotonicTimeUS uint64 `json:"client_monotonic_time_us"`
 	// EventID 是 reliable ability event identity。
@@ -111,10 +137,42 @@ func loadBattleWireGolden(t *testing.T) battleWireGoldenDocument {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	if len(document.Vectors) != 7 {
-		t.Fatalf("canonical battle wire vector count = %d, want 7", len(document.Vectors))
+	const canonicalVectorCount = 14
+	if len(document.Vectors) != canonicalVectorCount {
+		t.Fatalf("canonical battle wire vector count = %d, want %d", len(document.Vectors), canonicalVectorCount)
 	}
 	return document
+}
+
+// loadBattleWireMalformed 从共享 corpus 读取协议负例。
+func loadBattleWireMalformed(t *testing.T) battleWireMalformedDocument {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "shared", "contracts", "fixtures", "battle", "wire", "malformed-corpus.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document battleWireMalformedDocument
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	return document
+}
+
+// findBattleWireMalformedCase 返回唯一负例；缺失 identity 立即终止当前测试。
+func findBattleWireMalformedCase(
+	t *testing.T,
+	document battleWireMalformedDocument,
+	id string,
+) battleWireMalformedCase {
+	t.Helper()
+	for _, testCase := range document.Cases {
+		if testCase.CaseID == id {
+			return testCase
+		}
+	}
+	t.Fatalf("malformed battle wire case %s is missing", id)
+	return battleWireMalformedCase{}
 }
 
 // findBattleWireVector 返回唯一 vector；缺失 identity 立即终止当前测试。
@@ -210,6 +268,61 @@ func TestBattleWireHeaderGoldenParity(t *testing.T) {
 	}
 }
 
+// assertBattleSnapshotVector 验证 full/delta snapshot 的显式 presence 与 canonical bytes。
+func assertBattleSnapshotVector(
+	t *testing.T,
+	options proto.MarshalOptions,
+	vector battleWireVector,
+) {
+	t.Helper()
+	switch vector.Protobuf {
+	case "ihomeland.battle.v1.BattleFullSnapshot":
+		message := &battlev1.BattleFullSnapshot{}
+		message.SetServerTick(vector.Decoded.ServerTick)
+		message.SetSnapshotSequence(vector.Decoded.SnapshotSequence)
+		message.SetBaselineId(vector.Decoded.BaselineID)
+		message.SetPartitionIndex(uint32(vector.Decoded.PartitionIndex))
+		message.SetPartitionCount(uint32(vector.Decoded.PartitionCount))
+		message.SetLastProcessedInputTick(vector.Decoded.LastProcessedInputTick)
+		encoded, err := options.Marshal(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(encoded) != vector.BytesHex {
+			t.Fatalf("%s canonical encode drifted", vector.VectorID)
+		}
+		var decoded battlev1.BattleFullSnapshot
+		if err := proto.Unmarshal(decodeBattleWireBytes(t, vector), &decoded); err != nil ||
+			!decoded.HasLastProcessedInputTick() ||
+			decoded.GetLastProcessedInputTick() != vector.Decoded.LastProcessedInputTick {
+			t.Fatalf("%s canonical decode drifted", vector.VectorID)
+		}
+	case "ihomeland.battle.v1.BattleDeltaSnapshot":
+		message := &battlev1.BattleDeltaSnapshot{}
+		message.SetServerTick(vector.Decoded.ServerTick)
+		message.SetSnapshotSequence(vector.Decoded.SnapshotSequence)
+		message.SetBaselineId(vector.Decoded.BaselineID)
+		message.SetPartitionIndex(uint32(vector.Decoded.PartitionIndex))
+		message.SetPartitionCount(uint32(vector.Decoded.PartitionCount))
+		message.SetLastProcessedInputTick(vector.Decoded.LastProcessedInputTick)
+		encoded, err := options.Marshal(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(encoded) != vector.BytesHex {
+			t.Fatalf("%s canonical encode drifted", vector.VectorID)
+		}
+		var decoded battlev1.BattleDeltaSnapshot
+		if err := proto.Unmarshal(decodeBattleWireBytes(t, vector), &decoded); err != nil ||
+			!decoded.HasLastProcessedInputTick() ||
+			decoded.GetLastProcessedInputTick() != vector.Decoded.LastProcessedInputTick {
+			t.Fatalf("%s canonical decode drifted", vector.VectorID)
+		}
+	default:
+		t.Fatalf("%s has unsupported snapshot type %s", vector.VectorID, vector.Protobuf)
+	}
+}
+
 // TestBattleWireProtobufGoldenParity 验证 Go generated battle payload 的 deterministic bytes 与反向解析。
 func TestBattleWireProtobufGoldenParity(t *testing.T) {
 	document := loadBattleWireGolden(t)
@@ -252,5 +365,34 @@ func TestBattleWireProtobufGoldenParity(t *testing.T) {
 	if err := proto.Unmarshal(decodeBattleWireBytes(t, abilityVector), &decodedAbility); err != nil ||
 		!proto.Equal(ability, &decodedAbility) {
 		t.Fatal("BattleAbilityReliableEvent canonical decode drifted")
+	}
+
+	for _, id := range []string{
+		"battle-full-snapshot-ack-zero-v1",
+		"battle-delta-snapshot-ack-zero-v1",
+		"battle-delta-snapshot-ack-normal-v1",
+		"battle-delta-snapshot-ack-large-v1",
+		"battle-full-snapshot-ack-multipart-0-v1",
+		"battle-full-snapshot-ack-multipart-1-v1",
+	} {
+		assertBattleSnapshotVector(t, options, findBattleWireVector(t, document, id))
+	}
+	var missing battlev1.BattleFullSnapshot
+	malformed := findBattleWireMalformedCase(
+		t,
+		loadBattleWireMalformed(t),
+		"snapshot-ack-presence-missing",
+	)
+	if err := proto.Unmarshal(
+		decodeBattleWireBytes(t, battleWireVector{
+			VectorID:  malformed.CaseID,
+			BytesHex:  malformed.BytesHex,
+			ByteCount: malformed.ByteCount,
+			SHA256:    malformed.SHA256,
+		}),
+		&missing,
+	); err != nil || missing.HasLastProcessedInputTick() ||
+		malformed.ExpectedReason != "BATTLE_SNAPSHOT_ACK_MISSING" {
+		t.Fatal("missing snapshot acknowledgement acquired presence")
 	}
 }

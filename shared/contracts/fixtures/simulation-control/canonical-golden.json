@@ -25,6 +25,18 @@
       "canonicalJson": "{\"kind\":\"battle.session.revoke\",\"payload\":{\"assignmentFingerprint\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"battleSessionId\":\"bses_fixture_1\",\"revokeRequestId\":\"sctl_sessionrevoke0001\",\"sessionGeneration\":\"7\",\"simulationInstanceId\":\"sinst_0123456789abcdef0123456789abcdef\"},\"requestId\":\"sctl_sessionrevoke0001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"6\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
       "payloadBytes": 475,
       "lengthPrefixHex": "000001db"
+    },
+    {
+      "goldenId": "qualification-snapshot-request",
+      "canonicalJson": "{\"kind\":\"battle_qualification_snapshot_request\",\"payload\":{\"assignmentFingerprint\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"qualificationRunId\":\"bqrun_0123456789abcdef0123456789abcdef\",\"sampleSequence\":\"1\",\"simulationInstanceId\":\"sinst_0123456789abcdef0123456789abcdef\",\"simulationNodeId\":\"snode_fixture_1\"},\"requestId\":\"sctl_qualification000001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"7\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "payloadBytes": 511,
+      "lengthPrefixHex": "000001ff"
+    },
+    {
+      "goldenId": "qualification-snapshot-receipt",
+      "canonicalJson": "{\"kind\":\"battle_qualification_snapshot_receipt\",\"payload\":{\"activeSessionCount\":\"0\",\"assignmentFingerprint\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"committedTick\":\"0\",\"installedTicketCount\":\"0\",\"metrics\":{\"closeAuthentication\":\"0\",\"closeInternal\":\"0\",\"closeLifecycle\":\"0\",\"closeNormal\":\"0\",\"closeResource\":\"0\",\"closeTimeout\":\"0\",\"closeTransport\":\"0\",\"droppedPackets\":\"0\",\"egressQueueHighWatermark\":\"0\",\"expiredMessages\":\"0\",\"historyMemoryBytes\":\"0\",\"ingressQueueHighWatermark\":\"0\",\"instanceMemoryBytes\":\"0\",\"kcpEgressBytes\":\"0\",\"kcpEgressPackets\":\"0\",\"kcpIngressBytes\":\"0\",\"kcpIngressPackets\":\"0\",\"kcpQueueHighWatermark\":\"0\",\"kcpRetransmits\":\"0\",\"maximumTickDurationNs\":\"0\",\"rawEgressBytes\":\"0\",\"rawEgressPackets\":\"0\",\"rawIngressBytes\":\"0\",\"rawIngressPackets\":\"0\",\"rebinds\":\"0\",\"rejectedPackets\":\"0\",\"rekeys\":\"0\",\"tickDebtHighWatermark\":\"0\"},\"nodeCount\":\"1\",\"qualificationRunId\":\"bqrun_0123456789abcdef0123456789abcdef\",\"runningInstanceCount\":\"1\",\"sampleSequence\":\"1\",\"simulationInstanceId\":\"sinst_0123456789abcdef0123456789abcdef\",\"simulationNodeId\":\"snode_fixture_1\"},\"requestId\":\"sctl_qualification000001\",\"schemaVersion\":\"simulation-control-v1\",\"sequence\":\"8\",\"sessionNonce\":\"1111111111111111111111111111111111111111111111111111111111111111\"}",
+      "payloadBytes": 1274,
+      "lengthPrefixHex": "000004fa"
     }
   ]
 }

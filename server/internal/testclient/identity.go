@@ -2,6 +2,7 @@ package testclient
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -85,6 +86,30 @@ func (secret *Secret) Clear() {
 func (secret *Secret) Close() error {
 	secret.Clear()
 	return nil
+}
+
+// equal 使用常量时间比较两个仍有效的 credential owner，不产生明文 string 副本。
+func (secret *Secret) equal(other *Secret) bool {
+	if secret == nil || other == nil {
+		return false
+	}
+	if secret == other {
+		secret.mutex.Lock()
+		defer secret.mutex.Unlock()
+		return len(secret.value) != 0
+	}
+	secret.mutex.Lock()
+	left := append([]byte(nil), secret.value...)
+	secret.mutex.Unlock()
+	other.mutex.Lock()
+	right := append([]byte(nil), other.value...)
+	other.mutex.Unlock()
+	defer clear(left)
+	defer clear(right)
+	if len(left) == 0 || len(left) != len(right) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(left, right) == 1
 }
 
 // String 防止 `%s`、`%v` 与默认日志打印 credential。

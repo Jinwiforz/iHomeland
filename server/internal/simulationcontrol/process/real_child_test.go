@@ -7,9 +7,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +22,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jinwiforz/ihomeland/server/internal/account"
+	"github.com/jinwiforz/ihomeland/server/internal/battlequalification/protocolclient"
+	"github.com/jinwiforz/ihomeland/server/internal/battleticket"
+	"github.com/jinwiforz/ihomeland/server/internal/battleticketcontrol"
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
+	"github.com/jinwiforz/ihomeland/server/internal/session"
 	"github.com/jinwiforz/ihomeland/server/internal/simulationcontrol"
+	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 )
 
 // TestRealChildBattleUDPReadyBeforeHello 验证真实 Go parent 只有在 child 已绑定唯一 UDP socket 后才收到 hello。
@@ -65,6 +73,747 @@ func TestRealChildBattleUDPReadyBeforeHello(t *testing.T) {
 	if err := controller.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestRealChildProtocolClientSessionStart 验证两个真实 child 通过唯一 UDP listener 完成握手。
+func TestRealChildProtocolClientSessionStart(t *testing.T) {
+	if os.Getenv("IHOMELAND_SIMULATION_REAL_CHILD") != "1" {
+		t.Skip("real simulation child harness is required")
+	}
+	binaryPath, receiptPath := realArtifactPaths(t)
+	clientPath := filepath.Join(
+		filepath.Dir(binaryPath),
+		"ihomeland-battle-protocol-client.exe",
+	)
+	probe, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := uint16(probe.LocalAddr().(*net.UDPAddr).Port)
+	_ = probe.Close()
+	nonce, err := simulationcontrol.NewSessionNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualificationRunID, err := simulationcontrol.NewQualificationRunID(
+		"bqrun_" + nonce.String()[:32],
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := &diagnosticCollector{}
+	owner, err := Start(
+		Config{
+			BinaryPath:                 binaryPath,
+			BinarySHA256:               fileDigest(t, binaryPath),
+			QualificationReceiptPath:   receiptPath,
+			QualificationReceiptSHA256: fileDigest(t, receiptPath),
+			RequestTimeout:             3 * time.Second,
+			ShutdownTimeout:            3 * time.Second,
+			StderrLineLimit:            1024,
+			BattleUDPEnabled:           true,
+			BattleUDPBindHost:          "127.0.0.1",
+			BattleUDPBindPort:          port,
+			BattleUDPAdvertisedHost:    "127.0.0.1",
+			BattleUDPAdvertisedPort:    port,
+			BattleListenerIdentity:     "0123456789abcdef0123456789abcdef",
+			QualificationRunID:         qualificationRunID,
+			QualificationMode:          true,
+		},
+		nonce,
+		simulationcontrol.NewProposalInbox(),
+		diagnostics,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Terminate(context.Background()) })
+	controllerConfig := realControllerConfig(t)
+	controllerConfig.QualificationRunID = qualificationRunID
+	controllerConfig.QualificationMode = true
+	controller, err := simulationcontrol.BootstrapController(
+		context.Background(),
+		owner.Session(),
+		controllerConfig,
+	)
+	if err != nil {
+		t.Fatalf("bootstrap: %v diagnostics=%#v", err, diagnostics.snapshot())
+	}
+	snapshot := realStartingSnapshot(t)
+	if err := controller.Start(context.Background(), snapshot); err != nil {
+		t.Fatalf("start instance: %v", err)
+	}
+	target, found := controller.ResolveTarget(snapshot.Stamp())
+	if !found || target.Validate() != nil {
+		t.Fatalf("resolve target: found=%v target=%+v", found, target)
+	}
+
+	playerID, err := account.NewPlayerID("ply_realprotocolclient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := session.NewSessionID("ses_realprotocolclient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorSlot, err := battleticket.NewActorSlot(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := battleticket.NewEndpoint("127.0.0.1", port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, err := battleticket.NewIssueID("biss_real_protocol_client_0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireIdentity, err := battleticket.ParseDigestHex(strings.Repeat("1", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuedAt := time.Now().UTC().Truncate(time.Microsecond)
+	facts := battleticket.Facts{
+		PlayerID:              playerID,
+		SessionID:             sessionID,
+		SessionEpoch:          session.InitialEpoch,
+		Role:                  battleticket.RoleOwner,
+		WorldID:               snapshot.Stamp().WorldID(),
+		Assignment:            snapshot.Stamp(),
+		AssignmentFingerprint: target.AssignmentFingerprint,
+		RuntimeNodeID:         target.RuntimeNodeID,
+		SimulationNodeID:      target.NodeID,
+		SimulationInstanceID:  target.InstanceID,
+		MappingGeneration:     target.MappingGeneration,
+		TargetRevision:        target.Revision,
+		ModelIdentity:         target.ModelManifest,
+		ProfileIdentity:       target.ProfileManifest,
+		ConfigIdentity:        target.ConfigIdentity,
+		WireIdentity:          wireIdentity,
+		ActorSlot:             actorSlot,
+		Endpoint:              endpoint,
+		IssueID:               issueID,
+		IssuedAt:              issuedAt,
+		ExpiresAt:             issuedAt.Add(30 * time.Second),
+	}
+	derivationKey := make([]byte, sha256.Size)
+	for index := range derivationKey {
+		derivationKey[index] = 0x42
+	}
+	deriver, err := battleticket.NewDeriver(derivationKey)
+	clear(derivationKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := deriver.Derive(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := battleticketcontrol.NewRegistry(owner.Session(), target.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Install(context.Background(), target, material); err != nil {
+		t.Fatalf(
+			"install ticket: %v cause=%v diagnostics=%#v child=%v",
+			err,
+			errors.Unwrap(err),
+			diagnostics.snapshot(),
+			owner.Err(),
+		)
+	}
+
+	buildBytes, err := hex.DecodeString(realBuildIdentity(t))
+	if err != nil || len(buildBytes) != sha256.Size {
+		t.Fatalf("decode protocol client identity: %v", err)
+	}
+	var buildIdentity [sha256.Size]byte
+	copy(buildIdentity[:], buildBytes)
+	processContext, cancelProcess := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer cancelProcess()
+	clientSupervisor, err := protocolclient.Start(
+		processContext,
+		protocolclient.Config{
+			ExecutablePath:        clientPath,
+			ExpectedBuildIdentity: buildIdentity,
+		},
+	)
+	if err != nil {
+		t.Fatalf("start protocol client: %v", err)
+	}
+	credential := &protocolclient.SessionCredential{
+		TicketID:     material.Binding().TicketID().Bytes(),
+		TicketSecret: material.Secret().Bytes(),
+	}
+	startContext, cancelStart := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	sessionEvent, err := clientSupervisor.StartSession(
+		startContext,
+		protocolclient.SessionStart{
+			ClientSlot: 1,
+			Endpoint: netip.AddrPortFrom(
+				netip.MustParseAddr("127.0.0.1"),
+				port,
+			),
+			Credential: credential,
+			TicketExpiresAtUnixMS: uint64(
+				facts.ExpiresAt.UnixMilli(),
+			),
+		},
+	)
+	cancelStart()
+	if err != nil || sessionEvent.ClientSlot != 1 {
+		t.Fatalf("session start event=%+v err=%v diagnostics=%#v", sessionEvent, err, diagnostics.snapshot())
+	}
+	var retainedCredential byte
+	for _, value := range credential.TicketID {
+		retainedCredential |= value
+	}
+	for _, value := range credential.TicketSecret {
+		retainedCredential |= value
+	}
+	if retainedCredential != 0 {
+		t.Fatal("real supervisor retained ticket credential")
+	}
+	var pollReceipt protocolclient.PollReceipt
+	for probeSequence := uint64(1); probeSequence <= 3 &&
+		pollReceipt.SnapshotCount == 0; probeSequence++ {
+		workloadContext, cancelWorkload := context.WithTimeout(
+			context.Background(),
+			3*time.Second,
+		)
+		probeEvent, workloadErr := clientSupervisor.SendWorkload(
+			workloadContext,
+			protocolclient.WorkloadCommand{
+				ClientSlot:          1,
+				Operation:           protocolclient.WorkloadProbe,
+				RepeatCount:         1,
+				ApplicationSequence: probeSequence,
+				ApplicationTick:     probeSequence,
+			},
+		)
+		cancelWorkload()
+		if workloadErr != nil ||
+			probeEvent.Kind != protocolclient.WorkloadDatagramSent ||
+			probeEvent.Count != 1 {
+			t.Fatalf("send real probe: event=%+v err=%v", probeEvent, workloadErr)
+		}
+		pollContext, cancelPoll := context.WithTimeout(
+			context.Background(),
+			3*time.Second,
+		)
+		pollReceipt, err = clientSupervisor.PollSession(
+			pollContext,
+			protocolclient.Poll{
+				ClientSlot:    1,
+				MaximumEvents: 4,
+				Wait:          time.Second,
+			},
+		)
+		cancelPoll()
+		if err != nil {
+			break
+		}
+	}
+	if err != nil || pollReceipt.SnapshotCount == 0 ||
+		pollReceipt.LatestServerTick == 0 {
+		t.Fatalf("poll real snapshot: receipt=%+v err=%v diagnostics=%#v", pollReceipt, err, diagnostics.snapshot())
+	}
+	inputTick := uint64(1) + (pollReceipt.LatestServerTick-1)*2
+	workloadContext, cancelWorkload := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	inputEvent, err := clientSupervisor.SendWorkload(
+		workloadContext,
+		protocolclient.WorkloadCommand{
+			ClientSlot:          1,
+			Operation:           protocolclient.WorkloadInputBundle,
+			CommandKind:         1,
+			RepeatCount:         1,
+			ApplicationSequence: inputTick,
+			ApplicationTick:     inputTick,
+			ValueA:              500,
+			ValueB:              -500,
+		},
+	)
+	cancelWorkload()
+	if err != nil || inputEvent.Count != 1 {
+		t.Fatalf("send real input: event=%+v err=%v", inputEvent, err)
+	}
+	for attempt := 0; attempt < 4 &&
+		pollReceipt.LastProcessedInputTick < inputTick; attempt++ {
+		pollContext, cancelPoll := context.WithTimeout(
+			context.Background(),
+			3*time.Second,
+		)
+		pollReceipt, err = clientSupervisor.PollSession(
+			pollContext,
+			protocolclient.Poll{
+				ClientSlot:    1,
+				MaximumEvents: 8,
+				Wait:          500 * time.Millisecond,
+			},
+		)
+		cancelPoll()
+		if err != nil {
+			break
+		}
+	}
+	if err != nil || pollReceipt.LastProcessedInputTick < inputTick {
+		t.Fatalf(
+			"real input acknowledgement: inputTick=%d receipt=%+v err=%v",
+			inputTick,
+			pollReceipt,
+			err,
+		)
+	}
+	snapshotCountBeforeSecurity := pollReceipt.SnapshotCount
+	for index, delivery := range []protocolclient.DeliveryMutation{
+		protocolclient.DeliveryExactReplay,
+		protocolclient.DeliveryTamperedTag,
+		protocolclient.DeliveryOversizePrefix,
+	} {
+		securityContext, cancelSecurity := context.WithTimeout(
+			context.Background(),
+			3*time.Second,
+		)
+		event, securityErr := clientSupervisor.SendWorkload(
+			securityContext,
+			protocolclient.WorkloadCommand{
+				ClientSlot:          1,
+				Operation:           protocolclient.WorkloadProbe,
+				RepeatCount:         1,
+				ApplicationSequence: uint64(index) + 10,
+				ApplicationTick:     pollReceipt.SnapshotCount,
+				Delivery:            delivery,
+			},
+		)
+		cancelSecurity()
+		if securityErr != nil || event.Count != 2 {
+			t.Fatalf("real delivery mutation %d: event=%+v err=%v", delivery, event, securityErr)
+		}
+	}
+	pollContext, cancelPoll := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	pollReceipt, err = clientSupervisor.PollSession(
+		pollContext,
+		protocolclient.Poll{
+			ClientSlot:    1,
+			MaximumEvents: 8,
+			Wait:          time.Second,
+		},
+	)
+	cancelPoll()
+	if err != nil ||
+		pollReceipt.SnapshotCount < snapshotCountBeforeSecurity+3 {
+		t.Fatalf("real replay/tamper/MTU gate: receipt=%+v err=%v", pollReceipt, err)
+	}
+	metricsBeforeExpiry, err := controller.QualificationSnapshot(
+		context.Background(),
+		qualificationRunID,
+		snapshot.Stamp(),
+	)
+	if err != nil {
+		t.Fatalf("read metrics before expired input: %v", err)
+	}
+	expiredContext, cancelExpired := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	expiredEvent, err := clientSupervisor.SendWorkload(
+		expiredContext,
+		protocolclient.WorkloadCommand{
+			ClientSlot:          1,
+			Operation:           protocolclient.WorkloadInputBundle,
+			CommandKind:         3,
+			RepeatCount:         1,
+			ApplicationSequence: inputTick + 20,
+			ApplicationTick:     1,
+		},
+	)
+	cancelExpired()
+	if err != nil || expiredEvent.Count != 1 {
+		t.Fatalf("send expired real input: event=%+v err=%v", expiredEvent, err)
+	}
+	snapshotCountBeforeExpiry := pollReceipt.SnapshotCount
+	reliableCountBeforeExpiry := pollReceipt.ReliableCount
+	pollContext, cancelPoll = context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	pollReceipt, err = clientSupervisor.PollSession(
+		pollContext,
+		protocolclient.Poll{
+			ClientSlot:    1,
+			MaximumEvents: 2,
+			Wait:          500 * time.Millisecond,
+		},
+	)
+	cancelPoll()
+	if err != nil ||
+		pollReceipt.SnapshotCount < snapshotCountBeforeExpiry ||
+		pollReceipt.ReliableCount != reliableCountBeforeExpiry {
+		t.Fatalf("expired real input advanced application state: receipt=%+v err=%v", pollReceipt, err)
+	}
+	metricsAfterExpiry, err := controller.QualificationSnapshot(
+		context.Background(),
+		qualificationRunID,
+		snapshot.Stamp(),
+	)
+	if err != nil {
+		t.Fatalf("read metrics after expired input: %v", err)
+	}
+	if metricsAfterExpiry.Metrics.RejectedPackets !=
+		metricsBeforeExpiry.Metrics.RejectedPackets+1 {
+		t.Fatalf(
+			"expired real input rejection count drifted: before=%d after=%d",
+			metricsBeforeExpiry.Metrics.RejectedPackets,
+			metricsAfterExpiry.Metrics.RejectedPackets,
+		)
+	}
+	backpressureContext, cancelBackpressure := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	backpressureEvent, err := clientSupervisor.SendWorkload(
+		backpressureContext,
+		protocolclient.WorkloadCommand{
+			ClientSlot:          1,
+			Operation:           protocolclient.WorkloadProbe,
+			RepeatCount:         32,
+			ApplicationSequence: 100,
+			ApplicationTick:     pollReceipt.SnapshotCount,
+		},
+	)
+	cancelBackpressure()
+	if err != nil || backpressureEvent.Count != 32 {
+		t.Fatalf("send real backpressure burst: event=%+v err=%v", backpressureEvent, err)
+	}
+	snapshotCountBeforeIngressBurst := pollReceipt.SnapshotCount
+	pollContext, cancelPoll = context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	pollReceipt, err = clientSupervisor.PollSession(
+		pollContext,
+		protocolclient.Poll{
+			ClientSlot:    1,
+			MaximumEvents: 8,
+			Wait:          time.Second,
+		},
+	)
+	cancelPoll()
+	publishedDuringIngress := pollReceipt.SnapshotCount -
+		snapshotCountBeforeIngressBurst
+	if err != nil || publishedDuringIngress == 0 {
+		t.Fatalf(
+			"continuous ingress starved periodic publication: receipt=%+v published=%d err=%v",
+			pollReceipt,
+			publishedDuringIngress,
+			err,
+		)
+	}
+	transitionContext, cancelTransition := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	rekeyEvent, err := clientSupervisor.Transition(
+		transitionContext,
+		protocolclient.NetworkTransition{
+			ClientSlot: 1,
+			Operation:  protocolclient.NetworkRekey,
+		},
+	)
+	cancelTransition()
+	if err != nil || !rekeyEvent.Committed ||
+		rekeyEvent.Generation != 2 {
+		t.Fatalf("real rekey: event=%+v err=%v", rekeyEvent, err)
+	}
+	workloadContext, cancelWorkload = context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	resyncEvent, err := clientSupervisor.SendWorkload(
+		workloadContext,
+		protocolclient.WorkloadCommand{
+			ClientSlot:          1,
+			Operation:           protocolclient.WorkloadResyncRequest,
+			RepeatCount:         1,
+			ApplicationSequence: 1,
+			ApplicationTick:     pollReceipt.LatestServerTick,
+			ValueA:              1,
+		},
+	)
+	cancelWorkload()
+	if err != nil || resyncEvent.Count == 0 {
+		t.Fatalf("send real resync: event=%+v err=%v", resyncEvent, err)
+	}
+	pollContext, cancelPoll = context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	pollReceipt, err = clientSupervisor.PollSession(
+		pollContext,
+		protocolclient.Poll{
+			ClientSlot:    1,
+			MaximumEvents: 8,
+			Wait:          time.Second,
+		},
+	)
+	cancelPoll()
+	if err != nil || pollReceipt.ReliableCount == 0 ||
+		pollReceipt.SnapshotCount < 2 {
+		t.Fatalf("poll real KCP/resync: receipt=%+v err=%v diagnostics=%#v", pollReceipt, err, diagnostics.snapshot())
+	}
+	transitionContext, cancelTransition = context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	closeEvent, err := clientSupervisor.Transition(
+		transitionContext,
+		protocolclient.NetworkTransition{
+			ClientSlot: 1,
+			Operation:  protocolclient.NetworkClose,
+		},
+	)
+	cancelTransition()
+	if err != nil || !closeEvent.Committed ||
+		closeEvent.Generation != 0 {
+		t.Fatalf("real close: event=%+v err=%v", closeEvent, err)
+	}
+	closeContext, cancelClose := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	if err := clientSupervisor.Close(closeContext); err != nil {
+		cancelClose()
+		t.Fatalf("close protocol client: %v", err)
+	}
+	cancelClose()
+	if clientSupervisor.HadStderr() {
+		t.Fatal("real protocol client wrote stderr")
+	}
+	if _, err := registry.Revoke(
+		context.Background(),
+		target,
+		material.Binding(),
+	); err != nil {
+		t.Fatalf("revoke closed owner ticket: %v", err)
+	}
+	type additionalActor struct {
+		supervisor *protocolclient.Supervisor
+		cancel     context.CancelFunc
+		slot       uint8
+		binding    battleticket.Binding
+	}
+	additionalActors := make([]additionalActor, 0, 8)
+	for slot := uint8(0); slot < 8; slot++ {
+		material := deriveRealActorMaterial(
+			t,
+			deriver,
+			facts,
+			int(slot)+2,
+			slot,
+		)
+		supervisor, cancelActor := startRealProtocolActor(
+			t,
+			registry,
+			target,
+			material,
+			clientPath,
+			buildIdentity,
+			slot+1,
+			port,
+		)
+		t.Cleanup(func() {
+			cleanupContext, cancelCleanup :=
+				context.WithTimeout(
+					context.Background(),
+					time.Second,
+				)
+			_ = supervisor.Close(cleanupContext)
+			cancelCleanup()
+			cancelActor()
+		})
+		additionalActors = append(
+			additionalActors,
+			additionalActor{
+				supervisor: supervisor,
+				cancel:     cancelActor,
+				slot:       slot + 1,
+				binding:    material.Binding(),
+			},
+		)
+	}
+	if _, err := battleticket.NewActorSlot(8); err == nil {
+		t.Fatal("real ninth actor admission was not rejected")
+	}
+	if _, err := registry.Revoke(
+		context.Background(),
+		target,
+		additionalActors[0].binding,
+	); err != nil {
+		t.Fatalf("revoke active visitor: %v", err)
+	}
+	invalidationContext, cancelInvalidation := context.WithTimeout(
+		context.Background(),
+		2*time.Second,
+	)
+	if _, err := additionalActors[0].supervisor.Transition(
+		invalidationContext,
+		protocolclient.NetworkTransition{
+			ClientSlot: additionalActors[0].slot,
+			Operation:  protocolclient.NetworkClose,
+		},
+	); err == nil {
+		cancelInvalidation()
+		t.Fatal("revoked real visitor session remained active")
+	}
+	cancelInvalidation()
+	for _, actor := range additionalActors {
+		actorCloseContext, cancelActorClose := context.WithTimeout(
+			context.Background(),
+			3*time.Second,
+		)
+		if err := actor.supervisor.Close(actorCloseContext); err != nil {
+			cancelActorClose()
+			t.Fatalf("shutdown visitor slot %d: %v", actor.slot, err)
+		}
+		cancelActorClose()
+		actor.cancel()
+	}
+	if err := controller.Stop(context.Background(), snapshot.Stamp()); err != nil {
+		t.Fatalf("stop instance: %v", err)
+	}
+	if err := controller.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// deriveRealActorMaterial 从共同 target 事实构造一个不同账号/Session/VisitSession actor。
+func deriveRealActorMaterial(
+	t *testing.T,
+	deriver *battleticket.Deriver,
+	base battleticket.Facts,
+	identityIndex int,
+	slot uint8,
+) battleticket.Material {
+	t.Helper()
+	playerID, err := account.NewPlayerID(
+		fmt.Sprintf("ply_realvisitor%02d", identityIndex),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := session.NewSessionID(
+		fmt.Sprintf("ses_realvisitor%02d", identityIndex),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visitSessionID, err := visitsession.NewVisitSessionID(
+		fmt.Sprintf("vses_realvisitor%02d", identityIndex),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorSlot, err := battleticket.NewActorSlot(slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID, err := battleticket.NewIssueID(
+		fmt.Sprintf("biss_real_visitor_%02d_0001", identityIndex),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuedAt := time.Now().UTC().Truncate(time.Microsecond)
+	base.PlayerID = playerID
+	base.SessionID = sessionID
+	base.Role = battleticket.RoleVisitor
+	base.VisitSessionID = visitSessionID
+	base.ActorSlot = actorSlot
+	base.IssueID = issueID
+	base.IssuedAt = issuedAt
+	base.ExpiresAt = issuedAt.Add(30 * time.Second)
+	material, err := deriver.Derive(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return material
+}
+
+// startRealProtocolActor 安装公开 credential 并启动一个独立真实 client process。
+func startRealProtocolActor(
+	t *testing.T,
+	registry *battleticketcontrol.Registry,
+	target simulationcontrol.SimulationTarget,
+	material battleticket.Material,
+	clientPath string,
+	buildIdentity [sha256.Size]byte,
+	clientSlot uint8,
+	port uint16,
+) (*protocolclient.Supervisor, context.CancelFunc) {
+	t.Helper()
+	if _, err := registry.Install(
+		context.Background(),
+		target,
+		material,
+	); err != nil {
+		t.Fatalf("install actor slot %d: %v", clientSlot, err)
+	}
+	processContext, cancelProcess := context.WithTimeout(
+		context.Background(),
+		30*time.Second,
+	)
+	supervisor, err := protocolclient.Start(
+		processContext,
+		protocolclient.Config{
+			ExecutablePath:        clientPath,
+			ExpectedBuildIdentity: buildIdentity,
+		},
+	)
+	if err != nil {
+		cancelProcess()
+		t.Fatalf("start actor slot %d: %v", clientSlot, err)
+	}
+	credential := &protocolclient.SessionCredential{
+		TicketID:     material.Binding().TicketID().Bytes(),
+		TicketSecret: material.Secret().Bytes(),
+	}
+	startContext, cancelStart := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	event, err := supervisor.StartSession(
+		startContext,
+		protocolclient.SessionStart{
+			ClientSlot: clientSlot,
+			Endpoint: netip.AddrPortFrom(
+				netip.MustParseAddr("127.0.0.1"),
+				port,
+			),
+			Credential: credential,
+			TicketExpiresAtUnixMS: uint64(
+				material.Binding().Facts().ExpiresAt.UnixMilli(),
+			),
+		},
+	)
+	cancelStart()
+	if err != nil || event.ClientSlot != clientSlot {
+		_ = supervisor.Close(context.Background())
+		cancelProcess()
+		t.Fatalf("start actor slot %d: event=%+v err=%v", clientSlot, event, err)
+	}
+	return supervisor, cancelProcess
 }
 
 // diagnosticCollector 保存低敏 child stderr 供失败断言。
@@ -314,7 +1063,7 @@ func TestRealSessionMultipleStarts(t *testing.T) {
 			"actorCapacity":           8,
 			"expectedBuildIdentity":   realBuildIdentity(t),
 			"expectedModelManifest":   "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
-			"expectedProfileManifest": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+			"expectedProfileManifest": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
 			"instanceCapacity":        8,
 			"runtimeNodeId":           "rnode_realchildtest",
 			"simulationNodeId":        "snode_session",
@@ -409,7 +1158,7 @@ func TestRealChildResponseLossProxyReplaysStart(t *testing.T) {
 			"actorCapacity":           8,
 			"expectedBuildIdentity":   realBuildIdentity(t),
 			"expectedModelManifest":   "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
-			"expectedProfileManifest": "ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f",
+			"expectedProfileManifest": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
 			"instanceCapacity":        8,
 			"runtimeNodeId":           "rnode_proxy",
 			"simulationNodeId":        "snode_proxy",
@@ -580,7 +1329,7 @@ func realControllerConfig(t *testing.T) simulationcontrol.ControllerConfig {
 		Build: simulationcontrol.BuildBinding{
 			BuildIdentity:         digest(realBuildIdentity(t)),
 			ModelManifest:         digest("65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1"),
-			ProfileManifest:       digest("ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f"),
+			ProfileManifest:       digest("c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424"),
 			PlatformQualification: "implementation-qualified-windows-x64",
 		},
 		Capacity:           simulationcontrol.NodeCapacity{Instances: 8, Actors: 8},

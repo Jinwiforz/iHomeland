@@ -14,9 +14,15 @@ endif()
 set(approved_udp_adapter
     "${IHOMELAND_SIMULATION_ROOT}/src/transport/udp_listener.cpp")
 cmake_path(NORMAL_PATH approved_udp_adapter)
+set(approved_qualification_udp_client
+    "${IHOMELAND_SIMULATION_ROOT}/apps/battle_protocol_client/main.cpp")
+cmake_path(NORMAL_PATH approved_qualification_udp_client)
 set(approved_kcp_adapter
     "${IHOMELAND_SIMULATION_ROOT}/src/transport/kcp_adapter.cpp")
 cmake_path(NORMAL_PATH approved_kcp_adapter)
+set(approved_qualification_kcp_client
+    "${IHOMELAND_SIMULATION_ROOT}/src/qualification/battle_protocol_kcp.cpp")
+cmake_path(NORMAL_PATH approved_qualification_kcp_client)
 set(udp_socket_owner_count 0)
 set(kcp_owner_count 0)
 
@@ -24,24 +30,34 @@ foreach(source_file IN LISTS scope_files)
     cmake_path(NORMAL_PATH source_file)
     file(READ "${source_file}" content)
     if(content MATCHES "#[ \t]*include[ \t]*[<\"](asio|boost/asio|winsock|sys/socket|grpc|mysql|redis|UnityEngine)")
-        if(NOT source_file STREQUAL approved_udp_adapter OR
-           NOT content MATCHES "#[ \t]*include[ \t]*<asio\\.hpp>")
+        if(source_file STREQUAL approved_qualification_udp_client)
+            if(NOT content MATCHES "#[ \t]*include[ \t]*<winsock2\\.h>")
+                message(FATAL_ERROR "B0.6 qualification UDP client 缺少唯一 Winsock owner：${source_file}")
+            endif()
+        elseif(NOT source_file STREQUAL approved_udp_adapter OR
+               NOT content MATCHES "#[ \t]*include[ \t]*<asio\\.hpp>")
             message(FATAL_ERROR "B0.5 网络 include 越过唯一 UDP adapter：${source_file}")
         endif()
     endif()
     if(content MATCHES "(^|[^A-Za-z0-9_])(socket|bind|listen|accept|connect|WSAStartup)[ \t\r\n]*\\("
         OR content MATCHES "asio::ip::udp::socket")
-        if(NOT source_file STREQUAL approved_udp_adapter)
+        if(NOT source_file STREQUAL approved_udp_adapter AND
+           NOT source_file STREQUAL approved_qualification_udp_client)
             message(FATAL_ERROR "B0.5 socket 行为越过唯一 UDP adapter：${source_file}")
         endif()
-        math(EXPR udp_socket_owner_count "${udp_socket_owner_count} + 1")
+        if(source_file STREQUAL approved_udp_adapter)
+            math(EXPR udp_socket_owner_count "${udp_socket_owner_count} + 1")
+        endif()
     endif()
     if(content MATCHES "ikcp_")
-        if(NOT source_file STREQUAL approved_kcp_adapter OR
+        if((NOT source_file STREQUAL approved_kcp_adapter AND
+            NOT source_file STREQUAL approved_qualification_kcp_client) OR
            NOT content MATCHES "#[ \t]*include[ \t]*<ikcp\\.h>")
             message(FATAL_ERROR "B0.5 KCP 行为越过唯一 adapter：${source_file}")
         endif()
-        math(EXPR kcp_owner_count "${kcp_owner_count} + 1")
+        if(source_file STREQUAL approved_kcp_adapter)
+            math(EXPR kcp_owner_count "${kcp_owner_count} + 1")
+        endif()
     endif()
     if(content MATCHES "UnityEngine|MonoBehaviour"
         OR content MATCHES "(BattleMessageID|BattleMessageId|battle_message_id)[ \t]*=")

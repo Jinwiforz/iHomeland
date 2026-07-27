@@ -17,7 +17,7 @@ func TestFileFaultControllerCorrelatesOwnerResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- controller.Execute(context.Background(), "redis-flush") }()
+	go func() { done <- controller.Execute(context.Background(), FaultRedisFlush) }()
 	requestPath := filepath.Join(directory, "fault-request.json")
 	var request FaultRequest
 	deadline := time.Now().Add(time.Second)
@@ -34,5 +34,16 @@ func TestFileFaultControllerCorrelatesOwnerResponse(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+// TestFileFaultControllerRejectsUnknownOperation 验证 checkpoint 只接受封闭故障集合。
+func TestFileFaultControllerRejectsUnknownOperation(t *testing.T) {
+	controller, err := NewFileFaultController(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Execute(context.Background(), "unknown"); err == nil {
+		t.Fatal("unknown qualification fault was accepted")
 	}
 }

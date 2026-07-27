@@ -3,6 +3,7 @@ package testclient
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	visitv1 "github.com/jinwiforz/ihomeland/server/internal/generated/proto/ihomeland/visit/v1"
@@ -30,6 +31,8 @@ type joinedVisitFixture struct {
 	visitSessionID string
 	// revision 是最后一次已观察提交的公开 aggregate revision。
 	revision uint64
+	// registerActor 选择场景要求的 register-only 或 register-then-login session 路径。
+	registerActor scenarioActorRegistrar
 }
 
 // runVisitOpenInviteJoin 验证 OPEN、定向 invite、WSS push、HTTPS accept 与 JOIN 收敛。
@@ -61,6 +64,18 @@ func runVisitLeave(ctx context.Context, runtime *ScenarioRuntime) (resultErr err
 	if err != nil {
 		return err
 	}
+	if runtime.Lifecycle != nil {
+		if err := runtime.Lifecycle.recordPredecessor(
+			"visit-membership",
+			fixture.visitSessionID,
+			fixture.visitor.actor.SessionID,
+			strconv.FormatUint(fixture.visitor.actor.SessionEpoch, 10),
+			strconv.FormatUint(fixture.revision, 10),
+			"joined",
+		); err != nil {
+			return err
+		}
+	}
 	response, err := fixture.visitorTCP.Command(ctx, 2111, visitv1.VisitLeaveCommand_builder{ExpectedRevision: proto.Uint64(fixture.revision)}.Build())
 	if err != nil {
 		return err
@@ -73,7 +88,17 @@ func runVisitLeave(ctx context.Context, runtime *ScenarioRuntime) (resultErr err
 	if err := requireRevisionIncrease(fixture.revision, after); err != nil {
 		return err
 	}
-	return expectVisitorSafeReturn(ctx, fixture, visitv1.SafeReturnReason_SAFE_RETURN_REASON_VOLUNTARY_LEAVE)
+	if err := expectVisitorSafeReturn(
+		ctx,
+		fixture,
+		visitv1.SafeReturnReason_SAFE_RETURN_REASON_VOLUNTARY_LEAVE,
+	); err != nil {
+		return err
+	}
+	if runtime.Lifecycle != nil {
+		return runtime.Lifecycle.recordTermination()
+	}
+	return nil
 }
 
 // runVisitKick 验证只有 Owner 可精确 KICK 目标 Visitor 并触发 safe-return。
@@ -167,7 +192,7 @@ type additionalVisitor struct {
 func (fixture *joinedVisitFixture) joinAdditionalVisitor(ctx context.Context) (additionalVisitor, error) {
 	var additional additionalVisitor
 	var err error
-	additional.account, err = registerScenarioActor(fixture.scenario, fixture.runtime)
+	additional.account, err = fixture.registerActor(fixture.scenario, fixture.runtime)
 	if err != nil {
 		return additional, err
 	}
@@ -253,16 +278,24 @@ func (fixture *joinedVisitFixture) joinAdditionalVisitor(ctx context.Context) (a
 
 // setupJoinedVisit 只通过 HTTPS/WSS/TLS_TCP 建立一个 joined Visitor membership。
 func setupJoinedVisit(ctx context.Context, runtime *ScenarioRuntime) (*joinedVisitFixture, error) {
+	return setupJoinedVisitWithRegistrar(ctx, runtime, registerScenarioActor)
+}
+
+// setupJoinedVisitWithRegistrar 允许资格 workload 显式覆盖 actor session 建立路径。
+func setupJoinedVisitWithRegistrar(ctx context.Context, runtime *ScenarioRuntime, registrar scenarioActorRegistrar) (*joinedVisitFixture, error) {
+	if registrar == nil {
+		return nil, errors.New("VisitSession actor registrar is nil")
+	}
 	scenario, err := NewScenarioContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fixture := &joinedVisitFixture{scenario: scenario, runtime: runtime}
-	fixture.owner, err = registerScenarioActor(scenario, runtime)
+	fixture := &joinedVisitFixture{scenario: scenario, runtime: runtime, registerActor: registrar}
+	fixture.owner, err = registrar(scenario, runtime)
 	if err != nil {
 		return fixture, err
 	}
-	fixture.visitor, err = registerScenarioActor(scenario, runtime)
+	fixture.visitor, err = registrar(scenario, runtime)
 	if err != nil {
 		return fixture, err
 	}

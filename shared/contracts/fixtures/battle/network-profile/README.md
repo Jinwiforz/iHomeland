@@ -1,11 +1,11 @@
 # Battle Network Profile
 
-本目录是 `battle-network-profile-v1` 的唯一 source of truth，由 `battle-network-profile` capability 拥有。它消费 `../model/` 中冻结的 `battle-model-v1`，用于选择网络 cadence、窗口、baseline、MTU、逻辑 lane、KCP 参数和资源预算；它不拥有 gameplay 状态迁移，也不修改 model corpus。
+本目录是 `battle-network-profile-v2` 的唯一 source of truth，由 `battle-network-profile` capability 拥有。它消费 `../model/` 中冻结的 `battle-model-v1`，用于选择网络 cadence、窗口、baseline、MTU、逻辑 lane、KCP 参数和资源预算；它不拥有 gameplay 状态迁移，也不修改 model corpus。
 
 ## 版本与文件
 
-- `format_version`：profile 文件结构版本，当前为 `1`。
-- `profile_version`：消费者契约版本，当前为 `battle-network-profile-v1`。
+- `format_version`：profile 文件结构版本，当前为 `2`。
+- `profile_version`：消费者契约版本，当前为 `battle-network-profile-v2`。
 - `model-binding.json`：完整绑定 model manifest、assumptions、cases 与 requirements 的 SHA-256。
 - `profile.json`：selected candidates、参数分类、MTU/KCP、capacity 和后续补证门。
 - `message-inventory.json`：稳定 logical kind 与唯一 raw/KCP lane；不是 production wire registry。
@@ -18,7 +18,7 @@
 
 所有 JSON 必须使用 UTF-8 无 BOM、LF、两个空格缩进和单一末尾换行。对象字段顺序以已提交文件为准；需要排序的数组使用 ordinal 升序。文件摘要是原始 canonical bytes 的 lowercase SHA-256。整数必须位于 schema 范围内，时间、大小、频率、角度和距离必须携带登记单位，禁止依赖 locale、wall clock、线程或本机路径。
 
-逻辑 message kind 使用 `battle.<area>.<name>`，只表达 profile 语义。numeric message ID、Protobuf layout、datagram header、production endpoint、listener 和端口等待安全 battle transport change。每个 logical kind 只能有一个 `raw` 或 `kcp` lane；调用方不得动态换 lane或在 UDP 失败时静默转入现有 TLS/TCP/WSS。
+逻辑 message kind 使用 `battle.<area>.<name>`，只表达 profile 语义。numeric message ID、Protobuf layout、datagram header、production endpoint、listener 和端口由安全 battle transport capability 持有。每个 logical kind 只能有一个 `raw` 或 `kcp` lane；调用方不得动态换 lane或在 UDP 失败时静默转入现有 TLS/TCP/WSS。Application expiry 由发送端 message route 独立拥有：一般可靠事件与生命周期保持 500 ms，resync request/response 为 2250 ms；接收端不伪造 wire 未携带的发送绝对时间，而由 KCP window、queue hard cap 与 session lifecycle 约束重组资源。
 
 ## 资格分类
 

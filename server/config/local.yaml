@@ -85,7 +85,7 @@ publicApi:
     nodeQueueItems: 256
     sessionQueueItems: 256
     kcpQueueItems: 64
-    messageExpiry: 500ms
+    maximumMessageExpiry: 2250ms
     drainTimeout: 3s
   websocketControl:
     path: /v1/control

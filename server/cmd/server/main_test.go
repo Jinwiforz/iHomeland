@@ -222,7 +222,7 @@ func processSimulationControl(t *testing.T) string {
   qualificationReceiptSha256: %s
   buildIdentity: %s
   modelManifest: 65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1
-  profileManifest: ca8d0b85e2f1b57d2209e4f376a174c89833ff30b7b3dd694d26c17408be341f
+  profileManifest: c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424
   configIdentity: da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381
   navigationIdentity: 3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd
   physicsIdentity: ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98

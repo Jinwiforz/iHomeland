@@ -9,6 +9,9 @@
 
 namespace ihomeland::sim {
 
+class BattleRuntimeMetrics;
+class BattleSessionResourceGovernor;
+
 /// BattleResourceRejection 是低基数资源拒绝与终结原因。
 enum class BattleResourceRejection : std::uint8_t {
     /// None 表示本次资源申请成功。
@@ -65,7 +68,8 @@ public:
     static constexpr std::size_t SessionItems = 256;
 
     /// 构造函数初始化固定bucket与低敏metrics，不分配session状态。
-    BattleResourceGovernor();
+    explicit BattleResourceGovernor(
+        BattleRuntimeMetrics* runtime_metrics = nullptr);
 
     /// 析构函数释放固定资源表。
     ~BattleResourceGovernor();
@@ -117,9 +121,66 @@ public:
     [[nodiscard]] BattleResourceMetrics Metrics() const noexcept;
 
 private:
+    friend class BattleSessionResourceGovernor;
+
+    /// ReleaseSession 清除terminal session bucket并归还未释放的node budget。
+    void ReleaseSession(
+        std::uint64_t session_handle) noexcept;
+
     struct Impl;
     /// impl_ 保存固定array、计数与mutex。
     std::unique_ptr<Impl> impl_;
+};
+
+/// BattleSessionResourceGovernor 是单session拥有的node governor有界视图。
+///
+/// 该owner冻结session/instance低敏handle；析构时回收session/message registry与任何
+/// 遗留budget，同时保留node级IP、ticket与instance抗滥用历史。
+class BattleSessionResourceGovernor final {
+public:
+    /// 构造函数绑定唯一session与instance handle。
+    BattleSessionResourceGovernor(
+        BattleResourceGovernor& node_governor,
+        std::uint64_t session_handle,
+        std::uint64_t instance_handle);
+
+    /// 析构函数终结该session全部bucket与未释放budget。
+    ~BattleSessionResourceGovernor();
+
+    BattleSessionResourceGovernor(
+        const BattleSessionResourceGovernor&) = delete;
+    BattleSessionResourceGovernor& operator=(
+        const BattleSessionResourceGovernor&) = delete;
+
+    /// AllowMessage 执行session/message/instance三级rate gate。
+    [[nodiscard]] BattleResourceDecision AllowMessage(
+        std::uint32_t message_id,
+        std::uint16_t message_rate_per_second,
+        std::uint64_t now_unix_ms);
+
+    /// ReserveIngress 申请当前session与node ingress budget。
+    [[nodiscard]] BattleResourceDecision ReserveIngress(
+        std::size_t items);
+
+    /// ReleaseIngress 归还当前session与node ingress budget。
+    void ReleaseIngress(
+        std::size_t items) noexcept;
+
+    /// ReserveEgress 申请当前session与node egress budget。
+    [[nodiscard]] BattleResourceDecision ReserveEgress(
+        std::size_t items);
+
+    /// ReleaseEgress 归还当前session与node egress budget。
+    void ReleaseEgress(
+        std::size_t items) noexcept;
+
+private:
+    /// node_governor_ 是node-global hard budget与registry owner。
+    BattleResourceGovernor* node_governor_;
+    /// session_handle_ 是构造时冻结的低敏session identity。
+    std::uint64_t session_handle_;
+    /// instance_handle_ 是构造时冻结的低敏instance identity。
+    std::uint64_t instance_handle_;
 };
 
 }  // namespace ihomeland::sim

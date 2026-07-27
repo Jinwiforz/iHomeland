@@ -1,16 +1,20 @@
 #include "ihomeland/sim/transport/udp_listener.hpp"
 
 #include <asio.hpp>
+#include <mstcpip.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <deque>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace ihomeland::sim {
 namespace {
@@ -98,10 +102,67 @@ template <std::size_t Size>
     return remote;
 }
 
+/// IsIpv4Mapped 判断 canonical endpoint 是否保存 IPv4-mapped IPv6。
+[[nodiscard]] bool IsIpv4Mapped(
+    const std::array<std::uint8_t, 16>& address) noexcept {
+    return std::ranges::all_of(
+               address.begin(),
+               address.begin() + 10,
+               [](const std::uint8_t value) {
+                   return value == 0;
+               }) &&
+        address[10] == 0xff &&
+        address[11] == 0xff;
+}
+
+/// ParseRemoteEndpoint 从公开 canonical bytes 恢复 closed Asio endpoint。
+[[nodiscard]] std::optional<asio::ip::udp::endpoint>
+ParseRemoteEndpoint(
+    const BattleRemoteEndpoint& remote) noexcept {
+    if (remote.port == 0) {
+        return std::nullopt;
+    }
+    if (IsIpv4Mapped(remote.address)) {
+        asio::ip::address_v4::bytes_type bytes{};
+        std::ranges::copy(
+            remote.address.begin() + 12,
+            remote.address.end(),
+            bytes.begin());
+        const asio::ip::address_v4 address(bytes);
+        if (address.is_unspecified() ||
+            address.is_multicast()) {
+            return std::nullopt;
+        }
+        return asio::ip::udp::endpoint(
+            address,
+            remote.port);
+    }
+    asio::ip::address_v6::bytes_type bytes{};
+    std::ranges::copy(
+        remote.address,
+        bytes.begin());
+    const asio::ip::address_v6 address(bytes);
+    if (address.is_unspecified() ||
+        address.is_multicast()) {
+        return std::nullopt;
+    }
+    return asio::ip::udp::endpoint(
+        address,
+        remote.port);
+}
+
 }  // namespace
 
 /// BattleUdpListener::Impl 隔离 Asio socket、worker 与固定 receive storage。
 struct BattleUdpListener::Impl final {
+    /// PendingSend 拥有 executor 完成前必须保持有效的 output 与 remote。
+    struct PendingSend final {
+        /// datagram 是不超过 MTU ceiling 的独立副本。
+        std::vector<std::uint8_t> datagram;
+        /// remote 是已经过 closed public validation 的 numeric endpoint。
+        asio::ip::udp::endpoint remote;
+    };
+
     /// 构造函数保存已验证配置与唯一上层 multiplexer。
     Impl(
         BattleUdpListenerConfig value,
@@ -178,6 +239,99 @@ struct BattleUdpListener::Impl final {
         }
     }
 
+    /// EnqueueSend 只在 listener executor 上修改 send queue。
+    void EnqueueSend(PendingSend request) {
+        if (!running.load(std::memory_order_acquire) ||
+            !socket.is_open()) {
+            pending_send_datagrams.fetch_sub(
+                1,
+                std::memory_order_acq_rel);
+            rejected_send_datagrams.fetch_add(
+                1,
+                std::memory_order_relaxed);
+            return;
+        }
+        send_queue.push_back(std::move(request));
+        if (!send_in_progress) {
+            ArmSend();
+        }
+    }
+
+    /// ArmSend 在同一 socket 上串行发送 queue front。
+    void ArmSend() {
+        if (send_queue.empty() ||
+            !running.load(std::memory_order_acquire) ||
+            !socket.is_open()) {
+            send_in_progress = false;
+            return;
+        }
+        send_in_progress = true;
+        auto& request = send_queue.front();
+        socket.async_send_to(
+            asio::buffer(request.datagram),
+            request.remote,
+            [this](
+                const asio::error_code& error,
+                const std::size_t sent_bytes_value) {
+                HandleSend(error, sent_bytes_value);
+            });
+    }
+
+    /// HandleSend 终结一个 owned output 并继续唯一串行队列。
+    void HandleSend(
+        const asio::error_code& error,
+        const std::size_t sent_bytes_value) {
+        if (send_queue.empty()) {
+            send_in_progress = false;
+            return;
+        }
+        const auto expected_bytes =
+            send_queue.front().datagram.size();
+        if (!error && sent_bytes_value == expected_bytes) {
+            sent_datagrams.fetch_add(
+                1,
+                std::memory_order_relaxed);
+            sent_bytes.fetch_add(
+                sent_bytes_value,
+                std::memory_order_relaxed);
+        } else if (
+            error != asio::error::operation_aborted ||
+            running.load(std::memory_order_acquire)) {
+            send_failures.fetch_add(
+                1,
+                std::memory_order_relaxed);
+            failed.store(true, std::memory_order_release);
+            running.store(false, std::memory_order_release);
+            asio::error_code ignored;
+            socket.close(ignored);
+        }
+        send_queue.pop_front();
+        pending_send_datagrams.fetch_sub(
+            1,
+            std::memory_order_acq_rel);
+        send_in_progress = false;
+        if (running.load(std::memory_order_acquire)) {
+            ArmSend();
+        } else {
+            DiscardPendingSends();
+        }
+    }
+
+    /// DiscardPendingSends 在 executor 停止或 failure 后释放所有 queue slots。
+    void DiscardPendingSends() noexcept {
+        const auto discarded = send_queue.size();
+        send_queue.clear();
+        send_in_progress = false;
+        if (discarded != 0) {
+            pending_send_datagrams.fetch_sub(
+                discarded,
+                std::memory_order_acq_rel);
+            rejected_send_datagrams.fetch_add(
+                discarded,
+                std::memory_order_relaxed);
+        }
+    }
+
     /// config 是 immutable bind、advertised 与 cookie identity。
     BattleUdpListenerConfig config;
     /// handler 是 node-global authenticated multiplexer 入口。
@@ -191,6 +345,10 @@ struct BattleUdpListener::Impl final {
         receive_buffer{};
     /// receive_remote 是 Asio 写入的当前 source endpoint。
     asio::ip::udp::endpoint receive_remote;
+    /// send_queue 只由 io_context worker 修改并严格串行发送。
+    std::deque<PendingSend> send_queue;
+    /// send_in_progress 表示 queue front 已交给 socket。
+    bool send_in_progress{false};
     /// lifecycle_mutex 串行化 Start、Stop 与 status endpoint snapshot。
     mutable std::mutex lifecycle_mutex;
     /// worker 独占 io_context run loop。
@@ -215,6 +373,18 @@ struct BattleUdpListener::Impl final {
     std::atomic_uint64_t receive_failures{0};
     /// handler_failures 是上层 callback failure 数。
     std::atomic_uint64_t handler_failures{0};
+    /// pending_send_datagrams 是 caller reservation 与 executor queue 的共同 hard budget。
+    std::atomic_size_t pending_send_datagrams{0};
+    /// queued_send_datagrams 是取得 hard-budget slot 的累计数。
+    std::atomic_uint64_t queued_send_datagrams{0};
+    /// sent_datagrams 是完整 send completion 累计数。
+    std::atomic_uint64_t sent_datagrams{0};
+    /// sent_bytes 是成功发送的低敏 byte 累计数。
+    std::atomic_uint64_t sent_bytes{0};
+    /// rejected_send_datagrams 是 invalid、pressure 或 stop 拒绝累计数。
+    std::atomic_uint64_t rejected_send_datagrams{0};
+    /// send_failures 是非 shutdown socket failure 累计数。
+    std::atomic_uint64_t send_failures{0};
 };
 
 BattleUdpListener::BattleUdpListener(
@@ -270,24 +440,54 @@ void BattleUdpListener::Start() {
     impl_->failed.store(false, std::memory_order_release);
     asio::error_code error;
     impl_->socket.open(requested.protocol(), error);
-    if (!error) {
-        const BOOL exclusive_address_use = TRUE;
-        if (::setsockopt(
-                impl_->socket.native_handle(),
-                SOL_SOCKET,
-                SO_EXCLUSIVEADDRUSE,
-                reinterpret_cast<const char*>(
-                    &exclusive_address_use),
-                sizeof(exclusive_address_use)) ==
-            SOCKET_ERROR) {
-            error.assign(
-                WSAGetLastError(),
-                asio::error::get_system_category());
-        }
+    if (error) {
+        throw std::runtime_error(
+            "battle UDP listener socket open failed: " +
+            error.message());
     }
-    if (!error) {
-        impl_->socket.bind(requested, error);
+    const BOOL exclusive_address_use = TRUE;
+    if (::setsockopt(
+            impl_->socket.native_handle(),
+            SOL_SOCKET,
+            SO_EXCLUSIVEADDRUSE,
+            reinterpret_cast<const char*>(
+                &exclusive_address_use),
+            sizeof(exclusive_address_use)) ==
+        SOCKET_ERROR) {
+        error.assign(
+            WSAGetLastError(),
+            asio::error::get_system_category());
+        asio::error_code ignored;
+        impl_->socket.close(ignored);
+        throw std::runtime_error(
+            "battle UDP listener ownership policy failed: " +
+            error.message());
     }
+    // Windows 默认把无连接 UDP 的 ICMP Port Unreachable 映射为下一次
+    // receive 的 WSAECONNRESET；该错误只属于单个远端 datagram，不能终止
+    // node-global listener。必须在首次 receive 前关闭这一 socket 行为。
+    BOOL udp_connection_reset = FALSE;
+    DWORD bytes_returned = 0;
+    if (::WSAIoctl(
+            impl_->socket.native_handle(),
+            SIO_UDP_CONNRESET,
+            &udp_connection_reset,
+            sizeof(udp_connection_reset),
+            nullptr,
+            0,
+            &bytes_returned,
+            nullptr,
+            nullptr) == SOCKET_ERROR) {
+        error.assign(
+            WSAGetLastError(),
+            asio::error::get_system_category());
+        asio::error_code ignored;
+        impl_->socket.close(ignored);
+        throw std::runtime_error(
+            "battle UDP listener ICMP policy failed: " +
+            error.message());
+    }
+    impl_->socket.bind(requested, error);
     if (error) {
         asio::error_code ignored;
         impl_->socket.close(ignored);
@@ -343,6 +543,71 @@ void BattleUdpListener::Stop() noexcept {
     if (worker.joinable()) {
         worker.join();
     }
+    impl_->io_context.restart();
+    while (impl_->io_context.poll() != 0) {
+    }
+    impl_->DiscardPendingSends();
+    impl_->io_context.stop();
+}
+
+BattleUdpSendDisposition BattleUdpListener::Send(
+    const std::span<const std::uint8_t> datagram,
+    const BattleRemoteEndpoint& remote) {
+    if (datagram.empty() ||
+        datagram.size() > MaximumDatagramBytes) {
+        impl_->rejected_send_datagrams.fetch_add(
+            1,
+            std::memory_order_relaxed);
+        return BattleUdpSendDisposition::InvalidDatagram;
+    }
+    const auto endpoint = ParseRemoteEndpoint(remote);
+    if (!endpoint.has_value()) {
+        impl_->rejected_send_datagrams.fetch_add(
+            1,
+            std::memory_order_relaxed);
+        return BattleUdpSendDisposition::InvalidRemote;
+    }
+
+    std::scoped_lock lock(impl_->lifecycle_mutex);
+    if (!impl_->running.load(std::memory_order_acquire) ||
+        !impl_->socket.is_open()) {
+        impl_->rejected_send_datagrams.fetch_add(
+            1,
+            std::memory_order_relaxed);
+        return BattleUdpSendDisposition::Stopped;
+    }
+    auto pending = impl_->pending_send_datagrams.load(
+        std::memory_order_relaxed);
+    while (true) {
+        if (pending >= MaximumPendingSendDatagrams) {
+            impl_->rejected_send_datagrams.fetch_add(
+                1,
+                std::memory_order_relaxed);
+            return BattleUdpSendDisposition::QueueFull;
+        }
+        if (impl_->pending_send_datagrams
+                .compare_exchange_weak(
+                    pending,
+                    pending + 1,
+                    std::memory_order_acq_rel,
+                    std::memory_order_relaxed)) {
+            break;
+        }
+    }
+    impl_->queued_send_datagrams.fetch_add(
+        1,
+        std::memory_order_relaxed);
+    asio::post(
+        impl_->io_context,
+        [state = impl_.get(),
+         request = Impl::PendingSend{
+             .datagram = std::vector<std::uint8_t>(
+                 datagram.begin(),
+                 datagram.end()),
+             .remote = *endpoint}]() mutable {
+            state->EnqueueSend(std::move(request));
+        });
+    return BattleUdpSendDisposition::Queued;
 }
 
 BattleUdpListenerStatus BattleUdpListener::Status() const {
@@ -370,6 +635,21 @@ BattleUdpListenerStatus BattleUdpListener::Status() const {
                     std::memory_order_relaxed),
             .handler_failures =
                 impl_->handler_failures.load(
+                    std::memory_order_relaxed),
+            .queued_send_datagrams =
+                impl_->queued_send_datagrams.load(
+                    std::memory_order_relaxed),
+            .sent_datagrams =
+                impl_->sent_datagrams.load(
+                    std::memory_order_relaxed),
+            .sent_bytes =
+                impl_->sent_bytes.load(
+                    std::memory_order_relaxed),
+            .rejected_send_datagrams =
+                impl_->rejected_send_datagrams.load(
+                    std::memory_order_relaxed),
+            .send_failures =
+                impl_->send_failures.load(
                     std::memory_order_relaxed),
         },
     };

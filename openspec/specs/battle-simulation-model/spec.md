@@ -38,6 +38,25 @@
 - **WHEN** 重连或重新同步建立更高 mapping epoch，而旧 epoch 的未确认输入随后到达
 - **THEN** 旧输入以 `stale_generation` 拒绝，客户端历史不能跨 epoch 重演，服务器不把旧 InputTick 重新映射到新时间线
 
+### Requirement: 输入确认前沿必须形成不可变 replication projection
+
+每个 actor 的 `InputTimeline` MUST 在 simulation/replication 冻结点产生包含同一次 committed `ServerTick`、mapping generation 与 `LastProcessedInputTick` 的不可变 projection。该游标 MUST 只越过已经应用或以稳定 accepted/rejected/expired/missing 结果终结的连续 InputTick；网络线程和 snapshot encoder MUST 只消费同一个 commit 的 projection 副本，不得分别读取 Tick 与确认游标，也不得直接读取或修改可变 timeline。更高 mapping generation 建立时 MUST 创建从 0 开始的独立确认前沿，旧 generation 的未决、晚到或重放输入不得推进它。
+
+#### Scenario: gap 被稳定终结
+
+- **WHEN** InputTick 100 与 102 已终结、101 未决，随后 expiry policy 把 101 稳定终结
+- **THEN** 下一 simulation/replication 冻结点可把 `LastProcessedInputTick` 从 100 连续推进到 102，并产生同 generation 的不可变 projection
+
+#### Scenario: 网络线程并发发送 snapshot
+
+- **WHEN** simulation worker 正在处理后续 InputTick，网络线程发送先前冻结的 snapshot projection
+- **THEN** encoder 只观察同一次 commit 的固定 `ServerTick`、generation 与确认游标，不组合旧 Tick 和新游标、不读取半完成 timeline，也不因线程时序产生不同 wire 值
+
+#### Scenario: mapping generation 被替换
+
+- **WHEN** reconnect 建立更高 mapping generation 且旧 generation 仍有未决 InputTick
+- **THEN** 新 generation 的 projection 从 `LastProcessedInputTick = 0` 开始，旧 generation 的后续终结不能改变新 projection
+
 ### Requirement: 输入命令必须只表达受限意图
 
 模型 MUST 只接受 `ContinuousIntentSample`、`JumpPressed`、`SwitchWeapon`、`ActivateAbility` 与受信 `LifecycleDirective` 等登记 command kind。命令 MUST 绑定当前 actor、assignment/instance、session generation、mapping epoch、InputTick、command sequence 和 expiry，并 MUST NOT 携带最终 Transform、grounded、命中目标、伤害值、冷却完成、奖励或可覆盖连接身份的 actor identity。每个命令 MUST 由唯一 stage 决议为 accepted 或稳定 rejection；同一 Tick 的决议 MUST 按登记的 stage、ActorID、InputTick、sequence 与 kind 顺序执行，而不是按网络、容器或线程到达顺序。
