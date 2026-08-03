@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "change": "define-gameplay-configuration-governance",
+  "checks": [
+    {
+      "id": "quality-contract",
+      "reason": "proposal 阶段必须保持 closed validation plan、catalog 引用及普通 change 与最终产品资格的分层"
+    },
+    {
+      "id": "gameplay-config-validate",
+      "reason": "新增 gameplay configuration corpus、identity、reference、range、coverage、parity 与只读失败回归属于直接影响面"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "proposal、design、gameplay-configuration-governance/delivery-sequencing delta specs 与 tasks 必须通过 strict validation"
+    }
+  ]
+}

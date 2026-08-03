@@ -1,0 +1,19 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "coverage-registry",
+  "required_roles": [
+    { "role": "owner-visitor-player", "authority_kind": "actor", "presentation_required": true },
+    { "role": "sword", "authority_kind": "weapon", "presentation_required": false },
+    { "role": "fan", "authority_kind": "weapon", "presentation_required": false },
+    { "role": "sword-grant", "authority_kind": "ability-grant", "presentation_required": false },
+    { "role": "fan-grant", "authority_kind": "ability-grant", "presentation_required": false },
+    { "role": "sword-primary", "authority_kind": "ability", "presentation_required": true },
+    { "role": "fan-primary", "authority_kind": "ability", "presentation_required": true },
+    { "role": "ordinary-monster", "authority_kind": "actor", "presentation_required": true },
+    { "role": "boss", "authority_kind": "actor", "presentation_required": true },
+    { "role": "boss-phase", "authority_kind": "boss-phase", "presentation_required": false },
+    { "role": "personal-world-encounter", "authority_kind": "encounter", "presentation_required": false },
+    { "role": "world-collision", "authority_kind": "collision-layer", "presentation_required": false },
+    { "role": "world-navigation", "authority_kind": "navigation-policy", "presentation_required": false }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "document_kind", "required_roles"],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "coverage-registry" },
+    "required_roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "authority_kind", "presentation_required"],
+        "properties": {
+          "role": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "authority_kind": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "presentation_required": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

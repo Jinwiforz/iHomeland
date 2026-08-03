@@ -1,0 +1,45 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "manifest",
+  "identity_domain": "ihomeland-gameplay-config-v1",
+  "files": [
+    { "path": "packages/governance-reference-v1/authority.json", "document_kind": "authority-catalog", "file_sha256": "7c97e10036f626745348730f6ab6faa5fe963d7b6fa3c95d65e945dbb0db0b6c" },
+    { "path": "packages/governance-reference-v1/bindings.json", "document_kind": "external-bindings", "file_sha256": "72065882cf3b67105d100f8d4e24a361595f35e8cd53c6539bef8fc4a1374bbe" },
+    { "path": "packages/governance-reference-v1/package.json", "document_kind": "gameplay-package", "file_sha256": "3d969f4c158d0b978ef845c5df3def3fe9e13bf178e172eb9d9c89932655d49e" },
+    { "path": "packages/governance-reference-v1/presentation.json", "document_kind": "presentation-catalog", "file_sha256": "a7d326b6781a83abd931888ffc8854fd8d9593b496f774055a12d8149aec3a97" },
+    { "path": "registries/numeric-fields.json", "document_kind": "numeric-registry", "file_sha256": "4405d22d730523a56e45d17f81d6852aceda5c2216b3a9afa018f48aec59cd81" },
+    { "path": "registries/required-coverage.json", "document_kind": "coverage-registry", "file_sha256": "3da9ae421a254c31a50fb0021b2d9853b94b17c42c25d2952b79d7075ff1050d" },
+    { "path": "registries/semantic-types.json", "document_kind": "semantic-registry", "file_sha256": "ab8f13c7b21e0697e9c418b33a8ff39d64c2c635a6bccc53a961d81a74883c61" },
+    { "path": "schema/authority.schema.json", "document_kind": "authority-schema", "file_sha256": "27acaa9d35d923a20cddedfad6844e66f8a68ade340ebb9bd1edfdffe11e2d8b" },
+    { "path": "schema/bindings.schema.json", "document_kind": "bindings-schema", "file_sha256": "87b584bc66b8c52a42c6886bb695b90995cd2809b851a9dcb87ef0666b97dcea" },
+    { "path": "schema/coverage.schema.json", "document_kind": "coverage-schema", "file_sha256": "34e9c41454586ad73c73e2cc53befc02c84d604c0ff131ea1f69915587836bd2" },
+    { "path": "schema/manifest.schema.json", "document_kind": "manifest-schema", "file_sha256": "1c14da1269f6874b626afaccc81a603c5950738cf37bae55d024827f11beb46b" },
+    { "path": "schema/numeric-range.schema.json", "document_kind": "numeric-range-schema", "file_sha256": "034bee5b8160c6a01a437251507b6cc24d86ad654a216bb0c0f4cefe118d24cd" },
+    { "path": "schema/package.schema.json", "document_kind": "package-schema", "file_sha256": "17ac82c16ea7316a3cec8ca5bc9e6c2279f27413a164dec388f98fda9ec22b31" },
+    { "path": "schema/presentation.schema.json", "document_kind": "presentation-schema", "file_sha256": "0b69320d60974e5131e717daa00199c6425b64e165bd1b75bf86e6bac731265e" },
+    { "path": "schema/typed-reference.schema.json", "document_kind": "typed-reference-schema", "file_sha256": "822e8aaa3ed884c5ee3bcfd25e034ccbfbad5fc9fe609685ea3c2af4f10bc1c6" }
+  ],
+  "packages": [
+    {
+      "package_id": "governance-reference-v1",
+      "package_path": "packages/governance-reference-v1/package.json",
+      "identity_files": [
+        "packages/governance-reference-v1/authority.json",
+        "packages/governance-reference-v1/bindings.json",
+        "packages/governance-reference-v1/package.json",
+        "packages/governance-reference-v1/presentation.json",
+        "registries/numeric-fields.json",
+        "registries/required-coverage.json",
+        "registries/semantic-types.json",
+        "schema/authority.schema.json",
+        "schema/bindings.schema.json",
+        "schema/coverage.schema.json",
+        "schema/manifest.schema.json",
+        "schema/numeric-range.schema.json",
+        "schema/package.schema.json",
+        "schema/presentation.schema.json",
+        "schema/typed-reference.schema.json"
+      ]
+    }
+  ]
+}

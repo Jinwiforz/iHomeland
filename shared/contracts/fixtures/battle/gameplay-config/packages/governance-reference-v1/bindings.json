@@ -1,0 +1,12 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "external-bindings",
+  "package_id": "governance-reference-v1",
+  "qualification_state": "governance-only",
+  "map_id": "fixture/map/personal-world-flat-ground",
+  "map_content_identity": "66f010e7ec21a17ed12cdd5644f114136d0cd1bb1d6c41f0dd881dfd31bc1803",
+  "navigation_identity": "3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd",
+  "physics_identity": "ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98",
+  "collision_layer_ref": "fixture/collision-layer/world",
+  "navigation_policy_ref": "fixture/navigation-policy/world"
+}

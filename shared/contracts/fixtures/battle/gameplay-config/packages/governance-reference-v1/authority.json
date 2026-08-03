@@ -1,0 +1,250 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "authority-catalog",
+  "package_id": "governance-reference-v1",
+  "qualification_state": "governance-only",
+  "objects": [
+    {
+      "id": "fixture/actor/player",
+      "kind": "actor",
+      "role": "owner-visitor-player",
+      "references": [
+        { "field": "weapon-ref", "target_id": "fixture/weapon/fan", "target_kind": "weapon" },
+        { "field": "weapon-ref", "target_id": "fixture/weapon/sword", "target_kind": "weapon" },
+        { "field": "cue-ref", "target_id": "fixture/cue/player-state", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "health", "value": "100000", "unit": "attribute-milli" }
+      ]
+    },
+    {
+      "id": "fixture/actor/ordinary-monster",
+      "kind": "actor",
+      "role": "ordinary-monster",
+      "references": [
+        { "field": "ai-ref", "target_id": "fixture/ai/ordinary-monster", "target_kind": "ai" },
+        { "field": "cue-ref", "target_id": "fixture/cue/ordinary-monster-state", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "health", "value": "50000", "unit": "attribute-milli" }
+      ]
+    },
+    {
+      "id": "fixture/actor/boss",
+      "kind": "actor",
+      "role": "boss",
+      "references": [
+        { "field": "ai-ref", "target_id": "fixture/ai/boss", "target_kind": "ai" },
+        { "field": "boss-phase-ref", "target_id": "fixture/boss-phase/enraged", "target_kind": "boss-phase" },
+        { "field": "boss-phase-ref", "target_id": "fixture/boss-phase/desperate", "target_kind": "boss-phase" },
+        { "field": "cue-ref", "target_id": "fixture/cue/boss-state", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "health", "value": "500000", "unit": "attribute-milli" }
+      ]
+    },
+    {
+      "id": "fixture/weapon/sword",
+      "kind": "weapon",
+      "role": "sword",
+      "references": [
+        { "field": "grant-ref", "target_id": "fixture/ability-grant/sword", "target_kind": "ability-grant" },
+        { "field": "cue-ref", "target_id": "fixture/cue/sword-equipped", "target_kind": "cue" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "fixture/weapon/fan",
+      "kind": "weapon",
+      "role": "fan",
+      "references": [
+        { "field": "grant-ref", "target_id": "fixture/ability-grant/fan", "target_kind": "ability-grant" },
+        { "field": "cue-ref", "target_id": "fixture/cue/fan-equipped", "target_kind": "cue" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "fixture/ability-grant/sword",
+      "kind": "ability-grant",
+      "role": "sword-grant",
+      "references": [
+        { "field": "ability-ref", "target_id": "fixture/ability/sword-primary", "target_kind": "ability" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "fixture/ability-grant/fan",
+      "kind": "ability-grant",
+      "role": "fan-grant",
+      "references": [
+        { "field": "ability-ref", "target_id": "fixture/ability/fan-primary", "target_kind": "ability" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "fixture/ability/sword-primary",
+      "kind": "ability",
+      "role": "sword-primary",
+      "references": [
+        { "field": "effect-ref", "target_id": "fixture/effect/sword-damage", "target_kind": "effect" },
+        { "field": "cue-ref", "target_id": "fixture/cue/sword-primary", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-duration", "value": "4", "unit": "simulation-ticks" },
+        { "field": "cost", "value": "0", "unit": "attribute-milli" },
+        { "field": "cooldown", "value": "10", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "fixture/ability/fan-primary",
+      "kind": "ability",
+      "role": "fan-primary",
+      "references": [
+        { "field": "projectile-ref", "target_id": "fixture/projectile/fan-blade", "target_kind": "projectile" },
+        { "field": "cue-ref", "target_id": "fixture/cue/fan-primary", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-duration", "value": "5", "unit": "simulation-ticks" },
+        { "field": "cost", "value": "0", "unit": "attribute-milli" },
+        { "field": "cooldown", "value": "12", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "fixture/projectile/fan-blade",
+      "kind": "projectile",
+      "role": "none",
+      "references": [
+        { "field": "effect-ref", "target_id": "fixture/effect/fan-damage", "target_kind": "effect" },
+        { "field": "collision-layer-ref", "target_id": "fixture/collision-layer/world", "target_kind": "collision-layer" },
+        { "field": "cue-ref", "target_id": "fixture/cue/fan-projectile", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "speed", "value": "12000", "unit": "millimeters-per-second" },
+        { "field": "lifetime", "value": "20", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "fixture/effect/sword-damage",
+      "kind": "effect",
+      "role": "none",
+      "references": [
+        { "field": "cue-ref", "target_id": "fixture/cue/sword-hit", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "magnitude", "value": "-10000", "unit": "attribute-milli" },
+        { "field": "max-stacks", "value": "1", "unit": "stacks" }
+      ]
+    },
+    {
+      "id": "fixture/effect/fan-damage",
+      "kind": "effect",
+      "role": "none",
+      "references": [
+        { "field": "cue-ref", "target_id": "fixture/cue/fan-hit", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "magnitude", "value": "-8000", "unit": "attribute-milli" },
+        { "field": "max-stacks", "value": "1", "unit": "stacks" }
+      ]
+    },
+    {
+      "id": "fixture/ai/ordinary-monster",
+      "kind": "ai",
+      "role": "none",
+      "references": [
+        { "field": "ability-ref", "target_id": "fixture/ability/sword-primary", "target_kind": "ability" },
+        { "field": "navigation-policy-ref", "target_id": "fixture/navigation-policy/world", "target_kind": "navigation-policy" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "fixture/ai/boss",
+      "kind": "ai",
+      "role": "none",
+      "references": [
+        { "field": "ability-ref", "target_id": "fixture/ability/fan-primary", "target_kind": "ability" },
+        { "field": "navigation-policy-ref", "target_id": "fixture/navigation-policy/world", "target_kind": "navigation-policy" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "fixture/boss-phase/enraged",
+      "kind": "boss-phase",
+      "role": "boss-phase",
+      "references": [
+        { "field": "ai-ref", "target_id": "fixture/ai/boss", "target_kind": "ai" },
+        { "field": "ability-ref", "target_id": "fixture/ability/fan-primary", "target_kind": "ability" },
+        { "field": "cue-ref", "target_id": "fixture/cue/boss-enraged", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-order", "value": "1", "unit": "ordinal" },
+        { "field": "health-threshold", "value": "500000", "unit": "ratio-millionths" }
+      ]
+    },
+    {
+      "id": "fixture/boss-phase/desperate",
+      "kind": "boss-phase",
+      "role": "none",
+      "references": [
+        { "field": "ai-ref", "target_id": "fixture/ai/boss", "target_kind": "ai" },
+        { "field": "ability-ref", "target_id": "fixture/ability/fan-primary", "target_kind": "ability" },
+        { "field": "cue-ref", "target_id": "fixture/cue/boss-enraged", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-order", "value": "2", "unit": "ordinal" },
+        { "field": "health-threshold", "value": "250000", "unit": "ratio-millionths" }
+      ]
+    },
+    {
+      "id": "fixture/encounter/personal-world",
+      "kind": "encounter",
+      "role": "personal-world-encounter",
+      "references": [
+        { "field": "player-ref", "target_id": "fixture/actor/player", "target_kind": "actor" },
+        { "field": "monster-ref", "target_id": "fixture/actor/ordinary-monster", "target_kind": "actor" },
+        { "field": "boss-ref", "target_id": "fixture/actor/boss", "target_kind": "actor" },
+        { "field": "collision-layer-ref", "target_id": "fixture/collision-layer/world", "target_kind": "collision-layer" },
+        { "field": "navigation-policy-ref", "target_id": "fixture/navigation-policy/world", "target_kind": "navigation-policy" }
+      ],
+      "numeric_values": [
+        { "field": "owner-count", "value": "1", "unit": "actors" },
+        { "field": "visitor-count", "value": "4", "unit": "actors" },
+        { "field": "ordinary-monster-count", "value": "16", "unit": "actors" },
+        { "field": "boss-count", "value": "1", "unit": "actors" },
+        { "field": "peak-projectiles", "value": "64", "unit": "projectiles" },
+        { "field": "peak-effects", "value": "96", "unit": "effects" },
+        { "field": "peak-physics-queries", "value": "128", "unit": "queries-per-tick" },
+        { "field": "peak-navigation-queries", "value": "24", "unit": "queries-per-tick" }
+      ]
+    },
+    {
+      "id": "fixture/collision-layer/world",
+      "kind": "collision-layer",
+      "role": "world-collision",
+      "references": [],
+      "numeric_values": [
+        { "field": "mask", "value": "15", "unit": "bit-mask" }
+      ]
+    },
+    {
+      "id": "fixture/navigation-policy/world",
+      "kind": "navigation-policy",
+      "role": "world-navigation",
+      "references": [
+        { "field": "collision-layer-ref", "target_id": "fixture/collision-layer/world", "target_kind": "collision-layer" }
+      ],
+      "numeric_values": []
+    },
+    { "id": "fixture/cue/player-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/ordinary-monster-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/boss-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/sword-equipped", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/fan-equipped", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/sword-primary", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/fan-primary", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/fan-projectile", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/sword-hit", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/fan-hit", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "fixture/cue/boss-enraged", "kind": "cue", "role": "none", "references": [], "numeric_values": [] }
+  ]
+}

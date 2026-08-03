@@ -1,0 +1,33 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "gameplay-package",
+  "package_id": "governance-reference-v1",
+  "package_version": "governance-reference-v1",
+  "qualification_state": "governance-only",
+  "model_binding": {
+    "version": "battle-model-v1",
+    "manifest_sha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1"
+  },
+  "profile_binding": {
+    "version": "battle-network-profile-v2",
+    "manifest_sha256": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424"
+  },
+  "authority_path": "authority.json",
+  "presentation_path": "presentation.json",
+  "bindings_path": "bindings.json",
+  "required_roles": [
+    "boss",
+    "boss-phase",
+    "fan",
+    "fan-grant",
+    "fan-primary",
+    "ordinary-monster",
+    "owner-visitor-player",
+    "personal-world-encounter",
+    "sword",
+    "sword-grant",
+    "sword-primary",
+    "world-collision",
+    "world-navigation"
+  ]
+}

@@ -38,6 +38,12 @@
       "order": 60
     },
     {
+      "id": "gameplay-config-validate",
+      "class": "incremental",
+      "owner": "gameplay-config",
+      "order": 70
+    },
+    {
       "id": "proto-verify",
       "class": "targeted-expensive",
       "owner": "proto",

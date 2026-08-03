@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "document_kind", "entries"],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "numeric-registry" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "field", "value_type", "unit", "minimum", "maximum", "scale", "rounding", "overflow", "model_owner"],
+        "properties": {
+          "kind": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "field": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "value_type": { "enum": ["integer", "scaled-integer"] },
+          "unit": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "minimum": { "pattern": "^-?(?:0|[1-9][0-9]*)$", "type": "string" },
+          "maximum": { "pattern": "^-?(?:0|[1-9][0-9]*)$", "type": "string" },
+          "scale": { "pattern": "^(?:1|[1-9][0-9]*)$", "type": "string" },
+          "rounding": { "enum": ["exact", "toward-zero"] },
+          "overflow": { "const": "checked-int64" },
+          "model_owner": { "enum": ["AbilityActivation", "Movement", "Physics", "Effect", "Attribute", "AIIntent", "HitDetection", "Capacity"] }
+        }
+      }
+    }
+  }
+}

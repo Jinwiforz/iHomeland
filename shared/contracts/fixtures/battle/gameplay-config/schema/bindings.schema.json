@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "document_kind",
+    "package_id",
+    "qualification_state",
+    "map_id",
+    "map_content_identity",
+    "navigation_identity",
+    "physics_identity",
+    "collision_layer_ref",
+    "navigation_policy_ref"
+  ],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "external-bindings" },
+    "package_id": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+    "qualification_state": { "enum": ["governance-only", "production-candidate"] },
+    "map_id": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/map/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+    "map_content_identity": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+    "navigation_identity": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+    "physics_identity": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
+    "collision_layer_ref": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/collision-layer/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+    "navigation_policy_ref": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/navigation-policy/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" }
+  }
+}

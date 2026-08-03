@@ -255,6 +255,8 @@ Go `placement.RuntimeController` 是迁移接缝：可执行服务端在 product
 
 内部 `SimulationTarget` 只在 assignment current/active、lease 有效、node healthy 且 instance ready 时解析，包含完整 stamp fingerprint、`RuntimeNodeID`、node/instance identity、mapping generation、model/profile/config identity 与 8-actor qualification cap，不包含 credential、endpoint 或 PlayerID 覆盖字段。replacement、lease expiry、drain、stop 或 node loss会使旧 target 失效；它不改变客户端可见 assignment 投影，也不把 33-actor VisitSession 兼容上限改写为 battle 容量。
 
+B0.8 的 gameplay configuration 使用独立 `gameplay-config-format-v1` source contract。Go Composition Root 是 production package 选择 owner；C++ authority catalog 独占伤害、Cost/Cooldown、命中、Effect/Attribute、AI/Boss phase、encounter 与 collision/navigation policy，Unity presentation catalog 只消费稳定 semantic ID 并映射表现资源。Package identity 复用现有 `ConfigIdentity` 接缝，`NavigationIdentity` 与 `PhysicsIdentity` 继续独立；C++ 只在 instance start 前重验三者，active SimulationInstance 内不允许 hot reload 或 partial merge。配置变化与回滚必须通过完整 package 和更高 assignment generation replacement，不能让同一 timeline 或不同 actor 混用规则版本。
+
 `ResultProposal` 由 C++ node-global、最多 256 entries 的有界 outbox 产生；该边界覆盖 child 总内存，并允许 instance stop 后继续等待 ack。Go 在接受 child 提供的 fingerprint 前先按全部 immutable 字段重算，再查询 immutable MySQL receipt、验证 result catalog、完整 assignment/current fence、instance 与 kind-specific Tick range，最后在 owner transaction 内保存 committed/rejected 裁决后才发送 ack。当前只登记 `simulation.lifecycle.summary.v1`；未知 kind、stale assignment、伪造 fingerprint 和同 ResultID 非完全相同 proposal 均 fail closed。MySQL 是裁决事实 owner，C++ outbox 与 Go inbox 都不是持久数据库。
 
 正常关闭先停止 HTTP/WSS/TLS-TCP 与 semantic deadline worker，再通过 placement `Sleep` 对本 node 的 exact stamps 执行 drain/result、assignment revoke 和 instance stop；随后 `simulation_node` component 只清理残留 binding 并关闭 child，最后才关闭 Redis/MySQL。关闭超时不能恢复旧 fence。

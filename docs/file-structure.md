@@ -477,6 +477,8 @@ shared/contracts/fixtures/battle/protocol-client/ # 独立 C++ client 的 closed
 tools/secure-battle-transport/            # B0.5 verify/finalize、report 与失败回归
 shared/contracts/fixtures/battle/qualification/ # B0.6 fault/workload/metric/lifecycle contract
 tools/battle-qualification/               # 内部 B0.6 真实进程、故障注入、重连、安全与 finalize owner
+shared/contracts/fixtures/battle/gameplay-config/ # B0.8 前置配置 schema/registry/reference package
+tools/gameplay-config/                    # 纯数据 validator 与隔离失败回归
 tools/quality/                            # 唯一公共 impact/check-change/diagnose/qualify 编排入口
 ```
 
@@ -497,6 +499,15 @@ tools/quality/                            # 唯一公共 impact/check-change/dia
 `packages-lock.json` 必须由锁定 Unity Editor 刷新并人工检查；不得手工修改 Unity
 生成 `.csproj`。运行与清理规则见
 [`client-battle-runtime-runbook.md`](client-battle-runtime-runbook.md)。
+
+## B0.8 前置 Gameplay configuration 归属
+
+- `shared/contracts/fixtures/battle/gameplay-config/schema/`：manifest、package、authority、presentation、bindings、typed reference、numeric range 与 coverage 的 closed schemas。
+- `shared/contracts/fixtures/battle/gameplay-config/registries/`：semantic namespace/reference direction、numeric unit/range/rounding/overflow 与 required role coverage 的唯一治理源。
+- `shared/contracts/fixtures/battle/gameplay-config/packages/governance-reference-v1/`：只供 validator 使用的 `fixture/`、`governance-only` reference package；不得由 production Go/C++/Unity runtime 加载。
+- `tools/gameplay-config/`：只读 validator 与隔离 mutation regressions，不实现 gameplay evaluator，也不启动网络、Docker、CMake 或 Unity。
+
+B0.8 才能在本契约下创建非 fixture production package 和真实 Go selector、C++ authority loader、Unity presentation mapping。`shared/` 中只保存跨 runtime 契约数据，不放 gameplay 实现、二进制 map/navmesh/physics material、Unity GUID/path、生成代码或资格运行 evidence。
 
 每个活跃实现 change 在自身根目录维护 `validation.json`，只引用
 `tools/quality/catalog.json` 的 closed check ID。`tools/quality/quality.ps1` 是使用者与

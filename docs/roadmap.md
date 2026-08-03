@@ -527,10 +527,39 @@ physics 仍明确限制为 server-only Y=0 平地；正式地图 collision、技
 change。此次完成只代表定向开发验收，未运行也未生成完整 battle network 或产品 combat
 最终 qualified 结论。
 
+### B0.8 前置 `define-gameplay-configuration-governance`
+
+**状态：**实现、主 specs 同步、定向验证与归档前审计均已完成，change 已于 2026-08-03
+归档；B0.8 提案进入条件已满足，但 production gameplay content 与最终产品资格仍未交付。
+
+**进入条件：**B0.7 Unity gameplay runtime 与权威移动投影已完成代表性 Owner/Visitor
+开发验收；不得用 C++ 常量、Unity ScriptableObject、Scene 或 Prefab 反向充当跨 runtime
+配置事实。
+
+**产出：**`gameplay-config-format-v1` closed schemas、semantic/numeric/coverage registries、
+`governance-only` reference package、可重算 `ConfigIdentity`、独立 nav/physics bindings、
+authority/presentation owner 与 instance replacement/rollback 语义，以及纯数据 validator、
+隔离失败回归和 incremental quality check。
+
+**完成条件：**manifest/source digest、typed reference/cycle、单位/范围/overflow、B0.8 required
+role coverage、authority/presentation parity、fixture/production classification、低敏诊断与连续
+只读验证全部通过；主 specs、owner docs 和 closed `validation.json` 同步。该 change 完成只
+解锁 B0.8 提案，不交付 production package、runtime consumer、剑/扇子、怪物/Boss、地图
+collision/navigation、表现资产或最终产品资格。
+
+**当前 evidence：**`shared/contracts/fixtures/battle/gameplay-config/` 已登记 8 份 closed
+schema、3 份 registry 与完整 reference package；唯一 validator 重算
+`ConfigIdentity=2037d59b77dcf397030bf4fa729c82235f9ece42c15bcfb1fcd6712d754b5333`，
+31 项隔离回归覆盖 schema/digest、reference/cycle、range/overflow、coverage/parity、fixture
+误用、敏感输出和只读性。`gameplay-config-validate` 只属于普通 incremental check；主 specs
+同步、current change strict/check-change 与全仓 OpenSpec strict 均已通过并完成归档。该
+evidence 仅解锁 B0.8 提案，不代表可玩内容或最终资格；回滚可整体移除本 change
+新增 corpus/validator/spec，并恢复到 B0.7 与权威移动投影的已归档基线，不改变现有 runtime。
+
 ### B0.8 `deliver-personal-world-combat-slice`
 
 **进入条件：**Unity gameplay runtime 与 battle network development-readiness 稳定，
-玩法配置最小治理方案已由独立 change 冻结。
+`define-gameplay-configuration-governance` 已完成主 specs 同步、定向验证并归档。
 
 **产出：**一把近战剑、一把远程扇子、武器授予技能、少量怪物、一只 Boss、基础碰撞/导航/动画/VFX/Audio/HUD，以及 Owner 邀请 Visitor 协作的产品场景。
 

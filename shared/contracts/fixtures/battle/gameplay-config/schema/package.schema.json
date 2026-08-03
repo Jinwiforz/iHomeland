@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "document_kind",
+    "package_id",
+    "package_version",
+    "qualification_state",
+    "model_binding",
+    "profile_binding",
+    "authority_path",
+    "presentation_path",
+    "bindings_path",
+    "required_roles"
+  ],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "gameplay-package" },
+    "package_id": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+    "package_version": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-v[1-9][0-9]*$", "type": "string" },
+    "qualification_state": { "enum": ["governance-only", "production-candidate"] },
+    "model_binding": { "$ref": "#/$defs/sourceBinding" },
+    "profile_binding": { "$ref": "#/$defs/sourceBinding" },
+    "authority_path": { "pattern": "^authority\\.json$", "type": "string" },
+    "presentation_path": { "pattern": "^presentation\\.json$", "type": "string" },
+    "bindings_path": { "pattern": "^bindings\\.json$", "type": "string" },
+    "required_roles": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" }
+    }
+  },
+  "$defs": {
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "manifest_sha256"],
+      "properties": {
+        "version": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-v[1-9][0-9]*$", "type": "string" },
+        "manifest_sha256": { "pattern": "^[0-9a-f]{64}$", "type": "string" }
+      }
+    }
+  }
+}

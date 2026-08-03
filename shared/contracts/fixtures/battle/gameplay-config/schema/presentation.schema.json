@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "document_kind", "package_id", "qualification_state", "resources", "mappings"],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "presentation-catalog" },
+    "package_id": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+    "qualification_state": { "enum": ["governance-only", "production-candidate"] },
+    "resources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "logical_key"],
+        "properties": {
+          "id": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/resource/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "kind": { "enum": ["display", "animator", "vfx", "audio", "hud", "camera", "prediction"] },
+          "logical_key": { "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$", "type": "string" }
+        }
+      }
+    },
+    "mappings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["semantic_id", "semantic_kind", "resource_refs"],
+        "properties": {
+          "semantic_id": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/(?:actor|ability|effect|cue)/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "semantic_kind": { "enum": ["actor", "ability", "effect", "cue"] },
+          "resource_refs": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/resource/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

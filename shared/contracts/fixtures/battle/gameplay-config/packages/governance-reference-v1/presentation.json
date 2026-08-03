@@ -1,0 +1,36 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "presentation-catalog",
+  "package_id": "governance-reference-v1",
+  "qualification_state": "governance-only",
+  "resources": [
+    { "id": "fixture/resource/player-display", "kind": "display", "logical_key": "actor.player.display" },
+    { "id": "fixture/resource/monster-display", "kind": "display", "logical_key": "actor.monster.display" },
+    { "id": "fixture/resource/boss-display", "kind": "display", "logical_key": "actor.boss.display" },
+    { "id": "fixture/resource/sword-animation", "kind": "animator", "logical_key": "ability.sword.primary" },
+    { "id": "fixture/resource/fan-animation", "kind": "animator", "logical_key": "ability.fan.primary" },
+    { "id": "fixture/resource/damage-vfx", "kind": "vfx", "logical_key": "effect.damage.vfx" },
+    { "id": "fixture/resource/cue-audio", "kind": "audio", "logical_key": "cue.combat.audio" },
+    { "id": "fixture/resource/state-hud", "kind": "hud", "logical_key": "actor.state.hud" }
+  ],
+  "mappings": [
+    { "semantic_id": "fixture/actor/player", "semantic_kind": "actor", "resource_refs": ["fixture/resource/player-display", "fixture/resource/state-hud"] },
+    { "semantic_id": "fixture/actor/ordinary-monster", "semantic_kind": "actor", "resource_refs": ["fixture/resource/monster-display", "fixture/resource/state-hud"] },
+    { "semantic_id": "fixture/actor/boss", "semantic_kind": "actor", "resource_refs": ["fixture/resource/boss-display", "fixture/resource/state-hud"] },
+    { "semantic_id": "fixture/ability/sword-primary", "semantic_kind": "ability", "resource_refs": ["fixture/resource/sword-animation"] },
+    { "semantic_id": "fixture/ability/fan-primary", "semantic_kind": "ability", "resource_refs": ["fixture/resource/fan-animation"] },
+    { "semantic_id": "fixture/effect/sword-damage", "semantic_kind": "effect", "resource_refs": ["fixture/resource/damage-vfx"] },
+    { "semantic_id": "fixture/effect/fan-damage", "semantic_kind": "effect", "resource_refs": ["fixture/resource/damage-vfx"] },
+    { "semantic_id": "fixture/cue/player-state", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/ordinary-monster-state", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/boss-state", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/sword-equipped", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/fan-equipped", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/sword-primary", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/fan-primary", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/fan-projectile", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/sword-hit", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/fan-hit", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] },
+    { "semantic_id": "fixture/cue/boss-enraged", "semantic_kind": "cue", "resource_refs": ["fixture/resource/cue-audio"] }
+  ]
+}

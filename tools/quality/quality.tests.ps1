@@ -20,6 +20,7 @@ $supported = @(
     "simulation-control-validate",
     "battle-qualification-validate",
     "client-battle-runtime-validate",
+    "gameplay-config-validate",
     "proto-verify",
     "cpp-handshake-targeted",
     "go-handshake-targeted",
@@ -72,6 +73,14 @@ $catalog = Get-QualityCatalog `
     -SchemaPath $CatalogSchemaPath `
     -SupportedCheckIds $supported
 
+$gameplayConfigCheck = @($catalog.checks | Where-Object { $_.id -ceq "gameplay-config-validate" })
+if ($gameplayConfigCheck.Count -ne 1 -or
+    [string]$gameplayConfigCheck[0].class -cne "incremental" -or
+    [string]$gameplayConfigCheck[0].owner -cne "gameplay-config" -or
+    [int]$gameplayConfigCheck[0].order -ne 70) {
+    throw "gameplay config check metadata 未按中央 catalog 登记"
+}
+
 $entryText = Get-Content `
     -LiteralPath (Join-Path $PSScriptRoot "quality.ps1") `
     -Raw -Encoding utf8
@@ -87,6 +96,8 @@ $dryRunName = "quality-dry-run-" + [guid]::NewGuid().ToString("N")
 $dryRunRoot = Join-Path $RepositoryRoot ("openspec\changes\" + $dryRunName)
 $ownerFailureName = "quality-owner-failure-" + [guid]::NewGuid().ToString("N")
 $ownerFailureRoot = Join-Path $RepositoryRoot ("openspec\changes\" + $ownerFailureName)
+$dispatchName = "quality-gameplay-config-dispatch-" + [guid]::NewGuid().ToString("N")
+$dispatchRoot = Join-Path $RepositoryRoot ("openspec\changes\" + $dispatchName)
 [void](New-Item -ItemType Directory -Path $temporaryRoot -Force)
 try {
     $validPlanPath = Join-Path $temporaryRoot "valid.json"
@@ -97,8 +108,8 @@ try {
             change = "sample-change"
             checks = @(
                 @{
-                    id = "battle-wire-validate"
-                    reason = "wire contract 发生变化，需要验证 closed corpus"
+                    id = "gameplay-config-validate"
+                    reason = "gameplay config contract 发生变化，需要验证 closed corpus"
                 },
                 @{
                     id = "openspec-change-strict"
@@ -113,9 +124,27 @@ try {
         -SchemaPath $PlanSchemaPath `
         -ExpectedChange "sample-change"
     $resolved = Resolve-QualityPlanChecks -Catalog $catalog -Plan $validPlan
-    if ($resolved.Count -ne 2 -or $resolved[0].Id -cne "battle-wire-validate") {
+    if ($resolved.Count -ne 2 -or $resolved[0].Id -cne "gameplay-config-validate") {
         throw "valid plan 未按中央顺序解析"
     }
+
+    $missingCatalogPath = Join-Path $temporaryRoot "missing-catalog.json"
+    $missingCatalog = Get-Content -Raw -LiteralPath $CatalogPath | ConvertFrom-Json
+    $missingCatalog.checks = @(
+        $missingCatalog.checks |
+        Where-Object { [string]$_.id -cne "gameplay-config-validate" }
+    )
+    [IO.File]::WriteAllText(
+        $missingCatalogPath,
+        ($missingCatalog | ConvertTo-Json -Depth 8),
+        [Text.UTF8Encoding]::new($false)
+    )
+    Assert-Throws {
+        Get-QualityCatalog `
+            -CatalogPath $missingCatalogPath `
+            -SchemaPath $CatalogSchemaPath `
+            -SupportedCheckIds $supported
+    } "missing gameplay config implementation"
 
     $finalPlanPath = Join-Path $temporaryRoot "final.json"
     [IO.File]::WriteAllText(
@@ -193,7 +222,7 @@ try {
             change = $dryRunName
             checks = @(
                 @{
-                    id = "battle-wire-validate"
+                    id = "gameplay-config-validate"
                     reason = "dry-run 只预览登记 owner，不执行实际 corpus validator"
                 }
             )
@@ -211,6 +240,30 @@ try {
     $joinedDryRun = $dryRun.Output -join "`n"
     if ($joinedDryRun -match '(?i)[A-Z]:\\|btk_[A-Za-z0-9_-]+|bts_[A-Za-z0-9_-]+|(?:proof|traffic|cookie)[-_ ]?key') {
         throw "impact/dry-run 输出包含路径或敏感凭据形态"
+    }
+
+    [void](New-Item -ItemType Directory -Path $dispatchRoot -Force)
+    [IO.File]::WriteAllText(
+        (Join-Path $dispatchRoot "validation.json"),
+        (@{
+            schemaVersion = 1
+            change = $dispatchName
+            checks = @(
+                @{
+                    id = "gameplay-config-validate"
+                    reason = "验证 gameplay config owner 的实际 dispatch 与退出码传播"
+                }
+            )
+        } | ConvertTo-Json -Depth 8),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $dispatch = Invoke-QualityProcess -Arguments @(
+        "check-change",
+        "-Change", $dispatchName
+    )
+    if ($dispatch.ExitCode -ne 0 -or
+        -not (($dispatch.Output -join "`n") -match 'GAMEPLAY_CONFIG_TESTS_PASS')) {
+        throw "gameplay config check dispatch 未稳定通过"
     }
 
     $unknownChange = Invoke-QualityProcess -Arguments @(
@@ -264,6 +317,9 @@ finally {
     }
     if (Test-Path -LiteralPath $ownerFailureRoot) {
         Remove-Item -LiteralPath $ownerFailureRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $dispatchRoot) {
+        Remove-Item -LiteralPath $dispatchRoot -Recurse -Force
     }
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force

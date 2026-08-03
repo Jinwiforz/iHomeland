@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "document_kind", "namespaces", "allowed_references", "retired_ids"],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "semantic-registry" },
+    "namespaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "prefix", "owner"],
+        "properties": {
+          "kind": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "prefix": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/$", "type": "string" },
+          "owner": { "enum": ["authority", "presentation"] }
+        }
+      }
+    },
+    "allowed_references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from_kind", "field", "to_kinds"],
+        "properties": {
+          "from_kind": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "field": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+          "to_kinds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" }
+          }
+        }
+      }
+    },
+    "retired_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" }
+    }
+  }
+}

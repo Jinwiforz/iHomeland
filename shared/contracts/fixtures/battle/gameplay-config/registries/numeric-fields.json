@@ -1,0 +1,25 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "numeric-registry",
+  "entries": [
+    { "kind": "actor", "field": "health", "value_type": "scaled-integer", "unit": "attribute-milli", "minimum": "1", "maximum": "1000000000", "scale": "1000", "rounding": "toward-zero", "overflow": "checked-int64", "model_owner": "Attribute" },
+    { "kind": "ability", "field": "phase-duration", "value_type": "integer", "unit": "simulation-ticks", "minimum": "1", "maximum": "40", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "AbilityActivation" },
+    { "kind": "ability", "field": "cost", "value_type": "scaled-integer", "unit": "attribute-milli", "minimum": "0", "maximum": "1000000000", "scale": "1000", "rounding": "toward-zero", "overflow": "checked-int64", "model_owner": "AbilityActivation" },
+    { "kind": "ability", "field": "cooldown", "value_type": "integer", "unit": "simulation-ticks", "minimum": "0", "maximum": "400", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "AbilityActivation" },
+    { "kind": "projectile", "field": "speed", "value_type": "integer", "unit": "millimeters-per-second", "minimum": "1", "maximum": "100000", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Movement" },
+    { "kind": "projectile", "field": "lifetime", "value_type": "integer", "unit": "simulation-ticks", "minimum": "1", "maximum": "400", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "HitDetection" },
+    { "kind": "effect", "field": "magnitude", "value_type": "scaled-integer", "unit": "attribute-milli", "minimum": "-1000000000", "maximum": "1000000000", "scale": "1000", "rounding": "toward-zero", "overflow": "checked-int64", "model_owner": "Effect" },
+    { "kind": "effect", "field": "max-stacks", "value_type": "integer", "unit": "stacks", "minimum": "1", "maximum": "128", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Effect" },
+    { "kind": "boss-phase", "field": "phase-order", "value_type": "integer", "unit": "ordinal", "minimum": "1", "maximum": "32", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "AIIntent" },
+    { "kind": "boss-phase", "field": "health-threshold", "value_type": "scaled-integer", "unit": "ratio-millionths", "minimum": "1", "maximum": "999999", "scale": "1000000", "rounding": "toward-zero", "overflow": "checked-int64", "model_owner": "AIIntent" },
+    { "kind": "encounter", "field": "owner-count", "value_type": "integer", "unit": "actors", "minimum": "1", "maximum": "1", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "visitor-count", "value_type": "integer", "unit": "actors", "minimum": "0", "maximum": "7", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "ordinary-monster-count", "value_type": "integer", "unit": "actors", "minimum": "1", "maximum": "32", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "boss-count", "value_type": "integer", "unit": "actors", "minimum": "1", "maximum": "1", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "peak-projectiles", "value_type": "integer", "unit": "projectiles", "minimum": "0", "maximum": "256", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "peak-effects", "value_type": "integer", "unit": "effects", "minimum": "0", "maximum": "384", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "peak-physics-queries", "value_type": "integer", "unit": "queries-per-tick", "minimum": "0", "maximum": "640", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "encounter", "field": "peak-navigation-queries", "value_type": "integer", "unit": "queries-per-tick", "minimum": "0", "maximum": "64", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Capacity" },
+    { "kind": "collision-layer", "field": "mask", "value_type": "integer", "unit": "bit-mask", "minimum": "1", "maximum": "2147483647", "scale": "1", "rounding": "exact", "overflow": "checked-int64", "model_owner": "Physics" }
+  ]
+}

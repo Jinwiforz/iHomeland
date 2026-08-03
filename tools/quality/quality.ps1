@@ -43,6 +43,7 @@ $SupportedCheckIds = @(
     "simulation-control-validate",
     "battle-qualification-validate",
     "client-battle-runtime-validate",
+    "gameplay-config-validate",
     "proto-verify",
     "cpp-handshake-targeted",
     "go-handshake-targeted",
@@ -235,6 +236,16 @@ function Invoke-ChangeCheck {
                 -ScriptPath (Join-Path $RepositoryRoot "tools\client-battle-runtime\client-battle-runtime.tests.ps1") `
                 -Arguments @() `
                 -Label "client battle runtime validation"
+        }
+        "gameplay-config-validate" {
+            Invoke-ProjectPowerShell `
+                -ScriptPath (Join-Path $RepositoryRoot "tools\gameplay-config\gameplay-config.ps1") `
+                -Arguments @("validate") `
+                -Label "gameplay config corpus validation"
+            Invoke-ProjectPowerShell `
+                -ScriptPath (Join-Path $RepositoryRoot "tools\gameplay-config\gameplay-config.tests.ps1") `
+                -Arguments @() `
+                -Label "gameplay config failure regressions"
         }
         "proto-verify" {
             Invoke-ProjectPowerShell `

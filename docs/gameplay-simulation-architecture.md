@@ -121,6 +121,18 @@ CPU、allocator/memory、真实 codec size、真实 socket、AEAD 和 KCP adapte
 
 `message-inventory.json` 只冻结 `battle.input.bundle`、full/delta snapshot、probe、entity lifecycle、reliable ability event 与 resync 的 logical kind、direction、唯一 raw/KCP lane、sender expiry、size/rate 和恢复语义。它是 application expiry 的 profile 唯一事实源，但不是 production numeric registry；`3000-3007` projection、`.proto`、wire header、listener 与端口由 B0.5 安全 transport 独立交付并保持逐 route parity。
 
+### Gameplay configuration 治理
+
+机器可读治理契约位于 [Gameplay Configuration Governance](../shared/contracts/fixtures/battle/gameplay-config/README.md)。`gameplay-config-format-v1` 把一个 package 分为 C++ authority catalog、Unity presentation catalog 与 map/navigation/physics bindings，并以 manifest 登记的规范相对路径、document kind 和 raw-file SHA-256 重算 `ConfigIdentity`。`NavigationIdentity` 与 `PhysicsIdentity` 继续独立绑定，三者不得合并为无 source 的魔法摘要。
+
+- authority 是 actor、weapon、Ability grant/phase、projectile、Effect/Attribute、AI/Boss phase、encounter 和 collision/navigation policy 的唯一配置 owner；所有数值使用 registry 登记的整数或 scaled integer、真实单位、范围、舍入和 checked-int64 overflow policy。
+- presentation 只把已发布的 actor/Ability/Effect/cue semantic ID 映射为 display、Animator、VFX、Audio、HUD、camera 或 prediction 逻辑资源键；它不重复伤害、Cost、Cooldown、命中、AI、死亡、spawn 或 lifetime，也不能覆盖服务器 config binding。
+- typed semantic ID、允许引用方向与 required role coverage 由 registries 统一登记。Reference package 使用 `fixture/` namespace 和 `governance-only` classification，只证明 schema/validator 能力，production Composition Root、C++ child 与 Unity Player 必须拒绝加载。
+- 首版配置只在 instance start 前完整校验。Go 是 production package 选择 owner，C++ 在创建 SimulationInstance 前独立重验 config/nav/physics identity；active instance 内不支持 watcher、partial merge、actor-specific version 或 hot reload。更新和回滚都必须选择一份完整可验证 package，并通过更高 assignment generation/fence 建立 successor。
+- Unity build 缺少 required semantic mapping 时 battle feature fail closed，但不得伪造 logout、leave、safe-return、assignment replacement 或 PersonalWorld/VisitSession state。需要客户端可见 config projection 时必须另走协议 change，本治理契约不预分配字段或 message ID。
+
+唯一纯数据入口 `tools/gameplay-config/gameplay-config.ps1 validate` 校验 closed schema、digest、typed reference/cycle、单位/范围/overflow、coverage、authority/presentation parity、fixture classification 与低敏安全字段；它不导入或启动 Go/C++/Unity gameplay runtime、listener、Docker、CMake、网络或 evaluator。未来 result/replay/qualification evidence 只保存 exact package/config/nav/physics identity 与 schema version，不复制完整数值或资源目录。
+
 ### 输入 history 与预测 history
 
 Unity 为本地受控 actor 保存有界：

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "document_kind", "package_id", "qualification_state", "objects"],
+  "properties": {
+    "format_version": { "const": "gameplay-config-format-v1" },
+    "document_kind": { "const": "authority-catalog" },
+    "package_id": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+    "qualification_state": { "enum": ["governance-only", "production-candidate"] },
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/authorityObject" }
+    }
+  },
+  "$defs": {
+    "semanticId": {
+      "type": "string",
+      "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/(?:actor|weapon|ability-grant|ability|projectile|effect|ai|boss-phase|encounter|collision-layer|navigation-policy|cue)/[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "target_id", "target_kind"],
+      "properties": {
+        "field": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+        "target_id": { "$ref": "#/$defs/semanticId" },
+        "target_kind": {
+          "enum": ["actor", "weapon", "ability-grant", "ability", "projectile", "effect", "ai", "boss-phase", "encounter", "collision-layer", "navigation-policy", "cue"]
+        }
+      }
+    },
+    "numericValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "value", "unit"],
+      "properties": {
+        "field": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
+        "value": { "pattern": "^-?(?:0|[1-9][0-9]*)$", "type": "string" },
+        "unit": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" }
+      }
+    },
+    "authorityObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "role", "references", "numeric_values"],
+      "properties": {
+        "id": { "$ref": "#/$defs/semanticId" },
+        "kind": {
+          "enum": ["actor", "weapon", "ability-grant", "ability", "projectile", "effect", "ai", "boss-phase", "encounter", "collision-layer", "navigation-policy", "cue"]
+        },
+        "role": { "pattern": "^(?:none|[a-z0-9]+(?:-[a-z0-9]+)*)$", "type": "string" },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/reference" } },
+        "numeric_values": { "type": "array", "items": { "$ref": "#/$defs/numericValue" } }
+      }
+    }
+  }
+}
