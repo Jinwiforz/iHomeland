@@ -1,18 +1,114 @@
 using System;
+using System.Collections;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using IHomeland.Client.Application.Battle;
 using IHomeland.Client.Presentation.PersonalWorld;
 using IHomeland.Client.Scenes.Contexts;
 using IHomeland.Client.Scenes.PersonalWorld;
 using NUnit.Framework;
+using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
 
 namespace IHomeland.Client.Tests.PlayMode
 {
     /// <summary>验证 PersonalWorldSceneContext 只接受同 Scene 直接引用和 current generation。</summary>
     public sealed class PersonalWorldSceneContextPlayModeTests
     {
+        /// <summary>验证运行中render telemetry只更新固定计数器且不写Unity Console。</summary>
+        [Test]
+        public void RenderTelemetryAggregatesWithoutRuntimeConsoleWrites()
+        {
+            var root = new GameObject("RenderTelemetryFixture");
+            try
+            {
+                var host = root.AddComponent<ClientBattleSceneHost>();
+                var capture = typeof(ClientBattleSceneHost).GetMethod(
+                    "CaptureRenderDiagnostics",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(capture, Is.Not.Null);
+                foreach (var seconds in new[] { 0.016f, 0.04f, 0.06f, 0.12f })
+                {
+                    capture.Invoke(host, new object[] { seconds });
+                }
+
+                LogAssert.NoUnexpectedReceived();
+                Assert.That(
+                    GetPrivateField<int>(host, "_diagnosticRenderFrames"),
+                    Is.EqualTo(4));
+                Assert.That(
+                    GetPrivateField<int>(
+                        host,
+                        "_diagnosticFramesOverThirtyThreeMilliseconds"),
+                    Is.EqualTo(3));
+                Assert.That(
+                    GetPrivateField<int>(
+                        host,
+                        "_diagnosticFramesOverFiftyMilliseconds"),
+                    Is.EqualTo(2));
+                Assert.That(
+                    GetPrivateField<int>(
+                        host,
+                        "_diagnosticFramesOverOneHundredMilliseconds"),
+                    Is.EqualTo(1));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>验证世界参照只创建有界合并Renderer且不引入客户端Collider事实。</summary>
+        [UnityTest]
+        public IEnumerator ReferenceEnvironmentBuildsRendererOnlySpatialCues()
+        {
+            var root = new GameObject("ReferenceEnvironmentFixture");
+            Material material = null;
+            try
+            {
+                root.SetActive(false);
+                var environment =
+                    root.AddComponent<PersonalWorldReferenceEnvironment>();
+                var shader =
+                    Shader.Find("Universal Render Pipeline/Unlit");
+                Assert.That(shader, Is.Not.Null);
+                material = new Material(shader);
+                SetPrivateField(
+                    environment,
+                    "_materialTemplate",
+                    material);
+                root.SetActive(true);
+                yield return null;
+
+                Assert.That(
+                    root.GetComponentsInChildren<MeshRenderer>(),
+                    Has.Length.EqualTo(3));
+                Assert.That(
+                    root.GetComponentsInChildren<MeshFilter>(),
+                    Has.Length.EqualTo(3));
+                Assert.That(
+                    root.GetComponentsInChildren<Collider>(),
+                    Is.Empty);
+                Assert.That(
+                    root.transform.Find("ReferenceGround"),
+                    Is.Not.Null);
+                Assert.That(
+                    root.transform.Find("ReferenceGrid"),
+                    Is.Not.Null);
+                Assert.That(
+                    root.transform.Find("ReferenceLandmarks"),
+                    Is.Not.Null);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                UnityEngine.Object.DestroyImmediate(material);
+            }
+        }
+
         /// <summary>验证 SceneLifetime 释放后旧 Context 立即拒绝迟到 HUD 回写。</summary>
         [Test]
         public async Task ReleasedSceneLifetimeRejectsLateHudApply()
@@ -201,6 +297,522 @@ namespace IHomeland.Client.Tests.PlayMode
             }
         }
 
+        /// <summary>
+        /// 验证 Camera Host 对缺失 target 使用 Exploration fallback，并且每个 impulse identity
+        /// 只消费一次，解绑后迟到 intent 不会重新触发。
+        /// </summary>
+        [Test]
+        public void CameraHostMapsFallbackAndConsumesImpulseOnce()
+        {
+            var root = new GameObject("CameraHostFixture");
+            root.SetActive(false);
+            var host = root.AddComponent<CinemachineCameraHost>();
+            var actors = root.AddComponent<ClientActorViewRegistry>();
+            var impulseSource = root.AddComponent<CinemachineImpulseSource>();
+            impulseSource.ImpulseDefinition.ImpulseChannel = 1;
+            impulseSource.ImpulseDefinition.ImpulseShape =
+                CinemachineImpulseDefinition.ImpulseShapes.Bump;
+            impulseSource.ImpulseDefinition.ImpulseDuration = 0.2f;
+            impulseSource.ImpulseDefinition.ImpulseType =
+                CinemachineImpulseDefinition.ImpulseTypes.Uniform;
+            impulseSource.ImpulseDefinition.DissipationDistance = 100f;
+            impulseSource.DefaultVelocity = Vector3.down;
+            var exploration = CreateChild(root, "ExplorationRig");
+            var melee = CreateChild(root, "MeleeRig");
+            var rangedAim = CreateChild(root, "RangedAimRig");
+            var cinematic = CreateChild(root, "CinematicRig");
+            var followProxy = CreateChild(root, "FollowProxy").transform;
+            SetPrivateField(host, "_explorationRig", exploration);
+            SetPrivateField(host, "_meleeRig", melee);
+            SetPrivateField(host, "_rangedAimRig", rangedAim);
+            SetPrivateField(host, "_cinematicRig", cinematic);
+            SetPrivateField(host, "_followProxy", followProxy);
+            SetPrivateField(host, "_impulseSource", impulseSource);
+
+            var manager = CinemachineImpulseManager.Instance;
+            var previousTimeOverride = CinemachineCore.CurrentTimeOverride;
+            try
+            {
+                manager.Clear();
+                CinemachineCore.CurrentTimeOverride = 10f;
+                root.SetActive(true);
+                host.Bind(sceneGeneration: 1);
+                host.Apply(
+                    new ClientBattleCameraIntent(
+                        battleGeneration: 1,
+                        mode: ClientBattleCameraMode.RangedAim,
+                        followEntityID: 99,
+                        impulseEventID: 7),
+                    actors);
+
+                Assert.That(exploration.activeSelf, Is.True);
+                Assert.That(melee.activeSelf, Is.False);
+                Assert.That(rangedAim.activeSelf, Is.False);
+                Assert.That(cinematic.activeSelf, Is.False);
+                CinemachineCore.CurrentTimeOverride = 10.05f;
+                Assert.That(
+                    manager.GetImpulseAt(
+                        Vector3.zero,
+                        distance2D: false,
+                        channelMask: 1,
+                        out _,
+                        out _),
+                    Is.True);
+
+                manager.Clear();
+                CinemachineCore.CurrentTimeOverride = 11f;
+                host.Apply(
+                    new ClientBattleCameraIntent(
+                        battleGeneration: 1,
+                        mode: ClientBattleCameraMode.Exploration,
+                        followEntityID: 99,
+                        impulseEventID: 7),
+                    actors);
+                CinemachineCore.CurrentTimeOverride = 11.05f;
+                Assert.That(
+                    manager.GetImpulseAt(
+                        Vector3.zero,
+                        distance2D: false,
+                        channelMask: 1,
+                        out _,
+                        out _),
+                    Is.False);
+
+                host.Unbind();
+                CinemachineCore.CurrentTimeOverride = 12f;
+                host.Apply(
+                    new ClientBattleCameraIntent(
+                        battleGeneration: 1,
+                        mode: ClientBattleCameraMode.Cinematic,
+                        followEntityID: 99,
+                        impulseEventID: 8),
+                    actors);
+                CinemachineCore.CurrentTimeOverride = 12.05f;
+                Assert.That(
+                    manager.GetImpulseAt(
+                        Vector3.zero,
+                        distance2D: false,
+                        channelMask: 1,
+                        out _,
+                        out _),
+                    Is.False);
+            }
+            finally
+            {
+                CinemachineCore.CurrentTimeOverride = previousTimeOverride;
+                manager.Clear();
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>
+        /// 验证 Actor registry 原子创建、替换和销毁 local/remote view，HUD 与 Camera 只消费
+        /// immutable presentation state，并在解绑后拒绝迟到回写。
+        /// </summary>
+        [UnityTest]
+        public IEnumerator ActorHudAndCameraHostsConsumeOnlyCurrentPresentation()
+        {
+            var root = new GameObject("BattlePresentationFixture");
+            root.SetActive(false);
+
+            var actorTemplate = CreateChild(root, "ActorTemplate");
+            var actorRoot = CreateChild(root, "ActorRoot");
+            var actors = root.AddComponent<ClientActorViewRegistry>();
+            SetPrivateField(actors, "_actorPrefab", actorTemplate);
+            SetPrivateField(actors, "_actorRoot", actorRoot.transform);
+            SetPrivateField(actors, "_sceneGeneration", 1L);
+            SetPrivateField(actors, "_battleGeneration", 21L);
+
+            var canvasGroup = CreateChild(root, "BattleHud").AddComponent<CanvasGroup>();
+            var statusText = AddTextComponent(CreateChild(root, "StatusText"));
+            var healthText = AddTextComponent(CreateChild(root, "HealthText"));
+            var hud = root.AddComponent<ClientBattleHudHost>();
+            SetPrivateField(hud, "_root", canvasGroup);
+            SetPrivateField(hud, "_statusText", statusText);
+            SetPrivateField(hud, "_healthText", healthText);
+
+            var camera = root.AddComponent<CinemachineCameraHost>();
+            var exploration = CreateChild(root, "ExplorationRig");
+            var melee = CreateChild(root, "MeleeRig");
+            var rangedAim = CreateChild(root, "RangedAimRig");
+            var cinematic = CreateChild(root, "CinematicRig");
+            var followProxy = CreateChild(root, "FollowProxy").transform;
+            var impulseSource = root.AddComponent<CinemachineImpulseSource>();
+            SetPrivateField(camera, "_explorationRig", exploration);
+            SetPrivateField(camera, "_meleeRig", melee);
+            SetPrivateField(camera, "_rangedAimRig", rangedAim);
+            SetPrivateField(camera, "_cinematicRig", cinematic);
+            SetPrivateField(camera, "_followProxy", followProxy);
+            SetPrivateField(camera, "_impulseSource", impulseSource);
+
+            try
+            {
+                root.SetActive(true);
+                hud.Bind(sceneGeneration: 1);
+                camera.Bind(sceneGeneration: 1);
+                Assert.That(
+                    ReadText(statusText),
+                    Is.EqualTo("Entering battle..."));
+                Assert.That(ReadText(healthText), Is.EqualTo("HP waiting"));
+                AssertBasicLatin(ReadText(statusText));
+                AssertBasicLatin(ReadText(healthText));
+                hud.ApplyRuntime(
+                    new ClientBattleRuntimeSnapshot(
+                        ClientBattleAvailability.LoadingBaseline,
+                        ClientBattleFailure.None,
+                        battleGeneration: 21,
+                        targetKind: ClientBattleTargetKind.OwnWorld,
+                        role: ClientBattleRole.Owner,
+                        actorSlot: 1,
+                        baselineReady: false,
+                        inputEnabled: false));
+                Assert.That(
+                    ReadText(statusText),
+                    Is.EqualTo("Loading character..."));
+                AssertBasicLatin(ReadText(statusText));
+                var initial = Presentation(
+                    local: Actor(
+                        entityID: 2,
+                        entityGeneration: 1,
+                        local: true,
+                        x: 1000,
+                        y: 2000,
+                        z: 3000,
+                        yaw: 90000),
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 1,
+                        local: false,
+                        x: 4000,
+                        y: 5000,
+                        z: 6000,
+                        yaw: 180000),
+                    correctionVisible: true,
+                    cameraMode: ClientBattleCameraMode.RangedAim);
+
+                Assert.That(actors.TryApply(initial), Is.True);
+                hud.Apply(initial.Hud);
+                camera.Apply(initial.Camera, actors);
+                Assert.That(actorRoot.transform.childCount, Is.EqualTo(2));
+                actors.ReplaceBattleGeneration(
+                    battleGeneration: 0,
+                    preserveActors: true);
+                Assert.That(
+                    actorRoot.transform.childCount,
+                    Is.EqualTo(2),
+                    "Recoverable generation transition cleared the last trusted frame.");
+                actors.ReplaceBattleGeneration(
+                    battleGeneration: 21,
+                    preserveActors: true);
+                Assert.That(
+                    actors.TryGetActorTransform(2, out var localTransform),
+                    Is.True);
+                AssertPosition(localTransform, 1f, 2f, 3f);
+                Assert.That(
+                    Mathf.DeltaAngle(localTransform.eulerAngles.y, 90f),
+                    Is.EqualTo(0f).Within(0.01f));
+                Assert.That(
+                    actors.TryGetActorTransform(3, out var remoteTransform),
+                    Is.True);
+                AssertPosition(remoteTransform, 4f, 5f, 6f);
+                Assert.That(rangedAim.activeSelf, Is.True);
+                Assert.That(exploration.activeSelf, Is.False);
+                Assert.That(followProxy.position, Is.EqualTo(localTransform.position));
+                Assert.That(ReadText(statusText), Is.EqualTo("Battle ready"));
+                Assert.That(ReadText(healthText), Is.EqualTo("HP 48.5"));
+                AssertBasicLatin(ReadText(statusText));
+                AssertBasicLatin(ReadText(healthText));
+
+                hud.ApplyRuntime(
+                    new ClientBattleRuntimeSnapshot(
+                        ClientBattleAvailability.Connecting,
+                        ClientBattleFailure.None,
+                        battleGeneration: 0,
+                        targetKind: ClientBattleTargetKind.OwnWorld,
+                        role: ClientBattleRole.None,
+                        actorSlot: -1,
+                        baselineReady: false,
+                        inputEnabled: false));
+                Assert.That(
+                    ReadText(statusText),
+                    Is.EqualTo("Connection lost. Reconnecting..."));
+                Assert.That(
+                    ReadText(healthText),
+                    Is.EqualTo("HP 48.5 (last known)"));
+                hud.DiscardCommittedState();
+                hud.ApplyRuntime(
+                    new ClientBattleRuntimeSnapshot(
+                        ClientBattleAvailability.Unavailable,
+                        ClientBattleFailure.Protocol,
+                        battleGeneration: 0,
+                        targetKind: ClientBattleTargetKind.OwnWorld,
+                        role: ClientBattleRole.None,
+                        actorSlot: -1,
+                        baselineReady: false,
+                        inputEnabled: false));
+                Assert.That(
+                    ReadText(statusText),
+                    Is.EqualTo("Battle failed to load. Re-enter the world."));
+                Assert.That(
+                    ReadText(healthText),
+                    Is.EqualTo("HP waiting"));
+                AssertBasicLatin(ReadText(statusText));
+
+                var advanced = Presentation(
+                    local: Actor(
+                        entityID: 2,
+                        entityGeneration: 1,
+                        local: true,
+                        x: 3000,
+                        y: 2000,
+                        z: 3000,
+                        yaw: 120000),
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 1,
+                        local: false,
+                        x: 4000,
+                        y: 5000,
+                        z: 6000,
+                        yaw: 180000),
+                    correctionVisible: false,
+                    cameraMode: ClientBattleCameraMode.RangedAim);
+                Assert.That(actors.TryApply(advanced), Is.True);
+                AssertPosition(localTransform, 1f, 2f, 3f);
+                actors.Tick(1f / 60f);
+                var firstSmoothedX = localTransform.position.x;
+                actors.Tick(1f / 60f);
+                var secondSmoothedX = localTransform.position.x;
+                var retargeted = Presentation(
+                    local: Actor(
+                        entityID: 2,
+                        entityGeneration: 1,
+                        local: true,
+                        x: 5000,
+                        y: 2000,
+                        z: 3000,
+                        yaw: 150000),
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 1,
+                        local: false,
+                        x: 4000,
+                        y: 5000,
+                        z: 6000,
+                        yaw: 180000),
+                    correctionVisible: false,
+                    cameraMode: ClientBattleCameraMode.RangedAim);
+                Assert.That(actors.TryApply(retargeted), Is.True);
+                actors.Tick(1f / 60f);
+                var retargetedSmoothedX = localTransform.position.x;
+                camera.Tick(actors);
+                Assert.That(
+                    localTransform.position.x,
+                    Is.GreaterThan(secondSmoothedX).And.LessThan(5f));
+                Assert.That(
+                    Mathf.DeltaAngle(
+                        localTransform.eulerAngles.y,
+                        150f),
+                    Is.GreaterThan(0.01f));
+                var previousFrameDisplacement =
+                    secondSmoothedX - firstSmoothedX;
+                var retargetFrameDisplacement =
+                    retargetedSmoothedX - secondSmoothedX;
+                Assert.That(previousFrameDisplacement, Is.GreaterThan(0f));
+                Assert.That(
+                    retargetFrameDisplacement,
+                    Is.LessThan(previousFrameDisplacement * 1.75f),
+                    "Local presentation retargeting produced a render-frame speed spike.");
+                Assert.That(
+                    followProxy.position,
+                    Is.EqualTo(localTransform.position));
+                camera.Tick(actors, semanticAimYawMillidegrees: 45000);
+                Assert.That(
+                    Mathf.DeltaAngle(followProxy.eulerAngles.y, 45f),
+                    Is.EqualTo(0f).Within(0.01f),
+                    "Interactive camera did not consume render-cadence semantic aim.");
+
+                var movingSample = Presentation(
+                    local: Actor(
+                        entityID: 2,
+                        entityGeneration: 2,
+                        local: true,
+                        x: 0,
+                        y: 0,
+                        z: 0,
+                        yaw: 0,
+                        velocityX: 3000),
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 1,
+                        local: false,
+                        x: 4000,
+                        y: 5000,
+                        z: 6000,
+                        yaw: 180000),
+                    correctionVisible: false,
+                    cameraMode: ClientBattleCameraMode.Exploration);
+                Assert.That(actors.TryApply(movingSample), Is.True);
+                Assert.That(
+                    actors.TryGetActorTransform(2, out var movingTransform),
+                    Is.True);
+                AssertPosition(movingTransform, 0f, 0f, 0f);
+                for (var frame = 0; frame < 12; frame++)
+                {
+                    Assert.That(actors.TryApply(movingSample), Is.True);
+                    actors.Tick(1f / 60f);
+                }
+
+                Assert.That(
+                    movingTransform.position.x,
+                    Is.GreaterThan(0.15f).And.LessThan(0.23f),
+                    "Repeated immutable samples reset extrapolation age or exceeded its bounded horizon.");
+
+                var semanticMovingSample = Presentation(
+                    local: Actor(
+                        entityID: 2,
+                        entityGeneration: 3,
+                        local: true,
+                        x: 0,
+                        y: 0,
+                        z: 0,
+                        yaw: 0,
+                        velocityX: 3000),
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 1,
+                        local: false,
+                        x: 4000,
+                        y: 5000,
+                        z: 6000,
+                        yaw: 180000),
+                    correctionVisible: false,
+                    cameraMode: ClientBattleCameraMode.Exploration);
+                Assert.That(actors.TryApply(semanticMovingSample), Is.True);
+                Assert.That(
+                    actors.TryGetActorTransform(2, out var semanticTransform),
+                    Is.True);
+                var previousSemanticX = semanticTransform.position.x;
+                for (var frame = 0; frame < 6; frame++)
+                {
+                    if (frame == 2 || frame == 5)
+                    {
+                        semanticMovingSample = Presentation(
+                            local: Actor(
+                                entityID: 2,
+                                entityGeneration: 3,
+                                local: true,
+                                x: frame == 2 ? 150 : 300,
+                                y: 0,
+                                z: 0,
+                                yaw: 0,
+                                velocityX: 3000),
+                            remote: Actor(
+                                entityID: 3,
+                                entityGeneration: 1,
+                                local: false,
+                                x: 4000,
+                                y: 5000,
+                                z: 6000,
+                                yaw: 180000),
+                            correctionVisible: false,
+                            cameraMode: ClientBattleCameraMode.Exploration);
+                        Assert.That(
+                            actors.TryApply(semanticMovingSample),
+                            Is.True);
+                    }
+
+                    actors.Tick(
+                        1f / 60f,
+                        Vector2.right,
+                        gameplayAvailable: true);
+                    var displacement =
+                        semanticTransform.position.x - previousSemanticX;
+                    Assert.That(
+                        displacement,
+                        Is.EqualTo(0.05f).Within(0.002f),
+                        "Semantic render motor did not preserve continuous frame displacement.");
+                    previousSemanticX = semanticTransform.position.x;
+                }
+
+                var stoppedSample = Presentation(
+                    local: Actor(
+                        entityID: 2,
+                        entityGeneration: 3,
+                        local: true,
+                        x: 300,
+                        y: 0,
+                        z: 0,
+                        yaw: 0),
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 1,
+                        local: false,
+                        x: 4000,
+                        y: 5000,
+                        z: 6000,
+                        yaw: 180000),
+                    correctionVisible: false,
+                    cameraMode: ClientBattleCameraMode.Exploration);
+                Assert.That(actors.TryApply(stoppedSample), Is.True);
+                var beforeReleaseX = semanticTransform.position.x;
+                actors.Tick(
+                    1f / 60f,
+                    Vector2.zero,
+                    gameplayAvailable: true);
+                Assert.That(
+                    semanticTransform.position.x,
+                    Is.EqualTo(beforeReleaseX).Within(0.0001f),
+                    "Move release reversed the local render Transform.");
+
+                var successor = Presentation(
+                    local: null,
+                    remote: Actor(
+                        entityID: 3,
+                        entityGeneration: 2,
+                        local: false,
+                        x: 7000,
+                        y: 8000,
+                        z: 9000,
+                        yaw: 270000),
+                    correctionVisible: false,
+                    cameraMode: ClientBattleCameraMode.Exploration);
+                Assert.That(actors.TryApply(successor), Is.True);
+                yield return null;
+
+                Assert.That(actorRoot.transform.childCount, Is.EqualTo(1));
+                Assert.That(actors.TryGetActorTransform(2, out _), Is.False);
+                Assert.That(
+                    actors.TryGetActorTransform(3, out var successorRemote),
+                    Is.True);
+                Assert.That(
+                    successorRemote.name,
+                    Is.EqualTo("ActorView-3-2"));
+                AssertPosition(successorRemote, 7f, 8f, 9f);
+
+                hud.Unbind();
+                camera.Unbind();
+                actors.Unbind();
+                yield return null;
+                Assert.That(actorRoot.transform.childCount, Is.Zero);
+                Assert.That(canvasGroup.alpha, Is.Zero);
+                Assert.That(ReadText(statusText), Is.Empty);
+                Assert.That(ReadText(healthText), Is.Empty);
+
+                hud.Apply(initial.Hud);
+                camera.Apply(initial.Camera, actors);
+                Assert.That(actors.TryApply(initial), Is.False);
+                Assert.That(canvasGroup.alpha, Is.Zero);
+                Assert.That(ReadText(statusText), Is.Empty);
+                Assert.That(ReadText(healthText), Is.Empty);
+                Assert.That(exploration.activeSelf, Is.True);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+        }
+
         /// <summary>创建完全位于当前测试 Scene 的直接引用 fixture。</summary>
         /// <param name="includeLight">是否创建必需 Light。</param>
         /// <returns>尚未绑定 SceneLifetime 的 fixture。</returns>
@@ -225,6 +837,178 @@ namespace IHomeland.Client.Tests.PlayMode
             context.ConfigureBeforeActivation(camera, light, sceneRootObject.transform);
             root.SetActive(true);
             return new SceneContextFixture(root, context);
+        }
+
+        /// <summary>创建测试 root 下的 Scene-owned 子对象。</summary>
+        /// <param name="root">测试 fixture root。</param>
+        /// <param name="name">子对象名称。</param>
+        /// <returns>保持 activeSelf 的测试对象。</returns>
+        private static GameObject CreateChild(GameObject root, string name)
+        {
+            var child = new GameObject(name);
+            child.transform.SetParent(root.transform, worldPositionStays: false);
+            return child;
+        }
+
+        /// <summary>为程序化 Scene fixture 设置生产代码的 serialized direct reference。</summary>
+        /// <typeparam name="T">Serialized field value 类型。</typeparam>
+        /// <param name="target">包含 serialized field 的组件。</param>
+        /// <param name="fieldName">Private serialized field 名称。</param>
+        /// <param name="value">测试 direct reference。</param>
+        private static void SetPrivateField<T>(
+            object target,
+            string fieldName,
+            T value)
+        {
+            var field = target.GetType().GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"缺少 serialized field：{fieldName}");
+            field.SetValue(target, value);
+        }
+
+        /// <summary>读取测试对象的private field以验证有界状态。</summary>
+        /// <typeparam name="T">Private field value类型。</typeparam>
+        /// <param name="target">包含被测field的对象。</param>
+        /// <param name="fieldName">Private field名称。</param>
+        /// <returns>被测field的current value。</returns>
+        private static T GetPrivateField<T>(object target, string fieldName)
+        {
+            var field = target.GetType().GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"缺少private field：{fieldName}");
+            return (T)field.GetValue(target);
+        }
+
+        /// <summary>以毫米到米换算允许的浮点容差验证 Actor Transform。</summary>
+        /// <param name="target">被测 Actor Transform。</param>
+        /// <param name="x">期望米位置 X。</param>
+        /// <param name="y">期望米位置 Y。</param>
+        /// <param name="z">期望米位置 Z。</param>
+        private static void AssertPosition(
+            Transform target,
+            float x,
+            float y,
+            float z)
+        {
+            Assert.That(target.position.x, Is.EqualTo(x).Within(0.0001f));
+            Assert.That(target.position.y, Is.EqualTo(y).Within(0.0001f));
+            Assert.That(target.position.z, Is.EqualTo(z).Within(0.0001f));
+        }
+
+        /// <summary>通过已加载的 TextMeshPro runtime 类型创建测试文本，不向测试 asmdef 增加 UI owner。</summary>
+        /// <param name="target">承载 TMP component 的 Scene object。</param>
+        /// <returns>可直接赋给 `TMP_Text` serialized field 的组件。</returns>
+        private static Component AddTextComponent(GameObject target)
+        {
+            var textType = Type.GetType(
+                "TMPro.TextMeshProUGUI, Unity.TextMeshPro",
+                throwOnError: false);
+            Assert.That(textType, Is.Not.Null, "Unity.TextMeshPro runtime assembly 未加载。");
+            return target.AddComponent(textType);
+        }
+
+        /// <summary>读取测试 TMP component 的当前文本。</summary>
+        /// <param name="component">TextMeshProUGUI component。</param>
+        /// <returns>HUD Host 已提交的字符串。</returns>
+        private static string ReadText(Component component)
+        {
+            var property = component.GetType().GetProperty(
+                "text",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.That(property, Is.Not.Null, "TMP_Text.text property 不存在。");
+            return property.GetValue(component) as string;
+        }
+
+        /// <summary>确认 current Battle HUD 文案完全由 Basic Latin printable glyph组成。</summary>
+        /// <param name="value">待验证的 TMP 文本。</param>
+        private static void AssertBasicLatin(string value)
+        {
+            Assert.That(value, Is.Not.Null);
+            foreach (var character in value)
+            {
+                var codePoint = (int)character;
+                Assert.That(
+                    codePoint,
+                    Is.InRange((int)' ', (int)'~'),
+                    $"HUD text contains a non-Basic-Latin glyph: U+{codePoint:X4}");
+            }
+        }
+
+        /// <summary>创建一个明确标识 local prediction 或 remote interpolation 来源的 actor state。</summary>
+        /// <param name="entityID">Entity identity。</param>
+        /// <param name="entityGeneration">Lifecycle generation。</param>
+        /// <param name="local">是否来自 local prediction。</param>
+        /// <param name="x">毫米位置 X。</param>
+        /// <param name="y">毫米位置 Y。</param>
+        /// <param name="z">毫米位置 Z。</param>
+        /// <param name="yaw">毫度 yaw。</param>
+        /// <param name="velocityX">毫米/秒 world X速度。</param>
+        /// <param name="velocityY">毫米/秒 world Y速度。</param>
+        /// <param name="velocityZ">毫米/秒 world Z速度。</param>
+        /// <returns>Battle generation 21 的 immutable actor state。</returns>
+        private static ClientActorViewState Actor(
+            ulong entityID,
+            uint entityGeneration,
+            bool local,
+            int x,
+            int y,
+            int z,
+            int yaw,
+            int velocityX = 0,
+            int velocityY = 0,
+            int velocityZ = 0)
+        {
+            return new ClientActorViewState(
+                battleGeneration: 21,
+                entityID,
+                entityGeneration,
+                local,
+                new ClientBattleTransform(
+                    x,
+                    y,
+                    z,
+                    yaw,
+                    velocityXMillimetersPerSecond: velocityX,
+                    velocityYMillimetersPerSecond: velocityY,
+                    velocityZMillimetersPerSecond: velocityZ),
+                healthMilli: local ? 48500u : 100000u,
+                stateFlags: 0,
+                degraded: false);
+        }
+
+        /// <summary>创建 Actor、HUD 与 Camera 使用的同 generation immutable presentation。</summary>
+        /// <param name="local">可选 local prediction actor。</param>
+        /// <param name="remote">Remote interpolation actor。</param>
+        /// <param name="correctionVisible">HUD 是否显示位置校正。</param>
+        /// <param name="cameraMode">Camera intent mode。</param>
+        /// <returns>Battle generation 21 的一致 presentation state。</returns>
+        private static ClientGameplayPresentationState Presentation(
+            ClientActorViewState local,
+            ClientActorViewState remote,
+            bool correctionVisible,
+            ClientBattleCameraMode cameraMode)
+        {
+            var actorStates = local == null
+                ? new[] { remote }
+                : new[] { local, remote };
+            var followEntityID = local?.EntityID ?? remote.EntityID;
+            return new ClientGameplayPresentationState(
+                actorStates,
+                new ClientBattleHudViewState(
+                    battleGeneration: 21,
+                    ClientBattleAvailability.Active,
+                    localHealthMilli: local?.HealthMilli ?? 0,
+                    correctionVisible,
+                    inputEnabled: true,
+                    degraded: false),
+                Array.Empty<ClientGameplayCue>(),
+                new ClientBattleCameraIntent(
+                    battleGeneration: 21,
+                    cameraMode,
+                    followEntityID,
+                    impulseEventID: 0));
         }
 
         /// <summary>创建最小无 credential HUD 投影。</summary>

@@ -182,6 +182,31 @@ namespace IHomeland.Client.Tests.PlayMode
         }
 
         /// <summary>
+        /// 保护应用退出清理摘要不泄露参与者消息且保持warning可检索字段。
+        /// </summary>
+        [Test]
+        public void ApplicationQuitShutdownWarningIsLowSensitivity()
+        {
+            var error = new AppShutdownException(
+                new System.Exception[]
+                {
+                    new System.TimeoutException("sensitive injected detail"),
+                    new System.InvalidOperationException("other detail"),
+                });
+
+            var warning =
+                AppRoot.FormatApplicationQuitShutdownWarning(error);
+
+            Assert.That(
+                warning,
+                Is.EqualTo(
+                    "[IHOMELAND_APP_SHUTDOWN] outcome=best_effort " +
+                    "cleanup_errors=2 first_error=TimeoutException"));
+            Assert.That(warning, Does.Not.Contain("sensitive"));
+            Assert.That(warning, Does.Not.Contain("other detail"));
+        }
+
+        /// <summary>
         /// 验证缺失环境 profile 会在争用唯一 root 前安全停用 bootstrap。
         /// </summary>
         /// <returns>等待 Awake 完成并观察无网络对象图启动的枚举器。</returns>

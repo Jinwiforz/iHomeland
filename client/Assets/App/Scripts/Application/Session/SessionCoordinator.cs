@@ -6,6 +6,7 @@ using IHomeland.Client.Application.Ports;
 using IHomeland.Client.Application.Configuration;
 using IHomeland.Client.Foundation.Lifetime;
 using IHomeland.Client.Foundation.Time;
+using IHomeland.Client.Application.Battle;
 
 namespace IHomeland.Client.Application.Session
 {
@@ -17,7 +18,9 @@ namespace IHomeland.Client.Application.Session
     /// 防止旧响应覆盖后发请求；refresh 使用 single-flight 与 generation 双重 guard。Stop/forget 递增
     /// generation，使已经无法取消的迟到 completion 也不能恢复旧 credential。
     /// </remarks>
-    internal sealed class SessionCoordinator : IAppLifetimeParticipant
+    internal sealed class SessionCoordinator :
+        IAppLifetimeParticipant,
+        IClientBattleAuthorizationSource
     {
         /// <summary>
         /// 保护 owner state、snapshot、generation、auth intent 与 refresh task。
@@ -1127,6 +1130,63 @@ namespace IHomeland.Client.Application.Session
                         _refreshTask = null;
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// 为同一 battle connect attempt 取得 fresh 且只能消费一次的 authorization lease。
+        /// </summary>
+        /// <param name="expectedSessionGeneration">Activation 冻结的 Session generation。</param>
+        /// <param name="cancellationToken">Current attempt cancellation。</param>
+        /// <returns>同 generation lease、服务端拒绝或稳定本地失败。</returns>
+        public async Task<ClientGatewayResult<ClientCredentialLease>>
+            AcquireBattleAuthorizationAsync(
+                long expectedSessionGeneration,
+                CancellationToken cancellationToken)
+        {
+            if (expectedSessionGeneration <= 0)
+            {
+                return LocalPolicy<ClientCredentialLease>(
+                    ClientOperationIDs.IssueBattleTicket);
+            }
+
+            if (!TryCaptureAuthenticated(out var source) ||
+                source.Generation != expectedSessionGeneration)
+            {
+                return LocalPolicy<ClientCredentialLease>(
+                    ClientOperationIDs.IssueBattleTicket);
+            }
+
+            var current = await CaptureFreshAuthenticatedAsync(
+                ClientOperationIDs.IssueBattleTicket,
+                cancellationToken);
+            if (!current.IsSuccess)
+            {
+                return current.ServerError != null
+                    ? ClientGatewayResult<ClientCredentialLease>.Rejected(
+                        current.ServerError)
+                    : ClientGatewayResult<ClientCredentialLease>.Failed(
+                        current.Failure);
+            }
+
+            lock (_sync)
+            {
+                if (current.Value.Generation < expectedSessionGeneration ||
+                    !IsCurrent(current.Value.Generation) ||
+                    !string.Equals(
+                        current.Value.Session.SessionID,
+                        source.Session.SessionID,
+                        StringComparison.Ordinal) ||
+                    current.Value.Session.SessionEpoch !=
+                        source.Session.SessionEpoch)
+                {
+                    return LocalPolicy<ClientCredentialLease>(
+                        ClientOperationIDs.IssueBattleTicket);
+                }
+
+                return ClientGatewayResult<ClientCredentialLease>.Success(
+                    CreateAuthorizationLease(
+                        current.Value.Tokens.AccessToken));
             }
         }
 

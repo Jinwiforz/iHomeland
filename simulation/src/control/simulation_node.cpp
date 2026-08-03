@@ -2,6 +2,8 @@
 
 #include "ihomeland/sim/core/adapter_smoke.hpp"
 #include "ihomeland/sim/core/sha256.hpp"
+#include "ihomeland/sim/gameplay/battle_movement_replication.hpp"
+#include "ihomeland/sim/physics/flat_ground_physics_world.hpp"
 #include "ihomeland/sim/simulation/command_ingress.hpp"
 #include "ihomeland/sim/simulation/identity.hpp"
 #include "ihomeland/sim/simulation/input_timeline.hpp"
@@ -61,7 +63,74 @@ struct QualifiedRuntimePolicy final {
     static constexpr std::uint64_t MicrosecondsPerMillisecond = 1'000;
     /// InitialActorHealthScaled 是 instance admission 创建 actor 的完整初始生命值。
     static constexpr std::int64_t InitialActorHealthScaled = 100'000;
+    /// MovementInputScale 是 wire move axes 的千分比满幅。
+    static constexpr std::int64_t MovementInputScale = 1'000;
+    /// MaximumHorizontalSpeedMillimetersPerSecond 与 Unity prediction contract 一致。
+    static constexpr std::int64_t
+        MaximumHorizontalSpeedMillimetersPerSecond = 3'000;
+    /// MovementAccelerationMillimetersPerSecondSquared 是 50 ms 加速参数。
+    static constexpr std::int64_t
+        MovementAccelerationMillimetersPerSecondSquared = 60'000;
+    /// MovementDecelerationMillimetersPerSecondSquared 是 50 ms 减速参数。
+    static constexpr std::int64_t
+        MovementDecelerationMillimetersPerSecondSquared = 60'000;
+    /// GravityMillimetersPerSecondSquared 是 current kinematic gravity。
+    static constexpr std::int64_t
+        GravityMillimetersPerSecondSquared = 10'000;
+    /// JumpSpeedMillimetersPerSecond 是 grounded jump impulse。
+    static constexpr std::int64_t
+        JumpSpeedMillimetersPerSecond = 5'000;
+    /// MaximumGroundSlopeMilliradians 保留 battle model 的 45-degree policy。
+    static constexpr std::int64_t
+        MaximumGroundSlopeMilliradians = 785;
+    /// MaximumStepHeightMillimeters 是 current capsule step ceiling。
+    static constexpr std::int64_t
+        MaximumStepHeightMillimeters = 400;
 };
+
+/// QualifiedMovementConfig 构造 C++ authority 与 Unity prediction 共享的整数参数。
+[[nodiscard]] MovementConfig
+QualifiedMovementConfig() noexcept {
+    return {
+        .tick_step_ns =
+            static_cast<std::int64_t>(
+                QualifiedRuntimePolicy::
+                    SimulationStepNanoseconds),
+        .input_scale =
+            QualifiedRuntimePolicy::
+                MovementInputScale,
+        .maximum_horizontal_speed_mm_per_second =
+            QualifiedRuntimePolicy::
+                MaximumHorizontalSpeedMillimetersPerSecond,
+        .acceleration_mm_per_second_squared =
+            QualifiedRuntimePolicy::
+                MovementAccelerationMillimetersPerSecondSquared,
+        .deceleration_mm_per_second_squared =
+            QualifiedRuntimePolicy::
+                MovementDecelerationMillimetersPerSecondSquared,
+        .gravity_mm_per_second_squared =
+            QualifiedRuntimePolicy::
+                GravityMillimetersPerSecondSquared,
+        .jump_speed_mm_per_second =
+            QualifiedRuntimePolicy::
+                JumpSpeedMillimetersPerSecond,
+        .maximum_ground_slope_millirad =
+            QualifiedRuntimePolicy::
+                MaximumGroundSlopeMilliradians,
+        .maximum_step_height_mm =
+            QualifiedRuntimePolicy::
+                MaximumStepHeightMillimeters,
+    };
+}
+
+/// ActorIdentityMatchesSlot 锁定 wire v1 的 one-based entity identity 映射。
+[[nodiscard]] bool ActorIdentityMatchesSlot(
+    const BattleSessionContext& context) noexcept {
+    return context.Actor().actor_id ==
+        static_cast<std::uint64_t>(
+            context.Actor().actor_slot) +
+            1;
+}
 
 /// RequireIdentity 验证 control identity 只含安全 ASCII 且有固定前缀。
 void RequireIdentity(
@@ -279,9 +348,10 @@ struct SimulationNode::Entry final {
     std::unique_ptr<CommandIngress> command_ingress;
     /// input_timeline 只由 instance worker 推进连续输入终结状态。
     std::shared_ptr<InputTimeline> input_timeline;
-    /// input_acknowledgements 向 replication worker 发布 immutable projection。
-    std::shared_ptr<InputAcknowledgementStore>
-        input_acknowledgements;
+    /// movement_replication 原子拥有 current movement state 与 acknowledgement projection。
+    std::shared_ptr<
+        BattleMovementReplicationStore>
+        movement_replication;
     /// drained 标记 ingress 已关闭且 lifecycle result 已生成。
     bool drained{false};
 };
@@ -298,11 +368,10 @@ struct SimulationNode::BattleRuntimeBinding final {
     SimulationInstance* instance;
     /// command_ingress 是唯一 validated producer port。
     CommandIngress* command_ingress;
-    /// input_acknowledgements 是 replication 可读取的唯一跨线程确认快照。
-    std::shared_ptr<InputAcknowledgementStore>
-        input_acknowledgements;
-    /// initial_states 是 instance startup 冻结且只由后续 gameplay commit 替换的投影。
-    std::vector<StateProjectionToken> initial_states;
+    /// movement_replication 是 replication 可读取的唯一跨线程 committed projection。
+    std::shared_ptr<
+        BattleMovementReplicationStore>
+        movement_replication;
     /// active 在 drain/stop 开始前一次性关闭。
     bool active;
 };
@@ -444,27 +513,13 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
             command.navigation_identity,
             command.physics_identity));
     std::vector<std::uint64_t> actor_ids;
-    std::vector<StateProjectionToken> initial_states;
     actor_ids.reserve(command.actor_capacity);
-    initial_states.reserve(command.actor_capacity);
     for (std::size_t slot = 0;
          slot < command.actor_capacity;
          ++slot) {
         const auto actor_id =
             static_cast<std::uint64_t>(slot) + 1;
         actor_ids.push_back(actor_id);
-        initial_states.push_back(
-            StateProjectionToken{
-                .actor_id = actor_id,
-                .x_mm = 0,
-                .y_mm = 0,
-                .z_mm = 0,
-                .health_scaled =
-                    QualifiedRuntimePolicy::
-                        InitialActorHealthScaled,
-                .phase = 0,
-                .alive = true,
-            });
     }
     const auto input_mapping =
         InputMappingConfig{
@@ -499,11 +554,22 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
                 InputGapExpiryTicks,
             QualifiedRuntimePolicy::
                 InputDedupeItems);
-    auto input_acknowledgements =
+    auto movement_replication =
         std::make_shared<
-            InputAcknowledgementStore>(
-            command.mapping_generation,
-            actor_ids);
+            BattleMovementReplicationStore>(
+            BattleMovementReplicationConfig{
+                .mapping_generation =
+                    command.mapping_generation,
+                .movement =
+                    QualifiedMovementConfig(),
+                .maximum_actors =
+                    command.actor_capacity,
+            },
+            actor_ids,
+            QualifiedRuntimePolicy::
+                InitialActorHealthScaled,
+            std::make_shared<
+                FlatGroundPhysicsWorld>());
     auto instance = std::make_unique<SimulationInstance>(
         std::move(identity),
         SimulationInstanceConfig{
@@ -516,17 +582,18 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         },
         clock,
         [input_timeline,
-         input_acknowledgements](
+         movement_replication](
             const TickObservation& observation) {
-            static_cast<void>(
+            const auto resolutions =
                 input_timeline->Resolve(
                     observation.tick,
-                    observation.commands));
+                    observation.commands);
             const auto acknowledgements =
                 input_timeline->
                     FreezeAcknowledgements();
-            input_acknowledgements->Publish(
+            movement_replication->Commit(
                 observation.tick,
+                resolutions,
                 acknowledgements);
         },
         &runtime_metrics_);
@@ -561,7 +628,8 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
             *instance,
             input_mapping,
             actor_ids,
-            QualifiedRuntimePolicy::InputDedupeItems);
+            QualifiedRuntimePolicy::InputDedupeItems,
+            command.assignment.fingerprint);
     runtime_metrics_.ObserveMemory(
         instance->ReservedBytes(),
         0);
@@ -574,8 +642,8 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         std::move(command_ingress);
     entry->input_timeline =
         input_timeline;
-    entry->input_acknowledgements =
-        input_acknowledgements;
+    entry->movement_replication =
+        movement_replication;
     const auto receipt = InstanceReadyReceipt{
         .start_request_id = entry->command.start_request_id,
         .assignment_fingerprint = entry->command.assignment.fingerprint,
@@ -598,10 +666,8 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
                 .instance = entry->instance.get(),
                 .command_ingress =
                     entry->command_ingress.get(),
-                .input_acknowledgements =
-                    entry->input_acknowledgements,
-                .initial_states =
-                    std::move(initial_states),
+                .movement_replication =
+                    entry->movement_replication,
                 .active = true,
             });
     }
@@ -935,8 +1001,7 @@ BattleTicketReceipt SimulationNode::InstallBattleTicket(
         };
     }
     for (auto& existing : tickets_) {
-        if ((existing->state == BattleTicketState::Installed ||
-             existing->state == BattleTicketState::Consumed) &&
+        if (existing->state == BattleTicketState::Installed &&
             observed_unix_ms >= existing->binding.expires_at_unix_ms) {
             existing->state = BattleTicketState::Expired;
             existing->proof_key.reset();
@@ -996,20 +1061,40 @@ BattleTicketReceipt SimulationNode::InstallBattleTicket(
         BattleTicketRegistryLimit) {
         throw std::length_error("battle ticket registry capacity exhausted");
     }
+    TicketEntry* predecessor = nullptr;
     const auto occupied = std::any_of(
         tickets_.begin(),
         tickets_.end(),
         [&](const auto& existing) {
-            return (existing->state == BattleTicketState::Installed ||
-                    existing->state == BattleTicketState::Consumed) &&
-                   existing->binding.simulation_instance_id ==
-                       binding.simulation_instance_id &&
-                   (existing->binding.actor_slot == binding.actor_slot ||
-                    existing->binding.player_id == binding.player_id);
+            if ((existing->state != BattleTicketState::Installed &&
+                 existing->state != BattleTicketState::Consumed) ||
+                existing->binding.simulation_instance_id !=
+                    binding.simulation_instance_id) {
+                return false;
+            }
+            const auto same_slot =
+                existing->binding.actor_slot == binding.actor_slot;
+            const auto same_player =
+                existing->binding.player_id == binding.player_id;
+            const auto same_role =
+                existing->binding.role == binding.role;
+            if (same_slot && same_player && same_role &&
+                predecessor == nullptr) {
+                predecessor = existing.get();
+                return false;
+            }
+            return same_slot || same_player;
         });
     if (occupied) {
         throw std::length_error(
             "battle installed and active actor capacity exhausted");
+    }
+    std::string superseded_binding_fingerprint;
+    if (predecessor != nullptr) {
+        predecessor->state = BattleTicketState::Revoked;
+        predecessor->proof_key.reset();
+        superseded_binding_fingerprint =
+            predecessor->binding_fingerprint;
     }
     auto entry = std::make_unique<TicketEntry>();
     entry->install_request_id = command.install_request_id;
@@ -1025,6 +1110,8 @@ BattleTicketReceipt SimulationNode::InstallBattleTicket(
         .actor_slot = entry->binding.actor_slot,
         .state = entry->state,
         .replayed = false,
+        .superseded_binding_fingerprint =
+            std::move(superseded_binding_fingerprint),
     };
     tickets_.push_back(std::move(entry));
     return receipt;
@@ -1069,8 +1156,7 @@ BattleTicketReceipt SimulationNode::BattleTicketStatus(
         throw std::runtime_error("battle ticket status target is missing");
     }
     auto& entry = **iterator;
-    if ((entry.state == BattleTicketState::Installed ||
-         entry.state == BattleTicketState::Consumed) &&
+    if (entry.state == BattleTicketState::Installed &&
         observed_unix_ms >= entry.binding.expires_at_unix_ms) {
         entry.state = BattleTicketState::Expired;
         entry.proof_key.reset();
@@ -1145,8 +1231,7 @@ void SimulationNode::AuthenticateAndConsumeBattleTicket(
             "battle ticket authentication failed");
     }
     auto& entry = **iterator;
-    if ((entry.state == BattleTicketState::Installed ||
-         entry.state == BattleTicketState::Consumed) &&
+    if (entry.state == BattleTicketState::Installed &&
         observed_unix_ms >= entry.binding.expires_at_unix_ms) {
         entry.state = BattleTicketState::Expired;
         entry.proof_key.reset();
@@ -1288,8 +1373,7 @@ std::size_t SimulationNode::InstalledOrActiveActors(
     std::scoped_lock lock(ticket_mutex_);
     std::size_t actors = 0;
     for (auto& entry : tickets_) {
-        if ((entry->state == BattleTicketState::Installed ||
-             entry->state == BattleTicketState::Consumed) &&
+        if (entry->state == BattleTicketState::Installed &&
             observed_unix_ms >= entry->binding.expires_at_unix_ms) {
             entry->state = BattleTicketState::Expired;
             entry->proof_key.reset();
@@ -1307,6 +1391,9 @@ std::size_t SimulationNode::InstalledOrActiveActors(
 CommandIngress*
 SimulationNode::ResolveBattleCommandIngress(
     const BattleSessionContext& context) noexcept {
+    if (!ActorIdentityMatchesSlot(context)) {
+        return nullptr;
+    }
     std::scoped_lock lock(
         battle_runtime_binding_mutex_);
     const auto binding = std::find_if(
@@ -1330,6 +1417,9 @@ SimulationNode::ResolveBattleCommandIngress(
 std::optional<BattleReplicationProjection>
 SimulationNode::BattleReplicationSnapshot(
     const BattleSessionContext& context) const {
+    if (!ActorIdentityMatchesSlot(context)) {
+        return std::nullopt;
+    }
     std::scoped_lock lock(
         battle_runtime_binding_mutex_);
     const auto binding = std::find_if(
@@ -1348,30 +1438,21 @@ SimulationNode::BattleReplicationSnapshot(
         battle_runtime_bindings_.end()) {
         return std::nullopt;
     }
-    const auto actor_state = std::find_if(
-        binding->initial_states.begin(),
-        binding->initial_states.end(),
-        [&](const auto& state) {
-            return state.actor_id ==
-                context.Actor().actor_id;
-        });
-    if (actor_state ==
-        binding->initial_states.end()) {
-        return std::nullopt;
-    }
-    const auto acknowledgement =
-        binding->input_acknowledgements->
+    const auto projection =
+        binding->movement_replication->
             Freeze(
                 context.Actor().actor_id,
                 context.MappingGeneration());
-    if (!acknowledgement.has_value()) {
+    if (!projection.has_value() ||
+        binding->instance->CommittedTick() <
+            projection->server_tick) {
         return std::nullopt;
     }
     return BattleReplicationProjection{
-        .server_tick = acknowledgement->server_tick,
+        .server_tick = projection->server_tick,
         .acknowledgement =
-            acknowledgement->acknowledgement,
-        .states = {*actor_state},
+            projection->acknowledgement,
+        .states = projection->states,
     };
 }
 
@@ -1379,7 +1460,8 @@ BattleRawDispatchContext
 SimulationNode::BattleRawContext(
     const BattleSessionContext& context,
     const std::uint64_t now_unix_ms) const {
-    if (now_unix_ms == 0 ||
+    if (!ActorIdentityMatchesSlot(context) ||
+        now_unix_ms == 0 ||
         now_unix_ms >
             std::numeric_limits<std::uint64_t>::max() /
                 QualifiedRuntimePolicy::
@@ -1469,6 +1551,9 @@ SimulationNode::BattleRawContext(
 
 bool SimulationNode::BattleSessionCurrent(
     const BattleSessionContext& context) const noexcept {
+    if (!ActorIdentityMatchesSlot(context)) {
+        return false;
+    }
     {
         std::scoped_lock lock(
             battle_runtime_binding_mutex_);
@@ -1661,8 +1746,7 @@ SimulationNode::QualificationSnapshot(
         for (const auto& ticket : tickets_) {
             if (ticket->binding.simulation_instance_id !=
                     simulation_instance_id ||
-                ((ticket->state == BattleTicketState::Installed ||
-                  ticket->state == BattleTicketState::Consumed) &&
+                (ticket->state == BattleTicketState::Installed &&
                  observed_unix_ms >=
                      ticket->binding.expires_at_unix_ms)) {
                 continue;

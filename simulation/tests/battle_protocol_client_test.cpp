@@ -391,9 +391,11 @@ DeriveProofKey(
 /// MakeCredential 生成 move-only stdin secret fixture。
 [[nodiscard]] client::TicketCredential
 MakeCredential(
-    const sim::CryptoProvider::Key32& ticket_secret) {
+    const sim::CryptoProvider::Key32& ticket_secret,
+    const std::array<std::uint8_t, 16>& ticket_id =
+        Sequence<16>(0x10)) {
     client::TicketCredential credential;
-    credential.ticket_id = Sequence<16>(0x10);
+    credential.ticket_id = ticket_id;
     credential.ticket_secret = ticket_secret;
     credential.expires_at_unix_ms =
         NowUnixMs + 60'000;
@@ -543,6 +545,61 @@ RuntimeTicketCommand(
             },
         .proof_key = proof_key,
     };
+}
+
+/// RuntimeVisitorTicketCommand 构造同 instance 第二个 active actor ticket。
+[[nodiscard]] sim::BattleTicketInstallCommand
+RuntimeVisitorTicketCommand(
+    const sim::InstanceStartCommand& start,
+    const sim::InstanceReadyReceipt& ready,
+    const sim::CryptoProvider::Key32& proof_key) {
+    auto command =
+        RuntimeTicketCommand(
+            start,
+            ready,
+            proof_key);
+    command.install_request_id =
+        "sctl_protocol_runtime_install_visitor";
+    command.ticket_id =
+        "btk1_AQIDBAUGBwgJCgsMDQ4PEA";
+    command.binding_fingerprint =
+        LowerHex(Sequence<32>(0xc0));
+    command.binding.player_id =
+        "ply_protocol_runtime_visitor";
+    command.binding.session_id =
+        "ses_protocol_runtime_visitor";
+    command.binding.session_epoch = 4;
+    command.binding.role = "visitor";
+    command.binding.visit_session_id =
+        "vses_protocol_runtime";
+    command.binding.actor_slot = 3;
+    command.binding.issue_id =
+        "biss_protocol_runtime_visitor";
+    command.binding.expires_at_unix_ms =
+        NowUnixMs + 100;
+    return command;
+}
+
+/// RuntimeSuccessorTicketCommand 构造同 actor 的新一代一次性 ticket。
+[[nodiscard]] sim::BattleTicketInstallCommand
+RuntimeSuccessorTicketCommand(
+    const sim::InstanceStartCommand& start,
+    const sim::InstanceReadyReceipt& ready,
+    const sim::CryptoProvider::Key32& proof_key) {
+    auto command =
+        RuntimeTicketCommand(
+            start,
+            ready,
+            proof_key);
+    command.install_request_id =
+        "sctl_protocol_runtime_install_successor";
+    command.ticket_id =
+        "btk1_ICEiIyQlJicoKSorLC0uLw";
+    command.binding_fingerprint =
+        LowerHex(Sequence<32>(0xd0));
+    command.binding.issue_id =
+        "biss_protocol_runtime_successor";
+    return command;
 }
 
 /// RuntimeEndpoint 返回 listener 已 canonicalize 的 IPv4-mapped source。
@@ -832,8 +889,8 @@ void TestRuntimeComposition() {
                 return std::optional<
                     sim::BattleReplicationProjection>{};
             }
-            return std::optional{
-                sim::BattleReplicationProjection{
+            sim::BattleReplicationProjection
+                projection{
                     .server_tick = 20,
                     .acknowledgement = {
                         .actor_id =
@@ -842,18 +899,23 @@ void TestRuntimeComposition() {
                             context.MappingGeneration(),
                         .last_processed_input_tick = 1,
                     },
-                    .states = {{
-                        .actor_id =
-                            context.Actor().actor_id,
-                        .x_mm = 0,
-                        .y_mm = 0,
-                        .z_mm = 0,
-                        .health_scaled = 1,
-                        .phase = 1,
-                        .alive = true,
-                    }},
-                },
-            };
+                    .states = {},
+                };
+            for (std::uint64_t actor_id = 1;
+                 actor_id <= 8;
+                 ++actor_id) {
+                projection.states.push_back({
+                    .actor_id = actor_id,
+                    .x_mm = 0,
+                    .y_mm = 0,
+                    .z_mm = 0,
+                    .health_scaled = 1,
+                    .phase = 1,
+                    .alive = true,
+                });
+            }
+            return std::optional{
+                std::move(projection)};
         },
         [&](const sim::BattleSessionContext&,
             const sim::BattleKcpMessageView&) {
@@ -1196,6 +1258,121 @@ void TestRuntimeComposition() {
                         SecureDispatched,
         "rekey reset raw lane or diverged epoch");
 
+    const auto visitor_ticket_secret =
+        Sequence<32>(0x80);
+    auto visitor_proof_key = DeriveProofKey(
+        crypto,
+        Sequence<16>(0x01),
+        visitor_ticket_secret);
+    Require(
+        node.InstallBattleTicket(
+            RuntimeVisitorTicketCommand(
+                start,
+                ready,
+                visitor_proof_key),
+            NowUnixMs + 10).state ==
+            sim::BattleTicketState::Installed,
+        "runtime visitor ticket install failed");
+    crypto.SecureZero(visitor_proof_key);
+    client::ProtocolHandshake visitor_handshake(
+        MakeCredential(
+            visitor_ticket_secret,
+            Sequence<16>(0x01)),
+        NowUnixMs + 10);
+    auto visitor_remote = remote;
+    visitor_remote.port += 2;
+    responses.clear();
+    response_targets.clear();
+    Require(
+        runtime.HandleDatagram(
+            visitor_handshake.ClientHello(),
+            visitor_remote,
+            NowUnixMs + 10) ==
+                sim::
+                    BattleTransportRuntimeDisposition::
+                        RetryQueued &&
+            responses.size() == 1,
+        "runtime visitor Retry failed");
+    const auto visitor_auth =
+        visitor_handshake.AcceptRetry(
+            responses.back(),
+            NowUnixMs + 11);
+    responses.clear();
+    response_targets.clear();
+    replication_enabled = true;
+    Require(
+        visitor_auth.has_value() &&
+            runtime.HandleDatagram(
+                *visitor_auth,
+                visitor_remote,
+                NowUnixMs + 11) ==
+                sim::
+                    BattleTransportRuntimeDisposition::
+                        SessionAccepted &&
+            runtime.ActiveSessionCount() == 2 &&
+            responses.size() == 2,
+        "runtime visitor session did not join active actor set");
+    auto visitor_parameters =
+        visitor_handshake.AcceptServer(
+            responses.front(),
+            NowUnixMs + 12);
+    Require(
+        visitor_parameters.has_value() &&
+            visitor_parameters->actor_slot == 3 &&
+            visitor_parameters->role == 2,
+        "runtime visitor accept binding drifted");
+    const auto visitor_digest =
+        crypto.Sha256(
+            visitor_parameters->session_id);
+    client::SecureIdentity visitor_identity{
+        .battle_session_generation =
+            visitor_parameters->
+                battle_session_generation,
+        .endpoint_generation =
+            visitor_parameters->
+                endpoint_generation,
+    };
+    std::ranges::copy_n(
+        visitor_digest.begin(),
+        visitor_identity.session_id_digest.size(),
+        visitor_identity.session_id_digest.begin());
+    std::ranges::copy_n(
+        visitor_parameters->
+            binding_fingerprint.begin(),
+        visitor_identity.binding_discriminator.size(),
+        visitor_identity.binding_discriminator.begin());
+    client::ProtocolSecureChannel visitor_channel(
+        visitor_parameters->session_seed,
+        visitor_identity,
+        visitor_parameters->key_epoch,
+        NowUnixMs + 12);
+    crypto.SecureZero(
+        visitor_parameters->session_seed);
+    const auto visitor_bootstrap =
+        visitor_channel.Open(
+            responses.back(),
+            NowUnixMs + 12);
+    constexpr std::size_t RawHeaderBytes = 16;
+    ihomeland::battle::v1::BattleFullSnapshot
+        visitor_full;
+    Require(
+        visitor_bootstrap.disposition ==
+                client::OpenDisposition::Accepted &&
+            visitor_bootstrap.kind ==
+                client::PacketKind::Raw &&
+            visitor_bootstrap.plaintext.size() >
+                RawHeaderBytes &&
+            visitor_full.ParseFromArray(
+                visitor_bootstrap.plaintext.data() +
+                    RawHeaderBytes,
+                static_cast<int>(
+                    visitor_bootstrap.plaintext.size() -
+                    RawHeaderBytes)) &&
+            visitor_full.entities_size() == 2 &&
+            visitor_full.entities(0).entity_id() == 3 &&
+            visitor_full.entities(1).entity_id() == 4,
+        "runtime visitor bootstrap did not publish active actor set");
+
     responses.clear();
     response_targets.clear();
     replication_enabled = true;
@@ -1253,6 +1430,7 @@ void TestRuntimeComposition() {
             "runtime rejected secure KCP request");
     }
     std::size_t secure_kcp_responses = 0;
+    bool filtered_active_actor_snapshot = false;
     for (const auto& response : responses) {
         const auto opened = channel.Open(
             response,
@@ -1261,6 +1439,30 @@ void TestRuntimeComposition() {
             opened.disposition ==
                 client::OpenDisposition::Accepted,
             "client rejected runtime secure response");
+        if (opened.kind ==
+            client::PacketKind::Raw) {
+            ihomeland::battle::v1::
+                BattleFullSnapshot full_snapshot;
+            Require(
+                opened.plaintext.size() >
+                        RawHeaderBytes &&
+                    full_snapshot.ParseFromArray(
+                        opened.plaintext.data() +
+                            RawHeaderBytes,
+                        static_cast<int>(
+                            opened.plaintext.size() -
+                            RawHeaderBytes)) &&
+                    full_snapshot.entities_size() == 2 &&
+                    full_snapshot.entities(0)
+                            .entity_id() ==
+                        parameters->actor_slot + 1 &&
+                    full_snapshot.entities(1)
+                            .entity_id() ==
+                        visitor_parameters->actor_slot + 1,
+                "runtime published inactive actor capacity slots");
+            filtered_active_actor_snapshot = true;
+            continue;
+        }
         if (opened.kind !=
             client::PacketKind::Kcp) {
             continue;
@@ -1279,6 +1481,7 @@ void TestRuntimeComposition() {
         runtime_kcp.Status();
     Require(
         secure_kcp_responses != 0 &&
+            filtered_active_actor_snapshot &&
             runtime_kcp_messages == 1 &&
             runtime_kcp_status.input_ack_commands != 0 &&
             runtime_kcp_status.reconciled_messages == 1 &&
@@ -1438,12 +1641,169 @@ void TestRuntimeComposition() {
     responses.clear();
     response_targets.clear();
 
+    const auto successor_ticket_secret =
+        Sequence<32>(0x90);
+    auto successor_proof_key = DeriveProofKey(
+        crypto,
+        Sequence<16>(0x20),
+        successor_ticket_secret);
+    Require(
+        node.InstallBattleTicket(
+            RuntimeSuccessorTicketCommand(
+                start,
+                ready,
+                successor_proof_key),
+            NowUnixMs + 215).state ==
+            sim::BattleTicketState::Installed,
+        "runtime successor ticket install failed");
+    crypto.SecureZero(successor_proof_key);
+    client::ProtocolRawLane visitor_raw;
+    ihomeland::battle::v1::BattleProbe
+        visitor_keepalive_probe;
+    visitor_keepalive_probe.set_probe_sequence(1);
+    visitor_keepalive_probe.set_latest_snapshot_sequence(1);
+    visitor_keepalive_probe.set_client_monotonic_time_us(1);
+    const auto visitor_keepalive =
+        visitor_channel.Seal(
+            client::PacketKind::Raw,
+            visitor_raw.EncodeProbe(
+                1,
+                Bytes(visitor_keepalive_probe)),
+            NowUnixMs + 215);
+    Require(
+        visitor_keepalive.has_value() &&
+            runtime.HandleDatagram(
+                *visitor_keepalive,
+                visitor_remote,
+                NowUnixMs + 215) ==
+                sim::
+                    BattleTransportRuntimeDisposition::
+                        SecureDispatched &&
+            runtime.ActiveSessionCount() == 2,
+        "successor install retired another active actor");
+    responses.clear();
+    response_targets.clear();
+    client::ProtocolHandshake successor_handshake(
+        MakeCredential(
+            successor_ticket_secret,
+            Sequence<16>(0x20)),
+        NowUnixMs + 215);
+    auto successor_remote = remote;
+    successor_remote.port += 4;
+    Require(
+        runtime.HandleDatagram(
+            successor_handshake.ClientHello(),
+            successor_remote,
+            NowUnixMs + 215) ==
+                sim::
+                    BattleTransportRuntimeDisposition::
+                        RetryQueued &&
+            responses.size() == 1,
+        "runtime successor Retry failed");
+    const auto successor_auth =
+        successor_handshake.AcceptRetry(
+            responses.back(),
+            NowUnixMs + 216);
+    responses.clear();
+    response_targets.clear();
+    replication_enabled = true;
+    Require(
+        successor_auth.has_value() &&
+            runtime.HandleDatagram(
+                *successor_auth,
+                successor_remote,
+                NowUnixMs + 216) ==
+                sim::
+                    BattleTransportRuntimeDisposition::
+                        SessionAccepted &&
+            runtime.ActiveSessionCount() == 2 &&
+            responses.size() == 2 &&
+            runtime_metrics.Snapshot()
+                    .close_lifecycle == 1,
+        "authenticated successor did not replace stale actor session");
+    auto successor_parameters =
+        successor_handshake.AcceptServer(
+            responses.front(),
+            NowUnixMs + 217);
+    Require(
+        successor_parameters.has_value() &&
+            successor_parameters->actor_slot ==
+                parameters->actor_slot &&
+            successor_parameters->
+                    battle_session_generation !=
+                parameters->
+                    battle_session_generation,
+        "runtime successor accept binding drifted");
+    const auto successor_digest =
+        crypto.Sha256(
+            successor_parameters->session_id);
+    client::SecureIdentity successor_identity{
+        .battle_session_generation =
+            successor_parameters->
+                battle_session_generation,
+        .endpoint_generation =
+            successor_parameters->
+                endpoint_generation,
+    };
+    std::ranges::copy_n(
+        successor_digest.begin(),
+        successor_identity.session_id_digest.size(),
+        successor_identity.session_id_digest.begin());
+    std::ranges::copy_n(
+        successor_parameters->
+            binding_fingerprint.begin(),
+        successor_identity.binding_discriminator.size(),
+        successor_identity.binding_discriminator.begin());
+    client::ProtocolSecureChannel successor_channel(
+        successor_parameters->session_seed,
+        successor_identity,
+        successor_parameters->key_epoch,
+        NowUnixMs + 217);
+    crypto.SecureZero(
+        successor_parameters->session_seed);
+    const auto successor_bootstrap =
+        successor_channel.Open(
+            responses.back(),
+            NowUnixMs + 217);
+    ihomeland::battle::v1::BattleFullSnapshot
+        successor_full;
+    Require(
+        successor_bootstrap.disposition ==
+                client::OpenDisposition::Accepted &&
+            successor_bootstrap.kind ==
+                client::PacketKind::Raw &&
+            successor_bootstrap.plaintext.size() >
+                RawHeaderBytes &&
+            successor_full.ParseFromArray(
+                successor_bootstrap.plaintext.data() +
+                    RawHeaderBytes,
+                static_cast<int>(
+                    successor_bootstrap.plaintext.size() -
+                    RawHeaderBytes)) &&
+            successor_full.entities_size() == 2 &&
+            successor_full.entities(0).entity_id() ==
+                successor_parameters->actor_slot + 1 &&
+            successor_full.entities(1).entity_id() ==
+                visitor_parameters->actor_slot + 1,
+        "runtime successor baseline dropped another active actor");
+    Require(
+        runtime.HandleDatagram(
+            *rekeyed_raw,
+            candidate,
+            NowUnixMs + 218) ==
+            sim::
+                BattleTransportRuntimeDisposition::
+                    Dropped,
+        "retired predecessor remained routable");
+
+    responses.clear();
+    response_targets.clear();
     const std::array<std::uint8_t, 1>
         close_payload{1};
     const auto close_plaintext = EncodeControl(
         ClientControlKind::CloseRequest,
         close_payload);
-    const auto close = channel.Seal(
+    const auto close = successor_channel.Seal(
         client::PacketKind::Control,
         close_plaintext,
         NowUnixMs + 220);
@@ -1451,12 +1811,12 @@ void TestRuntimeComposition() {
         close.has_value() &&
             runtime.HandleDatagram(
                 *close,
-                candidate,
+                successor_remote,
                 NowUnixMs + 220) ==
                 sim::
                     BattleTransportRuntimeDisposition::
                         SessionClosed &&
-            runtime.ActiveSessionCount() == 0 &&
+            runtime.ActiveSessionCount() == 1 &&
             responses.size() ==
                 sim::BattleTransportControl::
                     CloseAcknowledgementCopies &&
@@ -1465,7 +1825,7 @@ void TestRuntimeComposition() {
         "authenticated close did not destroy runtime session");
     for (const auto& response : responses) {
         const auto close_acknowledged =
-            channel.Open(
+            successor_channel.Open(
                 response,
                 NowUnixMs + 220);
         Require(
@@ -1477,6 +1837,30 @@ void TestRuntimeComposition() {
                             CloseAcknowledged),
             "runtime emitted an invalid redundant close acknowledgement");
     }
+    responses.clear();
+    response_targets.clear();
+    const std::array<std::uint8_t, 1>
+        visitor_close_payload{1};
+    const auto visitor_close = visitor_channel.Seal(
+        client::PacketKind::Control,
+        EncodeControl(
+            ClientControlKind::CloseRequest,
+            visitor_close_payload),
+        NowUnixMs + 221);
+    Require(
+        visitor_close.has_value() &&
+            runtime.HandleDatagram(
+                *visitor_close,
+                visitor_remote,
+                NowUnixMs + 221) ==
+                sim::
+                    BattleTransportRuntimeDisposition::
+                        SessionClosed &&
+            runtime.ActiveSessionCount() == 0 &&
+            runtime_metrics.Snapshot()
+                    .close_normal == 2,
+        "visitor did not survive owner successor lifecycle");
+    visitor_channel.Close();
     Require(
         runtime.HandleDatagram(
             *rekeyed_raw,
@@ -2077,6 +2461,43 @@ RawEnvelope(
     return output;
 }
 
+/// PopulateTransform 写入 snapshot contract 要求显式存在的七个量化 scalar。
+void PopulateTransform(
+    ihomeland::battle::v1::QuantizedTransform& transform) {
+    transform.set_position_x_mm(100);
+    transform.set_position_y_mm(0);
+    transform.set_position_z_mm(-200);
+    transform.set_yaw_millidegrees(90'000);
+    transform.set_velocity_x_mm_per_second(3'000);
+    transform.set_velocity_y_mm_per_second(0);
+    transform.set_velocity_z_mm_per_second(-1'000);
+}
+
+/// PopulateFullEntity 写入 closed flags 与完整 transform 的 full state。
+void PopulateFullEntity(
+    ihomeland::battle::v1::BattleEntityState& state,
+    const std::uint64_t entity_id) {
+    state.set_entity_id(entity_id);
+    state.set_entity_generation(1);
+    PopulateTransform(*state.mutable_transform());
+    state.set_health_milli(100'000);
+    state.set_state_flags(
+        sim::BattleEntityStateFlags::Grounded);
+}
+
+/// PopulateDeltaEntity 写入 mask 与 presence 精确一致的完整 delta。
+void PopulateDeltaEntity(
+    ihomeland::battle::v1::BattleEntityDelta& state,
+    const std::uint64_t entity_id) {
+    state.set_entity_id(entity_id);
+    state.set_entity_generation(1);
+    state.set_state_mask(7);
+    PopulateTransform(*state.mutable_transform());
+    state.set_health_milli(100'000);
+    state.set_state_flags(
+        sim::BattleEntityStateFlags::Grounded);
+}
+
 /// TestRawLane 验证 input/probe 与 full/delta baseline transition。
 void TestRawLane() {
     client::ProtocolRawLane lane;
@@ -2140,6 +2561,9 @@ void TestRawLane() {
     full.set_partition_index(0);
     full.set_partition_count(1);
     full.set_last_processed_input_tick(0);
+    PopulateFullEntity(
+        *full.add_entities(),
+        1);
     const auto full_frame = RawEnvelope(
         3'002,
         1,
@@ -2162,6 +2586,9 @@ void TestRawLane() {
     delta.set_partition_index(0);
     delta.set_partition_count(1);
     delta.set_last_processed_input_tick(2);
+    PopulateDeltaEntity(
+        *delta.add_deltas(),
+        1);
     const auto delta_frame = RawEnvelope(
         3'003,
         2,
@@ -2205,6 +2632,9 @@ void TestRawLane() {
     missing_acknowledgement.set_baseline_id(9);
     missing_acknowledgement.set_partition_index(0);
     missing_acknowledgement.set_partition_count(2);
+    PopulateFullEntity(
+        *missing_acknowledgement.add_entities(),
+        1);
     Require(
         lane.DecodeSnapshot(
                 RawEnvelope(
@@ -2226,6 +2656,9 @@ void TestRawLane() {
     partial.set_partition_index(0);
     partial.set_partition_count(2);
     partial.set_last_processed_input_tick(3);
+    PopulateFullEntity(
+        *partial.add_entities(),
+        1);
     const auto first_partition = RawEnvelope(
         3'002,
         3,
@@ -2253,6 +2686,7 @@ void TestRawLane() {
         "multipart snapshot did not restart after rejection");
     partial.set_partition_index(1);
     partial.set_last_processed_input_tick(4);
+    partial.mutable_entities(0)->set_entity_id(2);
     Require(
         lane.DecodeSnapshot(
                 RawEnvelope(
@@ -2269,6 +2703,7 @@ void TestRawLane() {
 
     partial.set_partition_index(0);
     partial.set_last_processed_input_tick(3);
+    partial.mutable_entities(0)->set_entity_id(1);
     Require(
         lane.DecodeSnapshot(first_partition)
                 .disposition ==
@@ -2276,6 +2711,7 @@ void TestRawLane() {
             lane.PendingSnapshotSequence() == 3,
         "valid multipart snapshot did not begin");
     partial.set_partition_index(1);
+    partial.mutable_entities(0)->set_entity_id(2);
     const auto completed = lane.DecodeSnapshot(
         RawEnvelope(
             3'002,
@@ -2304,6 +2740,9 @@ void TestRawLane() {
     regressed_acknowledgement.set_partition_index(0);
     regressed_acknowledgement.set_partition_count(1);
     regressed_acknowledgement.set_last_processed_input_tick(2);
+    PopulateDeltaEntity(
+        *regressed_acknowledgement.add_deltas(),
+        1);
     Require(
         lane.DecodeSnapshot(
                 RawEnvelope(
@@ -2317,6 +2756,77 @@ void TestRawLane() {
                 client::RawDecodeDisposition::Rejected &&
             lane.LastProcessedInputTick() == 3,
         "snapshot acknowledgement regressed");
+
+    client::ProtocolRawLane contract_lane;
+    auto invalid_full = full;
+    invalid_full.set_snapshot_sequence(5);
+    invalid_full.set_baseline_id(10);
+    invalid_full.mutable_entities(0)->set_state_flags(
+        sim::BattleEntityStateFlags::KnownMask |
+        0x00000020U);
+    Require(
+        contract_lane.DecodeSnapshot(
+                RawEnvelope(
+                    3'002,
+                    7,
+                    0,
+                    1,
+                    invalid_full.SerializeAsString()))
+                .disposition ==
+            client::RawDecodeDisposition::Rejected,
+        "snapshot accepted unknown state_flags bit");
+
+    invalid_full = full;
+    invalid_full.set_snapshot_sequence(5);
+    invalid_full.set_baseline_id(10);
+    invalid_full.mutable_entities(0)
+        ->mutable_transform()
+        ->clear_velocity_z_mm_per_second();
+    Require(
+        contract_lane.DecodeSnapshot(
+                RawEnvelope(
+                    3'002,
+                    8,
+                    0,
+                    1,
+                    invalid_full.SerializeAsString()))
+                .disposition ==
+            client::RawDecodeDisposition::Rejected,
+        "snapshot accepted missing transform scalar");
+
+    invalid_full = full;
+    invalid_full.set_snapshot_sequence(5);
+    invalid_full.set_baseline_id(10);
+    invalid_full.mutable_entities(0)
+        ->mutable_transform()
+        ->set_yaw_millidegrees(180'000);
+    Require(
+        contract_lane.DecodeSnapshot(
+                RawEnvelope(
+                    3'002,
+                    9,
+                    0,
+                    1,
+                    invalid_full.SerializeAsString()))
+                .disposition ==
+            client::RawDecodeDisposition::Rejected,
+        "snapshot accepted non-canonical yaw");
+
+    auto invalid_delta = delta;
+    invalid_delta.set_server_tick(22);
+    invalid_delta.set_snapshot_sequence(5);
+    invalid_delta.mutable_deltas(0)->clear_transform();
+    Require(
+        contract_lane.DecodeSnapshot(
+                RawEnvelope(
+                    3'003,
+                    10,
+                    0,
+                    1,
+                    invalid_delta.SerializeAsString()))
+                .disposition ==
+            client::RawDecodeDisposition::Rejected,
+        "snapshot accepted delta mask/presence drift");
 }
 
 /// TestKcpParity 验证 client primitive 与 production server adapter 双向互通。

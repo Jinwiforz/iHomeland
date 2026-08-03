@@ -482,6 +482,22 @@ tools/quality/                            # 唯一公共 impact/check-change/dia
 
 `battle-model` validator 只验证纯 gameplay JSON；`battle-network-profile` 在此基础上只重放 logical byte/event、fault、queue 与 deadline，不实现 gameplay evaluator、真实 KCP、socket 或 listener。两个工具都不启动 Docker/Go/Unity/C++、不安装第三方依赖、不写 source corpus，也不依赖 generated code 或本机绝对路径。B0.5 的 `battle/wire/`、numeric registry、listener 与安全 transport 是独立 source/adapter，不反向写入 B0.1/B0.2 corpus。`battle/protocol-client/` 只冻结 Go supervisor 与独立 C++ executable 的低敏 stdio request/receipt，不是 production gameplay 入口。B0.6 `battlequalificationtool` 只经公开 HTTPS、受控私有 control、child stdio 与 opaque UDP gateway 驱动真实进程，不导入 production transport、simulation gameplay 或 application service 实现；运行日志、packet metadata 和运行态 evidence 进入 ignored `.local/battle-qualification/<run-id>/`，不得把账号凭据、raw ticket、AEAD key 或玩家资产写入 evidence；显式最终资格生成的长期 report 与 profile overlay 进入 `shared/contracts/evidence/battle-network/`，历史 change audit 只留在对应归档目录。
 
+## B0.7 Client battle runtime 归属
+
+- `Application/Battle/`：纯 C# policy、target/connection contracts、semantic input、prediction/history、replica、resync、interpolation、presentation projector 与 runtime coordinator。
+- `Application/World/ClientBattleWorldTargetSource.cs`：只把既有 world/session owners 的 current snapshot转换为 battle target，不拥有第二份业务事实。
+- `Infrastructure/Battle/`：BattleTicket closed codec、connect attempt、native interop、安全握手、AEAD/replay、raw/KCP codec与唯一 `BattleNetworkClient`。
+- `Core/Composition/BattleComposition.cs`：显式创建 battle module bundle，不提供 service locator。
+- `Scenes/PersonalWorld/`：`ClientBattleSceneHost`、Actor registry、battle HUD 与 Cinemachine intent adapter，只拥有 Scene Scope Unity objects。
+- `simulation/client_native/`：版本化 C ABI 与 libsodium/KCP primitive，不拥有 socket、ticket、route 或 gameplay adapter。
+- `shared/contracts/fixtures/client-battle-runtime/`：B0.7 source manifest。
+- `tools/client-battle-runtime/`：唯一 entry/native/Unity 定向验证 owner；本机结果只进入 ignored `.local/`。
+
+新增 Unity scripts 的 `.meta`、InputActions、Scene、Prefab、Cinemachine rigs 与
+`packages-lock.json` 必须由锁定 Unity Editor 刷新并人工检查；不得手工修改 Unity
+生成 `.csproj`。运行与清理规则见
+[`client-battle-runtime-runbook.md`](client-battle-runtime-runbook.md)。
+
 每个活跃实现 change 在自身根目录维护 `validation.json`，只引用
 `tools/quality/catalog.json` 的 closed check ID。`tools/quality/quality.ps1` 是使用者与
 自动化代理唯一需要理解的公共质量入口；底层 Go/C++/Proto/storage/server/client/battle

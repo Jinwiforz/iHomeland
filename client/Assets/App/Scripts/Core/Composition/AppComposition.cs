@@ -154,6 +154,11 @@ namespace IHomeland.Client.Core.Composition
             channels.GameplayChannel.DiagnosticRecorded += RecordGameplayDiagnostic;
 #endif
             var world = WorldComposition.Create(foundation, session, channels);
+            var battle = BattleComposition.Create(
+                foundation,
+                infrastructure,
+                session,
+                world);
             var presentation = PresentationComposition.Create(
                 uiHostRoot,
                 sceneTransitionHost,
@@ -163,7 +168,8 @@ namespace IHomeland.Client.Core.Composition
                 foundation,
                 session,
                 channels,
-                world);
+                world,
+                battle);
             return RuntimeQualificationComposition.Create(
                 uiHostRoot,
                 foundation,
@@ -171,6 +177,7 @@ namespace IHomeland.Client.Core.Composition
                 session,
                 channels,
                 world,
+                battle,
                 presentation,
                 RollbackTimeout,
                 ShutdownTimeout,

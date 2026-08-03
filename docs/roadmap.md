@@ -514,6 +514,19 @@ combat 已 qualified。
 
 **完成条件：**Owner/Visitor 在真实 C++ 服务上完成移动、跳跃、延迟预测/校正、远端插值、断线/assignment 切换和 Scene teardown；没有第二个 Router、完整客户端 GAS/ECS 或 View 直连 transport。
 
+**当前状态：**B0.7 source manifest、native C ABI/interop、BattleTicket/connect attempt、
+managed secure UDP/KCP 主链路、纯 C# input/prediction/acknowledgement/replica/interpolation、
+Composition/lifecycle、Scene Host、InputActions、Scene/Prefab/Cinemachine rig、定向质量
+catalog 与 Windows Player 入口均已落地。`implement-authoritative-battle-movement-projection`
+已把 C++ input timeline 接入 committed Movement/Physics projection，并发布动态位置、yaw、
+velocity、bit 4 grounded、完整 active actor set 与同 Tick acknowledgement；Unity 侧按
+50 ms authority group 预测、只重演 future group，并以 render motor、Actor smoothing 与
+Scene-owned Camera/世界参照呈现。2026-08-03 已完成单人移动/跳跃/镜头手感和双客户端
+Owner/Visitor 可见性、移动与跳跃的代表性人工验收，未发现阻断 B0.8 提案的问题。Current
+physics 仍明确限制为 server-only Y=0 平地；正式地图 collision、技能和战斗内容属于后续
+change。此次完成只代表定向开发验收，未运行也未生成完整 battle network 或产品 combat
+最终 qualified 结论。
+
 ### B0.8 `deliver-personal-world-combat-slice`
 
 **进入条件：**Unity gameplay runtime 与 battle network development-readiness 稳定，

@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using IHomeland.Client.Application.Bootstrap;
+using IHomeland.Client.Application.Battle;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
 using IHomeland.Client.Foundation.Lifetime;
+using IHomeland.Client.Infrastructure.Battle;
 using IHomeland.Client.Infrastructure.Tcp;
 using IHomeland.Client.Infrastructure.WebSocket;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -70,6 +72,15 @@ namespace IHomeland.Client.Core.Composition
         /// <summary>保存唯一connection recovery intent owner；isolated host fixture可以不提供。</summary>
         private readonly ClientConnectionRecoveryCoordinator _connectionRecoveryCoordinator;
 
+        /// <summary>保存唯一 battle runtime facade；isolated host fixture 可以不提供。</summary>
+        private readonly ClientBattleRuntimeCoordinator _battleRuntimeCoordinator;
+
+        /// <summary>保存唯一battle network owner；isolated host fixture可以不提供。</summary>
+        private readonly BattleNetworkClient _battleNetworkClient;
+
+        /// <summary>保存唯一battle native lease owner；isolated host fixture可以不提供。</summary>
+        private readonly ClientBattleNativeProvider _battleNativeProvider;
+
         /// <summary>
         /// 保存当前 App Scope 唯一 UI route owner；isolated host fixture 可以不提供。
         /// </summary>
@@ -108,6 +119,9 @@ namespace IHomeland.Client.Core.Composition
                 visitSessionService: null,
                 worldAdmissionCoordinator: null,
                 connectionRecoveryCoordinator: null,
+                battleRuntimeCoordinator: null,
+                battleNetworkClient: null,
+                battleNativeProvider: null,
                 uiRouter: null,
                 personalWorldExperience: null,
                 sceneTransitionHost: null)
@@ -129,6 +143,9 @@ namespace IHomeland.Client.Core.Composition
         /// <param name="visitSessionService">VisitSession/invite 投影 owner。</param>
         /// <param name="worldAdmissionCoordinator">World target flow owner。</param>
         /// <param name="connectionRecoveryCoordinator">唯一connection recovery intent owner。</param>
+        /// <param name="battleRuntimeCoordinator">唯一 client battle runtime owner。</param>
+        /// <param name="battleNetworkClient">唯一client battle network owner。</param>
+        /// <param name="battleNativeProvider">唯一client battle native lease owner。</param>
         /// <param name="uiRouter">App Scope 唯一 UI route owner。</param>
         /// <param name="personalWorldExperience">个人世界产品表现协调器。</param>
         /// <param name="sceneTransitionHost">唯一内容 Scene 转换 Host。</param>
@@ -147,6 +164,9 @@ namespace IHomeland.Client.Core.Composition
             VisitSessionService visitSessionService,
             WorldAdmissionCoordinator worldAdmissionCoordinator,
             ClientConnectionRecoveryCoordinator connectionRecoveryCoordinator,
+            ClientBattleRuntimeCoordinator battleRuntimeCoordinator,
+            BattleNetworkClient battleNetworkClient,
+            ClientBattleNativeProvider battleNativeProvider,
             ClientUiRouter uiRouter,
             ClientPersonalWorldExperience personalWorldExperience,
             ClientWorldSceneTransitionHost sceneTransitionHost)
@@ -180,6 +200,9 @@ namespace IHomeland.Client.Core.Composition
             _visitSessionService = visitSessionService;
             _worldAdmissionCoordinator = worldAdmissionCoordinator;
             _connectionRecoveryCoordinator = connectionRecoveryCoordinator;
+            _battleRuntimeCoordinator = battleRuntimeCoordinator;
+            _battleNetworkClient = battleNetworkClient;
+            _battleNativeProvider = battleNativeProvider;
             _uiRouter = uiRouter;
             _personalWorldExperience = personalWorldExperience;
             _sceneTransitionHost = sceneTransitionHost;
@@ -248,6 +271,13 @@ namespace IHomeland.Client.Core.Composition
         internal WorldAdmissionCoordinator WorldAdmissionCoordinator => _worldAdmissionCoordinator ??
             throw new InvalidOperationException("当前 isolated host composition 不包含 WorldAdmissionCoordinator。");
 
+        /// <summary>获取完整 Composition 显式连接的唯一 battle runtime owner。</summary>
+        /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 battle graph 时抛出。</exception>
+        internal ClientBattleRuntimeCoordinator BattleRuntimeCoordinator =>
+            _battleRuntimeCoordinator ??
+            throw new InvalidOperationException(
+                "当前 isolated host composition 不包含 battle runtime owner。");
+
         /// <summary>获取完整 Composition 显式连接的唯一 UI route owner。</summary>
         /// <exception cref="InvalidOperationException">Isolated host fixture 未连接 UI graph 时抛出。</exception>
         internal ClientUiRouter UiRouter => _uiRouter ??
@@ -277,7 +307,14 @@ namespace IHomeland.Client.Core.Composition
                     : _connectionRecoveryCoordinator,
                 Dispatcher,
                 UiRouter,
-                SceneTransitionHost);
+                SceneTransitionHost,
+                BattleRuntimeCoordinator,
+                _battleNetworkClient ??
+                    throw new InvalidOperationException(
+                        "当前 isolated host composition 不包含 battle network owner。"),
+                _battleNativeProvider ??
+                    throw new InvalidOperationException(
+                        "当前 isolated host composition 不包含 battle native owner。"));
         }
 #endif
     }

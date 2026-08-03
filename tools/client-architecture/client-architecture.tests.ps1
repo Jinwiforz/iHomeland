@@ -29,7 +29,7 @@ try {
     Assert-True ($report.schemaVersion -eq 1) "architecture report schema version changed"
     Assert-True ($report.mode -eq "report-only") "migration report unexpectedly became a hard gate"
     Assert-True (-not $report.hardGateEnabled) "migration report claims hard gate is enabled"
-    Assert-True (@($report.registry.owners).Count -eq 11) "owner registry lost a declared owner"
+    Assert-True (@($report.registry.owners).Count -eq 16) "owner registry lost a declared owner"
     Assert-True (@($report.registry.differences).Count -eq 0) "owner registry differs from current source"
     $allStates = @($report.registry.owners | ForEach-Object { @($_.stateKinds) })
     Assert-True (

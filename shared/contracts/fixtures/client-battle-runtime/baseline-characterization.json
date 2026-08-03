@@ -1,0 +1,92 @@
+{
+  "formatVersion": 1,
+  "documentKind": "client-battle-runtime-baseline-characterization",
+  "sourceCommit": "f42d692562aea31fda2e586248cb64e03f1be857",
+  "assets": [
+    {
+      "kind": "scene",
+      "path": "client/Assets/App/Scenes/BootstrapScene.unity",
+      "gitBlob": "8bc9096c7efb8283574ff9a7133696262ac531cb"
+    },
+    {
+      "kind": "scene",
+      "path": "client/Assets/App/Scenes/PersonalWorldScene.unity",
+      "gitBlob": "944f6ca934ca0c1fbc1d4eee4fde574e288d17ba"
+    },
+    {
+      "kind": "product-prefab",
+      "path": "client/Assets/App/UI/PersonalWorld/Prefabs/WorldHud.prefab",
+      "gitBlob": "d67cda132393e45d1e13f041a03734081de8a35c"
+    },
+    {
+      "kind": "product-uxml",
+      "path": "client/Assets/App/UI/PersonalWorld/LoginView.uxml",
+      "gitBlob": "6f08b4837c2ed2148c44d0ee028b473d6e14ec81"
+    },
+    {
+      "kind": "product-uxml",
+      "path": "client/Assets/App/UI/PersonalWorld/ShellView.uxml",
+      "gitBlob": "6e7b76097915cdad7b833b79dccd945253b70c37"
+    },
+    {
+      "kind": "product-uxml",
+      "path": "client/Assets/App/UI/PersonalWorld/WorldVisitView.uxml",
+      "gitBlob": "7dd9b4bf2f778a90fafd7556605e5c059313eea4"
+    },
+    {
+      "kind": "product-uxml",
+      "path": "client/Assets/App/UI/PersonalWorld/ConnectionLostView.uxml",
+      "gitBlob": "c70294963b3606d9bb873f865a1300c3ffb5a53c"
+    },
+    {
+      "kind": "product-uss",
+      "path": "client/Assets/App/UI/PersonalWorld/PersonalWorldTheme.uss",
+      "gitBlob": "7b5ead2208bcf10734166d4de0ec6ca404ee50a5"
+    },
+    {
+      "kind": "asmdef",
+      "path": "client/Assets/App/Scripts/IHomeland.Client.Runtime.asmdef",
+      "gitBlob": "7aa6378dff258dbb20de47c422a23e7bba6470e3"
+    },
+    {
+      "kind": "asmdef",
+      "path": "client/Assets/App/Scripts/Application/IHomeland.Client.Application.asmdef",
+      "gitBlob": "7f15924ca25525224820509b9f36ef44aaee337d"
+    },
+    {
+      "kind": "asmdef",
+      "path": "client/Assets/App/Scripts/Infrastructure/IHomeland.Client.Infrastructure.asmdef",
+      "gitBlob": "9f9b78118bf8652c3378d26675937e1233369fcf"
+    },
+    {
+      "kind": "asmdef",
+      "path": "client/Assets/App/Scripts/Presentation/Pure/IHomeland.Client.Presentation.asmdef",
+      "gitBlob": "9a79802b30b33374f364a4067b11f581d95b4c4f"
+    },
+    {
+      "kind": "asmdef",
+      "path": "client/Assets/App/Tests/EditMode/IHomeland.Client.Runtime.EditModeTests.asmdef",
+      "gitBlob": "b646240f069c03b2f95b298d0226d18d75f15d8c"
+    },
+    {
+      "kind": "asmdef",
+      "path": "client/Assets/App/Tests/PlayMode/IHomeland.Client.Runtime.PlayModeTests.asmdef",
+      "gitBlob": "cc73413fbb2bc5a6a65288cc3758e8c5c45813ce"
+    },
+    {
+      "kind": "owner-registry",
+      "path": "client/Architecture/owner-registry.json",
+      "gitBlob": "bdbf1588395d89b58db32defedd23947f6b30c29"
+    }
+  ],
+  "testSurface": {
+    "editModeSourceFiles": 31,
+    "playModeSourceFiles": 4
+  },
+  "buildSurface": {
+    "owner": "ClientDevelopmentBuild",
+    "development": true,
+    "release": true,
+    "releaseDiagnosticsForbidden": true
+  }
+}

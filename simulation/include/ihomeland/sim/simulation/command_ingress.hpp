@@ -173,7 +173,8 @@ public:
         SimulationInstance& instance,
         InputMappingConfig mapping,
         std::vector<std::uint64_t> actor_ids,
-        std::size_t dedupe_capacity);
+        std::size_t dedupe_capacity,
+        std::string assignment_fingerprint = {});
 
     /// Submit 在进入 inbox 前完成全部 binding/window/sequence/payload 检查。
     [[nodiscard]] CommandSubmitResult Submit(GameplayCommand command);
@@ -199,6 +200,8 @@ private:
 
     /// instance_ 是被验证 command 的唯一 inbox owner，必须长于 ingress。
     SimulationInstance* instance_;
+    /// assignment_fingerprint_ 冻结构造方唯一允许的外部 placement stamp。
+    std::string assignment_fingerprint_;
     /// mapping_ 是构造后不可变的 mapping epoch。
     InputMappingConfig mapping_;
     /// actor_ids_ 保持排序且无重复，用于确定查找。

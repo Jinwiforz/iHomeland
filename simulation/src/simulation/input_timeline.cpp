@@ -178,9 +178,11 @@ std::vector<ActorInputResolution> InputTimeline::Resolve(
     for (auto& state : states_) {
         std::vector<std::uint64_t> discrete;
         std::optional<const IngressCommand*> latest_continuous;
+        std::optional<const IngressCommand*> latest_aim;
+        bool jump_pressed = false;
         for (const auto* command : ordered) {
             if (command->actor_id != state.actor_id ||
-                command->target_tick != simulation_tick) {
+                command->target_tick > simulation_tick) {
                 continue;
             }
             if (std::find(
@@ -197,10 +199,28 @@ std::vector<ActorInputResolution> InputTimeline::Resolve(
                 latest_continuous = command;
             } else {
                 discrete.push_back(command->stable_sequence);
+                if (command->kind ==
+                    static_cast<std::uint8_t>(
+                        GameplayCommandKind::
+                            JumpPressed)) {
+                    jump_pressed = true;
+                }
+                if (command->kind ==
+                    static_cast<std::uint8_t>(
+                        GameplayCommandKind::
+                            AimIntent)) {
+                    latest_aim = command;
+                }
             }
         }
         if (latest_continuous) {
             state.last_continuous_payload = (*latest_continuous)->canonical_payload;
+            state.last_move_x_permille =
+                (*latest_continuous)->
+                    move_x_permille;
+            state.last_move_z_permille =
+                (*latest_continuous)->
+                    move_z_permille;
             state.last_continuous_tick = simulation_tick;
         }
         std::sort(
@@ -235,7 +255,22 @@ std::vector<ActorInputResolution> InputTimeline::Resolve(
         resolutions.push_back({
             .actor_id = state.actor_id,
             .continuous_payload = within_hold ? *state.last_continuous_payload : "0|0|0",
+            .move_x_permille =
+                within_hold
+                    ? state.last_move_x_permille
+                    : 0,
+            .move_z_permille =
+                within_hold
+                    ? state.last_move_z_permille
+                    : 0,
             .held = within_hold && state.last_continuous_tick != simulation_tick,
+            .jump_pressed = jump_pressed,
+            .aim_yaw_millidegrees =
+                latest_aim.has_value()
+                    ? std::optional<std::int32_t>{
+                          (*latest_aim)->
+                              aim_yaw_millidegrees}
+                    : std::nullopt,
             .discrete_sequences = std::move(discrete),
             .last_processed_input_tick = state.last_processed_input_tick});
     }
@@ -282,6 +317,8 @@ void InputTimeline::ReplaceMapping(
 void InputTimeline::Reset() {
     for (auto& state : states_) {
         state.last_continuous_payload.reset();
+        state.last_move_x_permille = 0;
+        state.last_move_z_permille = 0;
         state.last_continuous_tick = 0;
         state.last_processed_input_tick = mapping_.base_input_tick - 1;
         state.received_input_ticks.clear();

@@ -143,7 +143,8 @@ C++ 为每个连接保存有界输入窗口，只接受允许窗口内、通过 
 3. 取 `LastProcessedInputTick` 对应的权威可预测状态。
 4. 若误差在 profile tolerance 内，平滑表现但仍更新确认点。
 5. 若超出 tolerance，恢复权威确认状态。
-6. 按 InputTick 顺序重演所有尚未确认输入。
+6. 按 InputTick 顺序保留尚未确认输入，但只重演映射到current authority `ServerTick`
+   之后的 `SimulationTick` 组；ACK gap保留且已经落入authority horizon的frame不得再次积分。
 7. 丢弃已确认历史，并保持容量上限。
 
 校正只作用于本地可预测子集，例如胶囊位置、速度、grounded、受限 movement mode 和已明确支持预测的 ability phase。生命、伤害、怪物 AI、掉落、奖励和持久 mutation 始终消费服务器结果，不在客户端回滚推导。
@@ -375,6 +376,27 @@ intent 进入 `SimulationInstance` 有界 inbox，worker 保持唯一写；snaps
 以 10 Hz 发布最新状态并按 10 个发布周期建立 full baseline；持续 ingress 不能饿死该
 periodic owner。真实 child/loopback 实现资格与代表性受控弱网验证已经完成；完整容量、
 安全、生命周期与 soak 由显式最终资格裁决，跨区、公网运营商和大规模压测仍需独立证据。
+
+Battle-only恢复仍签发新ticket和新binding，但actor identity由同一simulation instance、
+PlayerID与role稳定标识。Go admission复用既有slot，C++安装successor时撤销predecessor
+binding；不同actor、role或slot组合按容量冲突拒绝，旧reservation释放也不得清除仍由
+successor持有的slot。
+
+### B0.7 Unity gameplay consumer
+
+Unity 的 `GameplayPrediction` 只消费 semantic input 与权威 snapshot，按 25 ms input cadence、50 ms simulation mapping、16-Tick history 预测本地最小 movement/jump；`GameplayReplica` 原子组装 full/delta、推进 field 7 acknowledgement 并触发 single-flight resync；`GameplayInterpolation` 为远端 entity 维护有界 sample。客户端不能提交最终 Transform、grounded、hit、damage、effect、death、reward 或 AI 结果。
+
+Current `SimulationNode` 的 battle runtime binding 已把 typed move/aim/jump resolution
+交给每 instance 唯一 `BattleMovementReplicationStore`，用 50 ms 整数 movement
+policy 和 `PhysicsWorld` 查询推进状态，并在一个临界区发布全部 actor state 与同 Tick
+acknowledgement。`StateProjectionToken` 显式包含 position、规范 yaw、三轴 velocity
+和 grounded；snapshot flags 低四位为 phase、bit 4 为 grounded、bit 31 为 dead。
+
+PersonalWorld 当前由 server-only `FlatGroundPhysicsWorld` 提供 Y=0 平面、
+`MoveCapsule` 与 `GroundProbe`，不读取 Unity Scene、客户端 Transform 或 wall clock。
+该 adapter 是闭合基础移动/跳跃链路的过渡实现；正式地图碰撞、坡面、台阶和静态几何
+必须在后续独立 change 中通过同一 `PhysicsWorld` port 替换。Unity 仍不得以本地 ground
+plane、Transform Y 或 phase bit 补齐服务端事实。
 
 ## 首个可玩竖切的完成定义
 

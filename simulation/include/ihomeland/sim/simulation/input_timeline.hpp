@@ -20,8 +20,16 @@ struct ActorInputResolution final {
     std::uint64_t actor_id;
     /// continuous_payload 是最后有效样本或 neutral token。
     std::string continuous_payload;
+    /// move_x_permille 是当前 Tick 应用的已验证平面 X intent。
+    std::int16_t move_x_permille;
+    /// move_z_permille 是当前 Tick 应用的已验证平面 Z intent。
+    std::int16_t move_z_permille;
     /// held 表示当前 Tick 沿用了更早的连续样本。
     bool held;
+    /// jump_pressed 表示当前 Tick 至少包含一个合法且未 hold 的 jump edge。
+    bool jump_pressed;
+    /// aim_yaw_millidegrees 是当前 Tick 最后一个规范排序 aim update。
+    std::optional<std::int32_t> aim_yaw_millidegrees;
     /// discrete_sequences 保存当前 Tick 合法离散边沿的规范顺序。
     std::vector<std::uint64_t> discrete_sequences;
     /// last_processed_input_tick 只越过 received 或已按 gap expiry 终结的连续区间。
@@ -105,7 +113,10 @@ public:
         std::uint32_t gap_expiry_ticks,
         std::size_t pending_capacity_per_actor);
 
-    /// Resolve 对一个 SimulationTick 的完整 batch 生成按 ActorID 排序的投影。
+    /// Resolve 对一个 SimulationTick 的完整 ready batch生成按 ActorID排序的投影。
+    ///
+    /// batch可包含已由CommandIngress确认仍在late window内、但目标Tick刚错过的command；
+    /// 这些command在首个尚未提交的current Tick消费，超出窗口的输入不会进入该边界。
     [[nodiscard]] std::vector<ActorInputResolution> Resolve(
         std::uint64_t simulation_tick,
         std::span<const IngressCommand> commands);
@@ -131,6 +142,10 @@ private:
         std::uint64_t actor_id;
         /// last_continuous_payload 保存最近合法连续样本。
         std::optional<std::string> last_continuous_payload;
+        /// last_move_x_permille 与 continuous payload 在同一 Tick 原子替换。
+        std::int16_t last_move_x_permille{0};
+        /// last_move_z_permille 与 continuous payload 在同一 Tick 原子替换。
+        std::int16_t last_move_z_permille{0};
         /// last_continuous_tick 是该样本被应用的 SimulationTick。
         std::uint64_t last_continuous_tick{0};
         /// last_processed_input_tick 是已连续终结的最大 InputTick。

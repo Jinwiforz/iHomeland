@@ -234,6 +234,146 @@
       ]
     },
     {
+      "id": "battle-connection",
+      "stateKinds": [
+        "battle-secure-connection",
+        "battle-traffic-epoch",
+        "battle-endpoint-generation"
+      ],
+      "ownerType": "IHomeland.Client.Infrastructure.Battle.BattleNetworkClient",
+      "facadeType": "IHomeland.Client.Application.Battle.IClientBattleConnectionPort",
+      "snapshotType": "IHomeland.Client.Application.Battle.ClientBattleConnectionSnapshot",
+      "module": "Infrastructure",
+      "source": "client/Assets/App/Scripts/Infrastructure/Battle/BattleNetworkClient.cs",
+      "commands": [
+        "ActivateAsync",
+        "TryStartTraffic",
+        "TrySendInput",
+        "TryRequestResync",
+        "DeactivateAsync",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "session",
+        "battle-runtime",
+        "client-battle-native"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+      ]
+    },
+    {
+      "id": "battle-runtime",
+      "stateKinds": [
+        "battle-runtime-generation",
+        "battle-input-gate",
+        "battle-presentation-availability"
+      ],
+      "ownerType": "IHomeland.Client.Application.Battle.ClientBattleRuntimeCoordinator",
+      "facadeType": "IHomeland.Client.Application.Battle.ClientBattleRuntimeCoordinator",
+      "snapshotType": "IHomeland.Client.Application.Battle.ClientBattleRuntimeSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/Battle/ClientBattleRuntimeCoordinator.cs",
+      "commands": [
+        "TrySetInput",
+        "TrySetCameraMode",
+        "TryConsumePresentation",
+        "StopAsync"
+      ],
+      "collaborators": [
+        "session",
+        "world-target",
+        "battle-connection",
+        "gameplay-replica",
+        "gameplay-prediction",
+        "gameplay-interpolation"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+      ]
+    },
+    {
+      "id": "gameplay-replica",
+      "stateKinds": [
+        "battle-authority-replica",
+        "battle-resync-intent"
+      ],
+      "ownerType": "IHomeland.Client.Application.Battle.GameplayReplica",
+      "facadeType": "IHomeland.Client.Application.Battle.IClientBattleInboundSink",
+      "snapshotType": "IHomeland.Client.Application.Battle.ClientGameplayReplicaSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/Battle/GameplayReplica.cs",
+      "commands": [
+        "Activate",
+        "AcceptSnapshot",
+        "AcceptLifecycle",
+        "AcceptAbilityEvent",
+        "AcceptResyncResponse",
+        "Deactivate"
+      ],
+      "collaborators": [
+        "battle-runtime",
+        "battle-connection"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+      ]
+    },
+    {
+      "id": "gameplay-prediction",
+      "stateKinds": [
+        "battle-semantic-input",
+        "battle-local-prediction",
+        "battle-input-acknowledgement"
+      ],
+      "ownerType": "IHomeland.Client.Application.Battle.GameplayPrediction",
+      "facadeType": "IHomeland.Client.Application.Battle.GameplayPrediction",
+      "snapshotType": "IHomeland.Client.Application.Battle.ClientGameplayPredictionSnapshot",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/Battle/GameplayPrediction.cs",
+      "commands": [
+        "Activate",
+        "TrySetInput",
+        "Tick",
+        "Reconcile",
+        "Deactivate"
+      ],
+      "collaborators": [
+        "battle-runtime",
+        "battle-connection"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+      ]
+    },
+    {
+      "id": "gameplay-interpolation",
+      "stateKinds": [
+        "battle-remote-samples",
+        "battle-render-timeline"
+      ],
+      "ownerType": "IHomeland.Client.Application.Battle.GameplayInterpolation",
+      "facadeType": "IHomeland.Client.Application.Battle.GameplayInterpolation",
+      "snapshotType": "IHomeland.Client.Application.Battle.ClientBattleInterpolatedState",
+      "module": "Application",
+      "source": "client/Assets/App/Scripts/Application/Battle/GameplayInterpolation.cs",
+      "commands": [
+        "Activate",
+        "AddSample",
+        "ReplaceSamples",
+        "Remove",
+        "Evaluate",
+        "Deactivate"
+      ],
+      "collaborators": [
+        "battle-runtime",
+        "gameplay-replica"
+      ],
+      "tests": [
+        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+      ]
+    },
+    {
       "id": "route",
       "stateKinds": [
         "ui-route"

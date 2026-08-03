@@ -230,7 +230,8 @@ function Assert-WireArtifacts {
 
     Assert-ExactProperties $Layout @(
         "format_version", "corpus_version", "document_kind", "secure_header",
-        "raw_route_header", "snapshot_acknowledgement", "kcp_segment_header",
+        "raw_route_header", "snapshot_acknowledgement", "snapshot_entity_state",
+        "kcp_segment_header",
         "kcp_route_envelope", "transport_control_envelope",
         "transport_control_messages", "datagram_equation"
     ) "wire-layout"
@@ -250,6 +251,34 @@ function Assert-WireArtifacts {
         [int]$Layout.snapshot_acknowledgement.route_payload_budgets."3002" -ne 1040 -or
         [int]$Layout.snapshot_acknowledgement.route_payload_budgets."3003" -ne 900) {
         throw "snapshot acknowledgement wire metadata 漂移"
+    }
+    Assert-ExactProperties $Layout.snapshot_entity_state @(
+        "message_ids", "transform_message", "required_scalar_fields",
+        "scalar_presence", "delta_state_mask", "state_flags"
+    ) "snapshot entity state"
+    if ((@($Layout.snapshot_entity_state.message_ids) -join ",") -cne "3002,3003,3005" -or
+        $Layout.snapshot_entity_state.transform_message -cne
+            "ihomeland.battle.v1.QuantizedTransform" -or
+        $Layout.snapshot_entity_state.scalar_presence -cne
+            "explicit-required-in-full-delta-and-spawn-state" -or
+        @($Layout.snapshot_entity_state.required_scalar_fields).Count -ne 7 -or
+        (@($Layout.snapshot_entity_state.required_scalar_fields.name) -join ",") -cne
+            "position_x_mm,position_y_mm,position_z_mm,yaw_millidegrees,velocity_x_mm_per_second,velocity_y_mm_per_second,velocity_z_mm_per_second" -or
+        (@($Layout.snapshot_entity_state.required_scalar_fields.field_number) -join ",") -cne
+            "1,2,3,4,5,6,7" -or
+        $Layout.snapshot_entity_state.required_scalar_fields[3].range -cne
+            "[-180000,180000)" -or
+        [uint32]$Layout.snapshot_entity_state.delta_state_mask.known_mask -ne 7 -or
+        $Layout.snapshot_entity_state.delta_state_mask.presence_policy -cne
+            "exact-match" -or
+        [uint32]$Layout.snapshot_entity_state.state_flags.phase_mask -ne 15 -or
+        [uint32]$Layout.snapshot_entity_state.state_flags.grounded_flag -ne 16 -or
+        [uint32]$Layout.snapshot_entity_state.state_flags.dead_flag -ne 2147483648 -or
+        [uint32]$Layout.snapshot_entity_state.state_flags.known_mask -ne 2147483679 -or
+        $Layout.snapshot_entity_state.state_flags.unknown_policy -cne "reject" -or
+        $Layout.snapshot_entity_state.state_flags.compatibility -cne
+            "bits-0-through-3-remain-phase-bit-4-is-grounded-bit-31-is-dead") {
+        throw "snapshot entity state registry 漂移"
     }
     foreach ($entry in @(
         @($Layout.secure_header, 48, "network-big-endian"),

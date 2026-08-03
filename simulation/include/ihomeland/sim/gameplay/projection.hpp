@@ -8,6 +8,9 @@ namespace ihomeland::sim {
 
 /// StateProjectionToken 是 Replication stage 的最小只读 actor state。
 struct StateProjectionToken final {
+    /// operator== 支持同 Tick跨会话 actor projection 一致性比较。
+    bool operator==(const StateProjectionToken&) const = default;
+
     /// actor_id 是规范状态顺序的唯一主键。
     std::uint64_t actor_id;
     /// x_mm 是整数 world X。
@@ -16,12 +19,35 @@ struct StateProjectionToken final {
     std::int64_t y_mm;
     /// z_mm 是整数 world Z。
     std::int64_t z_mm;
+    /// yaw_millidegrees 是绕 world up axis 的规范量化角度。
+    std::int32_t yaw_millidegrees{0};
+    /// velocity_x_mm_per_second 是已提交的 world X 速度。
+    std::int64_t velocity_x_mm_per_second{0};
+    /// velocity_y_mm_per_second 是已提交的 world Y 速度。
+    std::int64_t velocity_y_mm_per_second{0};
+    /// velocity_z_mm_per_second 是已提交的 world Z 速度。
+    std::int64_t velocity_z_mm_per_second{0};
     /// health_scaled 是当前 signed 64-bit scaled health。
     std::int64_t health_scaled;
     /// phase 是已提交的 Ability/AI/Boss phase token。
     std::uint32_t phase;
     /// alive 是 Death stage 已提交结果。
     bool alive;
+    /// grounded 是 Movement/Physics stage 已提交的权威接地事实。
+    bool grounded{false};
+};
+
+/// BattleEntityStateFlags 冻结 battle-wire-v1 snapshot state_flags registry。
+struct BattleEntityStateFlags final {
+    /// PhaseMask 保留既有低四位 gameplay phase token。
+    static constexpr std::uint32_t PhaseMask = 0x0000000fU;
+    /// Grounded 表示 Movement/Physics 已提交 authority ground contact。
+    static constexpr std::uint32_t Grounded = 0x00000010U;
+    /// Dead 表示 Death stage 已提交 entity death。
+    static constexpr std::uint32_t Dead = 0x80000000U;
+    /// KnownMask 是 producer 与 consumer 唯一允许的 bit set。
+    static constexpr std::uint32_t KnownMask =
+        PhaseMask | Grounded | Dead;
 };
 
 /// EventProjectionToken 是权威 gameplay event 的低敏规范值。

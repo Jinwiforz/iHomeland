@@ -1,4 +1,4 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 
 [CmdletBinding()]
 # 该入口是使用者和代理唯一需要理解的项目质量编排入口；底层脚本继续拥有实际验证逻辑。
@@ -42,6 +42,7 @@ $SupportedCheckIds = @(
     "battle-wire-validate",
     "simulation-control-validate",
     "battle-qualification-validate",
+    "client-battle-runtime-validate",
     "proto-verify",
     "cpp-handshake-targeted",
     "go-handshake-targeted",
@@ -53,6 +54,8 @@ $SupportedCheckIds = @(
     "battle-resync-diagnose",
     "battle-acknowledgement-diagnose",
     "battle-qualification-representative",
+    "client-battle-runtime-targeted",
+    "client-battle-runtime-unity",
     "openspec-change-strict",
     "final-product-qualification"
 )
@@ -227,6 +230,12 @@ function Invoke-ChangeCheck {
                 -Arguments @("validate") `
                 -Label "battle qualification validation"
         }
+        "client-battle-runtime-validate" {
+            Invoke-ProjectPowerShell `
+                -ScriptPath (Join-Path $RepositoryRoot "tools\client-battle-runtime\client-battle-runtime.tests.ps1") `
+                -Arguments @() `
+                -Label "client battle runtime validation"
+        }
         "proto-verify" {
             Invoke-ProjectPowerShell `
                 -ScriptPath (Join-Path $RepositoryRoot "tools\proto\proto.ps1") `
@@ -304,6 +313,21 @@ function Invoke-ChangeCheck {
                     "lifecycle-valid-endpoint-rebind"
                 ) `
                 -Label "battle qualification representative diagnostics"
+        }
+        "client-battle-runtime-targeted" {
+            Invoke-ProjectPowerShell `
+                -ScriptPath (Join-Path $RepositoryRoot "tools\client-battle-runtime\client-battle-runtime.ps1") `
+                -Arguments @(
+                    "-Action", "player-targeted",
+                    "-NativePreset", "windows-msvc-ci"
+                ) `
+                -Label "client battle runtime Player targeted"
+        }
+        "client-battle-runtime-unity" {
+            Invoke-ProjectPowerShell `
+                -ScriptPath (Join-Path $RepositoryRoot "tools\client-battle-runtime\client-battle-runtime.ps1") `
+                -Arguments @("-Action", "unity-tests") `
+                -Label "client battle runtime Unity EditMode/PlayMode"
         }
         "openspec-change-strict" {
             Invoke-CheckedOwner `

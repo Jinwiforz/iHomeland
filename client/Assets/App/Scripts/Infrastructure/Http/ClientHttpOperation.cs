@@ -164,7 +164,7 @@ namespace IHomeland.Client.Infrastructure.Http
     }
 
     /// <summary>
-    /// 集中拥有当前客户端网络阶段允许调用的十个 HTTP operation descriptor。
+    /// 集中拥有当前客户端网络阶段允许调用的十一个 HTTP operation descriptor。
     /// </summary>
     internal static class ClientHttpOperationCatalog
     {
@@ -198,6 +198,7 @@ namespace IHomeland.Client.Infrastructure.Http
             GetWorldBootstrap = Create("getWorldBootstrap", HttpMethod.Get, "/v1/world/bootstrap", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.None, 0, HttpStatusCode.OK, true, 5000, CompositeResponseLimitBytes);
             AcceptVisitInvite = Create("acceptVisitInvite", HttpMethod.Post, "/v1/visits/{visitSessionId}/invites/{inviteId}/accept", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.Json, 4096, HttpStatusCode.OK, true, 5000, SmallResponseLimitBytes);
             IssueWorldAdmission = Create("issueWorldAdmission", HttpMethod.Post, "/v1/world/admissions", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.Json, 4096, HttpStatusCode.Created, true, 5000, SmallResponseLimitBytes);
+            IssueBattleTicket = Create("issueBattleTicket", HttpMethod.Post, "/v1/battle/tickets", ClientHttpAuthentication.Bearer, ClientHttpBodyPolicy.Json, 2048, HttpStatusCode.Created, true, 5000, SmallResponseLimitBytes);
             Operations = new ReadOnlyCollection<ClientHttpOperation>(new[]
             {
                 GetVersion,
@@ -210,6 +211,7 @@ namespace IHomeland.Client.Infrastructure.Http
                 GetWorldBootstrap,
                 AcceptVisitInvite,
                 IssueWorldAdmission,
+                IssueBattleTicket,
             });
         }
 
@@ -262,6 +264,11 @@ namespace IHomeland.Client.Infrastructure.Http
         /// 获取签发一次性 gameplay world admission 的 descriptor。
         /// </summary>
         internal static ClientHttpOperation IssueWorldAdmission { get; }
+
+        /// <summary>
+        /// 获取为 current own/visit target 签发一次性 BattleTicket 的 descriptor。
+        /// </summary>
+        internal static ClientHttpOperation IssueBattleTicket { get; }
 
         /// <summary>
         /// 获取只包含当前 HTTP bootstrap capability 允许 operation 的稳定只读快照。

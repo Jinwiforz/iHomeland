@@ -24,7 +24,7 @@
     {
       "owner": "battle-wire",
       "path": "shared/contracts/fixtures/battle/wire/manifest.json",
-      "sha256": "9c7eb49798cb821411f222aab5225eb4c472f2892fc1c136806f36673bfedc30",
+      "sha256": "c4838f0efce9fffb852355de734d67ab9d78aaff55dea0dee2c9af672a3cbb5e",
       "requiredConclusion": "secure-transport-qualified-windows-x64"
     },
     {

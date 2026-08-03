@@ -405,6 +405,104 @@ namespace IHomeland.Client.Tests.EditMode
             }
         }
 
+        /// <summary>验证同一battle generation复用唯一恢复task且总deadline稳定结束该task。</summary>
+        [Test]
+        public async Task BattleRecoveryIsSingleFlightAndUsesCoordinatorDeadline()
+        {
+            var deadline = new CancellationTokenSource();
+            var deadlineOwners = 0;
+            var fixture = await RecoveryFixture.CreateAsync(_ =>
+            {
+                deadlineOwners++;
+                return deadlineOwners == 1
+                    ? deadline
+                    : throw new InvalidOperationException(
+                        "同一battle recovery不得创建第二个deadline。");
+            });
+            try
+            {
+                var entered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                var operationCalls = 0;
+                async Task<bool> RecoverAsync(CancellationToken cancellationToken)
+                {
+                    operationCalls++;
+                    entered.TrySetResult(true);
+                    await WaitForCancellationAsync(cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return true;
+                }
+
+                var first = fixture.Coordinator.RunBattleRecoveryAsync(
+                    501,
+                    RecoverAsync);
+                var duplicate = fixture.Coordinator.RunBattleRecoveryAsync(
+                    501,
+                    RecoverAsync);
+                var conflicting = fixture.Coordinator.RunBattleRecoveryAsync(
+                    502,
+                    RecoverAsync);
+
+                Assert.That(duplicate, Is.SameAs(first));
+                Assert.That(await conflicting, Is.False);
+                await entered.Task;
+                Assert.That(operationCalls, Is.EqualTo(1));
+                Assert.That(deadlineOwners, Is.EqualTo(1));
+                Assert.That(fixture.Coordinator.QualificationIntentOwnerCount, Is.EqualTo(1));
+
+                deadline.Cancel();
+                Assert.That(await first, Is.False);
+                Assert.That(fixture.Coordinator.QualificationIntentOwnerCount, Is.Zero);
+            }
+            finally
+            {
+                await fixture.StopAsync();
+            }
+        }
+
+        /// <summary>验证权威world恢复抢占battle-only重试并继续持有唯一恢复intent。</summary>
+        [Test]
+        public async Task WorldRecoveryPreemptsBattleOnlyRecovery()
+        {
+            var fixture = await RecoveryFixture.CreateAsync();
+            try
+            {
+                var entered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                var canceled = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                var battle = fixture.Coordinator.RunBattleRecoveryAsync(
+                    601,
+                    async cancellationToken =>
+                    {
+                        entered.TrySetResult(true);
+                        await WaitForCancellationAsync(cancellationToken);
+                        canceled.TrySetResult(true);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return true;
+                    });
+                await entered.Task;
+
+                fixture.Operations.WorldResult = PendingResult();
+                Assert.That(
+                    fixture.Coordinator.BeginAutomaticWorldRecovery(701),
+                    Is.True);
+                await canceled.Task;
+                Assert.That(await battle, Is.False);
+                Assert.That(
+                    fixture.Coordinator.Snapshot.Phase,
+                    Is.EqualTo(ClientConnectionRecoveryPhase.RecoveringWorld));
+                Assert.That(fixture.Coordinator.QualificationIntentOwnerCount, Is.EqualTo(1));
+                Assert.That(fixture.Operations.RecoverCalls, Is.EqualTo(1));
+            }
+            finally
+            {
+                fixture.Operations.WorldResult?.TrySetResult(
+                    ClientConnectionRecoveryResultKind.Stopped);
+                await fixture.StopAsync();
+            }
+        }
+
         /// <summary>创建异步continuation的可控结果。</summary>
         private static TaskCompletionSource<ClientConnectionRecoveryResultKind> PendingResult()
         {

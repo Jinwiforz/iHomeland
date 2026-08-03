@@ -103,6 +103,14 @@ struct IngressCommand final {
     std::uint64_t stable_sequence;
     /// kind 是 GameplayCommandKind 的 canonical 数值。
     std::uint8_t kind;
+    /// move_x_permille 是已验证 continuous intent X；其他 kind 固定为零。
+    std::int16_t move_x_permille{0};
+    /// move_z_permille 是已验证 continuous intent Z；其他 kind 固定为零。
+    std::int16_t move_z_permille{0};
+    /// aim_yaw_millidegrees 是已验证 aim yaw；其他 kind 固定为零。
+    std::int32_t aim_yaw_millidegrees{0};
+    /// aim_pitch_millidegrees 是已验证 aim pitch；其他 kind 固定为零。
+    std::int32_t aim_pitch_millidegrees{0};
     /// canonical_payload 是已通过 fixture adapter 安全检查的项目 token。
     std::string canonical_payload;
 };

@@ -25,5 +25,7 @@ namespace IHomeland.Client.Application.Contracts
         internal const string AcceptVisitInvite = "acceptVisitInvite";
         /// <summary>World admission 签发。</summary>
         internal const string IssueWorldAdmission = "issueWorldAdmission";
+        /// <summary>BattleTicket 签发。</summary>
+        internal const string IssueBattleTicket = "issueBattleTicket";
     }
 }

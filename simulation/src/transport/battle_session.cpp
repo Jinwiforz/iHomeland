@@ -21,8 +21,6 @@ constexpr std::uint32_t SecondaryAbilityId = 2;
 constexpr std::uint32_t MaximumInteractionSlot = 16;
 constexpr std::uint32_t InitialEntityGeneration = 1;
 constexpr std::uint32_t CompleteEntityStateMask = 7;
-constexpr std::uint32_t DeadEntityStateFlag =
-    std::uint32_t{1} << 31U;
 
 /// NonEmpty 验证authority string不为空。
 [[nodiscard]] bool NonEmpty(
@@ -203,6 +201,29 @@ void FillState(
                 std::numeric_limits<std::int32_t>::min()),
             static_cast<std::int64_t>(
                 std::numeric_limits<std::int32_t>::max()))));
+    transform->set_yaw_millidegrees(
+        state.yaw_millidegrees);
+    transform->set_velocity_x_mm_per_second(
+        static_cast<std::int32_t>(std::clamp(
+            state.velocity_x_mm_per_second,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    transform->set_velocity_y_mm_per_second(
+        static_cast<std::int32_t>(std::clamp(
+            state.velocity_y_mm_per_second,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    transform->set_velocity_z_mm_per_second(
+        static_cast<std::int32_t>(std::clamp(
+            state.velocity_z_mm_per_second,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
     output.set_health_milli(
         static_cast<std::uint32_t>(std::clamp(
             state.health_scaled,
@@ -211,7 +232,12 @@ void FillState(
                 std::numeric_limits<std::uint32_t>::max()))));
     output.set_state_flags(
         state.phase |
-        (state.alive ? 0U : DeadEntityStateFlag));
+        (state.grounded
+             ? BattleEntityStateFlags::Grounded
+             : 0U) |
+        (state.alive
+             ? 0U
+             : BattleEntityStateFlags::Dead));
 }
 
 /// FillDelta 将只读 simulation state 转为完整替换语义的 delta projection。
@@ -244,6 +270,29 @@ void FillDelta(
                 std::numeric_limits<std::int32_t>::min()),
             static_cast<std::int64_t>(
                 std::numeric_limits<std::int32_t>::max()))));
+    transform->set_yaw_millidegrees(
+        state.yaw_millidegrees);
+    transform->set_velocity_x_mm_per_second(
+        static_cast<std::int32_t>(std::clamp(
+            state.velocity_x_mm_per_second,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    transform->set_velocity_y_mm_per_second(
+        static_cast<std::int32_t>(std::clamp(
+            state.velocity_y_mm_per_second,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
+    transform->set_velocity_z_mm_per_second(
+        static_cast<std::int32_t>(std::clamp(
+            state.velocity_z_mm_per_second,
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::min()),
+            static_cast<std::int64_t>(
+                std::numeric_limits<std::int32_t>::max()))));
     output.set_health_milli(
         static_cast<std::uint32_t>(std::clamp(
             state.health_scaled,
@@ -252,7 +301,12 @@ void FillDelta(
                 std::numeric_limits<std::uint32_t>::max()))));
     output.set_state_flags(
         state.phase |
-        (state.alive ? 0U : DeadEntityStateFlag));
+        (state.grounded
+             ? BattleEntityStateFlags::Grounded
+             : 0U) |
+        (state.alive
+             ? 0U
+             : BattleEntityStateFlags::Dead));
 }
 
 }  // namespace
@@ -832,7 +886,14 @@ bool BattleReplicationQueue::QueueFullSnapshot(
         std::ranges::any_of(
             states,
             [](const StateProjectionToken& state) {
-                return state.actor_id == 0;
+                return state.actor_id == 0 ||
+                    state.yaw_millidegrees <
+                        -180'000 ||
+                    state.yaw_millidegrees >=
+                        180'000 ||
+                    (state.phase &
+                     ~BattleEntityStateFlags::
+                         PhaseMask) != 0;
             }) ||
         acknowledgement.actor_id !=
             impl_->context->Actor().actor_id ||
@@ -924,7 +985,14 @@ bool BattleReplicationQueue::QueueDeltaSnapshot(
         std::ranges::any_of(
             states,
             [](const StateProjectionToken& state) {
-                return state.actor_id == 0;
+                return state.actor_id == 0 ||
+                    state.yaw_millidegrees <
+                        -180'000 ||
+                    state.yaw_millidegrees >=
+                        180'000 ||
+                    (state.phase &
+                     ~BattleEntityStateFlags::
+                         PhaseMask) != 0;
             }) ||
         acknowledgement.actor_id !=
             impl_->context->Actor().actor_id ||

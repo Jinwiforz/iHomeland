@@ -1,4 +1,4 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 
 [CmdletBinding()]
 # 该回归只验证 quality plan/catalog/入口边界，不运行任何 production build 或资格矩阵。
@@ -19,6 +19,7 @@ $supported = @(
     "battle-wire-validate",
     "simulation-control-validate",
     "battle-qualification-validate",
+    "client-battle-runtime-validate",
     "proto-verify",
     "cpp-handshake-targeted",
     "go-handshake-targeted",
@@ -30,6 +31,8 @@ $supported = @(
     "battle-resync-diagnose",
     "battle-acknowledgement-diagnose",
     "battle-qualification-representative",
+    "client-battle-runtime-targeted",
+    "client-battle-runtime-unity",
     "openspec-change-strict",
     "final-product-qualification"
 )

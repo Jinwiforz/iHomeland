@@ -14,6 +14,12 @@ namespace IHomeland.Client.Core.Configuration
     [CreateAssetMenu(fileName = "ClientEnvironment", menuName = "iHomeland/Client Environment")]
     public sealed class ClientEnvironmentProfile : ScriptableObject
     {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>Development资格运行覆盖loopback HTTP根地址的唯一命令行参数。</summary>
+        private const string QualificationHttpBaseUriArgument =
+            "-ihomelandQualificationHttpBaseUri";
+#endif
+
         /// <summary>
         /// 保存决定明文 loopback 例外是否可用的环境类别。
         /// </summary>
@@ -37,11 +43,54 @@ namespace IHomeland.Client.Core.Configuration
         /// <exception cref="InvalidOperationException">环境类别、URI 或 build identity 不符合安全约束时抛出。</exception>
         internal ClientEnvironment Build(string clientVersion, int protocolVersion)
         {
+            var httpBaseUri = _httpBaseUri;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            var overrideBaseUri = ReadSingleArgument(
+                Environment.GetCommandLineArgs(),
+                QualificationHttpBaseUriArgument);
+            if (overrideBaseUri != null)
+            {
+                if (string.IsNullOrWhiteSpace(overrideBaseUri))
+                {
+                    throw new InvalidOperationException(
+                        "Development资格HTTP根地址参数重复或缺值。");
+                }
+
+                httpBaseUri = overrideBaseUri;
+            }
+#endif
             return ClientEnvironment.Create(
                 _environmentKind,
-                _httpBaseUri,
+                httpBaseUri,
                 clientVersion,
                 protocolVersion);
         }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>读取唯一资格命令行参数；重复或缺值时返回空字符串。</summary>
+        /// <param name="arguments">当前进程命令行参数。</param>
+        /// <param name="name">包含前导连字符的参数名。</param>
+        /// <returns>不存在时为null，合法时为参数值，重复或缺值时为空字符串。</returns>
+        private static string ReadSingleArgument(string[] arguments, string name)
+        {
+            string value = null;
+            for (var index = 0; index < arguments.Length; index++)
+            {
+                if (!string.Equals(arguments[index], name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (value != null || index + 1 >= arguments.Length)
+                {
+                    return string.Empty;
+                }
+
+                value = arguments[++index];
+            }
+
+            return value;
+        }
+#endif
     }
 }

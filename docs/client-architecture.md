@@ -276,7 +276,7 @@ Authoritative Snapshot/Event
 纯 C# gameplay owners：
 
 - `GameplayReplica`：保存 current assignment/instance generation 下的权威 actor、attribute、tag、ability/effect projection；不持有 GameObject。
-- `GameplayPrediction`：保存本地 actor 的有界 `InputHistory` 与 `PredictedStateHistory`，根据 `LastProcessedInputTick` 恢复确认状态并重演未确认输入。
+- `GameplayPrediction`：保存本地 actor 的有界 `InputHistory` 与 `PredictedStateHistory`；25 ms只生成并发送InputTick，映射到同一50 ms `SimulationTick`的frame按last move/aim与OR jump从共同组起点只积分一次，再根据`LastProcessedInputTick`裁剪。连续ACK缺口可以保留已被服务器消费的frame用于重发，但从authority基点只重演映射到`latest ServerTick`之后的未确认组，不能重复积分authority horizon内的历史。
 - `GameplayInterpolation`：保存远端 actor 的有界 snapshot samples，并以 profile 定义的 render delay 输出采样状态。
 - `GameplayPresentationProjector`：从 replica/prediction 派生不可变 `ActorViewState`、`HudViewState`、`GameplayCue` 和 `CameraIntent`。
 
@@ -366,6 +366,29 @@ OwnWorld
 PersonalWorld/VisitSession Services 属于 App Scope，可以跨加载场景保存最高 revision 与迁移状态；地图、NPC、Actor 和表现对象属于 Scene Scope。SceneContext 卸载后必须取消 world snapshot 订阅、交互任务和异步资源加载，迟到 callback 只能被 generation/cancellation guard 丢弃，不能写回已销毁 View 或旧 WorldInstance。
 
 Owner 是领域角色而非 Unity 网络 host。客户端不启动 listen server、不接受 Visitor socket，也不保存可转让的 WorldOwnerID。
+
+## 当前 Client Battle Runtime 边界
+
+`ClientBattleWorldTargetSource` 只把既有 Session、WorldAdmission、PersonalWorld 与 VisitSession owner 的 current snapshot 收敛为 battle target intent；`ClientBattleRuntimeCoordinator` 编排 target、battle generation、full baseline、input gate、replica、prediction、interpolation 与低敏 availability，不复制 world membership 最终事实。`BattleNetworkClient` 唯一拥有 connected UDP socket、安全握手、AEAD/replay、raw/KCP route 与 connection generation；authenticated rebind 只接受 Infrastructure network-path observer 或资格 fault gateway 提供的 server-facing candidate，完成 challenge/confirm 后只把 endpoint generation 从 current 推进到 current+1，保留 key epoch、packet sequence、replay window 与 KCP conversation，不从 Scene、本地私网地址或 payload 猜测 NAT 映射。Rekey 使用独立 10 分钟/`2^20` packet trigger 和 3 秒 previous epoch overlap，rebind、rekey、close 任一失败只进入 current generation 的唯一 terminal callback。Native C ABI 只提供 libsodium/KCP primitive，不拥有 ticket、socket、route、Unity object 或持久状态。
+
+Scene read path 固定为：
+
+```text
+ClientUiHostRoot
+  -> ClientBattleSceneHost
+  -> ClientBattleRuntimeCoordinator
+  -> immutable Actor/HUD/Camera presentation
+  -> ClientActorViewRegistry / ClientBattleHudHost / CinemachineCameraHost
+```
+
+`ClientUiHostRoot` 仍是唯一 Input System clone owner。Scene host 只读取 Move/Aim/Jump/Primary/Secondary/Interact，不能自行 enable 第二个 action map。Local Actor 使用 prediction/reconciliation transform；25 ms input采样不能直接触发25 ms Movement积分，同组第二个sample只允许从50 ms组起点重算，authority horizon内因ACK缺口残留的sample也不能再次积分，避免每次snapshot确认时前后拉回。Current平地prediction还复现server百万分比crossing和toward-zero舍入；render长帧触发安全re-anchor时保留已经采样的离散edge，在新timeline只发送一次，不能吞掉Jump/ability。Scene registry以保留跨render frame位置/角速度的临界阻尼追踪20 Hz local target，target更新不重置速度，Camera follow proxy只读取这一平滑Transform；current generic capsule的探索镜头使用4.5米距离、1.25米高肩点和0.10秒垂直阻尼，其他battle rig也不得回退到角色占满视野的2米低肩点构图。remote Actor 使用 100 ms delay、最多 150 ms extrapolation 的 interpolation；两者都不能回写 authority replica。可恢复断线与successor baseline期间保留最后可信Actor/Camera画面、关闭输入并在HUD标识`last known`；目标替换或终态失败立即清除。SceneLifetime 先退役 Input/Actor/HUD/Camera，随后 AppLifetime 才逆序停止 battle runtime、socket 与 native context。
+
+Current C++ runtime 已把 validated move/aim/jump 接入每 instance 唯一
+`BattleMovementReplicationStore`，并从同一 committed Tick 发布全部 actor 的 position、
+yaw、velocity、grounded 与 per-session acknowledgement。客户端只把
+`state_flags` bit 4 作为 authority grounded；低四位 phase、Transform 高度和 Scene
+collider 都不能替代该事实。Current PersonalWorld 服务端碰撞仍是 Y=0 有界平地 adapter，
+正式地图几何必须由后续独立 change 通过同一 `PhysicsWorld` port 替换。
 
 ## Scene、Prefab 与 ScriptableObject
 

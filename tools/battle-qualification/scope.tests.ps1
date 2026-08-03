@@ -1,6 +1,9 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+
+    # RuntimeManifestPath 只供授权边界 failure regression 注入，不改变 production 默认路径。
+    [string]$RuntimeManifestPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -27,9 +30,45 @@ if ($LASTEXITCODE -ne 0 -or $tracked.Count -eq 0) {
 Assert-NoMatches -Values $tracked `
     -Pattern '^(?:\.local/|simulation/out/|client/(?:Library|Temp|Logs|UserSettings)/)' `
     -Category "tracked-cache-or-run-output"
-Assert-NoMatches -Values $tracked `
-    -Pattern '(?i)(?:^|/)(?:BattleNetworkClient|BattlePrediction|BattleReconciliation|BattleActorView|BattleHud)\.(?:cs|uxml|uss)$' `
-    -Category "premature-unity-runtime"
+
+$unityRuntimePattern =
+    '(?i)(?:^|/)(?:BattleNetworkClient|BattlePrediction|BattleReconciliation|BattleActorView|BattleHud)\.(?:cs|uxml|uss)$'
+$unityRuntimePaths = @($tracked | Where-Object { $_ -match $unityRuntimePattern })
+if ($unityRuntimePaths.Count -ne 0) {
+    # B0.6 的禁止门只在 active B0.7 OpenSpec 与闭合 source manifest 同时有效时放行。
+    $authorizationPaths = @(
+        "openspec\changes\implement-unity-gameplay-runtime\.openspec.yaml",
+        "openspec\changes\implement-unity-gameplay-runtime\proposal.md",
+        "openspec\changes\implement-unity-gameplay-runtime\specs\client-battle-runtime\spec.md",
+        "tools\client-battle-runtime\client-battle-runtime.ps1")
+    foreach ($relativePath in $authorizationPaths) {
+        if (-not (Test-Path -LiteralPath (
+                    Join-Path $RepositoryRoot $relativePath) -PathType Leaf)) {
+            throw "battle qualification scope gate failed: premature-unity-runtime"
+        }
+    }
+
+    $changeIdentity = Get-Content -LiteralPath (
+        Join-Path $RepositoryRoot (
+            "openspec\changes\implement-unity-gameplay-runtime\.openspec.yaml")) `
+        -Raw -Encoding utf8
+    if ($changeIdentity -notmatch '(?m)^schema:\s*spec-driven\s*$') {
+        throw "battle qualification scope gate failed: premature-unity-runtime"
+    }
+
+    $runtimeGate = Join-Path $RepositoryRoot (
+        "tools\client-battle-runtime\client-battle-runtime.ps1")
+    $runtimeGateArguments = @{ Action = "validate" }
+    if (-not [string]::IsNullOrWhiteSpace($RuntimeManifestPath)) {
+        $runtimeGateArguments.ManifestPath = $RuntimeManifestPath
+    }
+    try {
+        & $runtimeGate @runtimeGateArguments *> $null
+    }
+    catch {
+        throw "battle qualification scope gate failed: premature-unity-runtime"
+    }
+}
 
 $evidenceRoot = Join-Path $RepositoryRoot "shared\contracts\evidence\battle-network"
 if (Test-Path -LiteralPath $evidenceRoot -PathType Container) {

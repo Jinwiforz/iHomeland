@@ -1,0 +1,140 @@
+{
+  "formatVersion": 1,
+  "runtimeVersion": "client-battle-runtime-v1",
+  "documentKind": "source-manifest",
+  "owner": "client-battle-runtime",
+  "baseline": {
+    "sourceCommit": "f42d692562aea31fda2e586248cb64e03f1be857",
+    "sourceState": "clean",
+    "unityVersion": "6000.5.2f1",
+    "clientQualificationVersion": "client-v1",
+    "clientContractSha256": "61d92f089607730b802a5c593c8b6b732f33427aa252fb5f6e92ddabbdd682d9"
+  },
+  "upstreamSources": [
+    {
+      "id": "battle-model",
+      "path": "shared/contracts/fixtures/battle/model/manifest.json",
+      "sha256": "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+      "requiredConclusion": "battle-model-v1"
+    },
+    {
+      "id": "battle-network-profile",
+      "path": "shared/contracts/fixtures/battle/network-profile/manifest.json",
+      "sha256": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
+      "requiredConclusion": "battle-network-profile-v2"
+    },
+    {
+      "id": "battle-wire",
+      "path": "shared/contracts/fixtures/battle/wire/manifest.json",
+      "sha256": "c4838f0efce9fffb852355de734d67ab9d78aaff55dea0dee2c9af672a3cbb5e",
+      "requiredConclusion": "battle-wire-v1"
+    },
+    {
+      "id": "battle-route-registry",
+      "path": "shared/contracts/registry/routes.json",
+      "sha256": "7308492da0c32f4e070ac3c41670df01052c0d66fad49e8c0670e033dc677c71",
+      "requiredConclusion": "routes-3000-3007"
+    },
+    {
+      "id": "battle-protobuf",
+      "path": "shared/proto/ihomeland/battle/v1/battle.proto",
+      "sha256": "3b59d879c3b7e98e2ba475423636d371ba03bc0d6fd4a7b5024c3add0bfe3b18",
+      "requiredConclusion": "generated-parity-source"
+    },
+    {
+      "id": "battle-network-qualification",
+      "path": "shared/contracts/fixtures/battle/qualification/manifest.json",
+      "sha256": "7532dd639c3734666f6b511c6a86d80deb437639816380ebaff0c89d4a55ebaa",
+      "requiredConclusion": "development-readiness-corpus"
+    },
+    {
+      "id": "battle-network-development-readiness",
+      "path": "openspec/changes/archive/2026-07-27-qualify-battle-network/tasks.md",
+      "sha256": "b143f84acf26f61e53d447ae6ff007d96bdd85e7b5ff377e1cbd28315fbbd134",
+      "requiredConclusion": "representative-development-readiness-passed"
+    }
+  ],
+  "entryPolicy": {
+    "profileVersion": "battle-network-profile-v2",
+    "simulationTickMilliseconds": 50,
+    "inputCadenceMilliseconds": 25,
+    "inputLeadSimulationTicks": 2,
+    "snapshotCadenceHertz": 10,
+    "mtuBytes": 1200,
+    "sessionQueueItems": 256,
+    "kcpQueueItems": 64,
+    "resyncExpiryMilliseconds": 2250,
+    "snapshotAcknowledgement": {
+      "fieldName": "last_processed_input_tick",
+      "fieldNumber": 7,
+      "requiredMessages": [
+        "BattleFullSnapshot",
+        "BattleDeltaSnapshot"
+      ],
+      "presencePolicy": "wire-tag-required-including-zero"
+    },
+    "routes": [
+      {
+        "messageId": 3000,
+        "lane": "RAW",
+        "direction": "CLIENT_TO_SERVER",
+        "maxPayloadSize": 384,
+        "expiryMs": 300
+      },
+      {
+        "messageId": 3001,
+        "lane": "RAW",
+        "direction": "CLIENT_TO_SERVER",
+        "maxPayloadSize": 96,
+        "expiryMs": 250
+      },
+      {
+        "messageId": 3002,
+        "lane": "RAW",
+        "direction": "SERVER_TO_CLIENT",
+        "maxPayloadSize": 1040,
+        "expiryMs": 500
+      },
+      {
+        "messageId": 3003,
+        "lane": "RAW",
+        "direction": "SERVER_TO_CLIENT",
+        "maxPayloadSize": 900,
+        "expiryMs": 300
+      },
+      {
+        "messageId": 3004,
+        "lane": "KCP",
+        "direction": "SERVER_TO_CLIENT",
+        "maxPayloadSize": 512,
+        "expiryMs": 500
+      },
+      {
+        "messageId": 3005,
+        "lane": "KCP",
+        "direction": "SERVER_TO_CLIENT",
+        "maxPayloadSize": 512,
+        "expiryMs": 500
+      },
+      {
+        "messageId": 3006,
+        "lane": "KCP",
+        "direction": "CLIENT_TO_SERVER",
+        "maxPayloadSize": 128,
+        "expiryMs": 2250
+      },
+      {
+        "messageId": 3007,
+        "lane": "KCP",
+        "direction": "SERVER_TO_CLIENT",
+        "maxPayloadSize": 768,
+        "expiryMs": 2250
+      }
+    ],
+    "developmentReadiness": {
+      "qualityCheckId": "battle-qualification-representative",
+      "archivedTask": "6.6",
+      "finalQualificationRequiredForDevelopment": false
+    }
+  }
+}

@@ -19,7 +19,10 @@ namespace IHomeland.Client.Presentation.Hosts
     /// Isolated fixture 的 Host 列表可以为空；production 必须通过直接序列化引用登记完整产品 Host。
     /// </remarks>
     [DisallowMultipleComponent]
-    public sealed class ClientUiHostRoot : MonoBehaviour, IClientUiInputCoordinator
+    public sealed class ClientUiHostRoot :
+        MonoBehaviour,
+        IClientUiInputCoordinator,
+        IClientBattleInputSource
     {
         /// <summary>保存项目级 Input System 资产模板；运行时只操作其私有 clone。</summary>
         [SerializeField]
@@ -51,6 +54,24 @@ namespace IHomeland.Client.Presentation.Hosts
         /// <summary>保存 UI map 中返回当前产品页面的标准取消 action。</summary>
         private InputAction _uiCancelAction;
 
+        /// <summary>保存 Player map 中唯一 battle Move action。</summary>
+        private InputAction _battleMoveAction;
+
+        /// <summary>保存 Player map 中唯一 battle Aim action。</summary>
+        private InputAction _battleAimAction;
+
+        /// <summary>保存 Player map 中唯一 battle Jump action。</summary>
+        private InputAction _battleJumpAction;
+
+        /// <summary>保存 Player map 中唯一 battle Primary action。</summary>
+        private InputAction _battlePrimaryAction;
+
+        /// <summary>保存 Player map 中唯一 battle Secondary action。</summary>
+        private InputAction _battleSecondaryAction;
+
+        /// <summary>保存 Player map 中唯一 battle Interact action。</summary>
+        private InputAction _battleInteractAction;
+
         /// <summary>保存初始化所在 Unity 主线程，阻止后台线程操作 Unity API。</summary>
         private int _mainThreadId;
 
@@ -77,6 +98,11 @@ namespace IHomeland.Client.Presentation.Hosts
 
         /// <summary>保存 release gate 建立的帧，保证新 action map 至少经过一次 Input System update。</summary>
         private int _inputReleaseGateFrame = -1;
+
+        /// <summary>
+        /// 表示Gameplay map刚获得owner，下一可用样本必须抑制重锁cursor产生的aim/edge瞬变。
+        /// </summary>
+        private bool _gameplaySampleWarmupPending;
 
         /// <summary>获取最近一次原子提交的输入状态。</summary>
         ClientUiInputState IClientUiInputCoordinator.CurrentState => CurrentState;
@@ -145,6 +171,107 @@ namespace IHomeland.Client.Presentation.Hosts
             }
 
             return hosts;
+        }
+
+        /// <summary>
+        /// 验证 production Input asset 包含 B0.7 所需的封闭 Player semantic actions。
+        /// </summary>
+        /// <exception cref="InvalidOperationException">缺少 Player map、任一 action 或 control type 漂移时抛出。</exception>
+        internal void ValidateBattleInputConfiguration()
+        {
+            if (_inputActions == null)
+            {
+                throw new InvalidOperationException(
+                    "ClientUiHostRoot 缺少 Input System 资产直接引用。");
+            }
+
+            var player = _inputActions.FindActionMap(
+                "Player",
+                throwIfNotFound: true);
+            ValidateBattleAction(
+                player,
+                "Move",
+                InputActionType.Value,
+                "Vector2");
+            ValidateBattleAction(
+                player,
+                "Aim",
+                InputActionType.Value,
+                "Vector2");
+            ValidateBattleAction(
+                player,
+                "Jump",
+                InputActionType.Button,
+                "Button");
+            ValidateBattleAction(
+                player,
+                "Primary",
+                InputActionType.Button,
+                "Button");
+            ValidateBattleAction(
+                player,
+                "Secondary",
+                InputActionType.Button,
+                "Button");
+            ValidateBattleAction(
+                player,
+                "Interact",
+                InputActionType.Button,
+                "Button");
+        }
+
+        /// <summary>
+        /// 捕获唯一Gameplay input owner的当前可用性与battle semantic sample。
+        /// </summary>
+        /// <returns>可采样时携带当前样本；UI、失焦或transition gate期间为明确不可用帧。</returns>
+        internal ClientBattleSceneInputFrame CaptureBattleInput()
+        {
+            if (!_initialized ||
+                _stopped ||
+                _inputReleaseGateActive ||
+                CurrentState.Mode != ClientUiInputMode.Gameplay ||
+                !UnityEngine.Application.isFocused ||
+                _battleMoveAction == null ||
+                _battleAimAction == null ||
+                _battleJumpAction == null ||
+                _battlePrimaryAction == null ||
+                _battleSecondaryAction == null ||
+                _battleInteractAction == null)
+            {
+                return default;
+            }
+
+            EnsureMainThread();
+            var suppressTransitionEdges = _gameplaySampleWarmupPending;
+            _gameplaySampleWarmupPending = false;
+            return new ClientBattleSceneInputFrame(
+                gameplayAvailable: true,
+                sample: new ClientBattleSceneInputSample(
+                    _battleMoveAction.ReadValue<Vector2>(),
+                    suppressTransitionEdges
+                        ? Vector2.zero
+                        : _battleAimAction.ReadValue<Vector2>(),
+                    !suppressTransitionEdges &&
+                        _battleJumpAction.WasPressedThisFrame(),
+                    !suppressTransitionEdges &&
+                        _battlePrimaryAction.WasPressedThisFrame(),
+                    !suppressTransitionEdges &&
+                        _battleSecondaryAction.WasPressedThisFrame(),
+                    !suppressTransitionEdges &&
+                        _battleInteractAction.WasPressedThisFrame()));
+        }
+
+        /// <summary>通过 battle Scene 窄端口验证 production semantic actions。</summary>
+        void IClientBattleInputSource.ValidateBattleInputConfiguration()
+        {
+            ValidateBattleInputConfiguration();
+        }
+
+        /// <summary>通过battle Scene窄端口读取current Gameplay input owner帧。</summary>
+        /// <returns>包含明确可用性与非权威semantic sample的值快照。</returns>
+        ClientBattleSceneInputFrame IClientBattleInputSource.CaptureBattleInput()
+        {
+            return CaptureBattleInput();
         }
 
         /// <summary>
@@ -223,10 +350,29 @@ namespace IHomeland.Client.Presentation.Hosts
                 _uiActionMap = _runtimeInputActions.FindActionMap("UI", throwIfNotFound: true);
                 _gameplayMenuAction = _playerActionMap.FindAction("Menu", throwIfNotFound: true);
                 _uiCancelAction = _uiActionMap.FindAction("Cancel", throwIfNotFound: true);
+                _battleMoveAction = _playerActionMap.FindAction(
+                    "Move",
+                    throwIfNotFound: false);
+                _battleAimAction = _playerActionMap.FindAction(
+                    "Aim",
+                    throwIfNotFound: false);
+                _battleJumpAction = _playerActionMap.FindAction(
+                    "Jump",
+                    throwIfNotFound: false);
+                _battlePrimaryAction = _playerActionMap.FindAction(
+                    "Primary",
+                    throwIfNotFound: false);
+                _battleSecondaryAction = _playerActionMap.FindAction(
+                    "Secondary",
+                    throwIfNotFound: false);
+                _battleInteractAction = _playerActionMap.FindAction(
+                    "Interact",
+                    throwIfNotFound: false);
                 _gameplayMenuAction.performed += OnGameplayMenuPerformed;
                 _uiCancelAction.performed += OnUiCancelPerformed;
                 _runtimeInputActions.Disable();
                 ApplyState(ClientUiInputState.Gameplay);
+                _gameplaySampleWarmupPending = true;
                 _initialized = true;
                 return Task.CompletedTask;
             }
@@ -288,6 +434,7 @@ namespace IHomeland.Client.Presentation.Hosts
             _cursorCommitPending = false;
             _inputReleaseGateActive = false;
             _inputReleaseGateFrame = -1;
+            _gameplaySampleWarmupPending = false;
             ClearPendingInputIntent();
             DestroyRuntimeInputClone();
             GameplayMenuRequested = null;
@@ -516,6 +663,38 @@ namespace IHomeland.Client.Presentation.Hosts
             return false;
         }
 
+        /// <summary>验证一个 production battle action 的唯一 identity、action type 与 control type。</summary>
+        /// <param name="player">Input asset 中唯一 Player action map。</param>
+        /// <param name="actionName">冻结 semantic action 名称。</param>
+        /// <param name="expectedActionType">冻结 Action Type。</param>
+        /// <param name="expectedControlType">Value action 必须显式声明、Button action 可由类型推导的 control type。</param>
+        private static void ValidateBattleAction(
+            InputActionMap player,
+            string actionName,
+            InputActionType expectedActionType,
+            string expectedControlType)
+        {
+            var action = player.FindAction(actionName, throwIfNotFound: false);
+            if (action == null)
+            {
+                throw new InvalidOperationException(
+                    $"Player/{actionName} action 缺失。");
+            }
+
+            var expectedControlMatches =
+                string.Equals(
+                    action.expectedControlType,
+                    expectedControlType,
+                    StringComparison.Ordinal) ||
+                (expectedActionType == InputActionType.Button &&
+                 string.IsNullOrEmpty(action.expectedControlType));
+            if (action.type != expectedActionType || !expectedControlMatches)
+            {
+                throw new InvalidOperationException(
+                    $"Player/{actionName} 必须声明 {expectedActionType}/{expectedControlType} input contract。");
+            }
+        }
+
         /// <summary>
         /// 对一个 framework Host 数组执行 null、identity、instance 与 framework 一致性验证。
         /// </summary>
@@ -588,6 +767,7 @@ namespace IHomeland.Client.Presentation.Hosts
                 ClearPendingInputIntent();
                 _inputReleaseGateActive = true;
                 _inputReleaseGateFrame = Time.frameCount;
+                _gameplaySampleWarmupPending = gameplay;
             }
 
             ClientUiDiagnostics.Trace(
@@ -675,6 +855,12 @@ namespace IHomeland.Client.Presentation.Hosts
             _uiActionMap = null;
             _gameplayMenuAction = null;
             _uiCancelAction = null;
+            _battleMoveAction = null;
+            _battleAimAction = null;
+            _battleJumpAction = null;
+            _battlePrimaryAction = null;
+            _battleSecondaryAction = null;
+            _battleInteractAction = null;
         }
     }
 }

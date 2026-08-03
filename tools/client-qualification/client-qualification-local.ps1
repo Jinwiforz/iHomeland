@@ -1,8 +1,8 @@
 ﻿# 该入口为 client-v1 soak/operator 组合隔离 storage、当前 Go server 与一次性测试账号。
 [CmdletBinding()]
 param(
-    # Action 选择五分钟 soak 或双 Player operator 矩阵。
-    [ValidateSet("soak", "operator")]
+    # Action 选择五分钟 soak、既有双 Player operator 或 battle runtime 矩阵。
+    [ValidateSet("soak", "operator", "battle")]
     [string]$Action = "soak",
 
     # RunId 必须来自已成功完成 automatic 的 client-v1 资格运行。
@@ -21,7 +21,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$RunDirectory = Join-Path $RepositoryRoot ".local\client-qualification\$RunId"
+$RunDirectory = if ($Action -eq "battle") {
+    Join-Path $RepositoryRoot ".local\client-battle-runtime-player\$RunId"
+}
+else {
+    Join-Path $RepositoryRoot ".local\client-qualification\$RunId"
+}
 $StorageTool = Join-Path $RepositoryRoot "tools\storage\storage.ps1"
 $GoTool = Join-Path $RepositoryRoot "tools\go\go.ps1"
 $QualificationTool = Join-Path $PSScriptRoot "client-qualification.ps1"
@@ -53,7 +58,10 @@ $SimulationStandardErrorLineBytes = 1024
 $SimulationQualificationSampleInterval = "1s"
 $StorageRunId = ""
 $ServerProcess = $null
+$SimulationProcess = $null
 $OwnedPlayerProcesses =
+    [Collections.Generic.List[Diagnostics.Process]]::new()
+$OwnedSimulationProcesses =
     [Collections.Generic.List[Diagnostics.Process]]::new()
 $PrimaryFailure = $null
 $CleanupFailures = [Collections.Generic.List[string]]::new()
@@ -134,6 +142,72 @@ function New-RandomBase64 {
     }
 }
 
+# Get-AvailableTcpPort 从 loopback 内核分配一个当前空闲 TCP 端口。
+function Get-AvailableTcpPort {
+    $listener = [Net.Sockets.TcpListener]::new(
+        [Net.IPAddress]::Loopback,
+        0)
+    try {
+        $listener.Start()
+        return [int](
+            [Net.IPEndPoint]$listener.LocalEndpoint
+        ).Port
+    }
+    finally {
+        $listener.Stop()
+    }
+}
+
+# Get-AvailableUdpPort 从 loopback 内核分配一个当前空闲 UDP 端口。
+function Get-AvailableUdpPort {
+    $client = [Net.Sockets.UdpClient]::new(
+        [Net.IPEndPoint]::new([Net.IPAddress]::Loopback, 0))
+    try {
+        return [int](
+            [Net.IPEndPoint]$client.Client.LocalEndPoint
+        ).Port
+    }
+    finally {
+        $client.Dispose()
+    }
+}
+
+# Set-IsolatedListenerPorts 为 battle runtime run 分配互不复用的 loopback endpoint。
+function Set-IsolatedListenerPorts {
+    $ports = [Collections.Generic.HashSet[int]]::new()
+    do {
+        $script:PublicApiPort = Get-AvailableTcpPort
+    } while (-not $ports.Add($PublicApiPort))
+    do {
+        $script:DiagnosticPort = Get-AvailableTcpPort
+    } while (-not $ports.Add($DiagnosticPort))
+    do {
+        $script:GameplayPort = Get-AvailableTcpPort
+    } while (-not $ports.Add($GameplayPort))
+    do {
+        $script:BattleUdpPort = Get-AvailableUdpPort
+    } while (-not $ports.Add($BattleUdpPort))
+}
+
+# Replace-ConfigLiteral 要求冻结 local config 中的 endpoint 模板只出现一次。
+function Replace-ConfigLiteral {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Expected,
+        [Parameter(Mandatory = $true)][string]$Replacement
+    )
+
+    if ($Source.IndexOf($Expected, [StringComparison]::Ordinal) -lt 0 -or
+        $Source.IndexOf(
+            $Expected,
+            $Source.IndexOf($Expected, [StringComparison]::Ordinal) +
+                $Expected.Length,
+            [StringComparison]::Ordinal) -ge 0) {
+        throw "client qualification local endpoint template drifted: $Expected"
+    }
+    return $Source.Replace($Expected, $Replacement)
+}
+
 # Write-RunLocalServerConfig 绑定当前 B0.3 证据并启用唯一 simulation child。
 function Write-RunLocalServerConfig {
     $simulationRoot =
@@ -168,7 +242,53 @@ function Write-RunLocalServerConfig {
             throw "client-v1 local soak simulation prerequisite is missing"
         }
     }
-    $source = Get-Content -LiteralPath $ServerConfig -Raw -Encoding utf8
+    $source = (
+        Get-Content -LiteralPath $ServerConfig -Raw -Encoding utf8
+    ).Replace("`r`n", "`n")
+    if ($Action -eq "battle") {
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected "diagnostic:`n  address: 127.0.0.1:8081" `
+            -Replacement "diagnostic:`n  address: 127.0.0.1:$DiagnosticPort"
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected "publicApi:`n  address: 127.0.0.1:8080" `
+            -Replacement "publicApi:`n  address: 127.0.0.1:$PublicApiPort"
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected "    wss:`n      host: 127.0.0.1`n      port: 8080" `
+            -Replacement (
+                "    wss:`n      host: 127.0.0.1`n" +
+                "      port: $PublicApiPort")
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected "    tlsTcp:`n      host: 127.0.0.1`n      port: 8444" `
+            -Replacement (
+                "    tlsTcp:`n      host: 127.0.0.1`n" +
+                "      port: $GameplayPort")
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected "    bindAddress: 127.0.0.1:58445" `
+            -Replacement "    bindAddress: 127.0.0.1:$BattleUdpPort"
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected (
+                "    advertised: { host: 127.0.0.1, port: 58445 }") `
+            -Replacement (
+                "    advertised: { host: 127.0.0.1, port: $BattleUdpPort }")
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected (
+                "    allowedHosts: [127.0.0.1:8080, localhost:8080]") `
+            -Replacement (
+                "    allowedHosts: [127.0.0.1:$PublicApiPort, " +
+                "localhost:$PublicApiPort]")
+        $source = Replace-ConfigLiteral `
+            -Source $source `
+            -Expected "  gameplayTcp:`n    address: 127.0.0.1:8444" `
+            -Replacement (
+                "  gameplayTcp:`n    address: 127.0.0.1:$GameplayPort")
+    }
     if ($source -match '(?m)^simulationControl:\s*$') {
         throw "client-v1 local config already owns simulationControl"
     }
@@ -257,6 +377,55 @@ function Wait-ServerReady {
     throw "client-v1 local soak server readiness deadline elapsed"
 }
 
+# Resolve-SimulationChild 只接受当前 Go PID 直接拥有的唯一 C++ simulation child。
+function Resolve-SimulationChild {
+    param([Parameter(Mandatory = $true)][int]$ParentProcessId)
+
+    $deadline = [DateTime]::UtcNow.Add($ServerReadyTimeout)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $children = @(
+            Get-CimInstance `
+                -ClassName Win32_Process `
+                -Filter "ParentProcessId = $ParentProcessId" |
+                Where-Object {
+                    [string]$_.Name -ceq "ihomeland-sim-server.exe"
+                }
+        )
+        if ($children.Count -eq 1) {
+            return [Diagnostics.Process]::GetProcessById(
+                [int]$children[0].ProcessId)
+        }
+        if ($children.Count -gt 1) {
+            throw "client qualification Go parent owns ambiguous simulation children"
+        }
+        if ($ServerProcess.HasExited) {
+            throw "client qualification Go parent exited before simulation child capture"
+        }
+        Start-Sleep -Milliseconds (
+            [int]$OperatorPollInterval.TotalMilliseconds
+        )
+    }
+    throw "client qualification simulation child capture deadline elapsed"
+}
+
+# Stop-ExactProcess 只停止调用方已经持有 Process object 的精确 PID。
+function Stop-ExactProcess {
+    param(
+        [Parameter(Mandatory = $true)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][string]$Owner
+    )
+
+    if ($Process.HasExited) {
+        return
+    }
+    Stop-Process -Id $Process.Id -Force -ErrorAction Stop
+    if (-not $Process.WaitForExit(
+        [int]$ServerStopTimeout.TotalMilliseconds
+    )) {
+        throw "client qualification $Owner stop deadline elapsed"
+    }
+}
+
 # Start-LocalServer 启动当前 Go binary，并按 incarnation 隔离日志。
 function Start-LocalServer {
     param([Parameter(Mandatory = $true)][string]$Incarnation)
@@ -274,18 +443,18 @@ function Start-LocalServer {
         ) `
         -PassThru
     Wait-ServerReady
+    $script:SimulationProcess = Resolve-SimulationChild `
+        -ParentProcessId $ServerProcess.Id
+    $OwnedSimulationProcesses.Add($SimulationProcess)
 }
 
-# Stop-LocalServer 只终止当前 helper 记录的精确 server PID。
+# Stop-LocalServer 只终止当前 helper 记录的精确 Go 与 C++ PID。
 function Stop-LocalServer {
-    if ($null -eq $ServerProcess -or $ServerProcess.HasExited) {
-        return
+    if ($null -ne $ServerProcess) {
+        Stop-ExactProcess -Process $ServerProcess -Owner "Go parent"
     }
-    Stop-Process -Id $ServerProcess.Id -Force -ErrorAction Stop
-    if (-not $ServerProcess.WaitForExit(
-        [int]$ServerStopTimeout.TotalMilliseconds
-    )) {
-        throw "client-v1 local server stop deadline elapsed"
+    if ($null -ne $SimulationProcess) {
+        Stop-ExactProcess -Process $SimulationProcess -Owner "C++ child"
     }
 }
 
@@ -402,6 +571,49 @@ function Start-OperatorPlayer {
     }
 }
 
+# Start-BattleRuntimePlayer 启动一个隔离role/profile与动态HTTP endpoint的Development Player。
+function Start-BattleRuntimePlayer {
+    param(
+        [Parameter(Mandatory = $true)][string]$PlayerPath,
+        [Parameter(Mandatory = $true)][ValidateSet("owner", "visitor")]
+        [string]$Role,
+        [Parameter(Mandatory = $true)][string]$CoordinationRoot,
+        [Parameter(Mandatory = $true)]$Credential
+    )
+
+    Set-QualificationCredential -Credential $Credential
+    try {
+        $process = Start-Process `
+            -FilePath $PlayerPath `
+            -ArgumentList @(
+                "-batchmode",
+                "-nographics",
+                "-logFile",
+                (Join-Path $RunDirectory "operator-battle-$Role.player.log"),
+                "-ihomelandDataProfile",
+                "qualification-battle-$Role",
+                "-ihomelandQualificationStorageRoot",
+                (Join-Path $RunDirectory "battle-player-storage"),
+                "-ihomelandQualificationHttpBaseUri",
+                "http://127.0.0.1:$PublicApiPort/",
+                "-ihomelandQualificationMode",
+                "client-battle-runtime",
+                "-ihomelandQualificationRole",
+                $Role,
+                "-ihomelandQualificationCoordinationRoot",
+                $CoordinationRoot
+            ) `
+            -WorkingDirectory $RunDirectory `
+            -WindowStyle Hidden `
+            -PassThru
+        $OwnedPlayerProcesses.Add($process)
+        return $process
+    }
+    finally {
+        Clear-QualificationCredential
+    }
+}
+
 # Stop-OperatorPlayer 只终止等待显式 replacement 的精确 Player PID。
 function Stop-OperatorPlayer {
     param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
@@ -455,7 +667,8 @@ function Wait-OperatorSignals {
 function Wait-OperatorPlayers {
     param(
         [Parameter(Mandatory = $true)][Diagnostics.Process[]]$Processes,
-        [Parameter(Mandatory = $true)][string[]]$LogSuffixes
+        [Parameter(Mandatory = $true)][string[]]$LogSuffixes,
+        [string]$ExpectedScenario = "two-player-operator"
     )
 
     $deadline = [DateTime]::UtcNow.Add($OperatorTimeout)
@@ -476,7 +689,10 @@ function Wait-OperatorPlayers {
             Select-String `
                 -LiteralPath $logPath `
                 -SimpleMatch `
-                "[IHOMELAND_QUALIFICATION] outcome=pass scenario=two-player-operator" `
+                (
+                    "[IHOMELAND_QUALIFICATION] outcome=pass " +
+                    "scenario=$ExpectedScenario"
+                ) `
                 -Quiet
         )) {
             throw "client-v1 operator Player pass marker is missing"
@@ -658,6 +874,144 @@ function Invoke-ServerRestartOperator {
     }
 }
 
+# Remove-TransientCoordinationRoot 删除battle Player之间携带临时player identity的独占目录。
+function Remove-TransientCoordinationRoot {
+    param([Parameter(Mandatory = $true)][string]$CoordinationRoot)
+
+    $resolvedRun = [IO.Path]::GetFullPath($RunDirectory).TrimEnd('\') + '\'
+    $resolvedRoot = [IO.Path]::GetFullPath($CoordinationRoot)
+    if (-not $resolvedRoot.StartsWith(
+            $resolvedRun,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "battle coordination root escaped its run directory"
+    }
+    if (Test-Path -LiteralPath $resolvedRoot) {
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force
+    }
+}
+
+# Invoke-ClientBattleRuntimeOperator 驱动真实双Player battle clean、恢复与teardown矩阵。
+function Invoke-ClientBattleRuntimeOperator {
+    param(
+        [Parameter(Mandatory = $true)][string]$PlayerPath,
+        [Parameter(Mandatory = $true)]$OwnerCredential,
+        [Parameter(Mandatory = $true)]$VisitorCredential
+    )
+
+    $root = Join-Path $RunDirectory (
+        "battle-coordination\" + [Guid]::NewGuid().ToString("N"))
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    try {
+        $owner = Start-BattleRuntimePlayer `
+            -PlayerPath $PlayerPath `
+            -Role "owner" `
+            -CoordinationRoot $root `
+            -Credential $OwnerCredential
+        Wait-OperatorSignals `
+            -CoordinationRoot $root `
+            -Names @("owner-ready") `
+            -Processes @($owner)
+        $visitor = Start-BattleRuntimePlayer `
+            -PlayerPath $PlayerPath `
+            -Role "visitor" `
+            -CoordinationRoot $root `
+            -Credential $VisitorCredential
+        Wait-OperatorPlayers `
+            -Processes @($owner, $visitor) `
+            -LogSuffixes @("battle-owner", "battle-visitor") `
+            -ExpectedScenario "client-battle-runtime"
+        if (-not (
+            Test-Path `
+                -LiteralPath (
+                    Join-Path $root "client-battle-runtime-pass.signal") `
+                -PathType Leaf
+        )) {
+            throw "client battle runtime completion signal is missing"
+        }
+    }
+    finally {
+        Remove-TransientCoordinationRoot -CoordinationRoot $root
+    }
+}
+
+# Assert-NoRunSecretArtifacts 拒绝一次性credential或derivation secret进入run产物。
+function Assert-NoRunSecretArtifacts {
+    param([Parameter(Mandatory = $true)][string[]]$Secrets)
+
+    $uniqueSecrets = @(
+        $Secrets |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    $artifacts = @(
+        Get-ChildItem -LiteralPath $RunDirectory -Recurse -File |
+            Where-Object {
+                $_.Extension -in @(
+                    ".json",
+                    ".log",
+                    ".signal",
+                    ".txt",
+                    ".yaml",
+                    ".yml")
+            }
+    )
+    foreach ($artifact in $artifacts) {
+        $text = [IO.File]::ReadAllText($artifact.FullName)
+        foreach ($secret in $uniqueSecrets) {
+            if ($text.IndexOf(
+                    $secret,
+                    [StringComparison]::Ordinal) -ge 0) {
+                throw (
+                    "client battle runtime secret leaked into artifact: " +
+                    $artifact.FullName)
+            }
+        }
+        if ($artifact.Extension -notin @(".yaml", ".yml") -and
+            $text -match (
+                '(?i)(ticket[_-]?secret|traffic[_-]?key|' +
+                'rekey[_-]?key|binding[_-]?fingerprint|' +
+                '["''](?:cookie|nonce)["'']\s*:|' +
+                '\b(?:cookie|nonce)=)')) {
+            throw (
+                "client battle runtime secret-shaped field leaked into artifact: " +
+                $artifact.FullName)
+        }
+    }
+}
+
+# Assert-LocalCleanup 验证本run记录的进程和动态listener均已退役。
+function Assert-LocalCleanup {
+    foreach ($process in @($OwnedPlayerProcesses)) {
+        if (-not $process.HasExited) {
+            throw "client qualification Player PID remained after cleanup"
+        }
+    }
+    foreach ($process in @($OwnedSimulationProcesses)) {
+        if (-not $process.HasExited) {
+            throw "client qualification C++ child PID remained after cleanup"
+        }
+    }
+    if ($null -ne $ServerProcess -and -not $ServerProcess.HasExited) {
+        throw "client qualification Go parent PID remained after cleanup"
+    }
+    $tcpListeners = @(
+        Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+            Where-Object {
+                [int]$_.LocalPort -in @(
+                    $PublicApiPort,
+                    $DiagnosticPort,
+                    $GameplayPort)
+            }
+    )
+    $udpListeners = @(
+        Get-NetUDPEndpoint -ErrorAction SilentlyContinue |
+            Where-Object { [int]$_.LocalPort -eq $BattleUdpPort }
+    )
+    if ($tcpListeners.Count -ne 0 -or $udpListeners.Count -ne 0) {
+        throw "client qualification listener remained after cleanup"
+    }
+}
+
 # Add-OperatorEvidence 只在三个真实 operator 场景全部通过后原子替换正式 automatic evidence。
 function Add-OperatorEvidence {
     $evidencePath = Join-Path $RunDirectory "automatic-evidence.json"
@@ -709,6 +1063,10 @@ function Add-OperatorEvidence {
         -Force
 }
 
+if ($Action -eq "battle") {
+    [IO.Directory]::CreateDirectory($RunDirectory) | Out-Null
+    Set-IsolatedListenerPorts
+}
 if (-not (Test-Path -LiteralPath $RunDirectory -PathType Container)) {
     throw "client-v1 qualification run directory is missing"
 }
@@ -842,7 +1200,7 @@ try {
             $credential = $null
         }
     }
-    else {
+    elseif ($Action -eq "operator") {
         $ownerCredential = Register-QualificationAccount
         $visitorCredential = Register-QualificationAccount
         $playerPath = Get-DevelopmentPlayer
@@ -861,6 +1219,28 @@ try {
             -VisitorCredential $visitorCredential `
             -AttemptRoot $operatorAttemptRoot
         Add-OperatorEvidence
+        $ownerCredential = $null
+        $visitorCredential = $null
+    }
+    else {
+        $ownerCredential = Register-QualificationAccount
+        $visitorCredential = Register-QualificationAccount
+        $playerPath = Get-DevelopmentPlayer
+        Invoke-ClientBattleRuntimeOperator `
+            -PlayerPath $playerPath `
+            -OwnerCredential $ownerCredential `
+            -VisitorCredential $visitorCredential
+        Stop-LocalServer
+        Assert-NoRunSecretArtifacts -Secrets @(
+            [string]$ownerCredential.Username,
+            [string]$ownerCredential.Password,
+            [string]$visitorCredential.Username,
+            [string]$visitorCredential.Password,
+            [string]$env:IHOMELAND_MYSQL_PASSWORD,
+            [string]$env:IHOMELAND_REDIS_PASSWORD,
+            [string]$env:IHOMELAND_WORLD_ADMISSION_KEY,
+            [string]$env:IHOMELAND_BATTLE_DERIVATION_KEY
+        )
         $ownerCredential = $null
         $visitorCredential = $null
     }
@@ -894,18 +1274,24 @@ finally {
             }
         }
     }
-    if ($null -ne $ServerProcess -and
-        -not $ServerProcess.HasExited) {
+    if ($null -ne $ServerProcess -and -not $ServerProcess.HasExited) {
         try {
-            Stop-Process -Id $ServerProcess.Id -Force -ErrorAction Stop
-            if (-not $ServerProcess.WaitForExit(
-                [int]$ServerStopTimeout.TotalMilliseconds
-            )) {
-                $CleanupFailures.Add("server-timeout")
-            }
+            Stop-ExactProcess -Process $ServerProcess -Owner "Go parent"
         }
         catch {
             $CleanupFailures.Add("server")
+        }
+    }
+    foreach ($simulationProcess in $OwnedSimulationProcesses) {
+        if (-not $simulationProcess.HasExited) {
+            try {
+                Stop-ExactProcess `
+                    -Process $simulationProcess `
+                    -Owner "C++ child"
+            }
+            catch {
+                $CleanupFailures.Add("simulation")
+            }
         }
     }
     if (-not [string]::IsNullOrWhiteSpace($StorageRunId)) {
@@ -924,6 +1310,12 @@ finally {
         catch {
             $CleanupFailures.Add("storage")
         }
+    }
+    try {
+        Assert-LocalCleanup
+    }
+    catch {
+        $CleanupFailures.Add("ownership")
     }
 }
 

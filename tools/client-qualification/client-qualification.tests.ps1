@@ -351,7 +351,8 @@ try {
     Assert-True (@($localErrors).Count -eq 0) "client local qualification composition is not parseable"
     $localToolText = [System.IO.File]::ReadAllText($LocalToolPath)
     Assert-True (
-        $localToolText -match 'ValidateSet\("soak", "operator"\)') `
+        $localToolText -match
+            'ValidateSet\("soak", "operator", "battle"\)') `
         "client local qualification action contract is not closed"
     Assert-True (
         $localToolText -match
@@ -367,7 +368,10 @@ try {
         "client local operator does not isolate coordination state per attempt"
     Assert-True (
         $localToolText -match 'Stop-Process\s+`\s*\r?\n\s*-Id \$playerProcess\.Id' -and
-        $localToolText -match 'Stop-Process -Id \$ServerProcess\.Id') `
+        $localToolText -match
+            'Stop-ExactProcess -Process \$ServerProcess -Owner "Go parent"' -and
+        $localToolText -match
+            '-Process \$simulationProcess\s+`\s*\r?\n\s*-Owner "C\+\+ child"') `
         "client local qualification cleanup is not bound to exact owned PIDs"
     Assert-True (
         $localToolText -match '(?s)-Action down\s+`\s*\r?\n\s*-RunId \$StorageRunId') `
@@ -405,6 +409,36 @@ try {
         $localStartOperatorFunction.Value -notmatch
             'IHOMELAND_QUALIFICATION_(USERNAME|PASSWORD)|Credential\.(Username|Password)') `
         "client local qualification leaked credentials into process arguments"
+    $localBattlePlayerFunction = [regex]::Match(
+        $localToolText,
+        '(?s)function Start-BattleRuntimePlayer\s*\{.*?\n\}')
+    Assert-True $localBattlePlayerFunction.Success (
+        "client local battle Player owner function is missing")
+    Assert-True (
+        $localBattlePlayerFunction.Value -notmatch
+            'IHOMELAND_QUALIFICATION_(USERNAME|PASSWORD)|Credential\.(Username|Password)' -and
+        $localBattlePlayerFunction.Value -match
+            '-ihomelandQualificationHttpBaseUri') `
+        "client local battle Player leaked credentials or lost isolated endpoint"
+    $localBattleOperatorFunction = [regex]::Match(
+        $localToolText,
+        '(?s)function Invoke-ClientBattleRuntimeOperator\s*\{.*?\n\}')
+    Assert-True $localBattleOperatorFunction.Success (
+        "client local battle operator function is missing")
+    $battleOwnerStart = $localBattleOperatorFunction.Value.IndexOf(
+        '$owner = Start-BattleRuntimePlayer',
+        [StringComparison]::Ordinal)
+    $battleOwnerReady = $localBattleOperatorFunction.Value.IndexOf(
+        '-Names @("owner-ready")',
+        [StringComparison]::Ordinal)
+    $battleVisitorStart = $localBattleOperatorFunction.Value.IndexOf(
+        '$visitor = Start-BattleRuntimePlayer',
+        [StringComparison]::Ordinal)
+    Assert-True (
+        $battleOwnerStart -ge 0 -and
+        $battleOwnerReady -gt $battleOwnerStart -and
+        $battleVisitorStart -gt $battleOwnerReady) `
+        "client local battle operator no longer phases first-time world bootstrap"
     foreach ($scenarioId in @(
         "two-player-product-flow",
         "two-player-channel-faults",

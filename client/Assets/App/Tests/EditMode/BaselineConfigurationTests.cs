@@ -266,6 +266,62 @@ namespace IHomeland.Client.Tests.EditMode
                 var contexts = GetComponentsInScene<PersonalWorldSceneContext>(personalWorldScene);
                 Assert.That(contexts, Has.Length.EqualTo(1));
                 contexts[0].ValidateConfiguration();
+                var referenceEnvironments =
+                    GetComponentsInScene<PersonalWorldReferenceEnvironment>(
+                        personalWorldScene);
+                Assert.That(referenceEnvironments, Has.Length.EqualTo(1));
+                Assert.That(
+                    referenceEnvironments[0].
+                        GetComponentsInChildren<Collider>(includeInactive: true),
+                    Is.Empty,
+                    "PersonalWorld世界参照不得创建客户端Collider事实。");
+
+                var thirdPersonFollows =
+                    GetComponentsInScene<Component>(personalWorldScene)
+                        .Where(component =>
+                            component.GetType().FullName ==
+                            "Unity.Cinemachine.CinemachineThirdPersonFollow")
+                        .ToArray();
+                Assert.That(thirdPersonFollows, Has.Length.EqualTo(4));
+                var explorationFollow = thirdPersonFollows.Single(
+                    follow => follow.gameObject.name == "ExplorationRig");
+                var serializedExploration =
+                    new SerializedObject(explorationFollow);
+                Assert.That(
+                    serializedExploration.FindProperty("CameraDistance")
+                        .floatValue,
+                    Is.EqualTo(4.5f).Within(0.001f));
+                Assert.That(
+                    serializedExploration.FindProperty("ShoulderOffset")
+                        .vector3Value.y,
+                    Is.EqualTo(1.25f).Within(0.001f));
+                Assert.That(
+                    serializedExploration.FindProperty("VerticalArmLength")
+                        .floatValue,
+                    Is.EqualTo(0.35f).Within(0.001f));
+                Assert.That(
+                    serializedExploration.FindProperty("Damping")
+                        .vector3Value.y,
+                    Is.EqualTo(0.1f).Within(0.001f));
+                Assert.That(
+                    thirdPersonFollows.All(
+                        follow =>
+                        {
+                            var serializedFollow =
+                                new SerializedObject(follow);
+                            return
+                                serializedFollow
+                                    .FindProperty("CameraDistance")
+                                    .floatValue >= 3.2f &&
+                                serializedFollow
+                                    .FindProperty("ShoulderOffset")
+                                    .vector3Value.y >= 1.15f &&
+                                serializedFollow
+                                    .FindProperty("Damping")
+                                    .vector3Value.y <= 0.15f;
+                        }),
+                    Is.True,
+                    "Battle camera rigs 必须保持可读距离、高位肩点与低垂直阻尼。");
             }
             finally
             {

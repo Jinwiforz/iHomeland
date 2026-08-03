@@ -48,6 +48,35 @@
       "3003": 900
     }
   },
+  "snapshot_entity_state": {
+    "message_ids": [3002, 3003, 3005],
+    "transform_message": "ihomeland.battle.v1.QuantizedTransform",
+    "required_scalar_fields": [
+      { "name": "position_x_mm", "field_number": 1, "range": "sint32" },
+      { "name": "position_y_mm", "field_number": 2, "range": "sint32" },
+      { "name": "position_z_mm", "field_number": 3, "range": "sint32" },
+      { "name": "yaw_millidegrees", "field_number": 4, "range": "[-180000,180000)" },
+      { "name": "velocity_x_mm_per_second", "field_number": 5, "range": "sint32" },
+      { "name": "velocity_y_mm_per_second", "field_number": 6, "range": "sint32" },
+      { "name": "velocity_z_mm_per_second", "field_number": 7, "range": "sint32" }
+    ],
+    "scalar_presence": "explicit-required-in-full-delta-and-spawn-state",
+    "delta_state_mask": {
+      "transform": 1,
+      "health_milli": 2,
+      "state_flags": 4,
+      "known_mask": 7,
+      "presence_policy": "exact-match"
+    },
+    "state_flags": {
+      "phase_mask": 15,
+      "grounded_flag": 16,
+      "dead_flag": 2147483648,
+      "known_mask": 2147483679,
+      "unknown_policy": "reject",
+      "compatibility": "bits-0-through-3-remain-phase-bit-4-is-grounded-bit-31-is-dead"
+    }
+  },
   "kcp_segment_header": {
     "size_bytes": 24,
     "byte_order": "little-endian",

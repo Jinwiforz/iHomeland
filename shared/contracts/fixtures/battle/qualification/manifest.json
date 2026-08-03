@@ -93,7 +93,7 @@
     {
       "path": "upstream-binding.json",
       "documentKind": "upstream-binding",
-      "sha256": "f93d9dc90ca1c9775f40766b275da73c9eca089cca7941c8513ff9a6e747e973"
+      "sha256": "d26e4440cb0f5a7c24f6e1263fe54e0962fd4f04d31e89632cb4855a3dd975db"
     },
     {
       "path": "workloads.json",

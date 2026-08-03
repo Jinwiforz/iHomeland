@@ -17,8 +17,34 @@ void Require(const bool condition, const char* message) {
 /// TestReadOnlyCanonicalProjection 验证 arrival reorder 不改 digest 且输入值不被回写。
 void TestReadOnlyCanonicalProjection() {
     const std::vector<ihomeland::sim::StateProjectionToken> states{
-        {.actor_id = 2, .x_mm = 20, .y_mm = 0, .z_mm = 0, .health_scaled = 90, .phase = 1, .alive = true},
-        {.actor_id = 1, .x_mm = 10, .y_mm = 0, .z_mm = 0, .health_scaled = 0, .phase = 2, .alive = false}};
+        {
+            .actor_id = 2,
+            .x_mm = 20,
+            .y_mm = 0,
+            .z_mm = 0,
+            .yaw_millidegrees = 90'000,
+            .velocity_x_mm_per_second = 3'000,
+            .velocity_y_mm_per_second = 0,
+            .velocity_z_mm_per_second = -1'000,
+            .health_scaled = 90,
+            .phase = 1,
+            .alive = true,
+            .grounded = true,
+        },
+        {
+            .actor_id = 1,
+            .x_mm = 10,
+            .y_mm = 5,
+            .z_mm = 0,
+            .yaw_millidegrees = -90'000,
+            .velocity_x_mm_per_second = 0,
+            .velocity_y_mm_per_second = 4'500,
+            .velocity_z_mm_per_second = 0,
+            .health_scaled = 0,
+            .phase = 2,
+            .alive = false,
+            .grounded = false,
+        }};
     const std::vector<ihomeland::sim::EventProjectionToken> events{
         {.tick = 2, .kind = 2, .source_actor_id = 2, .target_actor_id = 1, .activation_id = 9, .value_scaled = -10},
         {.tick = 1, .kind = 1, .source_actor_id = 1, .target_actor_id = 0, .activation_id = 0, .value_scaled = 0}};

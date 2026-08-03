@@ -132,7 +132,7 @@ enum class BattleTicketState : std::uint8_t {
     Consumed = 2,
     /// Revoked 已显式撤销且不可恢复。
     Revoked = 3,
-    /// Expired 已到绝对 deadline 且不可恢复。
+    /// Expired 表示 Installed 凭据未在绝对 deadline 前消费。
     Expired = 4,
 };
 
@@ -164,6 +164,8 @@ struct BattleTicketReceipt final {
     BattleTicketState state;
     /// replayed 表示相同 request/binding 的幂等结果。
     bool replayed;
+    /// superseded_binding_fingerprint 仅在同一 actor 安装 successor 时返回 predecessor digest。
+    std::string superseded_binding_fingerprint;
 };
 
 /// BattleQualificationSnapshotReceipt 是 exact instance 的只读低敏运行态投影。
@@ -238,7 +240,7 @@ public:
         const BattleTicketInstallCommand& command,
         std::uint64_t observed_unix_ms);
 
-    /// BattleTicketStatus 返回 exact ticket/binding 状态并惰性提交 expiry。
+    /// BattleTicketStatus 返回 exact ticket/binding 状态并惰性终结未消费凭据。
     [[nodiscard]] BattleTicketReceipt BattleTicketStatus(
         const std::string& ticket_id,
         const std::string& binding_fingerprint,
@@ -275,7 +277,7 @@ public:
         const std::string& simulation_instance_id,
         std::uint64_t observed_unix_ms);
 
-    /// ResolveBattleCommandIngress 返回 exact active instance 的唯一输入边界。
+    /// ResolveBattleCommandIngress 只为 actor_id=actor_slot+1 的 exact active instance 返回唯一输入边界。
     ///
     /// 返回值只允许由 node-global BattleTransportRuntime 在其 session lock 内借用；
     /// control owner 必须先撤销对应 runtime session，再 drain 或销毁 instance。
@@ -283,19 +285,19 @@ public:
     ResolveBattleCommandIngress(
         const BattleSessionContext& context) noexcept;
 
-    /// BattleReplicationSnapshot 冻结 exact active instance 的 committed 只读投影。
+    /// BattleReplicationSnapshot 冻结 exact one-based actor mapping 的 committed 只读投影。
     [[nodiscard]] std::optional<
         BattleReplicationProjection>
     BattleReplicationSnapshot(
         const BattleSessionContext& context) const;
 
-    /// BattleRawContext 从 exact active instance 构造当前 InputTick 接受窗口。
+    /// BattleRawContext 从 exact one-based actor mapping 构造当前 InputTick 接受窗口。
     [[nodiscard]] BattleRawDispatchContext
     BattleRawContext(
         const BattleSessionContext& context,
         std::uint64_t now_unix_ms) const;
 
-    /// BattleSessionCurrent 验证 session 仍绑定 current instance 与 consumed ticket。
+    /// BattleSessionCurrent 验证 session、consumed ticket 与 actor_slot+1 identity 仍 current。
     [[nodiscard]] bool BattleSessionCurrent(
         const BattleSessionContext& context) const noexcept;
 

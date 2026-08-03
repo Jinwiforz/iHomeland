@@ -51,6 +51,11 @@ namespace IHomeland.Client.Core.Bootstrap
         private bool _ownsClaim;
 
         /// <summary>
+        /// 表示 Unity 已进入应用或Play生命周期终结，异步尽力清理失败只输出退出摘要。
+        /// </summary>
+        private bool _applicationQuitting;
+
+        /// <summary>
         /// 获取当前 App Scope 生命周期状态；尚未绑定对象图时返回 Created。
         /// </summary>
         internal AppLifetimeState State => _composition == null
@@ -203,6 +208,7 @@ namespace IHomeland.Client.Core.Bootstrap
         /// </summary>
         private void OnApplicationQuit()
         {
+            _applicationQuitting = true;
             BeginObservedStop();
         }
 
@@ -263,10 +269,35 @@ namespace IHomeland.Client.Core.Bootstrap
             {
                 await StopAsync();
             }
+            catch (AppShutdownException stopError) when (_applicationQuitting)
+            {
+                Debug.LogWarning(
+                    FormatApplicationQuitShutdownWarning(stopError),
+                    this);
+            }
             catch (Exception stopError)
             {
                 Debug.LogException(stopError, this);
             }
+        }
+
+        /// <summary>
+        /// 构造不含credential、endpoint或业务identity的应用退出清理摘要。
+        /// </summary>
+        /// <param name="error">App Scope尽力停止聚合结果。</param>
+        /// <returns>包含错误数量和首个稳定异常类型的warning文本。</returns>
+        internal static string FormatApplicationQuitShutdownWarning(
+            AppShutdownException error)
+        {
+            if (error == null)
+            {
+                throw new ArgumentNullException(nameof(error));
+            }
+
+            return
+                "[IHOMELAND_APP_SHUTDOWN] outcome=best_effort " +
+                $"cleanup_errors={error.Errors.Count} " +
+                $"first_error={error.Errors[0].GetType().Name}";
         }
 
         /// <summary>

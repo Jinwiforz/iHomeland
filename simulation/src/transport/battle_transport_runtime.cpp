@@ -604,19 +604,114 @@ struct BattleTransportRuntime::Impl final {
                 candidate_unix_ms);
         }
 
+        /// ActiveProjection 只公开当前 instance 的 authenticated active actor。
+        ///
+        /// Simulation store 为确定性预分配全部容量；entity 生命周期必须来自
+        /// transport active session registry，不能把未占用 slot 暴露给客户端。
+        [[nodiscard]] std::optional<
+            BattleReplicationProjection>
+        ActiveProjection() {
+            auto projection =
+                owner.replication_projection_provider(
+                    *context);
+            if (!projection.has_value()) {
+                return std::nullopt;
+            }
+            std::vector<std::uint64_t>
+                active_actor_ids;
+            active_actor_ids.reserve(
+                owner.config.maximum_sessions);
+            active_actor_ids.push_back(
+                context->Actor().actor_id);
+            for (const auto& session :
+                 owner.sessions) {
+                if (session == nullptr ||
+                    session.get() == this ||
+                    !session->authority->Active() ||
+                    session->context->
+                            SimulationInstanceId() !=
+                        context->
+                            SimulationInstanceId() ||
+                    session->context->
+                            MappingGeneration() !=
+                        context->
+                            MappingGeneration()) {
+                    continue;
+                }
+                active_actor_ids.push_back(
+                    session->context->Actor().actor_id);
+            }
+            std::ranges::sort(active_actor_ids);
+            const auto duplicate =
+                std::ranges::adjacent_find(
+                    active_actor_ids);
+            if (duplicate !=
+                active_actor_ids.end()) {
+                authority->Invalidate(
+                    BattleSessionInvalidationReason::
+                        Instance);
+                return std::nullopt;
+            }
+
+            std::vector<StateProjectionToken>
+                active_states;
+            active_states.reserve(
+                active_actor_ids.size());
+            for (const auto& state :
+                 projection->states) {
+                if (std::ranges::binary_search(
+                        active_actor_ids,
+                        state.actor_id)) {
+                    active_states.push_back(state);
+                }
+            }
+            if (active_states.size() !=
+                active_actor_ids.size()) {
+                authority->Invalidate(
+                    BattleSessionInvalidationReason::
+                        Instance);
+                return std::nullopt;
+            }
+            projection->states =
+                std::move(active_states);
+            return projection;
+        }
+
+        /// ActorSetChanged 判断当前 projection 是否改变已公开 entity membership。
+        ///
+        /// Full snapshot 是当前 wire 唯一可原子替换 entity 集合的消息；普通 delta
+        /// 只更新已存在 generation，不能承担 spawn/despawn。
+        [[nodiscard]] bool ActorSetChanged(
+            const BattleReplicationProjection&
+                projection) const noexcept {
+            if (projection.states.size() !=
+                published_actor_ids.size()) {
+                return true;
+            }
+            for (std::size_t index = 0;
+                 index < projection.states.size();
+                 ++index) {
+                if (projection.states[index].actor_id !=
+                    published_actor_ids[index]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// QueueCurrentProjection 从 simulation owner 冻结 snapshot，不在 transport 生成状态。
         void QueueCurrentProjection(
             const bool force_full) {
             const auto projection =
-                owner.replication_projection_provider(
-                    *context);
+                ActiveProjection();
             if (!projection.has_value()) {
                 return;
             }
             const auto publication =
                 snapshot_cadence.Next(
                     projection->server_tick,
-                    force_full);
+                    force_full ||
+                        ActorSetChanged(*projection));
             if (!publication.has_value()) {
                 if (snapshot_cadence.Terminal()) {
                     authority->Invalidate(
@@ -663,6 +758,15 @@ struct BattleTransportRuntime::Impl final {
                 authority->Invalidate(
                     BattleSessionInvalidationReason::
                         Backpressure);
+                return;
+            }
+            published_actor_ids.clear();
+            published_actor_ids.reserve(
+                projection.states.size());
+            for (const auto& state :
+                 projection.states) {
+                published_actor_ids.push_back(
+                    state.actor_id);
             }
         }
 
@@ -671,8 +775,7 @@ struct BattleTransportRuntime::Impl final {
             const BattleKcpMessageView& message) {
             owner.kcp_handler(*context, message);
             const auto projection =
-                owner.replication_projection_provider(
-                    *context);
+                ActiveProjection();
             if (!projection.has_value()) {
                 authority->Invalidate(
                     BattleSessionInvalidationReason::
@@ -826,6 +929,9 @@ struct BattleTransportRuntime::Impl final {
         std::uint64_t operation_now_unix_ms{};
         /// snapshot_cadence 独占 full 周期与 raw application identity。
         BattleSnapshotCadence snapshot_cadence;
+        /// published_actor_ids 保存最近成功排队的 canonical entity membership。
+        std::vector<std::uint64_t>
+            published_actor_ids;
         /// close_reason 只为已确认的 authenticated client close 覆盖 Protocol 分类。
         std::optional<BattleCloseReasonCategory>
             close_reason;
@@ -899,6 +1005,36 @@ struct BattleTransportRuntime::Impl final {
             [&](const auto& session) {
                 return session->route_key == key;
             });
+    }
+
+    /// RetireActorPredecessor 让已认证的新会话原子接管同一 actor。
+    ///
+    /// UDP 断线不能依赖旧 client 发送 close；若 predecessor 继续占据 active
+    /// projection，新会话会因重复 actor 无法生成首个 baseline。
+    void RetireActorPredecessor(
+        const Session& successor) noexcept {
+        const auto predecessor = std::find_if(
+            sessions.begin(),
+            sessions.end(),
+            [&](const auto& session) {
+                return session != nullptr &&
+                    session->authority->Active() &&
+                    session->context->SimulationInstanceId() ==
+                        successor.context->
+                            SimulationInstanceId() &&
+                    session->context->MappingGeneration() ==
+                        successor.context->
+                            MappingGeneration() &&
+                    session->context->Actor().actor_id ==
+                        successor.context->Actor().actor_id;
+            });
+        if (predecessor == sessions.end()) {
+            return;
+        }
+        (*predecessor)->authority->Invalidate(
+            BattleSessionInvalidationReason::Target);
+        RecordSessionClose(*(*predecessor));
+        sessions.erase(predecessor);
     }
 
     /// RecordSessionClose 在唯一 erase owner 处累计一次低敏终结原因。
@@ -1172,6 +1308,7 @@ BattleTransportRuntime::HandleDatagram(
                 BattleUdpSendDisposition::Queued) {
             return BattleTransportRuntimeDisposition::Dropped;
         }
+        impl_->RetireActorPredecessor(*session);
         if (!session->BootstrapSnapshot()) {
             return BattleTransportRuntimeDisposition::Dropped;
         }

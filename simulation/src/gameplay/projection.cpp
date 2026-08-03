@@ -89,7 +89,7 @@ CanonicalGameplayProjection ProjectCanonicalGameplay(
 
     std::string text;
     text.reserve(
-        canonical_states.size() * 64 +
+        canonical_states.size() * 112 +
         canonical_events.size() * 64 +
         canonical_rejections.size() * 48 +
         canonical_capacities.size() * 32);
@@ -103,11 +103,29 @@ CanonicalGameplayProjection ProjectCanonicalGameplay(
         AppendSeparator(text, ',');
         AppendInteger(text, state.z_mm);
         AppendSeparator(text, ',');
+        AppendInteger(
+            text,
+            state.yaw_millidegrees);
+        AppendSeparator(text, ',');
+        AppendInteger(
+            text,
+            state.velocity_x_mm_per_second);
+        AppendSeparator(text, ',');
+        AppendInteger(
+            text,
+            state.velocity_y_mm_per_second);
+        AppendSeparator(text, ',');
+        AppendInteger(
+            text,
+            state.velocity_z_mm_per_second);
+        AppendSeparator(text, ',');
         AppendInteger(text, state.health_scaled);
         AppendSeparator(text, ',');
         AppendInteger(text, state.phase);
         AppendSeparator(text, ',');
         AppendInteger(text, state.alive ? 1 : 0);
+        AppendSeparator(text, ',');
+        AppendInteger(text, state.grounded ? 1 : 0);
         AppendSeparator(text, ';');
     }
     text.append("|E:");

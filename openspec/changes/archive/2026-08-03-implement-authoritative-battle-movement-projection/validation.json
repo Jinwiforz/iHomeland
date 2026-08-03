@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "change": "implement-authoritative-battle-movement-projection",
+  "checks": [
+    {
+      "id": "quality-contract",
+      "reason": "独立 6.8 change 必须保持 closed validation plan、catalog 引用与普通 change/最终资格分层"
+    },
+    {
+      "id": "battle-wire-validate",
+      "reason": "snapshot transform presence、state_flags registry、raw lane、payload ceiling 与 manifest identity 属于本 change 的直接协议影响面"
+    },
+    {
+      "id": "simulation-control-validate",
+      "reason": "SimulationNode runtime binding、single-worker Tick commit 与 teardown 必须保持现有 control lifecycle 和 assignment fencing"
+    },
+    {
+      "id": "client-battle-runtime-validate",
+      "reason": "Unity consumer source manifest、wire identity、grounded registry 与 authoritative reconciliation 边界必须闭合"
+    },
+    {
+      "id": "cpp-acknowledgement-targeted",
+      "reason": "本 change 将 actor movement state 与 LastProcessedInputTick 合并为同一 committed replication projection"
+    },
+    {
+      "id": "client-battle-runtime-targeted",
+      "reason": "C++ snapshot producer、独立协议客户端和纯 C# replica/reconciliation tests 属于直接实现面"
+    },
+    {
+      "id": "client-battle-runtime-unity",
+      "reason": "Authority grounded 进入 Unity runtime 后必须由 current Editor 的定向 EditMode/PlayMode fixtures 验证"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "独立 proposal、design、三份 capability delta specs 与 tasks 必须通过 strict validation"
+    }
+  ]
+}

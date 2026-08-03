@@ -344,13 +344,20 @@ void TestCommandBoundaryRejections() {
     const std::uint64_t input_tick,
     const std::uint64_t sequence,
     const ihomeland::sim::GameplayCommandKind kind,
-    std::string payload) {
+    std::string payload,
+    const std::int16_t move_x_permille = 0,
+    const std::int16_t move_z_permille = 0,
+    const std::int32_t aim_yaw_millidegrees = 0) {
     return {
         .target_tick = target_tick,
         .actor_id = 42,
         .input_tick = input_tick,
         .stable_sequence = sequence,
         .kind = static_cast<std::uint8_t>(kind),
+        .move_x_permille = move_x_permille,
+        .move_z_permille = move_z_permille,
+        .aim_yaw_millidegrees =
+            aim_yaw_millidegrees,
         .canonical_payload = std::move(payload)};
 }
 
@@ -365,9 +372,10 @@ void TestInputTimeline() {
         .early_window_ticks = 2,
         .late_window_ticks = 6};
     const std::vector<ihomeland::sim::IngressCommand> ordered{
-        TimelineCommand(1, 1, 1, ihomeland::sim::GameplayCommandKind::ContinuousIntentSample, "0|100|0"),
-        TimelineCommand(1, 2, 2, ihomeland::sim::GameplayCommandKind::ContinuousIntentSample, "0|200|0"),
+        TimelineCommand(1, 1, 1, ihomeland::sim::GameplayCommandKind::ContinuousIntentSample, "0|100|0", 100, 0),
+        TimelineCommand(1, 2, 2, ihomeland::sim::GameplayCommandKind::ContinuousIntentSample, "0|200|0", 200, -50),
         TimelineCommand(1, 2, 3, ihomeland::sim::GameplayCommandKind::JumpPressed, "1"),
+        TimelineCommand(1, 2, 4, ihomeland::sim::GameplayCommandKind::AimIntent, "5|90000|0", 0, 0, 90'000),
     };
     auto reversed = ordered;
     std::reverse(reversed.begin(), reversed.end());
@@ -377,19 +385,28 @@ void TestInputTimeline() {
     const auto reordered_tick = second.Resolve(1, reversed);
     Require(
         first_tick[0].continuous_payload == "0|200|0" &&
+            first_tick[0].move_x_permille == 200 &&
+            first_tick[0].move_z_permille == -50 &&
+            first_tick[0].jump_pressed &&
+            first_tick[0].aim_yaw_millidegrees ==
+                std::optional<std::int32_t>{90'000} &&
             reordered_tick[0].continuous_payload == first_tick[0].continuous_payload,
         "continuous fold depends on arrival order");
     Require(
-        first_tick[0].discrete_sequences == std::vector<std::uint64_t>{3} &&
+        first_tick[0].discrete_sequences == std::vector<std::uint64_t>({3, 4}) &&
             reordered_tick[0].discrete_sequences == first_tick[0].discrete_sequences,
         "discrete edge depends on arrival order");
     Require(first_tick[0].last_processed_input_tick == 2, "continuous confirmation frontier drifted");
 
     const std::vector<ihomeland::sim::IngressCommand> tick_two{
-        TimelineCommand(2, 4, 4, ihomeland::sim::GameplayCommandKind::ContinuousIntentSample, "0|400|0")};
+        TimelineCommand(2, 4, 5, ihomeland::sim::GameplayCommandKind::ContinuousIntentSample, "0|400|0", 400, 25)};
     const auto second_tick = first.Resolve(2, tick_two);
     Require(
         second_tick[0].continuous_payload == "0|400|0" &&
+            second_tick[0].move_x_permille == 400 &&
+            second_tick[0].move_z_permille == 25 &&
+            !second_tick[0].jump_pressed &&
+            !second_tick[0].aim_yaw_millidegrees.has_value() &&
             second_tick[0].last_processed_input_tick == 2,
         "pending InputTick gap was silently confirmed");
     Require(first.Resolve(3, {})[0].held, "continuous sample was not held inside policy");
@@ -407,9 +424,53 @@ void TestInputTimeline() {
         "input acknowledgement projection was not immutable and generation scoped");
     const auto neutral = first.Resolve(5, {});
     Require(
-        neutral[0].continuous_payload == "0|0|0" && !neutral[0].held &&
+        neutral[0].continuous_payload == "0|0|0" &&
+            neutral[0].move_x_permille == 0 &&
+            neutral[0].move_z_permille == 0 &&
+            !neutral[0].held &&
+            !neutral[0].jump_pressed &&
+            !neutral[0].aim_yaw_millidegrees.has_value() &&
             neutral[0].discrete_sequences.empty(),
         "continuous hold did not return to neutral");
+    const std::vector<ihomeland::sim::IngressCommand> late{
+        TimelineCommand(
+            5,
+            9,
+            6,
+            ihomeland::sim::GameplayCommandKind::
+                ContinuousIntentSample,
+            "0|700|0",
+            700,
+            -25),
+        TimelineCommand(
+            5,
+            10,
+            7,
+            ihomeland::sim::GameplayCommandKind::
+                JumpPressed,
+            "1"),
+        TimelineCommand(
+            5,
+            10,
+            8,
+            ihomeland::sim::GameplayCommandKind::
+                AimIntent,
+            "5|-45000|0",
+            0,
+            0,
+            -45'000),
+    };
+    const auto late_tick = first.Resolve(6, late);
+    Require(
+        late_tick[0].continuous_payload == "0|700|0" &&
+            late_tick[0].move_x_permille == 700 &&
+            late_tick[0].move_z_permille == -25 &&
+            !late_tick[0].held &&
+            late_tick[0].jump_pressed &&
+            late_tick[0].aim_yaw_millidegrees ==
+                std::optional<std::int32_t>{-45'000} &&
+            late_tick[0].last_processed_input_tick == 10,
+        "accepted late-window command was acknowledged without being applied");
     auto successor = mapping;
     successor.generation = 12;
     first.ReplaceMapping(successor);

@@ -384,6 +384,7 @@
             "secure_header",
             "raw_route_header",
             "snapshot_acknowledgement",
+            "snapshot_entity_state",
             "kcp_segment_header",
             "kcp_route_envelope",
             "transport_control_envelope",
@@ -457,6 +458,105 @@
                   "const": {
                     "3002": 1040,
                     "3003": 900
+                  }
+                }
+              }
+            },
+            "snapshot_entity_state": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "message_ids",
+                "transform_message",
+                "required_scalar_fields",
+                "scalar_presence",
+                "delta_state_mask",
+                "state_flags"
+              ],
+              "properties": {
+                "message_ids": {
+                  "const": [3002, 3003, 3005]
+                },
+                "transform_message": {
+                  "const": "ihomeland.battle.v1.QuantizedTransform"
+                },
+                "required_scalar_fields": {
+                  "type": "array",
+                  "minItems": 7,
+                  "maxItems": 7,
+                  "prefixItems": [
+                    {
+                      "const": {
+                        "name": "position_x_mm",
+                        "field_number": 1,
+                        "range": "sint32"
+                      }
+                    },
+                    {
+                      "const": {
+                        "name": "position_y_mm",
+                        "field_number": 2,
+                        "range": "sint32"
+                      }
+                    },
+                    {
+                      "const": {
+                        "name": "position_z_mm",
+                        "field_number": 3,
+                        "range": "sint32"
+                      }
+                    },
+                    {
+                      "const": {
+                        "name": "yaw_millidegrees",
+                        "field_number": 4,
+                        "range": "[-180000,180000)"
+                      }
+                    },
+                    {
+                      "const": {
+                        "name": "velocity_x_mm_per_second",
+                        "field_number": 5,
+                        "range": "sint32"
+                      }
+                    },
+                    {
+                      "const": {
+                        "name": "velocity_y_mm_per_second",
+                        "field_number": 6,
+                        "range": "sint32"
+                      }
+                    },
+                    {
+                      "const": {
+                        "name": "velocity_z_mm_per_second",
+                        "field_number": 7,
+                        "range": "sint32"
+                      }
+                    }
+                  ],
+                  "items": false
+                },
+                "scalar_presence": {
+                  "const": "explicit-required-in-full-delta-and-spawn-state"
+                },
+                "delta_state_mask": {
+                  "const": {
+                    "transform": 1,
+                    "health_milli": 2,
+                    "state_flags": 4,
+                    "known_mask": 7,
+                    "presence_policy": "exact-match"
+                  }
+                },
+                "state_flags": {
+                  "const": {
+                    "phase_mask": 15,
+                    "grounded_flag": 16,
+                    "dead_flag": 2147483648,
+                    "known_mask": 2147483679,
+                    "unknown_policy": "reject",
+                    "compatibility": "bits-0-through-3-remain-phase-bit-4-is-grounded-bit-31-is-dead"
                   }
                 }
               }

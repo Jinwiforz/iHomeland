@@ -1,6 +1,7 @@
 #include "ihomeland/qualification/battle/protocol_client.hpp"
 
 #include "ihomeland/battle/v1/battle.pb.h"
+#include "ihomeland/sim/gameplay/projection.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -94,6 +95,78 @@ struct SnapshotProjection final {
     std::uint64_t last_processed_input_tick{};
 };
 
+/// TransformValid 验证 snapshot 七个 scalar 的显式 presence 与 yaw registry。
+[[nodiscard]] bool TransformValid(
+    const ihomeland::battle::v1::
+        QuantizedTransform& transform) noexcept {
+    return transform.has_position_x_mm() &&
+           transform.has_position_y_mm() &&
+           transform.has_position_z_mm() &&
+           transform.has_yaw_millidegrees() &&
+           transform
+               .has_velocity_x_mm_per_second() &&
+           transform
+               .has_velocity_y_mm_per_second() &&
+           transform
+               .has_velocity_z_mm_per_second() &&
+           transform.yaw_millidegrees() >=
+               -180'000 &&
+           transform.yaw_millidegrees() <
+               180'000;
+}
+
+/// StateFlagsValid 拒绝 battle-wire-v1 registry 之外的 bit。
+[[nodiscard]] bool StateFlagsValid(
+    const std::uint32_t value) noexcept {
+    return (value &
+            ~ihomeland::sim::
+                BattleEntityStateFlags::
+                    KnownMask) == 0;
+}
+
+/// FullEntityValid 验证 full/spawn state 的 closed identity、presence 与 flags。
+[[nodiscard]] bool FullEntityValid(
+    const ihomeland::battle::v1::
+        BattleEntityState& state) noexcept {
+    return state.has_entity_id() &&
+           state.entity_id() != 0 &&
+           state.has_entity_generation() &&
+           state.entity_generation() != 0 &&
+           state.has_transform() &&
+           TransformValid(state.transform()) &&
+           state.has_health_milli() &&
+           state.has_state_flags() &&
+           StateFlagsValid(state.state_flags());
+}
+
+/// DeltaEntityValid 验证 state mask 与 edition scalar/message presence 精确一致。
+[[nodiscard]] bool DeltaEntityValid(
+    const ihomeland::battle::v1::
+        BattleEntityDelta& state) noexcept {
+    if (!state.has_entity_id() ||
+        state.entity_id() == 0 ||
+        !state.has_entity_generation() ||
+        state.entity_generation() == 0 ||
+        !state.has_state_mask() ||
+        state.state_mask() == 0 ||
+        (state.state_mask() & ~7U) != 0) {
+        return false;
+    }
+    const auto transform =
+        (state.state_mask() & 1U) != 0;
+    const auto health =
+        (state.state_mask() & 2U) != 0;
+    const auto flags =
+        (state.state_mask() & 4U) != 0;
+    return transform == state.has_transform() &&
+           (!state.has_transform() ||
+            TransformValid(state.transform())) &&
+           health == state.has_health_milli() &&
+           flags == state.has_state_flags() &&
+           (!state.has_state_flags() ||
+            StateFlagsValid(state.state_flags()));
+}
+
 /// ParseSnapshot 只接受 full/delta closed outer contract。
 [[nodiscard]] SnapshotProjection ParseSnapshot(
     const std::uint32_t message_id,
@@ -112,8 +185,20 @@ struct SnapshotProjection final {
             message.partition_count() >
                 ProtocolRawLane::MaximumPartitions ||
             message.partition_index() >=
-                message.partition_count()) {
+                message.partition_count() ||
+            message.entities_size() == 0) {
             return {};
+        }
+        std::uint64_t previous_entity_id = 0;
+        for (const auto& entity :
+             message.entities()) {
+            if (!FullEntityValid(entity) ||
+                entity.entity_id() <=
+                    previous_entity_id) {
+                return {};
+            }
+            previous_entity_id =
+                entity.entity_id();
         }
         return {
             .valid = true,
@@ -141,8 +226,20 @@ struct SnapshotProjection final {
             message.partition_count() >
                 ProtocolRawLane::MaximumPartitions ||
             message.partition_index() >=
-                message.partition_count()) {
+                message.partition_count() ||
+            message.deltas_size() == 0) {
             return {};
+        }
+        std::uint64_t previous_entity_id = 0;
+        for (const auto& entity :
+             message.deltas()) {
+            if (!DeltaEntityValid(entity) ||
+                entity.entity_id() <=
+                    previous_entity_id) {
+                return {};
+            }
+            previous_entity_id =
+                entity.entity_id();
         }
         return {
             .valid = true,

@@ -165,11 +165,20 @@ architecture gate 禁止链接 production transport/gameplay adapter。真实资
 Windows x64、项目局部 Go/CMake/MSVC/Windows SDK 缓存与 storage harness 所需 Docker；
 缺项应先通过各自统一入口恢复，不允许在资格脚本中临时使用系统同名工具或在线 fallback。
 
-### 后续仍未引入的依赖
+### B0.7 客户端 battle 依赖
 
-| 能力 | 计划依赖 | 唯一版本 owner | 引入门禁 |
+| 能力 | 锁定依赖 | 唯一版本 owner | 引入门禁 |
 |---|---|---|---|
-| 客户端镜头 | Cinemachine | Unity camera host | Battle network qualification、Unity Package Manager 精确版本、兼容矩阵与 scene/prefab 回归 |
+| 客户端镜头 | Cinemachine 3.1.7 / `com.unity.cinemachine` | `client-cinemachine-camera-host` | 3.1.5 在 Unity 6000.5.2f1 因 `GetInstanceID()` 被移除而产生 `CS0619`；3.1.6 起官方转换为 EntityID，当前锁定 2026-07-29 最新稳定版 3.1.7。必须由 current Editor resolve exact `packages-lock.json`，并完成 scene/prefab/CameraIntent 回归后才算锁定完成 |
+| 客户端 battle crypto | libsodium 1.0.22 | `client-battle-native-crypto` | 只经 `ihomeland-client-battle-native-v1` C ABI 使用项目锁定 source/checksum/license，不允许系统/NuGet fallback |
+| 客户端 battle KCP | KCP 2.1.1 | `client-battle-native-kcp` | 只经 generation-scoped native context 使用冻结参数；不得拥有 socket、ticket、route 或 Unity object |
+
+Windows x64 plugin 只能由
+`tools/client-battle-runtime/client-battle-runtime.ps1 -Action native-build`
+按 exact CMake preset 重建并复制到 ignored generated plugin 目录。Tracked binary、
+PATH、用户级 cache 与预编译 fallback 均禁止。Cinemachine rollback 为移除 Scene rig
+binding 与 package 声明并恢复 Exploration fallback；rollback 不能改变服务器 aim、
+hit 或 gameplay authority。
 
 项目代码只能通过窄 adapter/port 使用第三方能力。业务 component、跨端 protocol、公开 application contract 和持久 schema 不得暴露 Asio、Jolt、Detour 或 KCP 类型。不得把上游源码片段改名复制进业务目录来规避版本和许可证治理；确需 vendoring 时必须保留上游身份、完整许可证和补丁清单。
 

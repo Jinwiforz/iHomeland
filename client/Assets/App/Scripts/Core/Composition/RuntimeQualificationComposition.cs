@@ -16,6 +16,7 @@ namespace IHomeland.Client.Core.Composition
             SessionCompositionBundle session,
             ChannelCompositionBundle channels,
             WorldCompositionBundle world,
+            BattleCompositionBundle battle,
             PresentationCompositionBundle presentation,
             TimeSpan rollbackTimeout,
             TimeSpan shutdownTimeout,
@@ -23,7 +24,7 @@ namespace IHomeland.Client.Core.Composition
         {
             if (uiHostRoot == null || foundation == null || infrastructure == null ||
                 session == null || channels == null || world == null ||
-                presentation == null)
+                battle == null || presentation == null)
             {
                 throw new ArgumentNullException(
                     "Runtime module dependencies 不能为空。");
@@ -44,6 +45,11 @@ namespace IHomeland.Client.Core.Composition
                 world.VisitSession,
                 world.Admission,
                 world.Recovery,
+                battle.Inbound,
+                battle.Native,
+                battle.Network,
+                battle.TargetSource,
+                battle.Runtime,
                 presentation.SceneLifetimeOwner,
             };
             if (presentation.SceneTransitionHost != null)
@@ -64,7 +70,10 @@ namespace IHomeland.Client.Core.Composition
             return new AppCompositionResult(
                 lifetime,
                 foundation.Dispatcher,
-                Array.Empty<IAppTickable>(),
+                new IAppTickable[]
+                {
+                    battle.Prediction,
+                },
                 maximumDispatchesPerFrame,
                 session.BootstrapService,
                 session.SessionCoordinator,
@@ -74,6 +83,9 @@ namespace IHomeland.Client.Core.Composition
                 world.VisitSession,
                 world.Admission,
                 world.Recovery,
+                battle.Runtime,
+                battle.Network,
+                battle.Native,
                 presentation.Router,
                 presentation.Experience,
                 presentation.SceneTransitionHost);

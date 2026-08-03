@@ -15,8 +15,16 @@ CommandIngress::CommandIngress(
     SimulationInstance& instance,
     InputMappingConfig mapping,
     std::vector<std::uint64_t> actor_ids,
-    const std::size_t dedupe_capacity)
+    const std::size_t dedupe_capacity,
+    std::string assignment_fingerprint)
     : instance_(&instance),
+      assignment_fingerprint_(
+          assignment_fingerprint.empty()
+              ? instance.Identity()
+                    .Assignment()
+                    .Fingerprint()
+              : std::move(
+                    assignment_fingerprint)),
       mapping_(mapping),
       actor_ids_(std::move(actor_ids)),
       dedupe_capacity_(dedupe_capacity) {
@@ -24,7 +32,17 @@ CommandIngress::CommandIngress(
         mapping.base_simulation_tick == 0 || mapping.input_step_ns == 0 ||
         mapping.simulation_step_ns == 0 ||
         mapping.simulation_step_ns % mapping.input_step_ns != 0 ||
-        dedupe_capacity == 0 || actor_ids_.empty()) {
+        dedupe_capacity == 0 ||
+        actor_ids_.empty() ||
+        assignment_fingerprint_.size() != 64 ||
+        !std::ranges::all_of(
+            assignment_fingerprint_,
+            [](const char value) {
+                return (value >= '0' &&
+                        value <= '9') ||
+                    (value >= 'a' &&
+                     value <= 'f');
+            })) {
         throw std::invalid_argument("InputMappingConfig or actor binding is invalid");
     }
     std::sort(actor_ids_.begin(), actor_ids_.end());
@@ -36,7 +54,7 @@ CommandIngress::CommandIngress(
 }
 
 CommandSubmitResult CommandIngress::Submit(GameplayCommand command) {
-    if (command.assignment_fingerprint != instance_->Identity().Assignment().Fingerprint()) {
+    if (command.assignment_fingerprint != assignment_fingerprint_) {
         return {false, CommandRejection::StaleAssignment, 0};
     }
     if (command.mapping_generation != mapping_.generation) {
@@ -101,12 +119,36 @@ CommandSubmitResult CommandIngress::Submit(GameplayCommand command) {
             return {false, CommandRejection::Capacity, target_tick};
         }
 
+        std::int16_t move_x_permille = 0;
+        std::int16_t move_z_permille = 0;
+        std::int32_t aim_yaw_millidegrees = 0;
+        std::int32_t aim_pitch_millidegrees = 0;
+        if (const auto* move =
+                std::get_if<ContinuousIntentPayload>(
+                    &command.payload)) {
+            move_x_permille = move->move_x_permille;
+            move_z_permille = move->move_y_permille;
+        }
+        if (const auto* aim =
+                std::get_if<AimIntentPayload>(
+                    &command.payload)) {
+            aim_yaw_millidegrees =
+                aim->yaw_millidegrees;
+            aim_pitch_millidegrees =
+                aim->pitch_millidegrees;
+        }
         IngressCommand validated{
             .target_tick = target_tick,
             .actor_id = command.actor_id,
             .input_tick = command.input_tick,
             .stable_sequence = command.sequence,
             .kind = static_cast<std::uint8_t>(command.kind),
+            .move_x_permille = move_x_permille,
+            .move_z_permille = move_z_permille,
+            .aim_yaw_millidegrees =
+                aim_yaw_millidegrees,
+            .aim_pitch_millidegrees =
+                aim_pitch_millidegrees,
             .canonical_payload = CanonicalPayload(command)};
         const auto result = instance_->SubmitValidated(std::move(validated));
         if (result == InboxPushResult::Capacity) {

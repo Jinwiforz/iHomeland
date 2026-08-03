@@ -83,12 +83,12 @@ namespace IHomeland.Client.Tests.EditMode
         }
 
         /// <summary>
-        /// 验证 catalog 只暴露当前 capability 的十个 operation，并冻结核心 metadata。
+        /// 验证 catalog 只暴露当前 capability 的十一个 operation，并冻结核心 metadata。
         /// </summary>
         [Test]
-        public void CatalogFreezesTenOperations()
+        public void CatalogFreezesElevenOperations()
         {
-            Assert.That(ClientHttpOperationCatalog.All, Has.Count.EqualTo(10));
+            Assert.That(ClientHttpOperationCatalog.All, Has.Count.EqualTo(11));
             AssertDescriptor(
                 ClientHttpOperationCatalog.GetVersion,
                 "getVersion",
@@ -209,10 +209,22 @@ namespace IHomeland.Client.Tests.EditMode
                 true,
                 5000,
                 16 * 1024);
+            AssertDescriptor(
+                ClientHttpOperationCatalog.IssueBattleTicket,
+                "issueBattleTicket",
+                HttpMethod.Post,
+                "/v1/battle/tickets",
+                ClientHttpAuthentication.Bearer,
+                ClientHttpBodyPolicy.Json,
+                2048,
+                HttpStatusCode.Created,
+                true,
+                5000,
+                16 * 1024);
 
             Assert.That(
                 ClientHttpOperationCatalog.All.Select(item => item.OperationID).Distinct().Count(),
-                Is.EqualTo(10));
+                Is.EqualTo(11));
             Assert.That(
                 ClientHttpOperationCatalog.All.Count(item => item.RelativePath.IndexOf('{') >= 0),
                 Is.EqualTo(1));

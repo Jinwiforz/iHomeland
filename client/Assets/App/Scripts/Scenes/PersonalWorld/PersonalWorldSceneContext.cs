@@ -1,4 +1,6 @@
 using System;
+using IHomeland.Client.Application.Battle;
+using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Presentation.PersonalWorld;
 using IHomeland.Client.Scenes.Contexts;
 using UnityEngine;
@@ -29,6 +31,11 @@ namespace IHomeland.Client.Scenes.PersonalWorld
         [SerializeField]
         [Tooltip("只承载场景表现对象，不放置 App Scope 或业务最终事实。")]
         private Transform _sceneRoot;
+
+        /// <summary>保存 Scene Scope battle Input/Actor/HUD/Camera 聚合 Host。</summary>
+        [SerializeField]
+        [Tooltip("只持有 Scene Scope 表现与 App Scope 窄端口，不保存 socket 或业务最终事实。")]
+        private ClientBattleSceneHost _battleHost;
 
         /// <summary>保存当前注入的 Scene Scope 生命周期。</summary>
         private SceneLifetime _lifetime;
@@ -64,6 +71,21 @@ namespace IHomeland.Client.Scenes.PersonalWorld
             }
         }
 
+        /// <summary>验证 production PersonalWorldScene 已接线唯一 battle Scene Host。</summary>
+        /// <exception cref="InvalidOperationException">Battle Host 缺失或跨 Scene 时抛出。</exception>
+        internal void ValidateBattleConfiguration()
+        {
+            ValidateConfiguration();
+            if (_battleHost == null ||
+                _battleHost.gameObject.scene != gameObject.scene)
+            {
+                throw new InvalidOperationException(
+                    "PersonalWorldSceneContext 缺少同 Scene 的 ClientBattleSceneHost。");
+            }
+
+            _battleHost.ValidateConfiguration();
+        }
+
         /// <summary>
         /// 显式接收 current SceneLifetime 与无 credential View State。
         /// </summary>
@@ -86,6 +108,32 @@ namespace IHomeland.Client.Scenes.PersonalWorld
                 _lifetime = null;
                 _viewState = null;
                 throw new InvalidOperationException("PersonalWorldSceneContext 不能绑定已失效 generation。");
+            }
+        }
+
+        /// <summary>
+        /// 绑定 production battle Scene Host；App Scope runtime 与 Input owner 只以窄端口注入。
+        /// </summary>
+        /// <param name="lifetime">已由 App Scope owner 分配的 current Scene generation。</param>
+        /// <param name="viewState">当前 HUD 低敏页面切片。</param>
+        /// <param name="battleRuntime">App Scope 唯一 battle runtime facade。</param>
+        /// <param name="battleInput">App Scope 唯一 Input System owner 的窄端口。</param>
+        internal void Bind(
+            SceneLifetime lifetime,
+            ClientWorldHudViewState viewState,
+            ClientBattleRuntimeCoordinator battleRuntime,
+            IClientBattleInputSource battleInput)
+        {
+            ValidateBattleConfiguration();
+            Bind(lifetime, viewState);
+            try
+            {
+                _battleHost.Bind(lifetime, battleRuntime, battleInput);
+            }
+            catch
+            {
+                Unbind();
+                throw;
             }
         }
 
@@ -113,6 +161,7 @@ namespace IHomeland.Client.Scenes.PersonalWorld
         /// <summary>解除 View State 与 SceneLifetime 引用，不自行处置 App Scope owner。</summary>
         internal void Unbind()
         {
+            _battleHost?.Unbind();
             _viewState = null;
             _lifetime = null;
         }
@@ -140,6 +189,23 @@ namespace IHomeland.Client.Scenes.PersonalWorld
             _sceneCamera = sceneCamera;
             _sceneLight = sceneLight;
             _sceneRoot = sceneRoot;
+        }
+
+        /// <summary>
+        /// 为程序化 PlayMode fixture 在激活前配置 production battle Scene Host。
+        /// </summary>
+        /// <param name="battleHost">同一 Scene 的唯一 battle Scene Host。</param>
+        /// <exception cref="InvalidOperationException">组件已经激活时抛出。</exception>
+        internal void ConfigureBattleBeforeActivation(
+            ClientBattleSceneHost battleHost)
+        {
+            if (isActiveAndEnabled)
+            {
+                throw new InvalidOperationException(
+                    "PersonalWorldSceneContext 只能在激活前配置 battle Host。");
+            }
+
+            _battleHost = battleHost;
         }
     }
 }

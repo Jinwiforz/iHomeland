@@ -894,6 +894,19 @@ int RunControlStdio(
                 SecureZeroMemory(
                     command.proof_key.data(),
                     command.proof_key.size());
+                if (battle_runtime != nullptr &&
+                    !installed.superseded_binding_fingerprint.empty()) {
+                    auto fingerprint =
+                        ReadBindingFingerprint(
+                            Json(installed
+                                     .superseded_binding_fingerprint));
+                    static_cast<void>(
+                        battle_runtime->RevokeBinding(
+                            fingerprint));
+                    SecureZeroMemory(
+                        fingerprint.data(),
+                        fingerprint.size());
+                }
                 auto receipt = TicketReceiptPayload(installed);
                 receipt["installRequestId"] = install_request_id;
                 ControlFrameCodec::Write(

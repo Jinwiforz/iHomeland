@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using IHomeland.Client.Application.Battle;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Core.Composition;
@@ -11,6 +12,7 @@ using IHomeland.Client.Application.Session;
 using IHomeland.Client.Application.World;
 using IHomeland.Client.Presentation.Navigation;
 using IHomeland.Client.Presentation.PersonalWorld;
+using IHomeland.Client.Scenes.PersonalWorld;
 using UnityEngine;
 
 namespace IHomeland.Client.Core.Qualification
@@ -35,6 +37,9 @@ namespace IHomeland.Client.Core.Qualification
 
         /// <summary>真实双Player产品与故障矩阵的Development-only operator mode。</summary>
         private const string TwoPlayerOperatorMode = "two-player-operator";
+
+        /// <summary>真实双Player battle runtime定向验收mode。</summary>
+        private const string ClientBattleRuntimeMode = "client-battle-runtime";
 
         /// <summary>双Player operator使用的角色参数。</summary>
         private const string OperatorRoleArgument = "-ihomelandQualificationRole";
@@ -69,6 +74,9 @@ namespace IHomeland.Client.Core.Qualification
 
         /// <summary>只用于观察显式snapshot提交的低频调度间隔。</summary>
         private static readonly TimeSpan ObservationInterval = TimeSpan.FromMilliseconds(100);
+
+        /// <summary>跨越已观察到的约三分钟battle终结点，验证同一generation持续可玩。</summary>
+        private static readonly TimeSpan BattleContinuityDuration = TimeSpan.FromSeconds(210);
 
         /// <summary>
         /// 本地资格环境的gameplay pre-auth持续预算为每分钟60次；operator主动整形真实admission，
@@ -117,6 +125,13 @@ namespace IHomeland.Client.Core.Qualification
             if (string.Equals(mode, TwoPlayerOperatorMode, StringComparison.Ordinal))
             {
                 _ = ObserveTwoPlayerOperatorAsync(RunTwoPlayerOperatorAsync(composition));
+                return;
+            }
+
+            if (string.Equals(mode, ClientBattleRuntimeMode, StringComparison.Ordinal))
+            {
+                _ = ObserveClientBattleRuntimeAsync(
+                    RunClientBattleRuntimeAsync(composition));
                 return;
             }
 
@@ -176,6 +191,315 @@ namespace IHomeland.Client.Core.Qualification
             {
                 await RunVisitorServerRestartAsync(composition, coordinationRoot);
             }
+        }
+
+        /// <summary>执行真实双Player battle clean、recovery、safe-return与teardown场景。</summary>
+        /// <param name="composition">已经进入Running的完整产品Composition。</param>
+        /// <returns>当前角色负责的battle场景全部通过时完成。</returns>
+        private static async Task RunClientBattleRuntimeAsync(
+            AppCompositionResult composition)
+        {
+            var arguments = Environment.GetCommandLineArgs();
+            var role = ReadSingleArgument(arguments, OperatorRoleArgument);
+            var coordinationRoot = ReadSingleArgument(
+                arguments,
+                OperatorCoordinationRootArgument);
+            if ((!string.Equals(role, "owner", StringComparison.Ordinal) &&
+                 !string.Equals(role, "visitor", StringComparison.Ordinal)) ||
+                string.IsNullOrWhiteSpace(coordinationRoot))
+            {
+                throw new QualificationFailureException(
+                    "invalid-battle-runtime-arguments");
+            }
+
+            coordinationRoot = Path.GetFullPath(coordinationRoot);
+            if (!Directory.Exists(coordinationRoot))
+            {
+                throw new QualificationFailureException(
+                    "missing-coordination-root");
+            }
+
+            if (string.Equals(role, "owner", StringComparison.Ordinal))
+            {
+                await RunOwnerClientBattleRuntimeAsync(
+                    composition,
+                    coordinationRoot);
+            }
+            else
+            {
+                await RunVisitorClientBattleRuntimeAsync(
+                    composition,
+                    coordinationRoot);
+            }
+        }
+
+        /// <summary>驱动Owner battle clean、successor recovery、Visit关闭和最终资源释放。</summary>
+        /// <param name="composition">Owner完整产品graph。</param>
+        /// <param name="root">本次battle运行独占协调目录。</param>
+        /// <returns>Owner负责的全部真实场景通过时完成。</returns>
+        private static async Task RunOwnerClientBattleRuntimeAsync(
+            AppCompositionResult composition,
+            string root)
+        {
+            await LoginOrRestoreOwnWorldAsync(
+                composition,
+                requireCredentials: true);
+            var diagnostics = composition.CreateQualificationDiagnostics();
+            await WaitForBattleActiveAsync(
+                diagnostics,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            WriteSignal(root, "owner-ready", "ready");
+            var visitorPlayerID = await ReadRequiredSignalAsync(
+                root,
+                "visitor-player");
+            await RequireActionAsync(
+                composition.PersonalWorldExperience.OpenVisitAsync(
+                    CancellationToken.None),
+                "battle-owner-open-rejected");
+            await WaitUntilAsync(
+                () => composition.PersonalWorldExperience.ViewState.
+                    WorldVisit.IsOwner,
+                TransitionObservationDeadline);
+            await PublishInviteAsync(
+                composition,
+                root,
+                "battle-invite",
+                visitorPlayerID);
+            await WaitForOwnerMemberAsync(
+                composition,
+                root,
+                "battle-joined",
+                visitorPlayerID);
+
+            var ownerActive = await WaitForBattleActiveAsync(
+                diagnostics,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            WriteSignal(
+                root,
+                "owner-battle-slot",
+                ownerActive.Runtime.Runtime.ActorSlot.ToString());
+            var visitorSlot = await ReadActorSlotSignalAsync(
+                root,
+                "visitor-battle-slot");
+            if (visitorSlot == ownerActive.Runtime.Runtime.ActorSlot)
+            {
+                throw new QualificationFailureException(
+                    "battle-actor-slot-collision");
+            }
+
+            await WaitForSceneActorsAsync(
+                diagnostics,
+                expectedActors: 2,
+                stage: "owner-joined");
+            await ReadRequiredSignalAsync(root, "visitor-observer-ready");
+            await ExerciseLocalBattleAsync(
+                composition,
+                diagnostics,
+                moveXMilli: 1000,
+                moveYMilli: 0,
+                aimYawMillidegrees: 45000);
+            WriteSignal(root, "owner-motion-complete", "pass");
+            await ReadRequiredSignalAsync(root, "visitor-observed-owner");
+
+            var visitorEntityID = (ulong)(visitorSlot + 1);
+            var visitorBefore = await CaptureActorTransformAsync(
+                composition,
+                visitorEntityID);
+            WriteSignal(root, "owner-observer-ready", "ready");
+            await ReadRequiredSignalAsync(root, "visitor-motion-complete");
+            await WaitForActorTransformChangeAsync(
+                composition,
+                diagnostics,
+                visitorEntityID,
+                visitorBefore);
+            WriteSignal(root, "owner-observed-visitor", "pass");
+            await AssertBattleContinuityAsync(
+                diagnostics,
+                ownerActive.Runtime.Runtime.BattleGeneration,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            WriteSignal(root, "owner-continuity-pass", "pass");
+            await ReadRequiredSignalAsync(root, "visitor-continuity-pass");
+
+            var beforeRecovery = diagnostics.CaptureBattle();
+            if (!diagnostics.InjectBattleTransportDisconnect())
+            {
+                throw new QualificationFailureException(
+                    "battle-owner-disconnect-not-injected");
+            }
+
+            var recovered = await WaitForBattleSuccessorAsync(
+                diagnostics,
+                beforeRecovery.Runtime.Runtime.BattleGeneration,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            if (recovered.Runtime.Runtime.ActorSlot !=
+                beforeRecovery.Runtime.Runtime.ActorSlot)
+            {
+                throw new QualificationFailureException(
+                    "battle-successor-actor-slot-drifted");
+            }
+
+            await WaitForSceneActorsAsync(
+                diagnostics,
+                expectedActors: 2,
+                stage: "owner-recovered");
+            await ExerciseLocalBattleAsync(
+                composition,
+                diagnostics,
+                moveXMilli: 0,
+                moveYMilli: 1000,
+                aimYawMillidegrees: 90000);
+            WriteSignal(root, "owner-recovered", "pass");
+
+            await ReadRequiredSignalAsync(root, "visitor-disconnected");
+            var ownerBeforeSafeReturn = diagnostics.CaptureBattle();
+            await RequireActionAsync(
+                composition.PersonalWorldExperience.CloseVisitAsync(
+                    CancellationToken.None),
+                "battle-owner-close-rejected");
+            await WaitUntilAsync(
+                () => composition.VisitSessionService.Snapshot.Current == null,
+                TransitionObservationDeadline);
+            var ownerAfterSafeReturn = await WaitForBattleActiveAsync(
+                diagnostics,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            if (ownerAfterSafeReturn.Runtime.Runtime.BattleGeneration !=
+                ownerBeforeSafeReturn.Runtime.Runtime.BattleGeneration)
+            {
+                throw new QualificationFailureException(
+                    "battle-owner-safe-return-replaced-generation");
+            }
+
+            WriteSignal(root, "safe-return-triggered", "pass");
+            await ReadRequiredSignalAsync(root, "visitor-safe-return");
+
+            await LogoutAndAssertBattleReleasedAsync(composition, diagnostics);
+            WriteSignal(root, "owner-cleanup", "pass");
+            await ReadRequiredSignalAsync(root, "visitor-cleanup");
+            WriteSignal(root, "client-battle-runtime-pass", "pass");
+        }
+
+        /// <summary>驱动Visitor join、远端插值、本地movement和safe-return旧代拒绝。</summary>
+        /// <param name="composition">Visitor完整产品graph。</param>
+        /// <param name="root">本次battle运行独占协调目录。</param>
+        /// <returns>Visitor负责的全部真实场景通过时完成。</returns>
+        private static async Task RunVisitorClientBattleRuntimeAsync(
+            AppCompositionResult composition,
+            string root)
+        {
+            await LoginOrRestoreOwnWorldAsync(
+                composition,
+                requireCredentials: true);
+            var diagnostics = composition.CreateQualificationDiagnostics();
+            await WaitForBattleActiveAsync(
+                diagnostics,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            WriteSignal(
+                root,
+                "visitor-player",
+                composition.PersonalWorldExperience.ViewState.Shell.PlayerID);
+            await ReadRequiredSignalAsync(root, "owner-ready");
+            await AcceptPublishedInviteAsync(
+                composition,
+                root,
+                "battle-invite",
+                "battle-joined");
+
+            var visitorActive = await WaitForBattleActiveAsync(
+                diagnostics,
+                ClientBattleTargetKind.VisitWorld,
+                ClientBattleRole.Visitor);
+            WriteSignal(
+                root,
+                "visitor-battle-slot",
+                visitorActive.Runtime.Runtime.ActorSlot.ToString());
+            var ownerSlot = await ReadActorSlotSignalAsync(
+                root,
+                "owner-battle-slot");
+            if (ownerSlot == visitorActive.Runtime.Runtime.ActorSlot)
+            {
+                throw new QualificationFailureException(
+                    "battle-actor-slot-collision");
+            }
+
+            await WaitForSceneActorsAsync(
+                diagnostics,
+                expectedActors: 2,
+                stage: "visitor-joined");
+            var ownerEntityID = (ulong)(ownerSlot + 1);
+            var ownerBefore = await CaptureActorTransformAsync(
+                composition,
+                ownerEntityID);
+            WriteSignal(root, "visitor-observer-ready", "ready");
+            await ReadRequiredSignalAsync(root, "owner-motion-complete");
+            await WaitForActorTransformChangeAsync(
+                composition,
+                diagnostics,
+                ownerEntityID,
+                ownerBefore);
+            WriteSignal(root, "visitor-observed-owner", "pass");
+
+            await ReadRequiredSignalAsync(root, "owner-observer-ready");
+            await ExerciseLocalBattleAsync(
+                composition,
+                diagnostics,
+                moveXMilli: -1000,
+                moveYMilli: 0,
+                aimYawMillidegrees: -45000);
+            WriteSignal(root, "visitor-motion-complete", "pass");
+            await ReadRequiredSignalAsync(root, "owner-observed-visitor");
+            await AssertBattleContinuityAsync(
+                diagnostics,
+                visitorActive.Runtime.Runtime.BattleGeneration,
+                ClientBattleTargetKind.VisitWorld,
+                ClientBattleRole.Visitor);
+            WriteSignal(root, "visitor-continuity-pass", "pass");
+            await ReadRequiredSignalAsync(root, "owner-continuity-pass");
+            await ReadRequiredSignalAsync(root, "owner-recovered");
+
+            var beforeSafeReturn = diagnostics.CaptureBattle();
+            if (!diagnostics.InjectBattleTransportDisconnect())
+            {
+                throw new QualificationFailureException(
+                    "battle-visitor-disconnect-not-injected");
+            }
+
+            WriteSignal(root, "visitor-disconnected", "pass");
+            await ReadRequiredSignalAsync(root, "safe-return-triggered");
+            var successor = await WaitForBattleSuccessorAsync(
+                diagnostics,
+                beforeSafeReturn.Runtime.Runtime.BattleGeneration,
+                ClientBattleTargetKind.OwnWorld,
+                ClientBattleRole.Owner);
+            await WaitForSceneActorsAsync(
+                diagnostics,
+                expectedActors: 1,
+                stage: "visitor-safe-return");
+            await WaitUntilAsync(
+                () => IsStableOwnWorld(composition, diagnostics.Capture()),
+                TransitionObservationDeadline);
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            var stable = diagnostics.CaptureBattle();
+            if (stable.Runtime.Runtime.BattleGeneration !=
+                    successor.Runtime.Runtime.BattleGeneration ||
+                stable.Runtime.Runtime.TargetKind !=
+                    ClientBattleTargetKind.OwnWorld ||
+                stable.Runtime.Runtime.Availability !=
+                    ClientBattleAvailability.Active)
+            {
+                throw new QualificationFailureException(
+                    "battle-old-callback-overwrote-successor");
+            }
+
+            WriteSignal(root, "visitor-safe-return", "pass");
+            await LogoutAndAssertBattleReleasedAsync(composition, diagnostics);
+            WriteSignal(root, "visitor-cleanup", "pass");
+            await ReadRequiredSignalAsync(root, "owner-cleanup");
         }
 
         /// <summary>执行Owner产品流程、独立通道故障、进程恢复与Session失效检查。</summary>
@@ -494,6 +818,696 @@ namespace IHomeland.Client.Core.Qualification
             await WaitUntilAsync(
                 () => IsStableOwnWorld(composition, diagnostics.Capture()),
                 TransitionObservationDeadline);
+        }
+
+        /// <summary>等待真实battle baseline、input gate、active actor与唯一资源owner同时就绪。</summary>
+        /// <param name="diagnostics">只读battle诊断owner。</param>
+        /// <param name="targetKind">预期current target类别。</param>
+        /// <param name="role">预期authenticated角色。</param>
+        /// <returns>全部条件来自同一current generation的快照。</returns>
+        private static async Task<ClientBattleQualificationDiagnosticSnapshot>
+            WaitForBattleActiveAsync(
+                ClientQualificationDiagnostics diagnostics,
+                ClientBattleTargetKind targetKind,
+                ClientBattleRole role)
+        {
+            await WaitUntilAsync(
+                () => TryCaptureBattle(diagnostics, out var current) &&
+                      IsActiveBattle(current, targetKind, role),
+                TransitionObservationDeadline);
+            if (!TryCaptureBattle(diagnostics, out var snapshot) ||
+                !IsActiveBattle(snapshot, targetKind, role))
+            {
+                throw new QualificationFailureException(
+                    "battle-active-capture-drifted");
+            }
+
+            return snapshot;
+        }
+
+        /// <summary>等待旧battle generation退役且current target建立更高完整generation。</summary>
+        /// <param name="diagnostics">只读battle诊断owner。</param>
+        /// <param name="previousGeneration">必须退役的正generation。</param>
+        /// <param name="targetKind">successor预期target。</param>
+        /// <param name="role">successor预期角色。</param>
+        /// <returns>更高且已Active的successor快照。</returns>
+        private static async Task<ClientBattleQualificationDiagnosticSnapshot>
+            WaitForBattleSuccessorAsync(
+                ClientQualificationDiagnostics diagnostics,
+                long previousGeneration,
+                ClientBattleTargetKind targetKind,
+                ClientBattleRole role)
+        {
+            await WaitUntilAsync(
+                () => TryCaptureBattle(diagnostics, out var current) &&
+                      current.Runtime.Runtime.BattleGeneration >
+                          previousGeneration &&
+                      IsActiveBattle(current, targetKind, role),
+                TransitionObservationDeadline);
+            var snapshot = await WaitForBattleActiveAsync(
+                diagnostics,
+                targetKind,
+                role);
+            if (snapshot.Runtime.Runtime.BattleGeneration <= previousGeneration)
+            {
+                throw new QualificationFailureException(
+                    "battle-successor-generation-not-advanced");
+            }
+
+            return snapshot;
+        }
+
+        /// <summary>持续验证同一battle generation保持Active、Tick推进且资源owner唯一。</summary>
+        /// <param name="diagnostics">只读battle诊断owner。</param>
+        /// <param name="generation">不得被静默替换或清空的current generation。</param>
+        /// <param name="targetKind">预期target。</param>
+        /// <param name="role">预期角色。</param>
+        /// <returns>跨越已知故障时段后完成。</returns>
+        private static async Task AssertBattleContinuityAsync(
+            ClientQualificationDiagnostics diagnostics,
+            long generation,
+            ClientBattleTargetKind targetKind,
+            ClientBattleRole role)
+        {
+            var deadline = DateTime.UtcNow.Add(BattleContinuityDuration);
+            var advanceDeadline = DateTime.UtcNow.AddSeconds(5);
+            DateTime? inputUnavailableSince = null;
+            ulong observedServerTick = 0;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!TryCaptureBattle(diagnostics, out var current) ||
+                    current.Runtime.Runtime.Availability !=
+                        ClientBattleAvailability.Active ||
+                    current.Runtime.Runtime.Failure != ClientBattleFailure.None ||
+                    current.Runtime.Runtime.BattleGeneration != generation ||
+                    current.Runtime.Runtime.TargetKind != targetKind ||
+                    current.Runtime.Runtime.Role != role ||
+                    !current.Runtime.Runtime.BaselineReady ||
+                    current.Runtime.EntityCount == 0 ||
+                    current.Runtime.LocalEntityID !=
+                        (ulong)(current.Runtime.Runtime.ActorSlot + 1) ||
+                    current.SocketOwners != 1 ||
+                    current.PumpOwners != 3 ||
+                    current.NativeLeases != 1)
+                {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (current != null)
+                    {
+                        Debug.LogError(
+                            "[IHOMELAND_BATTLE_DIAGNOSTIC] " +
+                            "stage=long-continuity-drift " +
+                            $"generation={current.Runtime.Runtime.BattleGeneration} " +
+                            $"availability={current.Runtime.Runtime.Availability} " +
+                            $"failure={current.Runtime.Runtime.Failure} " +
+                            $"baseline_ready={current.Runtime.Runtime.BaselineReady} " +
+                            $"input_enabled={current.Runtime.Runtime.InputEnabled} " +
+                            $"entities={current.Runtime.EntityCount} " +
+                            $"resync_pending={current.Runtime.ResyncPending} " +
+                            $"socket_owners={current.SocketOwners} " +
+                            $"pump_owners={current.PumpOwners} " +
+                            $"native_leases={current.NativeLeases}");
+                    }
+#endif
+                    throw new QualificationFailureException(
+                        "battle-long-continuity-drifted");
+                }
+
+                if (!current.Runtime.Runtime.InputEnabled)
+                {
+                    inputUnavailableSince ??= DateTime.UtcNow;
+                    if (DateTime.UtcNow - inputUnavailableSince.Value >
+                        TimeSpan.FromSeconds(2))
+                    {
+                        throw new QualificationFailureException(
+                            "battle-long-continuity-input-stalled");
+                    }
+                }
+                else
+                {
+                    inputUnavailableSince = null;
+                }
+
+                if (current.Runtime.ServerTick < observedServerTick)
+                {
+                    throw new QualificationFailureException(
+                        "battle-long-continuity-tick-regressed");
+                }
+
+                if (current.Runtime.ServerTick > observedServerTick)
+                {
+                    observedServerTick = current.Runtime.ServerTick;
+                    advanceDeadline = DateTime.UtcNow.AddSeconds(5);
+                }
+                else if (DateTime.UtcNow >= advanceDeadline)
+                {
+                    throw new QualificationFailureException(
+                        "battle-long-continuity-tick-stalled");
+                }
+
+                await Task.Delay(ObservationInterval);
+            }
+        }
+
+        /// <summary>用封闭semantic input验证真实C++ move、jump、aim、ack与本地收敛。</summary>
+        /// <param name="composition">当前完整产品graph。</param>
+        /// <param name="diagnostics">只读battle诊断owner。</param>
+        /// <param name="moveXMilli">量化水平移动输入。</param>
+        /// <param name="moveYMilli">量化纵向移动输入。</param>
+        /// <param name="aimYawMillidegrees">预期server规范yaw。</param>
+        /// <returns>落地、ack推进且预测回到容差内时完成。</returns>
+        private static async Task ExerciseLocalBattleAsync(
+            AppCompositionResult composition,
+            ClientQualificationDiagnostics diagnostics,
+            int moveXMilli,
+            int moveYMilli,
+            int aimYawMillidegrees)
+        {
+            if (!TryCaptureBattle(diagnostics, out var start) ||
+                start.Runtime.Runtime.Availability !=
+                    ClientBattleAvailability.Active)
+            {
+                throw new QualificationFailureException(
+                    "battle-local-exercise-not-active");
+            }
+
+            var generation = start.Runtime.Runtime.BattleGeneration;
+            var startTransform = start.Runtime.AuthorityTransform;
+            var jumpObserved = false;
+            var acceptedSamples = 0;
+            var inputDeadline = DateTime.UtcNow.Add(
+                TransitionObservationDeadline);
+            var settledInput = new ClientBattleSemanticInput(
+                0,
+                0,
+                aimYawMillidegrees,
+                0,
+                jumpPressed: false,
+                primaryPressed: false,
+                secondaryPressed: false,
+                interactPressed: false,
+                interactionSlot: 0);
+            var expectedYaw = settledInput.AimYawMillidegrees;
+            try
+            {
+                while (acceptedSamples < 44)
+                {
+                    var input = new ClientBattleSemanticInput(
+                        moveXMilli,
+                        moveYMilli,
+                        aimYawMillidegrees,
+                        0,
+                        jumpPressed: !jumpObserved,
+                        primaryPressed: false,
+                        secondaryPressed: false,
+                        interactPressed: false,
+                        interactionSlot: 0);
+                    if (!composition.BattleRuntimeCoordinator.
+                            TrySetQualificationInput(generation, input))
+                    {
+                        if (!TryCaptureBattle(
+                                diagnostics,
+                                out var rejected) ||
+                            rejected.Runtime.Runtime.BattleGeneration !=
+                                generation ||
+                            rejected.Runtime.Runtime.Availability !=
+                                ClientBattleAvailability.Active)
+                        {
+                            throw new QualificationFailureException(
+                                "battle-qualification-input-drifted");
+                        }
+
+                        if (DateTime.UtcNow >= inputDeadline)
+                        {
+                            throw new QualificationFailureException(
+                                "battle-qualification-input-rejected");
+                        }
+
+                        await Task.Delay(ObservationInterval);
+                        continue;
+                    }
+
+                    acceptedSamples++;
+                    await Task.Delay(TimeSpan.FromMilliseconds(25));
+                    if (TryCaptureBattle(diagnostics, out var current) &&
+                        current.Runtime.Runtime.BattleGeneration == generation &&
+                        (!current.Runtime.AuthorityGrounded ||
+                         current.Runtime.AuthorityTransform.
+                             PositionYMillimeters >
+                         startTransform.PositionYMillimeters))
+                    {
+                        jumpObserved = true;
+                    }
+                }
+
+                var settleDeadline = DateTime.UtcNow.Add(
+                    TransitionObservationDeadline);
+                while (!composition.BattleRuntimeCoordinator.
+                           TrySetQualificationInput(generation, settledInput))
+                {
+                    if (!TryCaptureBattle(
+                            diagnostics,
+                            out var settling) ||
+                        settling.Runtime.Runtime.BattleGeneration !=
+                            generation ||
+                        settling.Runtime.Runtime.Availability !=
+                            ClientBattleAvailability.Active)
+                    {
+                        throw new QualificationFailureException(
+                            "battle-qualification-settle-input-drifted");
+                    }
+
+                    if (DateTime.UtcNow >= settleDeadline)
+                    {
+                        throw new QualificationFailureException(
+                            "battle-qualification-settle-input-rejected");
+                    }
+
+                    await Task.Delay(ObservationInterval);
+                }
+
+                var jumpDeadline = DateTime.UtcNow.Add(
+                    TransitionObservationDeadline);
+                while (!jumpObserved)
+                {
+                    composition.BattleRuntimeCoordinator.
+                        TrySetQualificationInput(generation, settledInput);
+                    if (!TryCaptureBattle(
+                            diagnostics,
+                            out var current) ||
+                        current.Runtime.Runtime.BattleGeneration !=
+                            generation ||
+                        current.Runtime.Runtime.Availability !=
+                            ClientBattleAvailability.Active)
+                    {
+                        throw new QualificationFailureException(
+                            "battle-local-exercise-drifted");
+                    }
+
+                    jumpObserved =
+                        !current.Runtime.AuthorityGrounded ||
+                        current.Runtime.AuthorityTransform.
+                            PositionYMillimeters >
+                        startTransform.PositionYMillimeters;
+                    if (jumpObserved)
+                    {
+                        break;
+                    }
+
+                    if (DateTime.UtcNow >= jumpDeadline)
+                    {
+                        Debug.Log(
+                            "[IHOMELAND_BATTLE_DIAGNOSTIC] " +
+                            "stage=jump-not-observed " +
+                            $"generation={current.Runtime.Runtime.BattleGeneration} " +
+                            $"server_tick={current.Runtime.ServerTick} " +
+                            $"sent_input_tick={current.Runtime.LastSentInputTick} " +
+                            $"ack_input_tick={current.Runtime.LastAcknowledgedInputTick} " +
+                            $"authority_x_mm={current.Runtime.AuthorityTransform.PositionXMillimeters} " +
+                            $"authority_y_mm={current.Runtime.AuthorityTransform.PositionYMillimeters} " +
+                            $"authority_z_mm={current.Runtime.AuthorityTransform.PositionZMillimeters} " +
+                            $"authority_yaw_mdeg={current.Runtime.AuthorityTransform.YawMillidegrees} " +
+                            $"predicted_x_mm={current.Runtime.PredictedTransform.PositionXMillimeters} " +
+                            $"predicted_y_mm={current.Runtime.PredictedTransform.PositionYMillimeters} " +
+                            $"predicted_z_mm={current.Runtime.PredictedTransform.PositionZMillimeters} " +
+                            $"predicted_yaw_mdeg={current.Runtime.PredictedTransform.YawMillidegrees} " +
+                            $"authority_grounded={current.Runtime.AuthorityGrounded} " +
+                            $"input_enabled={current.Runtime.Runtime.InputEnabled} " +
+                            $"resync_pending={current.Runtime.ResyncPending}");
+                        throw new QualificationFailureException(
+                            "battle-authority-jump-not-observed");
+                    }
+
+                    await Task.Delay(ObservationInterval);
+                }
+
+                var convergenceDeadline = DateTime.UtcNow.Add(
+                    TransitionObservationDeadline);
+                while (true)
+                {
+                    composition.BattleRuntimeCoordinator.
+                        TrySetQualificationInput(generation, settledInput);
+                    if (TryCaptureBattle(diagnostics, out var current) &&
+                        current.Runtime.Runtime.BattleGeneration == generation &&
+                        current.Runtime.Runtime.Availability ==
+                            ClientBattleAvailability.Active)
+                    {
+                        var authority = current.Runtime.AuthorityTransform;
+                        var horizontalMoved =
+                            authority.PositionXMillimeters !=
+                                startTransform.PositionXMillimeters ||
+                            authority.PositionZMillimeters !=
+                                startTransform.PositionZMillimeters;
+                        var withinCorrection =
+                            authority.PositionDistanceSquared(
+                                current.Runtime.PredictedTransform) <=
+                            (long)ClientBattlePolicy.Current.
+                                CorrectionPositionMillimeters *
+                            ClientBattlePolicy.Current.
+                                CorrectionPositionMillimeters;
+                        if (horizontalMoved &&
+                            authority.YawMillidegrees == expectedYaw &&
+                            current.Runtime.AuthorityGrounded &&
+                            current.Runtime.ServerTick >
+                                start.Runtime.ServerTick &&
+                            current.Runtime.LastAcknowledgedInputTick >
+                                start.Runtime.LastAcknowledgedInputTick &&
+                            current.Runtime.LastAcknowledgedInputTick <=
+                                Math.Max(
+                                    current.Runtime.LastSentInputTick,
+                                    current.Runtime.
+                                        ContinuityAcknowledgementAnchor) &&
+                            withinCorrection)
+                        {
+                            return;
+                        }
+
+                        if (DateTime.UtcNow >= convergenceDeadline)
+                        {
+                            Debug.Log(
+                                "[IHOMELAND_BATTLE_DIAGNOSTIC] " +
+                                "stage=local-convergence-timeout " +
+                                $"generation={current.Runtime.Runtime.BattleGeneration} " +
+                                $"server_tick={current.Runtime.ServerTick} " +
+                                $"start_server_tick={start.Runtime.ServerTick} " +
+                                $"sent_input_tick={current.Runtime.LastSentInputTick} " +
+                                $"ack_input_tick={current.Runtime.LastAcknowledgedInputTick} " +
+                                $"ack_anchor={current.Runtime.ContinuityAcknowledgementAnchor} " +
+                                $"start_ack_input_tick={start.Runtime.LastAcknowledgedInputTick} " +
+                                $"authority_x_mm={authority.PositionXMillimeters} " +
+                                $"authority_y_mm={authority.PositionYMillimeters} " +
+                                $"authority_z_mm={authority.PositionZMillimeters} " +
+                                $"authority_yaw_mdeg={authority.YawMillidegrees} " +
+                                $"expected_yaw_mdeg={expectedYaw} " +
+                                $"predicted_x_mm={current.Runtime.PredictedTransform.PositionXMillimeters} " +
+                                $"predicted_y_mm={current.Runtime.PredictedTransform.PositionYMillimeters} " +
+                                $"predicted_z_mm={current.Runtime.PredictedTransform.PositionZMillimeters} " +
+                                $"predicted_yaw_mdeg={current.Runtime.PredictedTransform.YawMillidegrees} " +
+                                $"authority_grounded={current.Runtime.AuthorityGrounded} " +
+                                $"within_correction={withinCorrection}");
+                            throw new QualificationFailureException(
+                                "battle-local-convergence-timeout");
+                        }
+                    }
+                    else if (DateTime.UtcNow >= convergenceDeadline)
+                    {
+                        throw new QualificationFailureException(
+                            "battle-local-exercise-drifted");
+                    }
+
+                    await Task.Delay(ObservationInterval);
+                }
+            }
+            finally
+            {
+                composition.BattleRuntimeCoordinator.
+                    ClearQualificationInput(generation);
+            }
+        }
+
+        /// <summary>取得指定actor当前presentation transform并验证active actor/local唯一边界。</summary>
+        /// <param name="composition">当前完整产品graph。</param>
+        /// <param name="entityID">必须存在的actor identity。</param>
+        /// <returns>local prediction或remote interpolation输出的transform。</returns>
+        private static async Task<ClientBattleTransform>
+            CaptureActorTransformAsync(
+                AppCompositionResult composition,
+                ulong entityID)
+        {
+            ClientBattleTransform transform = default;
+            await WaitUntilAsync(
+                () => TryCaptureActorTransform(
+                    composition,
+                    entityID,
+                    out transform),
+                TransitionObservationDeadline);
+            return transform;
+        }
+
+        /// <summary>等待指定remote actor的插值presentation发生真实位置变化。</summary>
+        /// <param name="composition">当前完整产品graph。</param>
+        /// <param name="diagnostics">只读battle runtime诊断owner。</param>
+        /// <param name="entityID">对端actor identity。</param>
+        /// <param name="before">对端movement前的presentation transform。</param>
+        /// <returns>位置变化被Scene read path观察到时完成。</returns>
+        private static async Task WaitForActorTransformChangeAsync(
+            AppCompositionResult composition,
+            ClientQualificationDiagnostics diagnostics,
+            ulong entityID,
+            ClientBattleTransform before)
+        {
+            var deadline = DateTime.UtcNow.Add(
+                TransitionObservationDeadline);
+            var current = before;
+            while (!TryCaptureActorTransform(
+                       composition,
+                       entityID,
+                       out current) ||
+                   current.PositionDistanceSquared(before) == 0)
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    if (TryCaptureBattle(diagnostics, out var battle))
+                    {
+                        Debug.Log(
+                            "[IHOMELAND_BATTLE_DIAGNOSTIC] " +
+                            "stage=remote-transform-timeout " +
+                            $"generation={battle.Runtime.Runtime.BattleGeneration} " +
+                            $"server_tick={battle.Runtime.ServerTick} " +
+                            $"entity_id={entityID} " +
+                            $"before_x_mm={before.PositionXMillimeters} " +
+                            $"before_y_mm={before.PositionYMillimeters} " +
+                            $"before_z_mm={before.PositionZMillimeters} " +
+                            $"current_x_mm={current.PositionXMillimeters} " +
+                            $"current_y_mm={current.PositionYMillimeters} " +
+                            $"current_z_mm={current.PositionZMillimeters}");
+                    }
+
+                    throw new QualificationFailureException(
+                        "battle-remote-transform-timeout");
+                }
+
+                await Task.Delay(ObservationInterval);
+            }
+        }
+
+        /// <summary>读取一次current presentation并拒绝空/超量actor或多个local actor。</summary>
+        /// <param name="composition">当前完整产品graph。</param>
+        /// <param name="entityID">待查找actor identity。</param>
+        /// <param name="transform">成功时返回指定actor transform。</param>
+        /// <returns>current presentation已包含指定actor时为true。</returns>
+        private static bool TryCaptureActorTransform(
+            AppCompositionResult composition,
+            ulong entityID,
+            out ClientBattleTransform transform)
+        {
+            transform = default;
+            if (!composition.BattleRuntimeCoordinator.
+                    TryConsumePresentation(out var presentation))
+            {
+                return false;
+            }
+
+            var localActors = 0;
+            var found = false;
+            for (var index = 0; index < presentation.Actors.Count; index++)
+            {
+                var actor = presentation.Actors[index];
+                if (actor.Local)
+                {
+                    localActors++;
+                }
+
+                if (actor.EntityID == entityID)
+                {
+                    transform = actor.Transform;
+                    found = true;
+                }
+            }
+
+            if (presentation.Actors.Count == 0 ||
+                presentation.Actors.Count >
+                    ClientBattlePolicy.Current.MaximumEntities ||
+                localActors != 1)
+            {
+                throw new QualificationFailureException(
+                    "battle-presentation-actor-boundary-drifted");
+            }
+
+            return found;
+        }
+
+        /// <summary>等待Scene registry真正实例化预期Actor，并保持唯一local view。</summary>
+        /// <param name="diagnostics">只读battle runtime诊断owner。</param>
+        /// <param name="expectedActors">Current公开actor集合大小。</param>
+        /// <param name="stage">不含identity的闭合资格阶段。</param>
+        /// <returns>可见Scene实例与presentation集合一致时完成。</returns>
+        private static async Task WaitForSceneActorsAsync(
+            ClientQualificationDiagnostics diagnostics,
+            int expectedActors,
+            string stage)
+        {
+            var deadline = DateTime.UtcNow.Add(
+                TransitionObservationDeadline);
+            while (true)
+            {
+                var registry =
+                    UnityEngine.Object.
+                        FindFirstObjectByType<ClientActorViewRegistry>();
+                if (registry != null &&
+                    registry.QualificationActorCount == expectedActors &&
+                    registry.QualificationLocalActorCount == 1)
+                {
+                    return;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    var sceneActors = registry == null
+                        ? -1
+                        : registry.QualificationActorCount;
+                    var sceneLocalActors = registry == null
+                        ? -1
+                        : registry.QualificationLocalActorCount;
+                    var runtimeEntities = -1;
+                    var generation = 0L;
+                    var availability =
+                        ClientBattleAvailability.Inactive;
+                    if (TryCaptureBattle(diagnostics, out var battle))
+                    {
+                        runtimeEntities = battle.Runtime.EntityCount;
+                        generation =
+                            battle.Runtime.Runtime.BattleGeneration;
+                        availability =
+                            battle.Runtime.Runtime.Availability;
+                    }
+
+                    Debug.Log(
+                        "[IHOMELAND_BATTLE_DIAGNOSTIC] " +
+                        "stage=scene-actors-timeout " +
+                        $"checkpoint={stage} " +
+                        $"expected_actors={expectedActors} " +
+                        $"scene_actors={sceneActors} " +
+                        $"scene_local_actors={sceneLocalActors} " +
+                        $"runtime_entities={runtimeEntities} " +
+                        $"generation={generation} " +
+                        $"availability={availability}");
+                    throw new QualificationFailureException(
+                        $"battle-scene-actors-{stage}-timeout");
+                }
+
+                await Task.Delay(ObservationInterval);
+            }
+        }
+
+        /// <summary>解析另一Player发布的0-7 actor slot。</summary>
+        /// <param name="root">本次battle运行独占协调目录。</param>
+        /// <param name="name">slot信号名。</param>
+        /// <returns>合法actor slot。</returns>
+        private static async Task<int> ReadActorSlotSignalAsync(
+            string root,
+            string name)
+        {
+            var value = await ReadRequiredSignalAsync(root, name);
+            if (!int.TryParse(value, out var slot) || slot < 0 || slot > 7)
+            {
+                throw new QualificationFailureException(
+                    "battle-actor-slot-signal-invalid");
+            }
+
+            return slot;
+        }
+
+        /// <summary>退出Session并验证Scene、battle socket、pump与native lease恰好释放。</summary>
+        /// <param name="composition">当前完整产品graph。</param>
+        /// <param name="diagnostics">只读资格诊断owner。</param>
+        /// <returns>全部App/Scene battle派生资源退役时完成。</returns>
+        private static async Task LogoutAndAssertBattleReleasedAsync(
+            AppCompositionResult composition,
+            ClientQualificationDiagnostics diagnostics)
+        {
+            await RequireActionAsync(
+                composition.PersonalWorldExperience.LogoutAsync(
+                    CancellationToken.None),
+                "battle-logout-rejected");
+            await WaitUntilAsync(
+                () =>
+                {
+                    if (!TryCaptureBattle(diagnostics, out var battle))
+                    {
+                        return false;
+                    }
+
+                    var app = diagnostics.Capture();
+                    return composition.PersonalWorldExperience.ViewState.Phase ==
+                               ClientPersonalWorldPhase.Login &&
+                           !composition.SessionCoordinator.TryGetCurrent(out _) &&
+                           app.SceneOwners == 0 &&
+                           battle.Runtime.Runtime.BattleGeneration == 0 &&
+                           battle.Runtime.Runtime.Availability ==
+                               ClientBattleAvailability.Inactive &&
+                           battle.Runtime.EntityCount == 0 &&
+                           battle.SocketOwners == 0 &&
+                           battle.PumpOwners == 0 &&
+                           battle.NativeLeases == 0;
+                },
+                TransitionObservationDeadline);
+        }
+
+        /// <summary>在generation替换窗口内安全尝试取得battle诊断。</summary>
+        /// <param name="diagnostics">只读battle诊断owner。</param>
+        /// <param name="snapshot">成功时返回current稳定快照。</param>
+        /// <returns>捕获未跨generation时为true。</returns>
+        private static bool TryCaptureBattle(
+            ClientQualificationDiagnostics diagnostics,
+            out ClientBattleQualificationDiagnosticSnapshot snapshot)
+        {
+            try
+            {
+                snapshot = diagnostics.CaptureBattle();
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                snapshot = null;
+                return false;
+            }
+        }
+
+        /// <summary>检查current battle graph已完整Active且资源owner符合固定边界。</summary>
+        /// <param name="snapshot">同一捕获窗口的battle诊断。</param>
+        /// <param name="targetKind">预期target。</param>
+        /// <param name="role">预期角色。</param>
+        /// <returns>全部runtime、identity与资源条件成立时为true。</returns>
+        private static bool IsActiveBattle(
+            ClientBattleQualificationDiagnosticSnapshot snapshot,
+            ClientBattleTargetKind targetKind,
+            ClientBattleRole role)
+        {
+            var runtime = snapshot.Runtime;
+            return runtime.Runtime.Availability ==
+                       ClientBattleAvailability.Active &&
+                   runtime.Runtime.Failure == ClientBattleFailure.None &&
+                   runtime.Runtime.BattleGeneration > 0 &&
+                   runtime.Runtime.TargetKind == targetKind &&
+                   runtime.Runtime.Role == role &&
+                   runtime.Runtime.ActorSlot >= 0 &&
+                   runtime.Runtime.ActorSlot <= 7 &&
+                   runtime.Runtime.BaselineReady &&
+                   runtime.Runtime.InputEnabled &&
+                   runtime.ServerTick > 0 &&
+                   runtime.EntityCount > 0 &&
+                   runtime.EntityCount <=
+                       ClientBattlePolicy.Current.MaximumEntities &&
+                   runtime.LocalEntityID ==
+                       (ulong)(runtime.Runtime.ActorSlot + 1) &&
+                   runtime.LastAcknowledgedInputTick <=
+                       Math.Max(
+                           runtime.LastSentInputTick,
+                           runtime.ContinuityAcknowledgementAnchor) &&
+                   !runtime.ResyncPending &&
+                   snapshot.SocketOwners == 1 &&
+                   snapshot.PumpOwners == 3 &&
+                   snapshot.NativeLeases == 1;
         }
 
         /// <summary>登录新profile或接纳同一安全profile已完成的Session恢复。</summary>
@@ -1242,6 +2256,32 @@ namespace IHomeland.Client.Core.Qualification
             {
                 Debug.LogError("[IHOMELAND_QUALIFICATION] outcome=fail reason=internal");
                 UnityEngine.Application.Quit(10);
+            }
+        }
+
+        /// <summary>观察真实battle runtime双Player场景并输出当前角色的唯一低敏结论。</summary>
+        /// <param name="run">当前Player拥有的唯一battle runtime资格task。</param>
+        /// <returns>结论写入Player日志并退出时结束。</returns>
+        private static async Task ObserveClientBattleRuntimeAsync(Task run)
+        {
+            try
+            {
+                await run;
+                Debug.Log(
+                    "[IHOMELAND_QUALIFICATION] outcome=pass scenario=client-battle-runtime");
+                UnityEngine.Application.Quit(0);
+            }
+            catch (QualificationFailureException failure)
+            {
+                Debug.LogError(
+                    $"[IHOMELAND_QUALIFICATION] outcome=fail reason={failure.Reason}");
+                UnityEngine.Application.Quit(11);
+            }
+            catch
+            {
+                Debug.LogError(
+                    "[IHOMELAND_QUALIFICATION] outcome=fail reason=internal");
+                UnityEngine.Application.Quit(12);
             }
         }
 

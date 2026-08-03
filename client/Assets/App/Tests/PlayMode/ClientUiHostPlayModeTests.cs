@@ -193,6 +193,10 @@ namespace IHomeland.Client.Tests.PlayMode
                 Assert.That(cancellations, Is.Zero);
                 Assert.That(input.CurrentState.Mode, Is.EqualTo(ClientUiInputMode.Ui));
                 Assert.That(input.CurrentState.InteractiveRouteId, Is.EqualTo(ClientUiRouteId.WorldVisit));
+                var uiInputFrame = hostRoot.CaptureBattleInput();
+                Assert.That(uiInputFrame.GameplayAvailable, Is.False);
+                Assert.That(uiInputFrame.Sample.Move, Is.EqualTo(Vector2.zero));
+                Assert.That(uiInputFrame.Sample.JumpPressed, Is.False);
 
                 // Owner 切换后的首帧只用于确认相关物理按键已释放。
                 yield return null;
@@ -204,6 +208,11 @@ namespace IHomeland.Client.Tests.PlayMode
                 Assert.That(cancellations, Is.EqualTo(1));
                 Assert.That(cancelledRoute, Is.EqualTo(ClientUiRouteId.WorldVisit));
                 Assert.That(input.CurrentState, Is.EqualTo(ClientUiInputState.Gameplay));
+
+                // 新Player map必须经过一次Input System update与物理按键释放后才重新提供样本。
+                Assert.That(hostRoot.CaptureBattleInput().GameplayAvailable, Is.False);
+                yield return null;
+                Assert.That(hostRoot.CaptureBattleInput().GameplayAvailable, Is.True);
 
                 Assert.That(hostRoot.StopAsync(CancellationToken.None).IsCompletedSuccessfully, Is.True);
                 PressAndReleaseTab(keyboard);
@@ -497,7 +506,18 @@ namespace IHomeland.Client.Tests.PlayMode
         {
             var inputAsset = ScriptableObject.CreateInstance<InputActionAsset>();
             var player = inputAsset.AddActionMap("Player");
-            player.AddAction("Move");
+            player.AddAction(
+                "Move",
+                InputActionType.Value,
+                expectedControlLayout: "Vector2");
+            player.AddAction(
+                "Aim",
+                InputActionType.Value,
+                expectedControlLayout: "Vector2");
+            player.AddAction("Jump", InputActionType.Button);
+            player.AddAction("Primary", InputActionType.Button);
+            player.AddAction("Secondary", InputActionType.Button);
+            player.AddAction("Interact", InputActionType.Button);
             player.AddAction("Menu", InputActionType.Button).AddBinding("<Keyboard>/tab");
             var ui = inputAsset.AddActionMap("UI");
             ui.AddAction("Navigate");

@@ -32,6 +32,12 @@
       "order": 50
     },
     {
+      "id": "client-battle-runtime-validate",
+      "class": "incremental",
+      "owner": "client-battle-runtime",
+      "order": 60
+    },
+    {
       "id": "proto-verify",
       "class": "targeted-expensive",
       "owner": "proto",
@@ -96,6 +102,18 @@
       "class": "targeted-expensive",
       "owner": "battle-qualification",
       "order": 200
+    },
+    {
+      "id": "client-battle-runtime-targeted",
+      "class": "targeted-expensive",
+      "owner": "client-battle-runtime",
+      "order": 210
+    },
+    {
+      "id": "client-battle-runtime-unity",
+      "class": "targeted-expensive",
+      "owner": "client-battle-runtime",
+      "order": 220
     },
     {
       "id": "openspec-change-strict",

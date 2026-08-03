@@ -20,14 +20,19 @@ namespace IHomeland.Client.Core.Composition
             FoundationCompositionBundle foundation,
             SessionCompositionBundle session,
             ChannelCompositionBundle channels,
-            WorldCompositionBundle world)
+            WorldCompositionBundle world,
+            BattleCompositionBundle battle)
         {
             if (uiHostRoot == null)
             {
                 throw new ArgumentNullException(nameof(uiHostRoot));
             }
 
-            if (foundation == null || session == null || channels == null || world == null)
+            if (foundation == null ||
+                session == null ||
+                channels == null ||
+                world == null ||
+                battle == null)
             {
                 throw new ArgumentNullException(
                     "Presentation module dependencies 不能为空。");
@@ -41,7 +46,11 @@ namespace IHomeland.Client.Core.Composition
                     throw new ArgumentNullException(nameof(sceneTransitionHost));
                 }
 
-                sceneTransitionHost.Configure(sceneLifetimeOwner);
+                uiHostRoot.ValidateBattleInputConfiguration();
+                sceneTransitionHost.Configure(
+                    sceneLifetimeOwner,
+                    battle.Runtime,
+                    uiHostRoot);
             }
 
             var routeDefinitions = productExperience

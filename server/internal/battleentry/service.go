@@ -82,7 +82,7 @@ type BattleEndpointProvider interface {
 //
 // 当前 adapter 可以由 fake 实现；后续 control change 必须把该端口接到 C++ hard-cap owner。
 type ActorCapacityOwner interface {
-	// Reserve 为相同 IssueID 与相同 target 幂等返回同一 slot，第 9 个 actor 必须拒绝。
+	// Reserve 为相同 IssueID 幂等返回同一 slot，同 actor successor 复用 slot，第 9 个 actor 必须拒绝。
 	Reserve(ctx context.Context, request ReservationRequest) (Reservation, error)
 	// Release 精确撤销尚未公开成功的 reservation，不能影响 successor target。
 	Release(ctx context.Context, reservation Reservation) error

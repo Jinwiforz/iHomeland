@@ -60,7 +60,8 @@ func (Target) GoString() string { return redactedValue }
 
 // ReservationRequest 是 installed+active capacity owner 的原子 slot 请求。
 //
-// IssueID 使 response-loss retry 返回同一 slot；Target 必须是刚解析的 exact current target。
+// IssueID 使 response-loss retry 返回同一 slot；同 actor 的 successor IssueID 必须复用该
+// target 上的稳定 slot。Target 必须是刚解析的 exact current target。
 type ReservationRequest struct {
 	// IssueID 是不含原始 HTTP key 的签发 identity。
 	IssueID battleticket.IssueID

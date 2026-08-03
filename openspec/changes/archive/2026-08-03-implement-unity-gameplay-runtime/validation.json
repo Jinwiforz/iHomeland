@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "change": "implement-unity-gameplay-runtime",
+  "checks": [
+    {
+      "id": "quality-contract",
+      "reason": "B0.7 必须保持 closed validation plan、catalog 引用和普通 change/最终资格分层"
+    },
+    {
+      "id": "battle-profile-validate",
+      "reason": "客户端预测、插值、resync、cadence 和容量必须绑定 current battle-network-profile-v2"
+    },
+    {
+      "id": "battle-wire-validate",
+      "reason": "Unity production transport 必须消费 current secure wire、route、expiry 和 acknowledgement contract"
+    },
+    {
+      "id": "battle-qualification-validate",
+      "reason": "B0.7 进入门必须继续绑定可用的 network development-readiness corpus与最终资格边界"
+    },
+    {
+      "id": "client-battle-runtime-validate",
+      "reason": "B0.7 source manifest、版本、profile、route、acknowledgement、readiness 与依赖进入身份必须保持闭合"
+    },
+    {
+      "id": "client-battle-runtime-targeted",
+      "reason": "Windows x64 native ABI/plugin、Development/Release build smoke及真实Go父进程、C++子进程、双Player battle场景属于本change直接实现面"
+    },
+    {
+      "id": "client-battle-runtime-unity",
+      "reason": "Input、prediction、replica、Scene generation 与 Unity assembly/asset 接线必须由 current 6000.5.2f1 的定向 EditMode fixture 验证"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "proposal、design、client-battle-runtime requirements 与 tasks 必须通过 strict validation"
+    }
+  ]
+}

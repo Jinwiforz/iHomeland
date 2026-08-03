@@ -330,6 +330,7 @@ function Test-ProductionAssemblyGraph {
             "IHomeland.Client.Infrastructure",
             "IHomeland.Client.Presentation",
             "IHomeland.Client.Protocol.Generated",
+            "Unity.Cinemachine",
             "Unity.InputSystem",
             "Unity.TextMeshPro")
     }

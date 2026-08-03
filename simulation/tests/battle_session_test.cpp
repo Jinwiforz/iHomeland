@@ -191,7 +191,7 @@ void TestContextAndIngress() {
     aim->set_kind(
         ihomeland::battle::v1::
             BATTLE_INPUT_KIND_AIM);
-    aim->set_aim_yaw_millidegrees(1'000);
+    aim->set_aim_yaw_millidegrees(-45'000);
     aim->set_aim_pitch_millidegrees(-500);
     auto* interact = bundle.add_commands();
     interact->set_command_sequence(3);
@@ -270,6 +270,17 @@ void TestContextAndIngress() {
                 observed,
                 [](const auto& command) {
                     return command.actor_id == 42;
+                }) &&
+            std::ranges::any_of(
+                observed,
+                [](const auto& command) {
+                    return command.kind ==
+                               static_cast<std::uint8_t>(
+                                   ihomeland::sim::
+                                       GameplayCommandKind::
+                                           AimIntent) &&
+                        command.aim_yaw_millidegrees ==
+                            -45'000;
                 });
     }
     instance.BeginDrain();
@@ -334,9 +345,14 @@ void TestReplication() {
             .x_mm = 1,
             .y_mm = 2,
             .z_mm = 3,
+            .yaw_millidegrees = 4,
+            .velocity_x_mm_per_second = 5,
+            .velocity_y_mm_per_second = 6,
+            .velocity_z_mm_per_second = 7,
             .health_scaled = 1000,
             .phase = 2,
             .alive = true,
+            .grounded = true,
         }};
     const auto acknowledgement =
         ihomeland::sim::
@@ -433,6 +449,25 @@ void TestReplication() {
             full_message
                     .last_processed_input_tick() ==
                 0 &&
+            full_message.entities_size() == 1 &&
+            full_message.entities(0).has_transform() &&
+            full_message.entities(0)
+                .transform()
+                .has_yaw_millidegrees() &&
+            full_message.entities(0)
+                .transform()
+                .has_velocity_x_mm_per_second() &&
+            full_message.entities(0)
+                .transform()
+                .has_velocity_y_mm_per_second() &&
+            full_message.entities(0)
+                .transform()
+                .has_velocity_z_mm_per_second() &&
+            full_message.entities(0).state_flags() ==
+                (2U |
+                 ihomeland::sim::
+                     BattleEntityStateFlags::
+                         Grounded) &&
             delta_message.ParseFromArray(
                 delta->payload.data(),
                 static_cast<int>(
@@ -576,13 +611,25 @@ void TestSnapshotPartitionBudget() {
             .z_mm =
                 std::numeric_limits<
                     std::int32_t>::max(),
+            .yaw_millidegrees = 179'999,
+            .velocity_x_mm_per_second =
+                std::numeric_limits<
+                    std::int32_t>::max(),
+            .velocity_y_mm_per_second =
+                std::numeric_limits<
+                    std::int32_t>::min(),
+            .velocity_z_mm_per_second =
+                std::numeric_limits<
+                    std::int32_t>::max(),
             .health_scaled =
                 std::numeric_limits<
                     std::uint32_t>::max(),
             .phase =
-                std::numeric_limits<
-                    std::uint32_t>::max(),
+                ihomeland::sim::
+                    BattleEntityStateFlags::
+                        PhaseMask,
             .alive = false,
+            .grounded = true,
         });
     }
     const auto acknowledgement =

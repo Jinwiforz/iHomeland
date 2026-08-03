@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/jinwiforz/ihomeland/server/internal/account"
 	"github.com/jinwiforz/ihomeland/server/internal/battleentry"
 	"github.com/jinwiforz/ihomeland/server/internal/battleticket"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
@@ -34,21 +35,37 @@ func (provider battleEndpointProvider) EndpointFor(_ context.Context, target sim
 type battleActorCapacity struct {
 	// mutex 串行化同一 instance 的 8-slot 决策。
 	mutex sync.Mutex
-	// reservations 按 IssueID 保存 response-loss 幂等结果。
-	reservations map[string]battleentry.Reservation
-	// occupied 保存 exact target 的 slot ownership。
-	occupied map[simulationcontrol.SimulationTarget][simulationcontrol.QualifiedActorCapacity]string
+	// reservations 按 IssueID 保存 response-loss 与 successor rollback 所需的 actor binding。
+	reservations map[string]battleActorReservation
+	// occupied 保存 exact target 的稳定 actor slot ownership。
+	occupied map[simulationcontrol.SimulationTarget][simulationcontrol.QualifiedActorCapacity]battleActorIdentity
+}
+
+// battleActorIdentity 是 target 内稳定复用 slot 的受信 actor key。
+type battleActorIdentity struct {
+	// playerID 来自当前 AuthContext。
+	playerID account.PlayerID
+	// role 来自 PersonalWorld 或 VisitSession owner。
+	role battleticket.Role
+}
+
+// battleActorReservation 保存 IssueID 与 actor identity 的精确关联。
+type battleActorReservation struct {
+	// reservation 是 application 可见的窄 slot receipt。
+	reservation battleentry.Reservation
+	// identity 防止相同 IssueID 被另一 actor 或 role 复用。
+	identity battleActorIdentity
 }
 
 // newBattleActorCapacity 创建无后台任务的固定容量 owner。
 func newBattleActorCapacity() *battleActorCapacity {
 	return &battleActorCapacity{
-		reservations: make(map[string]battleentry.Reservation),
-		occupied:     make(map[simulationcontrol.SimulationTarget][simulationcontrol.QualifiedActorCapacity]string),
+		reservations: make(map[string]battleActorReservation),
+		occupied:     make(map[simulationcontrol.SimulationTarget][simulationcontrol.QualifiedActorCapacity]battleActorIdentity),
 	}
 }
 
-// Reserve 为相同 issue/target 返回同一 slot，并原子拒绝第 9 个 actor。
+// Reserve 为相同 issue 返回同一 slot，同 actor successor 复用稳定 slot，并原子拒绝第 9 个 actor。
 func (owner *battleActorCapacity) Reserve(_ context.Context, request battleentry.ReservationRequest) (battleentry.Reservation, error) {
 	if owner == nil || !request.Valid() {
 		return battleentry.Reservation{}, battleticket.NewAdmissionError("capacity", battleticket.ErrorCodeInvalidArgument, nil)
@@ -56,15 +73,16 @@ func (owner *battleActorCapacity) Reserve(_ context.Context, request battleentry
 	owner.mutex.Lock()
 	defer owner.mutex.Unlock()
 	key := request.IssueID.Value()
+	identity := battleActorIdentity{playerID: request.PlayerID, role: request.Role}
 	if existing, found := owner.reservations[key]; found {
-		if existing.Target() != request.Target {
+		if existing.reservation.Target() != request.Target || existing.identity != identity {
 			return battleentry.Reservation{}, battleticket.NewAdmissionError("capacity", battleticket.ErrorCodeIdempotencyConflict, nil)
 		}
-		return existing, nil
+		return existing.reservation, nil
 	}
 	slots := owner.occupied[request.Target]
 	for index := uint8(0); index < simulationcontrol.QualifiedActorCapacity; index++ {
-		if slots[index] != "" {
+		if slots[index] != identity {
 			continue
 		}
 		slot, _ := battleticket.NewActorSlot(index)
@@ -72,9 +90,27 @@ func (owner *battleActorCapacity) Reserve(_ context.Context, request battleentry
 		if err != nil {
 			return battleentry.Reservation{}, err
 		}
-		slots[index] = key
+		owner.reservations[key] = battleActorReservation{
+			reservation: reservation,
+			identity:    identity,
+		}
+		return reservation, nil
+	}
+	for index := uint8(0); index < simulationcontrol.QualifiedActorCapacity; index++ {
+		if slots[index] != (battleActorIdentity{}) {
+			continue
+		}
+		slot, _ := battleticket.NewActorSlot(index)
+		reservation, err := battleentry.NewReservation(request.IssueID, request.Target, slot)
+		if err != nil {
+			return battleentry.Reservation{}, err
+		}
+		slots[index] = identity
 		owner.occupied[request.Target] = slots
-		owner.reservations[key] = reservation
+		owner.reservations[key] = battleActorReservation{
+			reservation: reservation,
+			identity:    identity,
+		}
 		return reservation, nil
 	}
 	return battleentry.Reservation{}, battleticket.NewAdmissionError("capacity", battleticket.ErrorCodeCapacityExceeded, nil)
@@ -106,15 +142,23 @@ func (owner *battleActorCapacity) Release(_ context.Context, reservation battlee
 	if !found {
 		return nil
 	}
-	if current.Target() != reservation.Target() || current.Slot() != reservation.Slot() {
+	if current.reservation.Target() != reservation.Target() ||
+		current.reservation.Slot() != reservation.Slot() {
 		return errors.New("battle reservation binding drifted")
 	}
-	slots := owner.occupied[reservation.Target()]
-	if slots[reservation.Slot().Index()] == key {
-		slots[reservation.Slot().Index()] = ""
-	}
 	delete(owner.reservations, key)
-	if slots == [simulationcontrol.QualifiedActorCapacity]string{} {
+	for _, candidate := range owner.reservations {
+		if candidate.reservation.Target() == reservation.Target() &&
+			candidate.reservation.Slot() == reservation.Slot() &&
+			candidate.identity == current.identity {
+			return nil
+		}
+	}
+	slots := owner.occupied[reservation.Target()]
+	if slots[reservation.Slot().Index()] == current.identity {
+		slots[reservation.Slot().Index()] = battleActorIdentity{}
+	}
+	if slots == [simulationcontrol.QualifiedActorCapacity]battleActorIdentity{} {
 		delete(owner.occupied, reservation.Target())
 	} else {
 		owner.occupied[reservation.Target()] = slots

@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using IHomeland.Client.Application.Battle;
 using IHomeland.Client.Application.Control;
 using IHomeland.Client.Application.Gameplay;
 using IHomeland.Client.Application.Ports;
@@ -16,7 +17,9 @@ namespace IHomeland.Client.Application.World
     /// 本owner只保存generation、阶段与冻结descriptor；Session、World、Visit和Scene最终事实仍由既有
     /// owner持有。所有成功提交同时验证session、intent与target，Scene由表现层显式确认第四重gate。
     /// </remarks>
-    internal sealed class ClientConnectionRecoveryCoordinator : IAppLifetimeParticipant
+    internal sealed class ClientConnectionRecoveryCoordinator :
+        IAppLifetimeParticipant,
+        IClientBattleRecoveryScheduler
     {
         /// <summary>保护snapshot、intent task与lifetime owner。</summary>
         private readonly object _sync = new object();
@@ -62,6 +65,18 @@ namespace IHomeland.Client.Application.World
 
         /// <summary>等待Scene commit时把同一总deadline转换为terminal提交。</summary>
         private CancellationTokenRegistration _sceneDeadlineRegistration;
+
+        /// <summary>Current battle-only recovery 的 linked cancellation owner。</summary>
+        private CancellationTokenSource _battleRecoveryCancellation;
+
+        /// <summary>Current battle-only recovery 的45秒 deadline owner。</summary>
+        private CancellationTokenSource _battleRecoveryDeadline;
+
+        /// <summary>Current battle-only single-flight completion。</summary>
+        private Task<bool> _battleRecoveryTask;
+
+        /// <summary>Current battle-only plan 的 source generation。</summary>
+        private long _battleRecoveryGeneration;
 
         /// <summary>只在active或等待Scene commit时保存冻结target。</summary>
         private ClientRecoveryTargetDescriptor _activeTarget;
@@ -167,7 +182,8 @@ namespace IHomeland.Client.Application.World
                 {
                     return _snapshot.Phase == ClientConnectionRecoveryPhase.RecoveringControl ||
                            _snapshot.Phase == ClientConnectionRecoveryPhase.RecoveringWorld ||
-                           _snapshot.Phase == ClientConnectionRecoveryPhase.AwaitingSceneCommit
+                           _snapshot.Phase == ClientConnectionRecoveryPhase.AwaitingSceneCommit ||
+                           _battleRecoveryTask != null
                         ? 1
                         : 0;
                 }
@@ -214,6 +230,123 @@ namespace IHomeland.Client.Application.World
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc />
+        public Task<bool> RunBattleRecoveryAsync(
+            long sourceBattleGeneration,
+            Func<CancellationToken, Task<bool>> operation)
+        {
+            if (sourceBattleGeneration <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(sourceBattleGeneration));
+            }
+
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
+            lock (_sync)
+            {
+                if (_lifetimeCancellation == null ||
+                    _snapshot.Phase !=
+                    ClientConnectionRecoveryPhase.Idle)
+                {
+                    return Task.FromResult(false);
+                }
+
+                if (_battleRecoveryTask != null)
+                {
+                    return _battleRecoveryGeneration ==
+                        sourceBattleGeneration
+                            ? _battleRecoveryTask
+                            : Task.FromResult(false);
+                }
+
+                var deadline = _deadlineFactory(_deadline);
+                var cancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        _lifetimeCancellation.Token,
+                        deadline.Token);
+                var completion =
+                    new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                _battleRecoveryDeadline = deadline;
+                _battleRecoveryCancellation = cancellation;
+                _battleRecoveryGeneration = sourceBattleGeneration;
+                _battleRecoveryTask = completion.Task;
+                _ = ExecuteBattleRecoveryAsync(
+                    sourceBattleGeneration,
+                    operation,
+                    cancellation,
+                    deadline,
+                    completion);
+                return completion.Task;
+            }
+        }
+
+        /// <inheritdoc />
+        public void PreemptBattleRecovery()
+        {
+            CancellationTokenSource cancellation;
+            lock (_sync)
+            {
+                cancellation = _battleRecoveryCancellation;
+            }
+
+            cancellation?.Cancel();
+        }
+
+        /// <summary>
+        /// 执行 recovery operation，并以 task identity 拒绝迟到 completion 清理 successor。
+        /// </summary>
+        /// <param name="sourceBattleGeneration">Frozen source generation。</param>
+        /// <param name="operation">Battle runtime 提供的窄恢复操作。</param>
+        /// <param name="cancellation">Lifetime 与总 deadline linked owner。</param>
+        /// <param name="deadline">独立总 deadline owner。</param>
+        /// <param name="completion">Single-flight completion source。</param>
+        /// <returns>Operation 与资源清理完成时结束。</returns>
+        private async Task ExecuteBattleRecoveryAsync(
+            long sourceBattleGeneration,
+            Func<CancellationToken, Task<bool>> operation,
+            CancellationTokenSource cancellation,
+            CancellationTokenSource deadline,
+            TaskCompletionSource<bool> completion)
+        {
+            var recovered = false;
+            try
+            {
+                recovered = await operation(cancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception)
+            {
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    if (_battleRecoveryGeneration ==
+                            sourceBattleGeneration &&
+                        ReferenceEquals(
+                            _battleRecoveryTask,
+                            completion.Task))
+                    {
+                        _battleRecoveryTask = null;
+                        _battleRecoveryCancellation = null;
+                        _battleRecoveryDeadline = null;
+                        _battleRecoveryGeneration = 0;
+                    }
+                }
+
+                completion.TrySetResult(recovered);
+                cancellation.Dispose();
+                deadline.Dispose();
+            }
+        }
+
         /// <summary>记录control进入adapter-owned有限恢复并冻结control-only能力。</summary>
         /// <param name="controlGeneration">发生瞬时故障的control run generation。</param>
         internal void BeginControlRecovery(long controlGeneration)
@@ -226,6 +359,7 @@ namespace IHomeland.Client.Application.World
         /// <param name="manual">是否由terminal状态下的玩家显式发起。</param>
         private bool BeginControlRecovery(long controlGeneration, bool manual)
         {
+            PreemptBattleRecovery();
             if (controlGeneration <= 0)
             {
                 return false;
@@ -602,7 +736,9 @@ namespace IHomeland.Client.Application.World
         /// <returns>Active task退出并提交Stopped时完成。</returns>
         public async Task StopAsync(CancellationToken cancellationToken)
         {
+            PreemptBattleRecovery();
             Task active;
+            Task<bool> battle;
             CancellationTokenSource lifetime;
             CancellationTokenSource intentDeadline;
             ClientConnectionRecoverySnapshot committed;
@@ -620,6 +756,7 @@ namespace IHomeland.Client.Application.World
                 _sceneDeadlineRegistration.Dispose();
                 _sceneDeadlineRegistration = default;
                 active = _activeTask;
+                battle = _battleRecoveryTask;
                 if (_subscribed)
                 {
                     _controlChannel.HealthChanged -= OnControlHealthChanged;
@@ -644,6 +781,10 @@ namespace IHomeland.Client.Application.World
             {
                 await AwaitWithCancellationAsync(active, cancellationToken);
             }
+            if (battle != null)
+            {
+                await AwaitWithCancellationAsync(battle, cancellationToken);
+            }
 
             lifetime?.Dispose();
             intentDeadline?.Dispose();
@@ -655,6 +796,7 @@ namespace IHomeland.Client.Application.World
         /// <returns>成功取得single-flight时返回true。</returns>
         private bool BeginWorldRecovery(long sourceGeneration, bool manual)
         {
+            PreemptBattleRecovery();
             ClientRecoveryTargetDescriptor target;
             ClientSessionSnapshot session;
             try

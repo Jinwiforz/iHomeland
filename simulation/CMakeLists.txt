@@ -58,6 +58,7 @@ add_library(ihomeland_sim_core STATIC
     src/ecs/structural_commands.cpp
     src/gameplay/ability.cpp
     src/gameplay/ai.cpp
+    src/gameplay/battle_movement_replication.cpp
     src/gameplay/effects.cpp
     src/gameplay/hit_detection.cpp
     src/gameplay/movement.cpp
@@ -104,6 +105,15 @@ target_link_libraries(ihomeland_sim_jolt_adapter
 )
 ihomeland_configure_project_target(ihomeland_sim_jolt_adapter)
 
+add_library(ihomeland_sim_flat_ground_adapter STATIC
+    src/adapters/flat_ground_physics_world.cpp
+)
+target_link_libraries(ihomeland_sim_flat_ground_adapter
+    PUBLIC iHomeland::SimulationCore
+)
+ihomeland_configure_project_target(
+    ihomeland_sim_flat_ground_adapter)
+
 add_library(ihomeland_sim_detour_adapter STATIC
     src/adapters/detour_adapter.cpp
     src/adapters/detour_navigation_world.cpp
@@ -127,6 +137,47 @@ target_link_libraries(ihomeland_battle_crypto_adapter
     PRIVATE iHomeland::Sodium
 )
 ihomeland_configure_project_target(ihomeland_battle_crypto_adapter)
+
+# client native plugin 只暴露 crypto/KCP primitive；socket、route、ticket 与 gameplay
+# ownership 必须留在 managed client。
+add_library(ihomeland_client_battle_native SHARED
+    client_native/include/ihomeland_client_battle_native.h
+    client_native/src/ihomeland_client_battle_native.cpp
+)
+target_include_directories(ihomeland_client_battle_native
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/client_native/include>"
+)
+target_compile_definitions(ihomeland_client_battle_native
+    PRIVATE IHOMELAND_CLIENT_BATTLE_NATIVE_EXPORTS)
+target_compile_options(ihomeland_client_battle_native
+    PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Brepro>")
+target_link_options(ihomeland_client_battle_native
+    PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Brepro>")
+target_link_libraries(ihomeland_client_battle_native
+    PRIVATE
+        iHomeland::Sodium
+        iHomeland::Kcp
+)
+set_target_properties(ihomeland_client_battle_native PROPERTIES
+    OUTPUT_NAME "ihomeland_client_battle_native"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-native"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-native"
+)
+ihomeland_configure_project_target(ihomeland_client_battle_native)
+
+# closed link gate 防止 client primitive 便利链接 production transport、simulation 或 OS socket。
+get_target_property(
+    IHOMELAND_CLIENT_BATTLE_NATIVE_LINK_LIBRARIES
+    ihomeland_client_battle_native
+    LINK_LIBRARIES)
+set(IHOMELAND_CLIENT_BATTLE_NATIVE_ALLOWED_LINK_LIBRARIES
+    "iHomeland::Sodium;iHomeland::Kcp")
+if(NOT IHOMELAND_CLIENT_BATTLE_NATIVE_LINK_LIBRARIES STREQUAL
+       IHOMELAND_CLIENT_BATTLE_NATIVE_ALLOWED_LINK_LIBRARIES)
+    message(FATAL_ERROR
+        "ihomeland_client_battle_native link scope 越过 crypto/KCP primitive allowlist")
+endif()
 
 add_library(ihomeland_battle_handshake_adapter STATIC
     src/transport/authenticated_handshake.cpp
@@ -335,6 +386,7 @@ target_link_libraries(ihomeland_sim_control_adapter
     PRIVATE
         iHomeland::BattleTransportRuntime
         iHomeland::BattleUdpListener
+        ihomeland_sim_flat_ground_adapter
         ihomeland_sim_jolt_adapter
         ihomeland_sim_detour_adapter
         nlohmann_json::nlohmann_json
@@ -459,6 +511,26 @@ if(NOT IHOMELAND_PROTOCOL_CLIENT_LINK_LIBRARIES STREQUAL
 endif()
 
 if(BUILD_TESTING)
+    add_executable(
+        ihomeland_client_battle_native_test
+        tests/client_battle_native_test.cpp)
+    target_link_libraries(
+        ihomeland_client_battle_native_test
+        PRIVATE ihomeland_client_battle_native)
+    set_target_properties(
+        ihomeland_client_battle_native_test
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+        "${CMAKE_BINARY_DIR}/client-native")
+    ihomeland_configure_project_target(
+        ihomeland_client_battle_native_test)
+    add_test(
+        NAME client.battle-native.abi
+        COMMAND ihomeland_client_battle_native_test)
+    set_tests_properties(
+        client.battle-native.abi
+        PROPERTIES LABELS
+        "unit;contract;client;battle;native;crypto;kcp;negative;architecture")
+
     add_executable(
         ihomeland_battle_protocol_client_test
         tests/battle_protocol_client_test.cpp
@@ -693,6 +765,23 @@ if(BUILD_TESTING)
     target_link_libraries(ihomeland_sim_gameplay_pipeline_test PRIVATE iHomeland::SimulationCore)
     ihomeland_configure_project_target(ihomeland_sim_gameplay_pipeline_test)
     add_test(NAME simulation.gameplay.pipeline COMMAND ihomeland_sim_gameplay_pipeline_test)
+
+    add_executable(
+        ihomeland_sim_battle_movement_replication_test
+        tests/battle_movement_replication_test.cpp)
+    target_link_libraries(
+        ihomeland_sim_battle_movement_replication_test
+        PRIVATE
+            iHomeland::SimulationCore
+            ihomeland_sim_flat_ground_adapter)
+    ihomeland_configure_project_target(
+        ihomeland_sim_battle_movement_replication_test)
+    add_test(
+        NAME simulation.gameplay.battle-movement-replication
+        COMMAND ihomeland_sim_battle_movement_replication_test)
+    set_tests_properties(
+        simulation.gameplay.battle-movement-replication
+        PROPERTIES LABELS "unit;integration;negative;determinism")
     set_tests_properties(simulation.gameplay.pipeline PROPERTIES LABELS "unit;negative;architecture")
 
     add_executable(ihomeland_sim_movement_test tests/movement_test.cpp)
@@ -797,6 +886,21 @@ if(BUILD_TESTING)
     ihomeland_configure_project_target(ihomeland_sim_jolt_physics_test)
     add_test(NAME simulation.physics.jolt-live COMMAND ihomeland_sim_jolt_physics_test)
     set_tests_properties(simulation.physics.jolt-live PROPERTIES LABELS "contract;negative;determinism;jolt-parity")
+
+    add_executable(
+        ihomeland_sim_flat_ground_physics_test
+        tests/flat_ground_physics_world_test.cpp)
+    target_link_libraries(
+        ihomeland_sim_flat_ground_physics_test
+        PRIVATE ihomeland_sim_flat_ground_adapter)
+    ihomeland_configure_project_target(
+        ihomeland_sim_flat_ground_physics_test)
+    add_test(
+        NAME simulation.physics.flat-ground
+        COMMAND ihomeland_sim_flat_ground_physics_test)
+    set_tests_properties(
+        simulation.physics.flat-ground
+        PROPERTIES LABELS "unit;contract;negative;determinism")
 
     add_executable(ihomeland_sim_detour_navigation_test tests/detour_navigation_world_test.cpp)
     target_link_libraries(ihomeland_sim_detour_navigation_test

@@ -273,6 +273,22 @@ receive invite
 
 客户端不能把 invite 当作连接凭据，不能从好友 PlayerID 拼接 endpoint，也不能在 Owner 断线后本地选举新 Owner。VisitSession close 后必须先停止 command，再销毁场景和投影；迟到 push、response 或资源 callback 通过 session/instance generation 丢弃。
 
+## UDP Battle Runtime 接入
+
+只有 current Session 与 WorldAdmission target 均已提交时，客户端才可通过 HTTPS `issueBattleTicket` 获取一次性 battle credential，并在同一个 connect attempt 内完成 cookie retry、authenticated accept、secret 清理与 UDP activation。成功 accept 后仍必须等待包含 `actor_slot + 1` local entity 的完整 full baseline，之后才打开 Player input gate；首个baseline等待固定为5秒，超时必须终结current generation并进入既有恢复，不能无限显示loading。不得从 Scene、payload PlayerID 或第一个 entity 猜测 local actor。同一 simulation instance、PlayerID 与 role 的 battle-only successor签发新 ticket并推进battle generation；新session认证后，服务端在首个baseline前按相同instance、mapping与actor原子退休predecessor，复用稳定actor slot并使旧route立即失效。Successor full baseline的`LastProcessedInputTick`初始化新prediction generation的ack/continuity anchor，但旧prediction history、command sequence、密钥与packet sequence不继承。不同actor不得通过恢复占用同一slot或绕过8 actor hard cap。
+
+Input System 只提交量化 Move/Aim/Jump/Primary/Secondary/Interact intent。Local movement/jump prediction、acknowledgement pruning 与 reconciliation 位于纯 C# Application；25 ms InputTick只用于采样和发送，同一50 ms SimulationTick内以last move/aim、OR jump从共同起点单次积分，连续ACK缺口保留的frame只有映射到latest authority ServerTick之后才允许重演，current平地落点使用与server一致的百万分比crossing与toward-zero舍入。snapshot replica 与 remote interpolation 仍只读服务器事实。Raw input/snapshot 不回退到 WSS/TLS-TCP，reliable ability/lifecycle/resync 只走登记 KCP lane。
+
+Battle-only transient failure 不得伪造 Visit leave、assignment replacement 或 Session invalidation。World/WSS/TLS-TCP recovery、safe-return 与 target replacement 必须抢占 battle attempt；successor target 只能签发新 ticket、建立新 battle generation并等待新 full baseline，旧 key、packet sequence、history 与 endpoint 均不得继承。Scene可在`Retrying`与successor baseline期间保留最后可信Actor/Camera/HP，但必须关闭输入并明确标识重连与`last known`；终态失败必须给出重新进入世界或重新登录的玩家动作，不得显示`Protocol`等内部分类。
+
+Current C++ runtime 已把 input timeline 接入动态 movement/physics snapshot，wire
+以 bit 4 登记 authority grounded，并保持完整 transform 与 acknowledgement 同 Tick
+发布。Current PersonalWorld 使用服务端 Y=0 有界平地，不读取 Unity Scene 或客户端
+Transform；它只闭合基础移动/跳跃链路，不代表正式地图碰撞完成。Editor 接线、分层
+测试入口、真实 Windows Player，以及单人和 Owner/Visitor 代表性人工场景已于
+2026-08-03 完成 B0.7 定向开发验收；完整网络矩阵、连续 verify、长时 soak 与 finalize
+仍只在使用者显式冻结候选时执行。
+
 ## 验收场景
 
 - 新安装注册并登录

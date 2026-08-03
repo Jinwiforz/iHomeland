@@ -1,12 +1,18 @@
 #include "ihomeland/sim/control/simulation_node.hpp"
 #include "ihomeland/sim/core/sha256.hpp"
+#include "ihomeland/sim/simulation/command_ingress.hpp"
 
 #include <chrono>
 #include <array>
 #include <iomanip>
+#include <iostream>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <utility>
 
 namespace {
 
@@ -325,6 +331,107 @@ void TestBattleTicketRegistry() {
         "stopped target lost exact terminal install replay");
 }
 
+/// TestBattleTicketSuccessorPreservesActorSlot 验证同 actor 新票据退役 predecessor 且不增加容量。
+void TestBattleTicketSuccessorPreservesActorSlot() {
+    constexpr std::uint64_t observed_unix_ms = 2000;
+    constexpr std::uint64_t successor_unix_ms = 3000;
+    ihomeland::sim::SimulationNode node(TestConfig());
+    const auto start = TestCommand("ticket_successor_0001");
+    const auto ready = node.Start(start);
+    const auto predecessor =
+        TestTicketCommand(start, ready, 0, 2500);
+    static_cast<void>(
+        node.InstallBattleTicket(
+            predecessor,
+            observed_unix_ms));
+    static_cast<void>(
+        node.ConsumeBattleTicket(
+            predecessor.ticket_id,
+            predecessor.binding_fingerprint,
+            observed_unix_ms));
+
+    const auto visitor =
+        TestTicketCommand(start, ready, 1, 2500);
+    static_cast<void>(
+        node.InstallBattleTicket(
+            visitor,
+            observed_unix_ms));
+    static_cast<void>(
+        node.ConsumeBattleTicket(
+            visitor.ticket_id,
+            visitor.binding_fingerprint,
+            observed_unix_ms));
+
+    auto successor =
+        TestTicketCommand(start, ready, 8, 5000);
+    successor.binding.actor_slot =
+        predecessor.binding.actor_slot;
+    successor.binding.player_id =
+        predecessor.binding.player_id;
+    successor.binding.session_id =
+        predecessor.binding.session_id;
+    successor.binding.session_epoch =
+        predecessor.binding.session_epoch;
+    successor.binding.role =
+        predecessor.binding.role;
+    const auto installed =
+        node.InstallBattleTicket(
+            successor,
+            successor_unix_ms);
+    Require(
+        installed.state ==
+                ihomeland::sim::BattleTicketState::Installed &&
+            installed.actor_slot ==
+                predecessor.binding.actor_slot &&
+            installed.superseded_binding_fingerprint ==
+                predecessor.binding_fingerprint,
+        "successor ticket did not supersede the exact actor");
+    const auto retired =
+        node.BattleTicketStatus(
+            predecessor.ticket_id,
+            predecessor.binding_fingerprint,
+            successor_unix_ms);
+    const auto visitor_after_successor =
+        node.BattleTicketStatus(
+            visitor.ticket_id,
+            visitor.binding_fingerprint,
+            successor_unix_ms);
+    Require(
+        retired.state ==
+                ihomeland::sim::BattleTicketState::Revoked &&
+            visitor_after_successor.state ==
+                ihomeland::sim::BattleTicketState::Consumed &&
+            node.InstalledOrActiveActors(
+                ready.simulation_instance_id,
+                successor_unix_ms) == 2,
+        "successor install retired another active actor");
+
+    auto slot_conflict =
+        TestTicketCommand(start, ready, 9, 5000);
+    slot_conflict.binding.actor_slot =
+        predecessor.binding.actor_slot;
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.InstallBattleTicket(
+                    slot_conflict,
+                    successor_unix_ms));
+        },
+        "different actor replaced an occupied successor slot");
+    auto player_conflict =
+        TestTicketCommand(start, ready, 10, 5000);
+    player_conflict.binding.player_id =
+        predecessor.binding.player_id;
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.InstallBattleTicket(
+                    player_conflict,
+                    successor_unix_ms));
+        },
+        "same actor changed slot during successor install");
+}
+
 /// TestQualificationSnapshot 验证 exact binding、只读计数与低敏聚合。
 void TestQualificationSnapshot() {
     constexpr std::uint64_t observed_unix_ms = 2'000;
@@ -416,6 +523,193 @@ void TestQualificationSnapshot() {
                 observed_unix_ms));
         },
         "qualification snapshot accepted stale assignment");
+}
+
+/// TestActorSlotEntityMapping 锁定 wire v1 actor_slot 到 one-based entity identity 的跨层门。
+void TestActorSlotEntityMapping() {
+    constexpr std::uint64_t observed_unix_ms = 2'000;
+    ihomeland::sim::SimulationNode node(TestConfig());
+    const auto start = TestCommand("actor_mapping_0001");
+    const auto ready = node.Start(start);
+    const auto ticket = TestTicketCommand(start, ready, 0);
+    static_cast<void>(
+        node.InstallBattleTicket(ticket, observed_unix_ms));
+    static_cast<void>(
+        node.ConsumeBattleTicket(
+            ticket.ticket_id,
+            ticket.binding_fingerprint,
+            observed_unix_ms));
+
+    const auto context_for_actor =
+        [&](const std::uint64_t actor_id) {
+            return ihomeland::sim::BattleSessionContext(
+                ticket.binding.session_id,
+                ticket.binding.session_epoch,
+                1,
+                1,
+                1,
+                ticket.binding.assignment_fingerprint,
+                ticket.binding.simulation_instance_id,
+                ticket.binding.mapping_generation,
+                ticket.binding.target_revision,
+                ihomeland::sim::BattleActorBinding{
+                    .player_id = ticket.binding.player_id,
+                    .role =
+                        ihomeland::sim::BattleActorRole::Owner,
+                    .actor_id = actor_id,
+                    .actor_slot = ticket.binding.actor_slot,
+                },
+                std::make_shared<
+                    ihomeland::sim::BattleSessionAuthority>());
+        };
+
+    const auto current = context_for_actor(1);
+    Require(
+        node.BattleSessionCurrent(current),
+        "one-based actor mapping was not current");
+    auto* ingress =
+        node.ResolveBattleCommandIngress(current);
+    Require(
+        ingress != nullptr,
+        "one-based actor mapping lost command ingress");
+    const auto projection =
+        node.BattleReplicationSnapshot(current);
+    Require(
+        !projection.has_value(),
+        "replication was fabricated before an input acknowledgement");
+
+    const auto raw_context =
+        node.BattleRawContext(
+            current,
+            observed_unix_ms);
+    const auto newest_target_tick =
+        1 +
+        (raw_context.newest_accepted_tick - 1) /
+            2;
+    const auto target_tick =
+        newest_target_tick - 1;
+    const auto input_tick =
+        1 + (target_tick - 1) * 2;
+    const auto submit =
+        [&](const std::uint64_t sequence,
+            const ihomeland::sim::GameplayCommandKind kind,
+            ihomeland::sim::GameplayCommandPayload payload) {
+            return ingress->Submit(
+                ihomeland::sim::GameplayCommand{
+                    .assignment_fingerprint =
+                        start.assignment.fingerprint,
+                    .mapping_generation =
+                        start.mapping_generation,
+                    .actor_id = 1,
+                    .input_tick = input_tick,
+                    .sequence = sequence,
+                    .expires_at_tick =
+                        target_tick + 2,
+                    .kind = kind,
+                    .payload = std::move(payload),
+                });
+        };
+    const auto move_result =
+        submit(
+            1,
+            ihomeland::sim::GameplayCommandKind::
+                ContinuousIntentSample,
+            ihomeland::sim::ContinuousIntentPayload{
+                .move_x_permille = 1'000,
+                .move_y_permille = 0});
+    const auto jump_result =
+        submit(
+            2,
+            ihomeland::sim::GameplayCommandKind::
+                JumpPressed,
+            ihomeland::sim::JumpPressedPayload{});
+    const auto aim_result =
+        submit(
+            3,
+            ihomeland::sim::GameplayCommandKind::
+                AimIntent,
+            ihomeland::sim::AimIntentPayload{
+                .yaw_millidegrees = 180'000,
+                .pitch_millidegrees = 0});
+    if (!move_result.accepted ||
+        !jump_result.accepted ||
+        !aim_result.accepted) {
+        std::cerr
+            << "move="
+            << static_cast<int>(
+                   move_result.rejection)
+            << " jump="
+            << static_cast<int>(
+                   jump_result.rejection)
+            << " aim="
+            << static_cast<int>(
+                   aim_result.rejection)
+            << " input=" << input_tick
+            << " target=" << target_tick
+            << '\n';
+    }
+    Require(
+        move_result.accepted &&
+            jump_result.accepted &&
+            aim_result.accepted,
+        "typed actor commands did not enter current instance");
+
+    std::optional<
+        ihomeland::sim::BattleReplicationProjection>
+        committed_projection;
+    for (std::size_t attempt = 0;
+         attempt < 500;
+         ++attempt) {
+        auto candidate =
+            node.BattleReplicationSnapshot(current);
+        if (candidate.has_value() &&
+            candidate->server_tick >=
+                target_tick &&
+            candidate->states.front().x_mm > 0) {
+            committed_projection =
+                std::move(candidate);
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    Require(
+        committed_projection.has_value() &&
+            committed_projection->states.size() ==
+                start.actor_capacity &&
+            committed_projection->states.front()
+                    .actor_id == 1 &&
+            committed_projection->states.front()
+                    .yaw_millidegrees ==
+                -180'000 &&
+            committed_projection->states.front()
+                    .y_mm > 0 &&
+            !committed_projection->states.front()
+                 .grounded &&
+            committed_projection->states.back()
+                    .actor_id ==
+                start.actor_capacity &&
+            committed_projection->states.back()
+                .grounded,
+        "node did not publish typed move/aim/jump for the complete actor set");
+
+    const auto drifted = context_for_actor(2);
+    Require(
+        !node.BattleSessionCurrent(drifted),
+        "drifted actor identity remained current");
+    Require(
+        node.ResolveBattleCommandIngress(drifted) == nullptr,
+        "drifted actor identity reached command ingress");
+    Require(
+        !node.BattleReplicationSnapshot(drifted).has_value(),
+        "drifted actor identity received replication state");
+    RequireFailure(
+        [&] {
+            static_cast<void>(
+                node.BattleRawContext(
+                    drifted,
+                    observed_unix_ms));
+        },
+        "drifted actor identity received raw input context");
 }
 
 /// TestLifecycle 验证 start replay、capacity、drain、result ack 与 stop replay。
@@ -576,10 +870,13 @@ int main() {
         TestLifecycle();
         TestActorQualificationCap();
         TestBattleTicketRegistry();
+        TestBattleTicketSuccessorPreservesActorSlot();
         TestQualificationSnapshot();
+        TestActorSlotEntityMapping();
         TestResultOutboxCapacity();
         return 0;
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
         return 1;
     }
 }

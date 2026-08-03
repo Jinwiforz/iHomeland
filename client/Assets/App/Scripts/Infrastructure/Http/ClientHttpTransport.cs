@@ -438,7 +438,8 @@ namespace IHomeland.Client.Infrastructure.Http
             }
 
             var requiresIdempotencyKey = ReferenceEquals(operation, ClientHttpOperationCatalog.AcceptVisitInvite) ||
-                                         ReferenceEquals(operation, ClientHttpOperationCatalog.IssueWorldAdmission);
+                                         ReferenceEquals(operation, ClientHttpOperationCatalog.IssueWorldAdmission) ||
+                                         ReferenceEquals(operation, ClientHttpOperationCatalog.IssueBattleTicket);
             if (requiresIdempotencyKey != !string.IsNullOrEmpty(idempotencyKey) ||
                 (requiresIdempotencyKey && !IsValidIdempotencyKey(idempotencyKey)))
             {
@@ -604,20 +605,39 @@ namespace IHomeland.Client.Infrastructure.Http
             using (var buffer = new MemoryStream())
             {
                 var chunk = new byte[ReadBufferBytes];
-                while (true)
+                try
                 {
-                    var count = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken);
-                    if (count == 0)
+                    while (true)
                     {
-                        return buffer.ToArray();
-                    }
+                        var count = await stream.ReadAsync(
+                            chunk,
+                            0,
+                            chunk.Length,
+                            cancellationToken);
+                        if (count == 0)
+                        {
+                            return buffer.ToArray();
+                        }
 
-                    if (buffer.Length + count > maximumBytes)
+                        if (buffer.Length + count > maximumBytes)
+                        {
+                            return null;
+                        }
+
+                        buffer.Write(chunk, 0, count);
+                    }
+                }
+                finally
+                {
+                    Array.Clear(chunk, 0, chunk.Length);
+                    if (buffer.TryGetBuffer(out var segment) &&
+                        segment.Array != null)
                     {
-                        return null;
+                        Array.Clear(
+                            segment.Array,
+                            segment.Offset,
+                            segment.Count);
                     }
-
-                    buffer.Write(chunk, 0, count);
                 }
             }
         }

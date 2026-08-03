@@ -197,6 +197,14 @@ Network Receive
 
 任何后台线程不得直接读写 `VisualElement`、GameObject、Component 或 UnityEngine.Object。
 
+## Battle Scene 表现边界
+
+UI Toolkit 继续拥有 Login、Shell、WorldVisit、ConnectionLost 等 logical screen/overlay；既有 uGUI WorldHud 继续属于唯一 route owner。B0.7 新增的 `ClientBattleHudHost` 只是 `PersonalWorldScene` 内的 scene-bound overlay，用于低敏 battle availability、authority health 与 correction 提示，不创建第二个 screen、Router、EventSystem 或 input action owner。
+
+`ClientActorViewRegistry` 按 battle/entity generation 创建 generic Actor Prefab；local view 读取 prediction presentation，remote view 读取 interpolation presentation。`CinemachineCameraHost` 只把 Exploration、MeleeCombat、RangedAim、Cinematic intent 映射到登记 rig 与 follow proxy；Camera、Animator、HUD 与 cue 都没有 hit/damage/authority command API。
+
+当 UI Toolkit 页面或 modal 捕获输入时，唯一 `ClientUiHostRoot` 切换 Player/UI action map、cursor 与 focus，Scene battle host 随即停止采样。Scene replacement 先使 SceneLifetime 不可提交，再解绑 Actor/HUD/Camera/Input；销毁后的 callback 只能被 generation gate 丢弃。
+
 ## 设计语义
 
 两套 UI 共享语义，不共享控件：

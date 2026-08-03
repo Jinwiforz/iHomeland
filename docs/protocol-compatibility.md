@@ -259,6 +259,18 @@ wire identity 必须拒绝缺失字段。同一逻辑 snapshot 的所有 partiti
 sequence、baseline、mapping generation 与确认值，三端 consumer 只能在完整集合一致
 后发布该确认，不能从 `ServerTick`、日志或到达顺序推导。
 
+`BattleEntityState.state_flags` 的 current closed registry 为：低四位 `0x0000000f`
+保留 phase token，bit 4 `0x00000010` 表示 Movement/Physics 已提交的 authority
+grounded，bit 31 `0x80000000` 表示 dead，唯一 known mask 为 `0x8000001f`。bit 0
+仍是 phase，不得重解释为 grounded；任意未知 bit 必须拒绝。
+
+Full、delta transform 与 lifecycle spawn state 必须显式携带 position 三轴、规范 yaw
+和 velocity 三轴共七个 scalar，yaw 只允许 `[-180000, 180000)`；delta 的
+`state_mask` 必须与 transform、health、flags presence 精确一致。C++ producer、
+独立协议客户端与 C# consumer 由静态 parity gate 和负向测试共同锁定该 registry。
+Unity prediction/reconciliation 只消费 bit 4，不得按 Transform 高度、Scene collider
+或 phase token 推导接地。
+
 独立资格客户端的 stdio contract 由
 `shared/contracts/fixtures/battle/protocol-client/` 拥有。`IHBQ` outer frame 使用
 严格递增 sequence、absolute request deadline 与零值 receipt deadline；session-start

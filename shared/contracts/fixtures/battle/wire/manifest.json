@@ -3,7 +3,7 @@
   "corpus_version": "battle-wire-v1",
   "document_kind": "manifest",
   "schema_path": "schema.json",
-  "schema_sha256": "0f31d67c337490c517bdb90ed4635e9b69ee17b2a7188aeb3376f79bca0e56ba",
+  "schema_sha256": "e32921e17cff550b24a4dbc05b463d400eafe45735f1ca57c1125576d9b4f4f0",
   "required_domains": [
     "binding",
     "crypto",
@@ -49,7 +49,7 @@
     {
       "path": "wire-layout.json",
       "document_kind": "wire-layout",
-      "sha256": "14ab4bb8ea57a004d236efd639bb31bbbc012acc08684e4adbf14c2a4a1bd4c5"
+      "sha256": "fac40fb93054e75b49b2fd7ccff7791313ee2ed5bd7577b172c46c204b123ef5"
     },
     {
       "path": "wire-suite.json",

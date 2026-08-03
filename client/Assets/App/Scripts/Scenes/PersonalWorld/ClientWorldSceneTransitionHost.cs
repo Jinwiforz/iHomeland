@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using IHomeland.Client.Application.Battle;
 using IHomeland.Client.Presentation.PersonalWorld;
+using IHomeland.Client.Presentation.Hosts;
 using IHomeland.Client.Scenes.Contexts;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -27,6 +29,12 @@ namespace IHomeland.Client.Scenes.PersonalWorld
 
         /// <summary>由 Composition 显式注入的 Scene generation owner。</summary>
         private SceneLifetimeOwner _lifetimeOwner;
+
+        /// <summary>保存 production Scene 可使用的唯一 App Scope battle runtime facade。</summary>
+        private ClientBattleRuntimeCoordinator _battleRuntime;
+
+        /// <summary>保存 production Scene 可使用的唯一 App Scope Input owner 窄端口。</summary>
+        private IClientBattleInputSource _battleInput;
 
         /// <summary>保存已提交内容场景的 Unity handle。</summary>
         private Scene _currentScene;
@@ -89,12 +97,43 @@ namespace IHomeland.Client.Scenes.PersonalWorld
         /// <exception cref="InvalidOperationException">Host 已启动或重复配置时抛出。</exception>
         internal void Configure(SceneLifetimeOwner lifetimeOwner)
         {
+            ConfigureCore(lifetimeOwner, battleRuntime: null, battleInput: null);
+        }
+
+        /// <summary>
+        /// 由 production Composition 在 AppLifetime 启动前注入 Scene 与 battle 窄端口。
+        /// </summary>
+        /// <param name="lifetimeOwner">App Scope 唯一 Scene generation owner。</param>
+        /// <param name="battleRuntime">App Scope 唯一 battle runtime facade。</param>
+        /// <param name="battleInput">App Scope 唯一 Input System owner。</param>
+        internal void Configure(
+            SceneLifetimeOwner lifetimeOwner,
+            ClientBattleRuntimeCoordinator battleRuntime,
+            IClientBattleInputSource battleInput)
+        {
+            ConfigureCore(
+                lifetimeOwner,
+                battleRuntime ?? throw new ArgumentNullException(nameof(battleRuntime)),
+                battleInput ?? throw new ArgumentNullException(nameof(battleInput)));
+        }
+
+        /// <summary>执行 isolated 或 production Host 的一次性配置。</summary>
+        /// <param name="lifetimeOwner">App Scope 唯一 Scene generation owner。</param>
+        /// <param name="battleRuntime">Production battle runtime；isolated fixture 为 null。</param>
+        /// <param name="battleInput">Production Input owner；isolated fixture 为 null。</param>
+        private void ConfigureCore(
+            SceneLifetimeOwner lifetimeOwner,
+            ClientBattleRuntimeCoordinator battleRuntime,
+            IClientBattleInputSource battleInput)
+        {
             if (_running || _stopped || _lifetimeOwner != null)
             {
                 throw new InvalidOperationException("ClientWorldSceneTransitionHost 只能在启动前配置一次。");
             }
 
             _lifetimeOwner = lifetimeOwner ?? throw new ArgumentNullException(nameof(lifetimeOwner));
+            _battleRuntime = battleRuntime;
+            _battleInput = battleInput;
         }
 
         /// <summary>启用显式场景转换，不自动加载任何内容 Scene。</summary>
@@ -217,7 +256,18 @@ namespace IHomeland.Client.Scenes.PersonalWorld
 
                         context = FindSingleContext(candidate);
                         context.ValidateConfiguration();
-                        context.Bind(candidateLifetime, viewState.WorldHud);
+                        if (_battleRuntime != null && _battleInput != null)
+                        {
+                            context.Bind(
+                                candidateLifetime,
+                                viewState.WorldHud,
+                                _battleRuntime,
+                                _battleInput);
+                        }
+                        else
+                        {
+                            context.Bind(candidateLifetime, viewState.WorldHud);
+                        }
                         lock (_sync)
                         {
                             if (!_running || _stopped || !candidateLifetime.CanCommit ||
