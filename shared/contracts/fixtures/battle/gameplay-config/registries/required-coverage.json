@@ -3,8 +3,8 @@
   "document_kind": "coverage-registry",
   "required_roles": [
     { "role": "owner-visitor-player", "authority_kind": "actor", "presentation_required": true },
-    { "role": "sword", "authority_kind": "weapon", "presentation_required": false },
-    { "role": "fan", "authority_kind": "weapon", "presentation_required": false },
+    { "role": "sword", "authority_kind": "weapon", "presentation_required": true },
+    { "role": "fan", "authority_kind": "weapon", "presentation_required": true },
     { "role": "sword-grant", "authority_kind": "ability-grant", "presentation_required": false },
     { "role": "fan-grant", "authority_kind": "ability-grant", "presentation_required": false },
     { "role": "sword-primary", "authority_kind": "ability", "presentation_required": true },

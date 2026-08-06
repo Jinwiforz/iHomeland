@@ -299,18 +299,12 @@ public:
 
     /// QueueAbilityEvent 从只读event投影生成3004可靠消息。
     [[nodiscard]] bool QueueAbilityEvent(
-        const EventProjectionToken& event,
-        std::uint32_t source_generation,
-        std::uint32_t ability_id,
-        std::uint32_t phase,
+        const CombatAbilityEvent& event,
         std::uint64_t now_unix_ms);
 
     /// QueueEntityLifecycle 从simulation event生成3005可靠消息。
     [[nodiscard]] bool QueueEntityLifecycle(
-        const EventProjectionToken& event,
-        std::uint32_t entity_generation,
-        std::uint32_t kind,
-        std::uint32_t archetype_id,
+        const CombatLifecycleEvent& event,
         std::uint64_t now_unix_ms);
 
     /// QueueResyncResponse 确认恢复策略但不在KCP内嵌snapshot。

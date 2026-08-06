@@ -1,0 +1,18 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "wire-mapping",
+  "package_id": "governance-reference-v1",
+  "qualification_state": "governance-only",
+  "mappings": [
+    { "kind": "actor", "semantic_id": "fixture/actor/player", "numeric_id": 1 },
+    { "kind": "actor", "semantic_id": "fixture/actor/ordinary-monster", "numeric_id": 2 },
+    { "kind": "actor", "semantic_id": "fixture/actor/boss", "numeric_id": 3 },
+    { "kind": "weapon", "semantic_id": "fixture/weapon/sword", "numeric_id": 101 },
+    { "kind": "weapon", "semantic_id": "fixture/weapon/fan", "numeric_id": 102 },
+    { "kind": "ability", "semantic_id": "fixture/ability/sword-primary", "numeric_id": 201 },
+    { "kind": "ability", "semantic_id": "fixture/ability/fan-primary", "numeric_id": 202 },
+    { "kind": "projectile", "semantic_id": "fixture/projectile/fan-blade", "numeric_id": 301 }
+  ],
+  "retired_numeric_ids": [],
+  "retired_semantic_ids": []
+}

@@ -35,13 +35,15 @@
               "typed-reference-schema",
               "numeric-range-schema",
               "coverage-schema",
+              "wire-mapping-schema",
               "semantic-registry",
               "numeric-registry",
               "coverage-registry",
               "gameplay-package",
               "authority-catalog",
               "presentation-catalog",
-              "external-bindings"
+              "external-bindings",
+              "wire-mapping"
             ]
           },
           "file_sha256": {

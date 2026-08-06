@@ -292,7 +292,8 @@ int RunControlStdio(
     std::ostream& diagnostics,
     const ControlBuildBinding& build,
     const BattleUdpListenerConfig* battle_listener,
-    const QualificationControlConfig* qualification) {
+    const QualificationControlConfig* qualification,
+    const GameplayPackageCatalog* gameplay_package) {
     try {
         static const std::regex qualification_run_pattern{
             "^bqrun_[0-9a-f]{32}$"};
@@ -313,18 +314,22 @@ int RunControlStdio(
         ControlSequence sequence(hello_frame.session_nonce);
         sequence.AcceptInbound(hello_frame);
         const auto hello = ParseObject(hello_frame.payload_json);
-        RequireFields(
-            hello,
-            {
-                "actorCapacity",
-                "expectedBuildIdentity",
-                "expectedModelManifest",
-                "expectedProfileManifest",
-                "instanceCapacity",
-                "runtimeNodeId",
-                "simulationNodeId",
-            },
-            "hello challenge");
+        auto hello_fields = std::set<std::string, std::less<>>{
+            "actorCapacity",
+            "expectedBuildIdentity",
+            "expectedModelManifest",
+            "expectedProfileManifest",
+            "instanceCapacity",
+            "runtimeNodeId",
+            "simulationNodeId",
+        };
+        if (gameplay_package != nullptr) {
+            hello_fields.insert("expectedConfigIdentity");
+            hello_fields.insert("expectedNavigationIdentity");
+            hello_fields.insert("expectedPhysicsIdentity");
+            hello_fields.insert("expectedWireIdentity");
+        }
+        RequireFields(hello, hello_fields, "hello challenge");
         if (hello.at("expectedBuildIdentity").get<std::string>() !=
                 build.build_identity ||
             hello.at("expectedModelManifest").get<std::string>() !=
@@ -335,6 +340,18 @@ int RunControlStdio(
                 "implementation-qualified-windows-x64") {
             throw std::runtime_error("control hello build binding drifted");
         }
+        if (gameplay_package != nullptr &&
+            (hello.at("expectedConfigIdentity").get<std::string>() !=
+                 gameplay_package->binding.config_identity ||
+             hello.at("expectedNavigationIdentity").get<std::string>() !=
+                 gameplay_package->binding.navigation_identity ||
+             hello.at("expectedPhysicsIdentity").get<std::string>() !=
+                 gameplay_package->binding.physics_identity ||
+             hello.at("expectedWireIdentity").get<std::string>() !=
+                 gameplay_package->binding.wire_identity)) {
+            throw std::runtime_error(
+                "control hello gameplay package binding drifted");
+        }
         auto node = std::make_unique<SimulationNode>(SimulationNodeConfig{
             .simulation_node_id = hello.at("simulationNodeId").get<std::string>(),
             .runtime_node_id = hello.at("runtimeNodeId").get<std::string>(),
@@ -344,6 +361,10 @@ int RunControlStdio(
             .instance_capacity =
                 hello.at("instanceCapacity").get<std::size_t>(),
             .actor_capacity = hello.at("actorCapacity").get<std::size_t>(),
+            .gameplay_catalog = gameplay_package == nullptr
+                ? nullptr
+                : std::make_shared<const GameplayPackageCatalog>(
+                      *gameplay_package),
         });
         std::unique_ptr<BattleTransportRuntime>
             battle_runtime;
@@ -424,7 +445,16 @@ int RunControlStdio(
                                 context);
                     },
                     ObservedUnixMilliseconds(),
-                    &node->RuntimeMetrics());
+                    &node->RuntimeMetrics(),
+                    [owner = node.get()](
+                        const BattleSessionContext&
+                            context,
+                        const bool active) {
+                        return owner->
+                            SetBattleSessionParticipation(
+                                context,
+                                active);
+                    });
             auto* runtime_owner =
                 battle_runtime.get();
             node->StartBattleUdpListener(
@@ -444,7 +474,7 @@ int RunControlStdio(
                     static_cast<void>(disposition);
                 });
         }
-        const auto hello_receipt = Json{
+        auto hello_receipt = Json{
             {"actorCapacity", node->Config().actor_capacity},
             {"buildIdentity", build.build_identity},
             {"instanceCapacity", node->Config().instance_capacity},
@@ -454,6 +484,22 @@ int RunControlStdio(
             {"runtimeNodeId", node->Config().runtime_node_id},
             {"simulationNodeId", node->Config().simulation_node_id},
         }.dump();
+        auto hello_receipt_document = Json::parse(hello_receipt);
+        if (gameplay_package != nullptr) {
+            hello_receipt_document["configIdentity"] =
+                gameplay_package->binding.config_identity;
+            hello_receipt_document["gameplayPackageId"] =
+                gameplay_package->binding.package_id;
+            hello_receipt_document["mappingIdentity"] =
+                gameplay_package->binding.mapping_identity;
+            hello_receipt_document["navigationIdentity"] =
+                gameplay_package->binding.navigation_identity;
+            hello_receipt_document["physicsIdentity"] =
+                gameplay_package->binding.physics_identity;
+            hello_receipt_document["wireIdentity"] =
+                gameplay_package->binding.wire_identity;
+            hello_receipt = hello_receipt_document.dump();
+        }
         ControlFrameCodec::Write(
             output,
             sequence.MakeOutbound(

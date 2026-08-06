@@ -231,6 +231,7 @@ function Assert-WireArtifacts {
     Assert-ExactProperties $Layout @(
         "format_version", "corpus_version", "document_kind", "secure_header",
         "raw_route_header", "snapshot_acknowledgement", "snapshot_entity_state",
+        "content_mapping",
         "kcp_segment_header",
         "kcp_route_envelope", "transport_control_envelope",
         "transport_control_messages", "datagram_equation"
@@ -254,7 +255,8 @@ function Assert-WireArtifacts {
     }
     Assert-ExactProperties $Layout.snapshot_entity_state @(
         "message_ids", "transform_message", "required_scalar_fields",
-        "scalar_presence", "delta_state_mask", "state_flags"
+        "required_content_fields", "scalar_presence", "cross_field_invariants",
+        "delta_state_mask", "state_flags", "partition_projection"
     ) "snapshot entity state"
     if ((@($Layout.snapshot_entity_state.message_ids) -join ",") -cne "3002,3003,3005" -or
         $Layout.snapshot_entity_state.transform_message -cne
@@ -268,7 +270,14 @@ function Assert-WireArtifacts {
             "1,2,3,4,5,6,7" -or
         $Layout.snapshot_entity_state.required_scalar_fields[3].range -cne
             "[-180000,180000)" -or
-        [uint32]$Layout.snapshot_entity_state.delta_state_mask.known_mask -ne 7 -or
+        (@($Layout.snapshot_entity_state.required_content_fields.name) -join ",") -cne
+            "archetype_id,equipped_weapon_id,max_health_milli" -or
+        (@($Layout.snapshot_entity_state.required_content_fields.field_number) -join ",") -cne
+            "6,7,8" -or
+        (@($Layout.snapshot_entity_state.cross_field_invariants) -join ",") -cne
+            "health-milli-not-greater-than-max-health-milli,lifecycle-archetype-equals-initial-state-archetype,player-weapon-mapped-nonzero-and-non-player-weapon-zero" -or
+        [uint32]$Layout.snapshot_entity_state.delta_state_mask.equipped_weapon_id -ne 8 -or
+        [uint32]$Layout.snapshot_entity_state.delta_state_mask.known_mask -ne 15 -or
         $Layout.snapshot_entity_state.delta_state_mask.presence_policy -cne
             "exact-match" -or
         [uint32]$Layout.snapshot_entity_state.state_flags.phase_mask -ne 15 -or
@@ -277,8 +286,37 @@ function Assert-WireArtifacts {
         [uint32]$Layout.snapshot_entity_state.state_flags.known_mask -ne 2147483679 -or
         $Layout.snapshot_entity_state.state_flags.unknown_policy -cne "reject" -or
         $Layout.snapshot_entity_state.state_flags.compatibility -cne
-            "bits-0-through-3-remain-phase-bit-4-is-grounded-bit-31-is-dead") {
+            "bits-0-through-3-remain-phase-bit-4-is-grounded-bit-31-is-dead" -or
+        [int]$Layout.snapshot_entity_state.partition_projection.maximum_encoded_entity_state_bytes -ne 91 -or
+        [int]$Layout.snapshot_entity_state.partition_projection.maximum_full_entity_entry_bytes -ne 93 -or
+        [int]$Layout.snapshot_entity_state.partition_projection.maximum_encoded_entity_delta_bytes -ne 85 -or
+        [int]$Layout.snapshot_entity_state.partition_projection.maximum_delta_entity_entry_bytes -ne 87 -or
+        [int]$Layout.snapshot_entity_state.partition_projection.minimum_entities_per_full_partition -ne 8 -or
+        [int]$Layout.snapshot_entity_state.partition_projection.minimum_entities_per_delta_partition -ne 8 -or
+        [int]$Layout.snapshot_entity_state.partition_projection.maximum_datagram_bytes -ne 1200) {
         throw "snapshot entity state registry 漂移"
+    }
+    Assert-ExactProperties $Layout.content_mapping @(
+        "source_path", "mapping_sha256", "numeric_type", "nonzero_required",
+        "retired_policy", "kinds"
+    ) "content mapping"
+    $mappingPath = (Resolve-Path -LiteralPath (Join-Path $CorpusRoot ([string]$Layout.content_mapping.source_path))).Path
+    $mapping = Get-Content -LiteralPath $mappingPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $mappingIds = @($mapping.mappings | ForEach-Object { [uint64]$_.numeric_id })
+    if (-not $mappingPath.StartsWith($RepositoryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        (Get-Sha256 -Path $mappingPath) -cne [string]$Layout.content_mapping.mapping_sha256 -or
+        $Layout.content_mapping.numeric_type -cne "uint32" -or
+        -not [bool]$Layout.content_mapping.nonzero_required -or
+        $Layout.content_mapping.retired_policy -cne "never-reuse" -or
+        (@($Layout.content_mapping.kinds) -join ",") -cne "actor,weapon,ability,projectile" -or
+        $mapping.document_kind -cne "wire-mapping" -or
+        $mapping.qualification_state -cne "production" -or
+        @($mapping.mappings | Where-Object {
+            [uint64]$_.numeric_id -eq 0 -or [uint64]$_.numeric_id -gt [uint32]::MaxValue -or
+            [string]$_.kind -notin @("actor", "weapon", "ability", "projectile")
+        }).Count -gt 0 -or
+        @($mappingIds | Sort-Object -Unique).Count -ne $mappingIds.Count) {
+        throw "production content wire mapping 漂移"
     }
     foreach ($entry in @(
         @($Layout.secure_header, 48, "network-big-endian"),
@@ -556,8 +594,8 @@ function Assert-BattleGeneratedTypeBoundaries {
             Pattern = "IHomeland.Protocol.Battle.V1"
             Paths = @("client/Assets/App")
             Allowed = @(
-                "client/Assets/App/Scripts/Infrastructure/Battle/",
-                "client/Assets/App/Tests/"
+                "client/Assets/App/Modules/PersonalWorldCombat/Infrastructure/",
+                "client/Assets/App/Modules/"
             )
         },
         @{

@@ -43,6 +43,14 @@ struct BattleReplicationProjection final {
     InputAcknowledgementProjection acknowledgement;
     /// states 是同一 tick 的全部公开 entity state owned copy。
     std::vector<StateProjectionToken> states;
+    /// ability_events 是 instance journal 内可供每个 session 独立追赶的可靠事件。
+    std::vector<CombatAbilityEvent> ability_events;
+    /// lifecycle_events 是 instance journal 内可供每个 session 独立追赶的可靠事件。
+    std::vector<CombatLifecycleEvent> lifecycle_events;
+    /// player_actor_ids 区分预留空 player slot 与始终公开的 encounter entity。
+    std::vector<std::uint64_t> player_actor_ids;
+    /// encounter_complete 是不可结算的暂态 Boss defeat projection。
+    bool encounter_complete;
 };
 
 /// BattleSnapshotPublication 是一次不可变 snapshot cadence 决议。
@@ -165,6 +173,11 @@ public:
     using AuthorityValidator = std::function<bool(
         const BattleSessionContext&)>;
 
+    /// SessionLifecycleObserver 把 authenticated session generation 的唯一生灭通知给 simulation owner。
+    using SessionLifecycleObserver = std::function<bool(
+        const BattleSessionContext&,
+        bool)>;
+
     /// 构造函数创建 cookie、handshake、resource 与固定 session registry。
     BattleTransportRuntime(
         BattleTransportRuntimeConfig config,
@@ -177,7 +190,8 @@ public:
         KcpMessageHandler kcp_handler,
         AuthorityValidator authority_validator,
         std::uint64_t initial_unix_ms,
-        BattleRuntimeMetrics* runtime_metrics = nullptr);
+        BattleRuntimeMetrics* runtime_metrics = nullptr,
+        SessionLifecycleObserver session_lifecycle_observer = {});
 
     /// 析构函数 fail closed 清理全部 session、KCP 与 traffic secret。
     ~BattleTransportRuntime();

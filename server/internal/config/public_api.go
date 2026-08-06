@@ -359,7 +359,7 @@ func DefaultPublicAPI() PublicAPI {
 		BattleUDP: BattleUDPPolicy{
 			BindAddress: "127.0.0.1:58445", Advertised: Endpoint{Host: "127.0.0.1", Port: 58445},
 			DerivationKeySecret: "env:IHOMELAND_BATTLE_DERIVATION_KEY",
-			WireIdentity:        "3d0505f82dcfacec3b296e0a089ce58db2338a59b45e65c87ae6f1dddf47c2b1", MaximumTicketLifetime: 30 * time.Second,
+			WireIdentity:        "9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432", MaximumTicketLifetime: 30 * time.Second,
 			ReplayRetention: 5 * time.Minute, CookieRotation: 30 * time.Second,
 			RekeyInterval: 10 * time.Minute, PreviousEpochOverlap: 3 * time.Second,
 			PreAuthRate:    RatePolicy{Requests: 60, Window: time.Minute, Burst: 10},

@@ -12,9 +12,14 @@
     "version": "battle-network-profile-v2",
     "manifest_sha256": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424"
   },
+  "wire_binding": {
+    "version": "battle-wire-v1",
+    "manifest_sha256": "9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432"
+  },
   "authority_path": "authority.json",
   "presentation_path": "presentation.json",
   "bindings_path": "bindings.json",
+  "wire_mapping_path": "wire-mapping.json",
   "required_roles": [
     "boss",
     "boss-phase",

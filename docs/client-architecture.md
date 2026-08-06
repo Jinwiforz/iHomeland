@@ -282,7 +282,7 @@ Authoritative Snapshot/Event
 
 这些 owner 由 App Scope 装配，但其状态绑定 current target/assignment generation。离开世界、safe-return、assignment 更换、session invalidation 或 battle connection hard reset 时必须原子退役旧 generation 和 history。Scene 加载不能创建第二份 replica，Scene 卸载也不能伪造 disconnect/result。
 
-Scene Scope 只拥有玩家/怪物/Boss Actor Views、Animator、VFX、Audio、uGUI HUD、input host 与 camera host。View 通过 entity/view identity 绑定只读状态，并把语义输入交给 Application；它不能读取 socket、generated packet、ticket，不能提交最终 transform、命中、伤害、血量或 cooldown。
+Scene Scope 只拥有玩家/怪物/Boss Actor Views、Animator、VFX、Audio、uGUI HUD、input host 与 camera host。View 通过 entity/view identity 绑定只读状态，并把语义输入交给 Application；它不能读取 socket、generated packet、ticket，不能提交最终 transform、命中、伤害、血量或 cooldown。`ClientActorViewState.Moving`只由同一immutable Transform的量化水平速度派生；production Animator用`Moving/Bool`在Idle与共享in-place Locomotion之间切换，移动期间`VisualRoot`保持零local position与单位scale。Idle呼吸可以改变`VisualRoot`，但只允许在水平静止时播放，不能与actor root位移并行形成第二条视觉轨迹。
 
 客户端不实现完整 ECS 或完整 GAS。预测只覆盖 simulation model 明确允许的移动、跳跃和 ability 表现子集；服务器的 Attribute/Tag/Ability/Effect/Cooldown/Cost 权威结果被复制为 model，GameplayCue 被投影为表现。damage formula、effect stacking、target validation、AI 与 settlement 不进入客户端。
 
@@ -381,7 +381,7 @@ ClientUiHostRoot
   -> ClientActorViewRegistry / ClientBattleHudHost / CinemachineCameraHost
 ```
 
-`ClientUiHostRoot` 仍是唯一 Input System clone owner。Scene host 只读取 Move/Aim/Jump/Primary/Secondary/Interact，不能自行 enable 第二个 action map。Local Actor 使用 prediction/reconciliation transform；25 ms input采样不能直接触发25 ms Movement积分，同组第二个sample只允许从50 ms组起点重算，authority horizon内因ACK缺口残留的sample也不能再次积分，避免每次snapshot确认时前后拉回。Current平地prediction还复现server百万分比crossing和toward-zero舍入；render长帧触发安全re-anchor时保留已经采样的离散edge，在新timeline只发送一次，不能吞掉Jump/ability。Scene registry以保留跨render frame位置/角速度的临界阻尼追踪20 Hz local target，target更新不重置速度，Camera follow proxy只读取这一平滑Transform；current generic capsule的探索镜头使用4.5米距离、1.25米高肩点和0.10秒垂直阻尼，其他battle rig也不得回退到角色占满视野的2米低肩点构图。remote Actor 使用 100 ms delay、最多 150 ms extrapolation 的 interpolation；两者都不能回写 authority replica。可恢复断线与successor baseline期间保留最后可信Actor/Camera画面、关闭输入并在HUD标识`last known`；目标替换或终态失败立即清除。SceneLifetime 先退役 Input/Actor/HUD/Camera，随后 AppLifetime 才逆序停止 battle runtime、socket 与 native context。
+`ClientUiHostRoot` 仍是唯一 Input System clone owner。Player map 默认只配对当前 Keyboard 与 Mouse；只有某个具体 Gamepad 产生显式按键输入后才切换到该实例，Joystick、XR、Touch 以及未配对虚拟 Gamepad 的轴值都不能成为 Move/Aim fallback。设备归属通过 action-map device pairing 实现，不得按 binding group 清空绑定，否则 `Keyboard&Mouse;Touch` 之类的共享 `<Pointer>/delta` 会连同鼠标视角一起被覆盖。Scene host 只读取 Move/Aim/Jump/Primary/Secondary/Interact，不能自行 enable 第二个 action map。Local Actor 使用 prediction/reconciliation transform；25 ms input采样不能直接触发25 ms Movement积分，同组第二个sample只允许从50 ms组起点重算，authority horizon内因ACK缺口残留的sample也不能再次积分。由于authority按10 Hz每2个SimulationTick发布，`GameplayPrediction`必须从latest authority到future frame horizon逐Tick重演：没有新frame的中间Tick仍在4-Tick闭区间内复用C++ `InputTimeline`相同的last Move，超过窗口才neutral。Authority pacing只保留一个25 ms send credit，不能在publication放行帧burst；prediction-owned表现时钟从current visible pose连接完整horizon并直接发布量化`PresentationTransform`，不把send backlog解释为可见相位。Current平地prediction还复现server百万分比crossing和toward-zero舍入；render长帧触发安全re-anchor时保留已经采样的离散edge，在新timeline只发送一次，不能吞掉Jump/ability。Scene registry只在同帧提交该pose，不保存第二只计时器、不积分raw Move也不按velocity生成未知位置。Camera follow proxy读取提交后的同一Transform，避免prediction台阶、周期性一步rebase和松键后的第二写入者。ActorView随后从该Transform的水平速度选择Idle或in-place Locomotion，不能让循环Idle的垂直位移/缩放叠加到移动轨迹。current generic capsule的探索镜头使用4.5米距离、1.25米高肩点和0.10秒垂直阻尼，其他battle rig也不得回退到角色占满视野的2米低肩点构图。remote Actor仍使用100 ms authority render delay、最多150 ms extrapolation的`GameplayInterpolation`；local prediction-owned presentation与remote interpolation属于不同时间域，两者都不能回写authority replica。可恢复断线与successor baseline期间保留最后可信Actor/Camera画面、关闭输入并在HUD标识`last known`；目标替换或终态失败立即清除。SceneLifetime 先退役 Input/Actor/HUD/Camera，随后 AppLifetime 才逆序停止 battle runtime、socket 与 native context。
 
 Current C++ runtime 已把 validated move/aim/jump 接入每 instance 唯一
 `BattleMovementReplicationStore`，并从同一 committed Tick 发布全部 actor 的 position、
@@ -415,6 +415,12 @@ ScriptableObject 不保存在线 session、连接状态或 world/visit snapshot�
 - WSS/TCP 独立断线与重连不改变消息语义。
 - SceneContext 卸载后无持久引用。
 - 网络 push 只在主线程更新业务状态和 active view。
-- 应用退出有 deadline，不同步阻塞 Unity shutdown。
+- 应用退出有 deadline，不同步阻塞 Unity shutdown；`Experience`只撤销自身intent/subscriber/generation，`ClientUiRouter`唯一清理routes，`ClientWorldSceneTransitionHost`在`OnApplicationQuit`中立即失效Context/SceneLifetime并把实际Scene销毁交还Unity，不重复等待`UnloadSceneAsync`。
 - 个人世界阶段 Owner/Visitor 模式切换不会残留旧 SceneContext、旧 admission 或可写 world callback。
 - 未认证启动只创建 Login 页面且零业务网络副作用；双 Host 的 modal、focus、raycast、action map 与 teardown 保持单 owner。
+
+## B0.8 combat consumer
+
+纯 C# `GameplayReplica` 原子验证 production archetype/weapon/max-health、统一 ability/lifecycle event sequence 与 lifecycle parity；unknown、generation gap 或冲突只触发 current single-flight resync/terminal path，不部分提交。`GameplayPresentationProjector` 把 authority state 映射为 immutable player/monster/Boss/projectile ActorView、player/Boss HUD、去重 GameplayCue 与 melee/ranged CameraIntent，不保存 Unity object 或规则数值。
+
+`ClientBattleSemanticInput` 追加 `SwitchWeaponPressed` 离散 edge；lost-continuity re-anchor 与 focus gate 必须像 Jump/Primary 一样只保留一次。Development-only qualification snapshot可读取 local weapon、Boss health/phase/dead 与累计 ability event count，但不暴露 PlayerID、credential、endpoint、payload 或 settlement。Prefab、Scene、Animator、VFX、Audio 和 `ClientCombatResourceCatalog` 的制作清单见当前 change 的 `unity-content-handoff.md`。

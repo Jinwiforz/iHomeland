@@ -23,7 +23,7 @@
           "scale": { "pattern": "^(?:1|[1-9][0-9]*)$", "type": "string" },
           "rounding": { "enum": ["exact", "toward-zero"] },
           "overflow": { "const": "checked-int64" },
-          "model_owner": { "enum": ["AbilityActivation", "Movement", "Physics", "Effect", "Attribute", "AIIntent", "HitDetection", "Capacity"] }
+          "model_owner": { "enum": ["AbilityActivation", "Movement", "Physics", "Effect", "Attribute", "AIIntent", "HitDetection", "Death", "Capacity"] }
         }
       }
     }

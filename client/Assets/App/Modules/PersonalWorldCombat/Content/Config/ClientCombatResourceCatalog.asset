@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 41dc379ecb515694e99c9e21f6519d7f, type: 3}
+  m_Name: ClientCombatResourceCatalog
+  m_EditorClassIdentifier: IHomeland.Client.Runtime::IHomeland.Client.PersonalWorldCombat.Runtime.Scenes.ClientCombatResourceCatalog
+  _packageID: personal-world-combat-v1
+  _mapID: personal-world-combat/map/arena
+  _playerDisplay: {fileID: 5451464687982605430, guid: ed0e23833a1821a40ae9a74a2bc88fd2, type: 3}
+  _monsterDisplay: {fileID: 5868216111356885517, guid: edd70606f83e928459ec2f8f16d893a7, type: 3}
+  _bossDisplay: {fileID: 2856945472066148992, guid: 2006e377276c43144bc483f548ac53f8, type: 3}
+  _fanProjectileDisplay: {fileID: 2187952314564867385, guid: 1671c6eaf07679440a43c3edfefb132d, type: 3}
+  _swordDisplay: {fileID: 2330813616497893705, guid: a49732fcdb5d9f745a30de30b8ece665, type: 3}
+  _fanDisplay: {fileID: 7657213703335631829, guid: cab2913eaeb4a7a43af406891183a772, type: 3}
+  _swordAnimator: {fileID: 9100000, guid: ec268987505dd6d46a537c3a8f35a97b, type: 2}
+  _fanAnimator: {fileID: 9100000, guid: f903dfd12811e9d4086ee42ebdb35e12, type: 2}
+  _monsterAnimator: {fileID: 9100000, guid: d2b46c5d6c648a240ba37430ee81d1a1, type: 2}
+  _bossAnimator: {fileID: 9100000, guid: 4a0083686ff948c44a247f03681a16d6, type: 2}
+  _damageVfx: {fileID: 6977996418326022912, guid: cdcc07586aa0a884b9cc38549b7a5099, type: 3}
+  _combatAudio: {fileID: 8300000, guid: 03788046bd4b99949b94492319259e9b, type: 3}
+  _playerHud: {fileID: 3581505731175945230, guid: 8e121ddfb63f15143af4648169e717ec, type: 3}
+  _bossHud: {fileID: 2698869532055298201, guid: 0101c425227aac84bb120fa9091d2d79, type: 3}
+  _meleeCamera: {fileID: 6153933984233955953, guid: b7626ae6e9593ff49b4bb1a8174c01af, type: 3}
+  _rangedCamera: {fileID: 8742176516679613467, guid: 5062bf1fcd17b5b4bbdba3b7698efd39, type: 3}

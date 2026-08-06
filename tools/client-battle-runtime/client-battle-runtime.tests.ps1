@@ -186,6 +186,16 @@ try {
         [System.Text.UTF8Encoding]::new($false))
     Invoke-ExpectedFailure $staleExpiryPath "battle route policy drifted: 3006"
 
+    $wrongGapExpiry = $source | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $wrongGapExpiry.entryPolicy.inputGapExpirySimulationTicks = 5
+    $wrongGapExpiryPath = Join-Path $TestRoot "wrong-gap-expiry.json"
+    [System.IO.File]::WriteAllText(
+        $wrongGapExpiryPath,
+        (($wrongGapExpiry | ConvertTo-Json -Depth 12) + "`n"),
+        [System.Text.UTF8Encoding]::new($false))
+    Invoke-ExpectedFailure $wrongGapExpiryPath (
+        "battle profile parameter drifted: input-gap-expiry-ticks")
+
     $missingAck = $source | ConvertTo-Json -Depth 12 | ConvertFrom-Json
     $missingAck.entryPolicy.snapshotAcknowledgement.requiredMessages = @(
         "BattleFullSnapshot")

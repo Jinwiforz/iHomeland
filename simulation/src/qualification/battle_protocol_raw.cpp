@@ -136,7 +136,19 @@ struct SnapshotProjection final {
            TransformValid(state.transform()) &&
            state.has_health_milli() &&
            state.has_state_flags() &&
-           StateFlagsValid(state.state_flags());
+           StateFlagsValid(state.state_flags()) &&
+           state.has_archetype_id() &&
+           state.archetype_id() >= 1U &&
+           state.archetype_id() <= 3U &&
+           state.has_equipped_weapon_id() &&
+           state.has_max_health_milli() &&
+           state.max_health_milli() > 0U &&
+           state.health_milli() <=
+               state.max_health_milli() &&
+           (state.archetype_id() == 1U
+                ? state.equipped_weapon_id() == 101U ||
+                      state.equipped_weapon_id() == 102U
+                : state.equipped_weapon_id() == 0U);
 }
 
 /// DeltaEntityValid 验证 state mask 与 edition scalar/message presence 精确一致。
@@ -149,7 +161,7 @@ struct SnapshotProjection final {
         state.entity_generation() == 0 ||
         !state.has_state_mask() ||
         state.state_mask() == 0 ||
-        (state.state_mask() & ~7U) != 0) {
+        (state.state_mask() & ~15U) != 0) {
         return false;
     }
     const auto transform =
@@ -158,13 +170,19 @@ struct SnapshotProjection final {
         (state.state_mask() & 2U) != 0;
     const auto flags =
         (state.state_mask() & 4U) != 0;
+    const auto weapon =
+        (state.state_mask() & 8U) != 0;
     return transform == state.has_transform() &&
            (!state.has_transform() ||
             TransformValid(state.transform())) &&
            health == state.has_health_milli() &&
            flags == state.has_state_flags() &&
            (!state.has_state_flags() ||
-            StateFlagsValid(state.state_flags()));
+            StateFlagsValid(state.state_flags())) &&
+           weapon == state.has_equipped_weapon_id() &&
+           (!state.has_equipped_weapon_id() ||
+            state.equipped_weapon_id() == 101U ||
+            state.equipped_weapon_id() == 102U);
 }
 
 /// ParseSnapshot 只接受 full/delta closed outer contract。

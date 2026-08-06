@@ -1,0 +1,17 @@
+{
+  "format_version": "personal-world-physics-v1",
+  "map_id": "personal-world-combat/map/arena",
+  "coordinate_unit": "millimeters",
+  "gravity_mm_per_second_squared": -9800,
+  "collision_layers": [
+    { "id": 1, "semantic_id": "personal-world-combat/collision-layer/world", "collides_with_mask": 15 },
+    { "id": 2, "semantic_id": "personal-world-combat/collision-layer/player", "collides_with_mask": 13 },
+    { "id": 3, "semantic_id": "personal-world-combat/collision-layer/enemy", "collides_with_mask": 11 },
+    { "id": 4, "semantic_id": "personal-world-combat/collision-layer/projectile", "collides_with_mask": 7 }
+  ],
+  "query_policy": {
+    "fraction_scale": 1000000,
+    "sort_keys": ["fraction", "collider_id", "subshape_id"],
+    "maximum_hits": 32
+  }
+}

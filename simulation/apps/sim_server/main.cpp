@@ -1,5 +1,7 @@
 #include "ihomeland/sim/core/adapter_smoke.hpp"
 #include "ihomeland/sim/core/fixed_tick.hpp"
+#include "ihomeland/sim/config/gameplay_package.hpp"
+#include "ihomeland/sim/config/personal_world_arena.hpp"
 #include "ihomeland/sim/control/control_server.hpp"
 
 #include <fcntl.h>
@@ -8,6 +10,7 @@
 #include <cstdio>
 #include <charconv>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -87,6 +90,20 @@ struct ControlOptions final {
     std::optional<std::string> listener_identity;
     /// qualification_run_id 仅由 B0.6 资格入口显式传入。
     std::optional<std::string> qualification_run_id;
+    /// gameplay_package_root 是本机只读 production package 目录。
+    std::optional<std::string> gameplay_package_root;
+    /// gameplay_arena_root 是本机只读 server arena source 目录。
+    std::optional<std::string> gameplay_arena_root;
+    /// package_id 是 Go 明确选择的 production semantic identity。
+    std::optional<std::string> package_id;
+    /// config_identity 是 Go 重算后的五文档聚合摘要。
+    std::optional<std::string> config_identity;
+    /// navigation_identity 是 Go 冻结的 Detour source 摘要。
+    std::optional<std::string> navigation_identity;
+    /// physics_identity 是 Go 冻结的 Jolt source 摘要。
+    std::optional<std::string> physics_identity;
+    /// wire_identity 是 Go 冻结的 battle wire manifest 摘要。
+    std::optional<std::string> wire_identity;
 };
 
 /// AssignOption 拒绝重复选项，避免命令行顺序覆盖安全边界。
@@ -125,6 +142,20 @@ struct ControlOptions final {
         } else if (name == "--battle-qualification-run-id") {
             assigned =
                 AssignOption(options.qualification_run_id, value);
+        } else if (name == "--gameplay-package-root") {
+            assigned = AssignOption(options.gameplay_package_root, value);
+        } else if (name == "--gameplay-arena-root") {
+            assigned = AssignOption(options.gameplay_arena_root, value);
+        } else if (name == "--gameplay-package-id") {
+            assigned = AssignOption(options.package_id, value);
+        } else if (name == "--gameplay-config-identity") {
+            assigned = AssignOption(options.config_identity, value);
+        } else if (name == "--gameplay-navigation-identity") {
+            assigned = AssignOption(options.navigation_identity, value);
+        } else if (name == "--gameplay-physics-identity") {
+            assigned = AssignOption(options.physics_identity, value);
+        } else if (name == "--gameplay-wire-identity") {
+            assigned = AssignOption(options.wire_identity, value);
         }
         if (!assigned) {
             return std::nullopt;
@@ -139,6 +170,18 @@ struct ControlOptions final {
     constexpr unsigned int listener_field_count = 5;
     if (listener_fields != 0 &&
         listener_fields != listener_field_count) {
+        return std::nullopt;
+    }
+    const auto gameplay_fields =
+        static_cast<unsigned int>(options.gameplay_package_root.has_value()) +
+        static_cast<unsigned int>(options.gameplay_arena_root.has_value()) +
+        static_cast<unsigned int>(options.package_id.has_value()) +
+        static_cast<unsigned int>(options.config_identity.has_value()) +
+        static_cast<unsigned int>(options.navigation_identity.has_value()) +
+        static_cast<unsigned int>(options.physics_identity.has_value()) +
+        static_cast<unsigned int>(options.wire_identity.has_value());
+    constexpr unsigned int gameplay_field_count = 7;
+    if (gameplay_fields != gameplay_field_count) {
         return std::nullopt;
     }
     return options;
@@ -161,6 +204,31 @@ int main(const int argument_count, const char* const arguments[]) {
             ParseControlOptions(argument_count, arguments);
         if (!options) {
             std::cerr << "simulation control arguments are invalid\n";
+            return 2;
+        }
+        std::optional<ihomeland::sim::GameplayPackageCatalog>
+            gameplay_package;
+        try {
+            gameplay_package.emplace(
+                ihomeland::sim::LoadGameplayPackageCatalog(
+                    *options->gameplay_package_root,
+                    *options->package_id,
+                    *options->config_identity,
+                    *options->navigation_identity,
+                    *options->physics_identity,
+                    *options->wire_identity,
+                    IHOMELAND_CONTROL_MODEL_MANIFEST,
+                    IHOMELAND_CONTROL_PROFILE_MANIFEST));
+            gameplay_package->arena =
+                std::make_shared<const ihomeland::sim::PersonalWorldArenaCatalog>(
+                    ihomeland::sim::LoadPersonalWorldArenaCatalog(
+                        *options->gameplay_arena_root,
+                        gameplay_package->binding.map_id,
+                        gameplay_package->binding.map_content_identity,
+                        gameplay_package->binding.navigation_identity,
+                        gameplay_package->binding.physics_identity));
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
             return 2;
         }
         std::optional<ihomeland::sim::BattleUdpListenerConfig> listener;
@@ -202,7 +270,8 @@ int main(const int argument_count, const char* const arguments[]) {
                     "implementation-qualified-windows-x64",
             },
             listener ? &*listener : nullptr,
-            qualification ? &*qualification : nullptr);
+            qualification ? &*qualification : nullptr,
+            &*gameplay_package);
     }
     std::cerr
         << "usage: ihomeland-sim-server --smoke|--control-stdio "

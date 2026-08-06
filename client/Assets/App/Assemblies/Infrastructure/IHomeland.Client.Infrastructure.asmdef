@@ -1,0 +1,20 @@
+{
+  "name": "IHomeland.Client.Infrastructure",
+  "rootNamespace": "IHomeland.Client",
+  "references": [
+    "IHomeland.Client.Foundation",
+    "IHomeland.Client.Application",
+    "IHomeland.Client.Protocol.Generated"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Google.Protobuf.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

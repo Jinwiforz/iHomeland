@@ -3,7 +3,7 @@
   "corpus_version": "battle-wire-v1",
   "document_kind": "manifest",
   "schema_path": "schema.json",
-  "schema_sha256": "e32921e17cff550b24a4dbc05b463d400eafe45735f1ca57c1125576d9b4f4f0",
+  "schema_sha256": "6116333f783458dff84bffca681b45631187ea0d13d0feb38e4e29cc1d99ca3e",
   "required_domains": [
     "binding",
     "crypto",
@@ -24,7 +24,7 @@
     {
       "path": "canonical-golden.json",
       "document_kind": "canonical-golden",
-      "sha256": "b618ff675075fe1905c65098669d742516e3404fc406eb7ddf279189ac62eb66"
+      "sha256": "696183c51bf373352c2354122ff2b36a06ce46634dfa246a057727af080ddbb0"
     },
     {
       "path": "limits.json",
@@ -34,7 +34,7 @@
     {
       "path": "malformed-corpus.json",
       "document_kind": "malformed-corpus",
-      "sha256": "e98c8211e39aec4899094232873b9130306c24b7f635ba18316a840f726a3f0c"
+      "sha256": "11e9a0303e6f9bfa935ca918bed6689d3625fd5319ebc00ba95c96479f56a373"
     },
     {
       "path": "model-profile-control-binding.json",
@@ -49,7 +49,7 @@
     {
       "path": "wire-layout.json",
       "document_kind": "wire-layout",
-      "sha256": "fac40fb93054e75b49b2fd7ccff7791313ee2ed5bd7577b172c46c204b123ef5"
+      "sha256": "a9d3074a377950f4ed33cee6473a0f210a7c585de1056fa6e4d0d6c3a0eb3d0b"
     },
     {
       "path": "wire-suite.json",

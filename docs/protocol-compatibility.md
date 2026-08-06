@@ -284,3 +284,9 @@ B0.6 的 metric identity 同样属于兼容性边界。`delivery-age` 固定绑�
 age；客户端相邻 snapshot receipt gap 是 cadence/baseline 诊断，不能替代该指标。
 Go loader、PowerShell validator、schema 与 failure regression 必须同时拒绝 source
 或 method 漂移。
+
+## B0.8 combat wire 扩展
+
+`BattleInputKind` 追加 `SWITCH_WEAPON`，仅允许所有 optional payload 字段缺失；unknown enum 或非零附带字段必须拒绝。`BattleEntityState` 显式携带 nonzero `entity_generation`、production `archetype_id`、player `equipped_weapon_id` 与正数 `max_health_milli`；同 generation 的 archetype/max-health 不可改变，health 必须在 `[0,max]`。`BattleEntityDelta` 只以新增 mask bit `8` 更新 equipped weapon，并继续要求 mask/presence 精确一致。
+
+Lifecycle spawn 的 outer entity/generation/archetype 必须与完整 `initial_state` byte-semantic 一致；despawn 不携带 initial state。Ability event 的 source generation 与排序去重 target set 都必须指向 current replica entity。Wire mapping 固定 player/monster/Boss 为 `1/2/3`、sword/fan 为 `101/102`、四种 ability 为 `201..204`、fan projectile 为 `301`；未知或 retired ID fail closed。Current wire identity 为 `9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432`。

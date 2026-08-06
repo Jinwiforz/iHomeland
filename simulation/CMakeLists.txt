@@ -64,6 +64,7 @@ add_library(ihomeland_sim_core STATIC
     src/gameplay/movement.cpp
     src/gameplay/pipeline.cpp
     src/gameplay/projection.cpp
+    src/gameplay/production_encounter.cpp
     src/history/history_ring.cpp
     src/simulation/command_ingress.cpp
     src/simulation/identity.cpp
@@ -95,6 +96,17 @@ target_link_libraries(ihomeland_sim_fixture_adapter
 )
 ihomeland_configure_project_target(ihomeland_sim_fixture_adapter)
 
+add_library(ihomeland_gameplay_package_adapter STATIC
+    src/adapters/gameplay_package.cpp
+)
+add_library(iHomeland::GameplayPackage ALIAS
+    ihomeland_gameplay_package_adapter)
+target_link_libraries(ihomeland_gameplay_package_adapter
+    PUBLIC iHomeland::SimulationCore
+    PRIVATE nlohmann_json::nlohmann_json
+)
+ihomeland_configure_project_target(ihomeland_gameplay_package_adapter)
+
 add_library(ihomeland_sim_jolt_adapter STATIC
     src/adapters/jolt_adapter.cpp
     src/adapters/jolt_physics_world.cpp
@@ -123,6 +135,22 @@ target_link_libraries(ihomeland_sim_detour_adapter
     PRIVATE RecastNavigation::Detour
 )
 ihomeland_configure_project_target(ihomeland_sim_detour_adapter)
+
+add_library(ihomeland_sim_personal_world_arena_adapter STATIC
+    src/adapters/personal_world_arena.cpp
+)
+add_library(iHomeland::PersonalWorldArena ALIAS
+    ihomeland_sim_personal_world_arena_adapter)
+target_link_libraries(ihomeland_sim_personal_world_arena_adapter
+    PUBLIC iHomeland::SimulationCore
+    PRIVATE
+        ihomeland_sim_jolt_adapter
+        ihomeland_sim_detour_adapter
+        nlohmann_json::nlohmann_json
+        RecastNavigation::Detour
+)
+ihomeland_configure_project_target(
+    ihomeland_sim_personal_world_arena_adapter)
 
 add_library(ihomeland_battle_crypto_adapter STATIC
     src/transport/crypto_provider.cpp
@@ -386,9 +414,8 @@ target_link_libraries(ihomeland_sim_control_adapter
     PRIVATE
         iHomeland::BattleTransportRuntime
         iHomeland::BattleUdpListener
+        iHomeland::PersonalWorldArena
         ihomeland_sim_flat_ground_adapter
-        ihomeland_sim_jolt_adapter
-        ihomeland_sim_detour_adapter
         nlohmann_json::nlohmann_json
         bcrypt
 )
@@ -400,6 +427,8 @@ add_executable(ihomeland-sim-server
 target_link_libraries(ihomeland-sim-server
     PRIVATE
         iHomeland::SimulationControl
+        iHomeland::GameplayPackage
+        iHomeland::PersonalWorldArena
         ihomeland_sim_fixture_adapter
         ihomeland_sim_jolt_adapter
         ihomeland_sim_detour_adapter
@@ -545,7 +574,9 @@ if(BUILD_TESTING)
             iHomeland::BattleKcp
             iHomeland::BattleSecureDatagram
             iHomeland::BattleTransportRuntime
+            iHomeland::BattleUdpListener
             iHomeland::SimulationControl
+            iHomeland::Asio
     )
     ihomeland_configure_project_target(
         ihomeland_battle_protocol_client_test)
@@ -910,6 +941,34 @@ if(BUILD_TESTING)
     add_test(NAME simulation.navigation.detour-live COMMAND ihomeland_sim_detour_navigation_test)
     set_tests_properties(simulation.navigation.detour-live PROPERTIES LABELS "contract;negative;determinism;detour-parity")
 
+    add_executable(ihomeland_sim_personal_world_arena_test
+        tests/personal_world_arena_test.cpp)
+    target_link_libraries(ihomeland_sim_personal_world_arena_test
+        PRIVATE iHomeland::PersonalWorldArena)
+    target_compile_definitions(ihomeland_sim_personal_world_arena_test PRIVATE
+        "IHOMELAND_PERSONAL_WORLD_ARENA_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/content/personal-world-combat-v1\"")
+    ihomeland_configure_project_target(
+        ihomeland_sim_personal_world_arena_test)
+    add_test(NAME simulation.arena.personal-world
+        COMMAND ihomeland_sim_personal_world_arena_test)
+    set_tests_properties(simulation.arena.personal-world PROPERTIES
+        LABELS "contract;negative;determinism;jolt-parity;detour-parity")
+
+    add_executable(ihomeland_sim_production_encounter_test
+        tests/production_encounter_test.cpp)
+    target_link_libraries(ihomeland_sim_production_encounter_test PRIVATE
+        iHomeland::SimulationCore
+        iHomeland::GameplayPackage
+        iHomeland::PersonalWorldArena)
+    target_compile_definitions(ihomeland_sim_production_encounter_test PRIVATE
+        "IHOMELAND_GAMEPLAY_PACKAGE_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/../shared/contracts/gameplay/battle/packages/personal-world-combat-v1\""
+        "IHOMELAND_PERSONAL_WORLD_ARENA_ROOT=\"${CMAKE_CURRENT_SOURCE_DIR}/content/personal-world-combat-v1\"")
+    ihomeland_configure_project_target(ihomeland_sim_production_encounter_test)
+    add_test(NAME simulation.gameplay.production-encounter
+        COMMAND ihomeland_sim_production_encounter_test)
+    set_tests_properties(simulation.gameplay.production-encounter PROPERTIES
+        LABELS "unit;integration;negative;determinism;combat")
+
     add_executable(ihomeland_sim_control_frame_test tests/control_frame_test.cpp)
     target_link_libraries(
         ihomeland_sim_control_frame_test
@@ -920,6 +979,17 @@ if(BUILD_TESTING)
     ihomeland_configure_project_target(ihomeland_sim_control_frame_test)
     add_test(NAME simulation.control.frame COMMAND ihomeland_sim_control_frame_test)
     set_tests_properties(simulation.control.frame PROPERTIES LABELS "unit;contract;negative")
+
+    add_executable(ihomeland_gameplay_package_test tests/gameplay_package_test.cpp)
+    target_link_libraries(
+        ihomeland_gameplay_package_test
+        PRIVATE iHomeland::GameplayPackage)
+    target_compile_definitions(
+        ihomeland_gameplay_package_test
+        PRIVATE IHOMELAND_GAMEPLAY_PACKAGE_ROOT="${CMAKE_SOURCE_DIR}/../shared/contracts/gameplay/battle/packages/personal-world-combat-v1")
+    ihomeland_configure_project_target(ihomeland_gameplay_package_test)
+    add_test(NAME simulation.config.gameplay-package COMMAND ihomeland_gameplay_package_test)
+    set_tests_properties(simulation.config.gameplay-package PROPERTIES LABELS "unit;contract;negative")
 
     add_executable(ihomeland_sim_control_node_test tests/simulation_node_test.cpp)
     target_link_libraries(ihomeland_sim_control_node_test PRIVATE iHomeland::SimulationControl)

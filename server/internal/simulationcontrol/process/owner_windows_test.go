@@ -28,11 +28,18 @@ func TestQualificationConfigRequiresExplicitModeAndSingleCLI(t *testing.T) {
 		RequestTimeout:             time.Second,
 		ShutdownTimeout:            time.Second,
 		StderrLineLimit:            256,
+		GameplayPackageRoot:        filepath.Join(t.TempDir(), "personal-world-combat-v1"),
+		GameplayArenaRoot:          filepath.Join(t.TempDir(), "personal-world-combat-arena-v1"),
+		GameplayPackageID:          "personal-world-combat-v1",
+		ConfigIdentity:             digest,
+		NavigationIdentity:         digest,
+		PhysicsIdentity:            digest,
+		WireIdentity:               digest,
 	}
 	if err := base.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if arguments := processArguments(base); len(arguments) != 1 ||
+	if arguments := processArguments(base); len(arguments) != 15 ||
 		arguments[0] != "--control-stdio" {
 		t.Fatalf("production arguments = %v", arguments)
 	}
@@ -53,9 +60,9 @@ func TestQualificationConfigRequiresExplicitModeAndSingleCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	arguments := processArguments(qualified)
-	if len(arguments) != 3 ||
-		arguments[1] != "--battle-qualification-run-id" ||
-		arguments[2] != runID.String() {
+	if len(arguments) != 17 ||
+		arguments[15] != "--battle-qualification-run-id" ||
+		arguments[16] != runID.String() {
 		t.Fatalf("qualification arguments = %v", arguments)
 	}
 }

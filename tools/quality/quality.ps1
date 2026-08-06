@@ -57,6 +57,7 @@ $SupportedCheckIds = @(
     "battle-qualification-representative",
     "client-battle-runtime-targeted",
     "client-battle-runtime-unity",
+    "personal-world-combat-targeted",
     "openspec-change-strict",
     "final-product-qualification"
 )
@@ -339,6 +340,15 @@ function Invoke-ChangeCheck {
                 -ScriptPath (Join-Path $RepositoryRoot "tools\client-battle-runtime\client-battle-runtime.ps1") `
                 -Arguments @("-Action", "unity-tests") `
                 -Label "client battle runtime Unity EditMode/PlayMode"
+        }
+        "personal-world-combat-targeted" {
+            Invoke-ProjectPowerShell `
+                -ScriptPath (Join-Path $RepositoryRoot "tools\personal-world-combat\personal-world-combat.ps1") `
+                -Arguments @(
+                    "-Action", "targeted",
+                    "-TimeoutSeconds", [string]$TimeoutSeconds
+                ) `
+                -Label "PersonalWorld combat targeted"
         }
         "openspec-change-strict" {
             Invoke-CheckedOwner `

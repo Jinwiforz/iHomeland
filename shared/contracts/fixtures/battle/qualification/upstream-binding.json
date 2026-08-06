@@ -18,13 +18,13 @@
     {
       "owner": "simulation-control",
       "path": "shared/contracts/fixtures/simulation-control/manifest.json",
-      "sha256": "9e0e10e4b085584aec22c99bbf0e6e6163de893869142f7dd8ef230430dcac6f",
+      "sha256": "a83be178665443c9eb63972f1f989feb07ab12c4c8d71f895177ed897f3d7e1c",
       "requiredConclusion": "control-qualified-windows-x64"
     },
     {
       "owner": "battle-wire",
       "path": "shared/contracts/fixtures/battle/wire/manifest.json",
-      "sha256": "c4838f0efce9fffb852355de734d67ab9d78aaff55dea0dee2c9af672a3cbb5e",
+      "sha256": "9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432",
       "requiredConclusion": "secure-transport-qualified-windows-x64"
     },
     {

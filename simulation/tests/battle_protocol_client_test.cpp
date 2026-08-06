@@ -9,9 +9,13 @@
 #include "ihomeland/sim/transport/battle_transport_runtime.hpp"
 #include "ihomeland/sim/transport/kcp_adapter.hpp"
 #include "ihomeland/sim/transport/secure_datagram.hpp"
+#include "ihomeland/sim/transport/udp_listener.hpp"
+
+#include <asio.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -21,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -616,6 +621,289 @@ RuntimeEndpoint() {
     };
 }
 
+/// ReceiveSocketDatagram 在固定 deadline 内从真实 loopback socket 接收一个 datagram。
+[[nodiscard]] std::vector<std::uint8_t>
+ReceiveSocketDatagram(
+    asio::ip::udp::socket& socket,
+    const std::chrono::milliseconds timeout) {
+    socket.non_blocking(true);
+    std::array<std::uint8_t,
+               sim::BattleUdpListener::MaximumDatagramBytes>
+        buffer{};
+    asio::ip::udp::endpoint source;
+    const auto deadline =
+        std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        asio::error_code error;
+        const auto received = socket.receive_from(
+            asio::buffer(buffer),
+            source,
+            0,
+            error);
+        if (!error) {
+            return {
+                buffer.begin(),
+                buffer.begin() +
+                    static_cast<std::ptrdiff_t>(received),
+            };
+        }
+        if (error != asio::error::would_block &&
+            error != asio::error::try_again) {
+            throw std::runtime_error(
+                "real socket receive failed");
+        }
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(1));
+    }
+    throw std::runtime_error(
+        "real socket receive timed out");
+}
+
+/// SendSocketDatagram 通过真实 UDP socket 完整发送一个 battle datagram。
+void SendSocketDatagram(
+    asio::ip::udp::socket& socket,
+    const asio::ip::udp::endpoint& target,
+    const std::span<const std::uint8_t> datagram) {
+    const auto sent = socket.send_to(
+        asio::buffer(datagram),
+        target);
+    Require(
+        sent == datagram.size(),
+        "real socket send was partial");
+}
+
+/// TestRuntimeRealSocketIngress 验证独立client经真实socket完成握手与combat input ingress。
+void TestRuntimeRealSocketIngress() {
+    const auto socket_now = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+    sim::CryptoProvider crypto;
+    const auto ticket_secret = Sequence<32>(0x40);
+    auto proof_key = DeriveProofKey(
+        crypto,
+        Sequence<16>(0x10),
+        ticket_secret);
+    sim::SimulationNode node(RuntimeNodeConfig());
+    const auto start = RuntimeStartCommand();
+    const auto ready = node.Start(start);
+
+    std::atomic<std::uint64_t> dispatch_time{socket_now};
+    std::atomic<sim::BattleTransportRuntime*> runtime_ptr{nullptr};
+    std::atomic<sim::BattleTransportRuntimeDisposition>
+        last_disposition{
+            sim::BattleTransportRuntimeDisposition::Dropped};
+    sim::BattleUdpListener listener(
+        {
+            .bind_endpoint = {
+                .host = "127.0.0.1",
+                .port = 0,
+            },
+            .advertised_endpoint = {
+                .host = "127.0.0.1",
+                .port = 0,
+            },
+            .listener_identity = Sequence<16>(0xa0),
+            .mode = sim::BattleUdpListenerMode::LoopbackTest,
+        },
+        [&](const std::span<const std::uint8_t> datagram,
+            const sim::BattleRemoteEndpoint& remote) {
+            auto* runtime = runtime_ptr.load(
+                std::memory_order_acquire);
+            Require(
+                runtime != nullptr,
+                "real socket dispatched before runtime publication");
+            last_disposition.store(
+                runtime->HandleDatagram(
+                    datagram,
+                    remote,
+                    dispatch_time.load(
+                        std::memory_order_acquire)),
+                std::memory_order_release);
+        });
+    listener.Start();
+    const auto listener_status = listener.Status();
+
+    auto ticket = RuntimeTicketCommand(
+        start,
+        ready,
+        proof_key);
+    ticket.binding.issued_at_unix_ms = socket_now - 1'000;
+    ticket.binding.expires_at_unix_ms = socket_now + 60'000;
+    ticket.binding.advertised_port =
+        listener_status.advertised_endpoint.port;
+    static_cast<void>(node.InstallBattleTicket(
+        ticket,
+        socket_now));
+    crypto.SecureZero(proof_key);
+
+    sim::BattleRuntimeMetrics metrics;
+    sim::BattleTransportRuntime runtime(
+        {
+            .simulation_node_id =
+                "snode_protocol_runtime",
+            .advertised_host = "127.0.0.1",
+            .advertised_port =
+                listener_status.advertised_endpoint.port,
+            .listener_identity = Sequence<16>(0xa0),
+            .maximum_sessions = 8,
+        },
+        node,
+        [&](const std::span<const std::uint8_t> datagram,
+            const sim::BattleRemoteEndpoint& remote) {
+            return listener.Send(datagram, remote);
+        },
+        [&](const sim::BattleSessionContext& context,
+            const std::uint64_t now_unix_ms) {
+            return node.BattleRawContext(context, now_unix_ms);
+        },
+        [&](const sim::BattleSessionContext& context) {
+            return node.ResolveBattleCommandIngress(context);
+        },
+        [](const sim::BattleSessionContext&) {
+            return std::optional<
+                sim::BattleReplicationProjection>{};
+        },
+        [](const sim::BattleSessionContext&,
+           const sim::BattleKcpMessageView&) {},
+        [&](const sim::BattleSessionContext& context) {
+            return node.BattleSessionCurrent(context);
+        },
+        socket_now,
+        &metrics);
+    runtime_ptr.store(&runtime, std::memory_order_release);
+
+    asio::io_context client_context;
+    asio::ip::udp::socket socket(
+        client_context,
+        asio::ip::udp::v4());
+    const asio::ip::udp::endpoint target(
+        asio::ip::make_address_v4("127.0.0.1"),
+        listener_status.bound_endpoint.port);
+    auto credential = MakeCredential(ticket_secret);
+    credential.expires_at_unix_ms = socket_now + 60'000;
+    client::ProtocolHandshake handshake(
+        std::move(credential),
+        socket_now);
+
+    SendSocketDatagram(
+        socket,
+        target,
+        handshake.ClientHello());
+    const auto retry = ReceiveSocketDatagram(
+        socket,
+        std::chrono::seconds(2));
+    const auto auth = handshake.AcceptRetry(
+        retry,
+        socket_now + 1);
+    Require(
+        auth.has_value(),
+        "real socket Retry was rejected");
+    dispatch_time.store(
+        socket_now + 1,
+        std::memory_order_release);
+    SendSocketDatagram(socket, target, *auth);
+    const auto accept = ReceiveSocketDatagram(
+        socket,
+        std::chrono::seconds(2));
+    auto parameters = handshake.AcceptServer(
+        accept,
+        socket_now + 2);
+    Require(
+        last_disposition.load(
+            std::memory_order_acquire) ==
+            sim::BattleTransportRuntimeDisposition::
+                SessionAccepted,
+        "real socket ClientAuth was not accepted");
+    Require(
+        parameters.has_value(),
+        "real socket ServerAccept was rejected");
+    if (runtime.ActiveSessionCount() != 1) {
+        const auto snapshot = metrics.Snapshot();
+        throw std::runtime_error(
+            "real socket session count drifted: " +
+            std::to_string(runtime.ActiveSessionCount()) +
+            ", close_auth=" +
+            std::to_string(snapshot.close_authentication) +
+            ", close_lifecycle=" +
+            std::to_string(snapshot.close_lifecycle) +
+            ", close_resource=" +
+            std::to_string(snapshot.close_resource));
+    }
+
+    const auto session_digest =
+        crypto.Sha256(parameters->session_id);
+    client::SecureIdentity identity{
+        .battle_session_generation =
+            parameters->battle_session_generation,
+        .endpoint_generation =
+            parameters->endpoint_generation,
+    };
+    std::ranges::copy_n(
+        session_digest.begin(),
+        identity.session_id_digest.size(),
+        identity.session_id_digest.begin());
+    std::ranges::copy_n(
+        parameters->binding_fingerprint.begin(),
+        identity.binding_discriminator.size(),
+        identity.binding_discriminator.begin());
+    client::ProtocolSecureChannel channel(
+        parameters->session_seed,
+        identity,
+        parameters->key_epoch,
+        socket_now + 2);
+    crypto.SecureZero(parameters->session_seed);
+
+    ihomeland::battle::v1::BattleInputBundle bundle;
+    bundle.set_newest_input_tick(1);
+    bundle.set_latest_observed_server_tick(1);
+    auto* switch_weapon = bundle.add_commands();
+    switch_weapon->set_command_sequence(1);
+    switch_weapon->set_kind(
+        ihomeland::battle::v1::
+            BATTLE_INPUT_KIND_SWITCH_WEAPON);
+    auto* primary = bundle.add_commands();
+    primary->set_command_sequence(2);
+    primary->set_kind(
+        ihomeland::battle::v1::
+            BATTLE_INPUT_KIND_PRIMARY_ABILITY);
+    client::ProtocolRawLane raw;
+    const auto sealed = channel.Seal(
+        client::PacketKind::Raw,
+        raw.EncodeInputBundle(1, Bytes(bundle)),
+        socket_now + 3);
+    Require(
+        sealed.has_value(),
+        "real socket combat input seal failed");
+    dispatch_time.store(
+        socket_now + 3,
+        std::memory_order_release);
+    SendSocketDatagram(socket, target, *sealed);
+
+    const auto deadline =
+        std::chrono::steady_clock::now() +
+        std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline &&
+           metrics.Snapshot().raw_ingress_packets == 0) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(1));
+    }
+    Require(
+        metrics.Snapshot().raw_ingress_packets == 1 &&
+            listener.Status().counters.accepted_datagrams == 3,
+        "real socket combat input did not reach raw ingress");
+
+    runtime_ptr.store(nullptr, std::memory_order_release);
+    runtime.Stop();
+    listener.Stop();
+    socket.close();
+    node.BeginShutdown(std::chrono::milliseconds(1'000));
+    Require(
+        !listener.Status().running &&
+            runtime.ActiveSessionCount() == 0,
+        "real socket runtime did not shut down cleanly");
+}
+
 /// TestHandshake 验证独立 client 与独立 test encoder 的 transcript parity。
 [[nodiscard]] ServerAcceptFixture TestHandshake() {
     sim::CryptoProvider crypto;
@@ -906,13 +1194,19 @@ void TestRuntimeComposition() {
                  ++actor_id) {
                 projection.states.push_back({
                     .actor_id = actor_id,
+                    .entity_generation = 1,
                     .x_mm = 0,
                     .y_mm = 0,
                     .z_mm = 0,
-                    .health_scaled = 1,
+                    .health_scaled = 100'000,
                     .phase = 1,
                     .alive = true,
+                    .archetype_id = 1,
+                    .equipped_weapon_id = 101,
+                    .max_health_scaled = 100'000,
                 });
+                projection.player_actor_ids.push_back(
+                    actor_id);
             }
             return std::optional{
                 std::move(projection)};
@@ -2479,6 +2773,9 @@ void PopulateFullEntity(
     const std::uint64_t entity_id) {
     state.set_entity_id(entity_id);
     state.set_entity_generation(1);
+    state.set_archetype_id(1);
+    state.set_equipped_weapon_id(101);
+    state.set_max_health_milli(100'000);
     PopulateTransform(*state.mutable_transform());
     state.set_health_milli(100'000);
     state.set_state_flags(
@@ -3115,6 +3412,7 @@ int main() {
     try {
         const auto accept = TestHandshake();
         TestSnapshotCadence();
+        TestRuntimeRealSocketIngress();
         TestRuntimeComposition();
         TestSecureParity(accept);
         TestSecureNegative(accept);

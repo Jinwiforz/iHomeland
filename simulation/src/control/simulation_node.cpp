@@ -1,8 +1,9 @@
 #include "ihomeland/sim/control/simulation_node.hpp"
 
-#include "ihomeland/sim/core/adapter_smoke.hpp"
+#include "ihomeland/sim/config/personal_world_arena.hpp"
 #include "ihomeland/sim/core/sha256.hpp"
 #include "ihomeland/sim/gameplay/battle_movement_replication.hpp"
+#include "ihomeland/sim/gameplay/production_encounter.hpp"
 #include "ihomeland/sim/physics/flat_ground_physics_world.hpp"
 #include "ihomeland/sim/simulation/command_ingress.hpp"
 #include "ihomeland/sim/simulation/identity.hpp"
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <limits>
 #include <memory>
@@ -86,6 +88,84 @@ struct QualifiedRuntimePolicy final {
     /// MaximumStepHeightMillimeters 是 current capsule step ceiling。
     static constexpr std::int64_t
         MaximumStepHeightMillimeters = 400;
+};
+
+/// BattleParticipantRegistry 在 transport 与唯一 simulation worker 间传递有界参战资格。
+class BattleParticipantRegistry final {
+public:
+    /// 构造函数冻结 one-based actor identity 容量。
+    explicit BattleParticipantRegistry(
+        const std::size_t capacity)
+        : capacity_(capacity) {
+        if (capacity_ == 0 ||
+            capacity_ > generations_.size()) {
+            throw std::invalid_argument(
+                "battle participant capacity is invalid");
+        }
+    }
+
+    /// Activate 只接受不低于 current 的 nonzero session generation。
+    [[nodiscard]] bool Activate(
+        const std::uint64_t actor_id,
+        const std::uint32_t generation) noexcept {
+        if (actor_id == 0 || actor_id > capacity_ ||
+            generation == 0) {
+            return false;
+        }
+        auto& current = generations_[actor_id - 1];
+        auto observed = current.load(
+            std::memory_order_acquire);
+        while (observed < generation &&
+               !current.compare_exchange_weak(
+                   observed,
+                   generation,
+                   std::memory_order_acq_rel,
+                   std::memory_order_acquire)) {
+        }
+        return observed <= generation;
+    }
+
+    /// Deactivate 只撤销 exact generation，旧 predecessor 不影响 successor。
+    [[nodiscard]] bool Deactivate(
+        const std::uint64_t actor_id,
+        const std::uint32_t generation) noexcept {
+        if (actor_id == 0 || actor_id > capacity_ ||
+            generation == 0) {
+            return false;
+        }
+        auto expected = generation;
+        static_cast<void>(
+            generations_[actor_id - 1]
+                .compare_exchange_strong(
+                    expected,
+                    0,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire));
+        return true;
+    }
+
+    /// FreezeActiveActorIds 在一个 Tick barrier 生成规范有序 active actor set。
+    [[nodiscard]] std::vector<std::uint64_t>
+    FreezeActiveActorIds() const {
+        std::vector<std::uint64_t> active;
+        active.reserve(capacity_);
+        for (std::size_t index = 0;
+             index < capacity_;
+             ++index) {
+            if (generations_[index].load(
+                    std::memory_order_acquire) != 0) {
+                active.push_back(index + 1);
+            }
+        }
+        return active;
+    }
+
+private:
+    /// generations_ 保存每个固定 slot 的 current active BattleSessionGeneration。
+    std::array<std::atomic<std::uint32_t>, 8>
+        generations_{};
+    /// capacity_ 限定可访问的固定前缀。
+    std::size_t capacity_;
 };
 
 /// QualifiedMovementConfig 构造 C++ authority 与 Unity prediction 共享的整数参数。
@@ -352,6 +432,15 @@ struct SimulationNode::Entry final {
     std::shared_ptr<
         BattleMovementReplicationStore>
         movement_replication;
+    /// navigation_world 是该 timeline 独占且已完成 source identity gate 的 Detour adapter。
+    std::shared_ptr<NavigationWorld> navigation_world;
+    /// encounter_runtime 是 production 单写 combat pipeline；fixture node 为空。
+    std::shared_ptr<ProductionEncounterRuntime> encounter_runtime;
+    /// participant_registry 是 authenticated session generation 的跨线程有界事实源。
+    std::shared_ptr<BattleParticipantRegistry>
+        participant_registry;
+    /// gameplay_catalog 固定该 timeline 创建时的 immutable authority snapshot。
+    std::shared_ptr<const GameplayPackageCatalog> gameplay_catalog;
     /// drained 标记 ingress 已关闭且 lifecycle result 已生成。
     bool drained{false};
 };
@@ -372,6 +461,9 @@ struct SimulationNode::BattleRuntimeBinding final {
     std::shared_ptr<
         BattleMovementReplicationStore>
         movement_replication;
+    /// participant_registry 为 production worker 提供每 Tick active actor set。
+    std::shared_ptr<BattleParticipantRegistry>
+        participant_registry;
     /// active 在 drain/stop 开始前一次性关闭。
     bool active;
 };
@@ -419,7 +511,8 @@ SimulationNode::SimulationNode(SimulationNodeConfig config)
     RequireDigest(config_.profile_manifest, "profile manifest");
     if (config_.instance_capacity == 0 ||
         config_.instance_capacity > ResultOutboxLimit ||
-        config_.actor_capacity == 0 || config_.actor_capacity > 8) {
+        config_.actor_capacity == 0 || config_.actor_capacity > 8 ||
+        (config_.gameplay_catalog && !config_.gameplay_catalog->arena)) {
         throw std::invalid_argument("simulation node capacity is invalid");
     }
     entries_.reserve(config_.instance_capacity);
@@ -466,7 +559,11 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         command.mapping_generation == 0 ||
         command.seed == 0 ||
         command.actor_capacity == 0 ||
-        command.actor_capacity > config_.actor_capacity) {
+        command.actor_capacity > config_.actor_capacity ||
+        (config_.gameplay_catalog &&
+         (command.config_identity != config_.gameplay_catalog->binding.config_identity ||
+          command.navigation_identity != config_.gameplay_catalog->binding.navigation_identity ||
+          command.physics_identity != config_.gameplay_catalog->binding.physics_identity))) {
         throw std::invalid_argument("simulation start binding is invalid");
     }
     const auto existing = std::find_if(
@@ -554,6 +651,33 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
                 InputGapExpiryTicks,
             QualifiedRuntimePolicy::
                 InputDedupeItems);
+    std::shared_ptr<PhysicsWorld> physics_world;
+    std::shared_ptr<NavigationWorld> navigation_world;
+    if (config_.gameplay_catalog) {
+        physics_world = CreatePersonalWorldPhysicsWorld(
+            *config_.gameplay_catalog->arena);
+        navigation_world = CreatePersonalWorldNavigationWorld(
+            *config_.gameplay_catalog->arena);
+    } else {
+        physics_world = std::make_shared<FlatGroundPhysicsWorld>();
+    }
+    std::vector<Vector3Mm> initial_positions;
+    if (config_.gameplay_catalog) {
+        initial_positions.reserve(command.actor_capacity);
+        for (std::size_t index = 0; index < command.actor_capacity; ++index) {
+            const auto spawn_id = index == 0
+                ? std::string("owner")
+                : "visitor-" + std::to_string(((index - 1) % 3) + 1);
+            const auto spawn = std::ranges::find(
+                config_.gameplay_catalog->arena->spawn_points,
+                spawn_id,
+                &ArenaSpawnPoint::id);
+            if (spawn == config_.gameplay_catalog->arena->spawn_points.end()) {
+                throw std::runtime_error("production player spawn is missing");
+            }
+            initial_positions.push_back(spawn->position_mm);
+        }
+    }
     auto movement_replication =
         std::make_shared<
             BattleMovementReplicationStore>(
@@ -568,8 +692,29 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
             actor_ids,
             QualifiedRuntimePolicy::
                 InitialActorHealthScaled,
-            std::make_shared<
-                FlatGroundPhysicsWorld>());
+             physics_world,
+             std::move(initial_positions));
+    auto participant_registry =
+        std::make_shared<BattleParticipantRegistry>(
+            command.actor_capacity);
+    std::shared_ptr<ProductionEncounterRuntime> encounter_runtime;
+    std::uint32_t projectile_archetype{};
+    if (config_.gameplay_catalog) {
+        const auto mapping = std::ranges::find(
+            config_.gameplay_catalog->mappings,
+            std::string("personal-world-combat/projectile/fan-blade"),
+            &GameplayWireMapping::semantic_id);
+        if (mapping == config_.gameplay_catalog->mappings.end()) {
+            throw std::runtime_error("production projectile mapping is missing");
+        }
+        projectile_archetype = mapping->numeric_id;
+        encounter_runtime = std::make_shared<ProductionEncounterRuntime>(
+            config_.gameplay_catalog,
+            command.actor_capacity,
+            command.seed,
+            physics_world,
+            navigation_world);
+    }
     auto instance = std::make_unique<SimulationInstance>(
         std::move(identity),
         SimulationInstanceConfig{
@@ -582,8 +727,14 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         },
         clock,
         [input_timeline,
-         movement_replication](
-            const TickObservation& observation) {
+         movement_replication,
+         participant_registry,
+         fixture_actor_ids = actor_ids,
+         encounter_runtime,
+         projectile_archetype,
+         runtime_metrics = &runtime_metrics_,
+         encounter_recorded = false](
+            const TickObservation& observation) mutable {
             const auto resolutions =
                 input_timeline->Resolve(
                     observation.tick,
@@ -591,10 +742,49 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
             const auto acknowledgements =
                 input_timeline->
                     FreezeAcknowledgements();
-            movement_replication->Commit(
+            const auto active_actor_ids =
+                encounter_runtime
+                    ? participant_registry->
+                          FreezeActiveActorIds()
+                    : fixture_actor_ids;
+            const auto movement_states =
+                movement_replication->Commit(
                 observation.tick,
                 resolutions,
-                acknowledgements);
+                acknowledgements,
+                active_actor_ids,
+                !encounter_runtime);
+            if (encounter_runtime) {
+                const auto combat = encounter_runtime->Commit(
+                    observation.tick,
+                    observation.commands,
+                    movement_states,
+                    active_actor_ids);
+                const auto projectiles = std::ranges::count(
+                    combat.states,
+                    projectile_archetype,
+                    &StateProjectionToken::archetype_id);
+                const auto completed_now =
+                    combat.encounter_complete &&
+                    !encounter_recorded;
+                runtime_metrics->ObserveCombat(
+                    combat.states.size() -
+                        static_cast<std::size_t>(projectiles),
+                    static_cast<std::size_t>(projectiles),
+                    combat.ability_events.size(),
+                    combat.lifecycle_events.size(),
+                    completed_now);
+                encounter_recorded =
+                    encounter_recorded ||
+                    combat.encounter_complete;
+                movement_replication->PublishAuthoritative(
+                    observation.tick,
+                    combat.states,
+                    acknowledgements,
+                    combat.ability_events,
+                    combat.lifecycle_events,
+                    combat.encounter_complete);
+            }
         },
         &runtime_metrics_);
     const std::vector<StartupStep> startup{
@@ -605,18 +795,18 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         },
         {
             .stage = StartupStage::Physics,
-            .initialize = [] {
-                if (!RunJoltSmoke()) {
-                    throw std::runtime_error("Jolt adapter startup failed");
+            .initialize = [physics_world] {
+                if (!physics_world) {
+                    throw std::runtime_error("Jolt arena adapter startup failed");
                 }
             },
             .rollback = [] {},
         },
         {
             .stage = StartupStage::Navigation,
-            .initialize = [] {
-                if (!RunDetourSmoke()) {
-                    throw std::runtime_error("Detour adapter startup failed");
+            .initialize = [navigation_world, production = static_cast<bool>(config_.gameplay_catalog)] {
+                if (production && !navigation_world) {
+                    throw std::runtime_error("Detour arena adapter startup failed");
                 }
             },
             .rollback = [] {},
@@ -644,6 +834,11 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
         input_timeline;
     entry->movement_replication =
         movement_replication;
+    entry->navigation_world = std::move(navigation_world);
+    entry->encounter_runtime = std::move(encounter_runtime);
+    entry->participant_registry =
+        participant_registry;
+    entry->gameplay_catalog = config_.gameplay_catalog;
     const auto receipt = InstanceReadyReceipt{
         .start_request_id = entry->command.start_request_id,
         .assignment_fingerprint = entry->command.assignment.fingerprint,
@@ -668,6 +863,8 @@ InstanceReadyReceipt SimulationNode::Start(const InstanceStartCommand& command) 
                     entry->command_ingress.get(),
                 .movement_replication =
                     entry->movement_replication,
+                .participant_registry =
+                    entry->participant_registry,
                 .active = true,
             });
     }
@@ -786,6 +983,12 @@ InstanceStatusReceipt SimulationNode::Drain(
                 entry.command.config_identity + "|" +
                 entry.command.navigation_identity + "|" +
                 entry.command.physics_identity + "|" +
+                (entry.gameplay_catalog
+                     ? entry.gameplay_catalog->binding.wire_identity
+                     : std::string{}) + "|" +
+                (entry.gameplay_catalog
+                     ? entry.gameplay_catalog->binding.map_content_identity
+                     : std::string{}) + "|" +
                 std::to_string(entry.command.mapping_generation) + "|" +
                 std::to_string(entry.command.seed) + "|" +
                 std::to_string(entry.command.actor_capacity) + "|" +
@@ -1453,6 +1656,10 @@ SimulationNode::BattleReplicationSnapshot(
         .acknowledgement =
             projection->acknowledgement,
         .states = projection->states,
+        .ability_events = projection->ability_events,
+        .lifecycle_events = projection->lifecycle_events,
+        .player_actor_ids = projection->player_actor_ids,
+        .encounter_complete = projection->encounter_complete,
     };
 }
 
@@ -1599,9 +1806,42 @@ bool SimulationNode::BattleSessionCurrent(
                     context.MappingGeneration() &&
                 binding.target_revision ==
                     context.TargetRevision() &&
-                binding.actor_slot ==
-                    context.Actor().actor_slot;
+                 binding.actor_slot ==
+                     context.Actor().actor_slot;
+         });
+}
+
+bool SimulationNode::SetBattleSessionParticipation(
+    const BattleSessionContext& context,
+    const bool active) noexcept {
+    if (!ActorIdentityMatchesSlot(context)) {
+        return false;
+    }
+    std::scoped_lock lock(
+        battle_runtime_binding_mutex_);
+    const auto binding = std::find_if(
+        battle_runtime_bindings_.begin(),
+        battle_runtime_bindings_.end(),
+        [&](const auto& candidate) {
+            return candidate.active &&
+                candidate.simulation_instance_id ==
+                    context.SimulationInstanceId() &&
+                candidate.assignment_fingerprint ==
+                    context.AssignmentFingerprint() &&
+                candidate.mapping_generation ==
+                    context.MappingGeneration();
         });
+    if (binding == battle_runtime_bindings_.end() ||
+        !binding->participant_registry) {
+        return false;
+    }
+    return active
+        ? binding->participant_registry->Activate(
+              context.Actor().actor_id,
+              context.BattleSessionGeneration())
+        : binding->participant_registry->Deactivate(
+              context.Actor().actor_id,
+              context.BattleSessionGeneration());
 }
 
 void SimulationNode::StartBattleUdpListener(

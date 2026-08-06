@@ -311,7 +311,7 @@ shared/
 
 ## 当前 Unity 工程与 Gameplay 目标
 
-Unity 工程已经创建。下面只登记当前资产根；脚本 owner 的当前/目标归属由后续“客户端程序集归属”树唯一维护，避免复制一份会漂移的 `Scripts/` 明细：
+Unity 工程采用 feature-first 资产布局。业务模块拥有自己的脚本、测试与内容，稳定程序集定义集中治理；`Generated`、第三方 project resource 与业务资产互不冒充 owner：
 
 ```text
 client/
@@ -321,23 +321,20 @@ client/
     owner-registry.json
   Assets/
     App/
-      Config/
-      Editor/
+      Assemblies/                # 稳定 layer/test asmdef；不保存业务脚本
       Generated/
         Protocol/
           IHomeland.Client.Protocol.Generated.asmdef  # 工具生成，稳定程序集边界
           Sources/                                    # protoc 生成 C#
           Runtime/                                    # 锁定 Google.Protobuf.dll
-      Scripts/                    # 见下方唯一程序集归属树
-      Tests/
-        EditMode/
-        PlayMode/
-      UI/
+      Modules/
+        Core/
+        AppShell/
+        Session/
+        Networking/
         PersonalWorld/
-          Prefabs/
-      Scenes/
-        BootstrapScene.unity
-        PersonalWorldScene.unity
+        PersonalWorldCombat/
+      ThirdParty/                 # TextMesh Pro、UI Toolkit 等导入的 project resource
   Packages/
   ProjectSettings/
 ```
@@ -345,98 +342,78 @@ client/
 ### 客户端程序集归属
 
 ```text
-client/Assets/App/Scripts/
-  Foundation/                 # IHomeland.Client.Foundation
-  Application/
-    Configuration/
-    Contracts/
-    Ports/
-    Session/
-    Control/                  # 仅 Application control contracts
-    Gameplay/                 # 仅 Application gameplay contracts/models
-      Replica/                # 权威 snapshot 的纯 C# 副本
-      Prediction/             # input/predicted-state history 与 reconciliation
-      Interpolation/          # 远端实体插值采样
-    World/
-  Infrastructure/
-    Http/
-    Security/
-    Time/
-    WebSocket/                # ClientControlChannel 与 WSS components
-    Tcp/                      # ClientGameplayChannel 与 TLS/TCP components
-    BattleNetwork/            # 后续 secure UDP/KCP concrete adapter
-  Presentation/
-    Pure/
-      Navigation/
-      PersonalWorld/
-    Hosts/                    # Runtime assembly 的 Unity Hosts
-    PersonalWorld/            # Runtime assembly 的 Unity Views/adapters
-    Gameplay/                 # Actor、animation、VFX、camera 等 Scene adapter
-  Core/
-    Bootstrap/
-    Composition/
-    Configuration/            # Unity 序列化环境资产
-    Presentation/             # Runtime 产品 binding 类型边界
-    Qualification/
-  Scenes/
-    PersonalWorld/
-      Gameplay/               # scene-bound actor、HUD 与 camera hosts
+client/Assets/App/
+  Assemblies/
+    Foundation/               # IHomeland.Client.Foundation
+    Application/              # IHomeland.Client.Application
+    Infrastructure/           # IHomeland.Client.Infrastructure
+    Presentation/             # IHomeland.Client.Presentation
+    Runtime/                  # IHomeland.Client.Runtime
+    Tests/{EditMode,PlayMode,Protocol}/
+  Modules/
+    Core/
+      Foundation/             # lifetime、threading、clock ports
+      Infrastructure/         # 通用技术 adapter，例如 system clock
+      Runtime/                # composition、通用 Scene lifetime
+      Tests/
+      Content/                # Input、rendering、全局 UI settings
+    AppShell/
+      Application/            # bootstrap/configuration use case
+      Presentation/           # route/navigation 纯 C# 模型
+      Runtime/                # 唯一入口、composition root、UI hosts、qualification
+      Editor/
+      Tests/
+      Content/                # environment config、Bootstrap scene
+    Session/{Application,Infrastructure,Runtime,Tests}/
+    Networking/{Application,Infrastructure,Runtime,Tests}/
+    PersonalWorld/{Application,Presentation,Runtime,Tests,Content}/
+    PersonalWorldCombat/{Application,Infrastructure,Runtime,Tests,Content}/
 ```
 
-上述 gameplay 子目录同样是目标归属，不要求当前创建。纯 C# replica、history、reconciliation 与 interpolation 属于 App Scope；`BattleNetwork` 只实现已冻结的 secure UDP/KCP port；Actor、Animator、Cinemachine 与 uGUI HUD 属于 Scene Scope，卸载场景时释放，且不得保存权威战斗事实。
+纯 C# replica、history、reconciliation 与 interpolation 属于 App Scope；secure UDP/KCP concrete adapter 属于 `PersonalWorldCombat/Infrastructure`；Actor、Animator、Cinemachine 与 uGUI HUD 属于 `PersonalWorldCombat/Runtime` 和 Scene Scope，卸载场景时释放，且不得保存权威战斗事实。
 
-`Foundation`、`Application`、`Presentation/Pure` 分别由独立 `noEngineReferences` asmdef 封闭；`Infrastructure` 只能指向 Foundation、Application 与 generated protocol；`Scripts` 根 asmdef 对应 Runtime，是唯一可同时装配 Infrastructure、Presentation 与 Unity 类型的顶层程序集。顶层 `Presentation/Hosts`、`Presentation/PersonalWorld` 与 `Core/Presentation` 都属于该 Runtime 程序集，不是额外程序集。
+物理模块与编译程序集表达两个正交维度：目录回答“由哪个 feature 拥有”，asmdef 回答“允许依赖哪一层”。`Foundation`、`Application`、`Presentation` 由独立 `noEngineReferences` asmdef 封闭；`Infrastructure` 只能指向 Foundation、Application 与 generated protocol；`Runtime` 是唯一可装配 concrete adapter、Presentation 与 Unity 类型的顶层程序集。各模块通过 Unity 生成的 `.asmref` 加入这些稳定程序集，不为目录整齐制造循环 feature assembly。
 
-`Core/Composition` 固定包含 Foundation、Infrastructure、Session、Channel、World、Presentation、Runtime/Qualification 七个子 Composition。它们返回私有封闭 bundle，不形成公共容器。旧 `Core/Lifetime`、Application 内的 concrete channel、跨层 mapper 与过渡 namespace 不得恢复。
+手写 namespace 使用 `IHomeland.Client.<Feature>.<Layer>[.<Subarea>]`；assembly name 继续保持 `IHomeland.Client.Foundation/Application/Infrastructure/Presentation/Runtime`。各 feature 的 `Runtime/Composition` 返回私有封闭 bundle，最终只由 `AppShell.Runtime.Composition` 显式装配，不形成公共容器、service locator 或全局 event bus。
 
 `client/Architecture/owner-registry.json` 声明每种状态的唯一 owner、commands、snapshot、module、collaborators 与测试入口；`tools/client-architecture/client-architecture.ps1 -Action verify` 是程序集 DAG、禁止依赖、owner 唯一性、旧路径与 Unity 序列化脚本完整性的 hard gate，并输出 flows、ports、adapters 和提示性复杂度清单。
 
-### `Core`
+### `Core` 与 `AppShell`
 
-- Bootstrap：唯一启动入口。
-- Composition：对象创建和依赖连接。
-- Configuration：只保存 Unity 可序列化的环境资产类型；运行时配置 model/owner 仍归 `Application/Configuration`。
-- Presentation：保存必须依赖 Unity 序列化与 Inspector 的产品 binding 类型边界；具体 Host/View 归顶层 `Presentation`。
-- Qualification：仅 Editor/Development 的低敏诊断与产品 action 驱动。
+`Core` 只保存删除任一业务 feature 后仍成立的技术基础：生命周期、主线程调度、时间抽象、通用 Scene generation、Input asset、rendering settings 与全局 PanelSettings。它不得反向依赖 Session、Networking、PersonalWorld 或 PersonalWorldCombat；测试 helper 也不能以“测试共用”为理由把业务依赖带入 Core。
 
-Lifetime 已归属 `Foundation/Lifetime`；不得恢复旧 `Core/Lifetime`。
+`AppShell` 保存唯一应用入口与产品壳：bootstrap/configuration use case、route registry、`AppBootstrap -> AppComposition -> AppRoot`、UI hosts、Development/Editor qualification 和 Windows build owner。它负责显式组合 feature，不拥有 feature 的最终事实。
 
 ### `Generated`
 
 `Generated/Protocol` 由 `tools/proto/proto.ps1 generate` 独占并在 Unity 编译前整体重建；源码、asmdef、runtime DLL 及 Unity 随后产生的 `.meta` 都保持 Git 忽略。这里不放手写 adapter、fixture 或配置，Scene/Prefab/ScriptableObject 不引用生成脚本。没有独立且已批准的 OpenAPI 客户端生成 change 前，不创建 `Generated/Http`。
 
-### `Application`
+### Feature 内部层次
 
-纯 C# configuration、session、personal-world、visit-session 状态与命令，不依赖具体 UI、Unity Host、generated protocol 或平台 socket/WebSocket 对象。Application 只定义 channel ports 与强类型 contracts；concrete channel owner 位于 Infrastructure。
+每个 feature 只创建当前实际需要的层次。`Application` 保存纯 C# use case、状态 owner、ports 与强类型 contracts，不依赖具体 UI、Unity Host、generated protocol 或平台 socket/WebSocket 对象；`Infrastructure` 保存 HTTP/WSS/TCP/security/native/protocol adapter，不保存第二份业务事实；`Presentation` 保存纯 C# view state、route 与语义 action；`Runtime` 只承担 Unity Host、Scene/Prefab 生命周期、Inspector 引用和 Composition。
 
-当前已落地 `Application/Bootstrap` 的启动配置用例、`Application/Session` 的唯一 session/credential owner、`Application/Control` 与 `Application/Gameplay` 的窄 contracts/ports，以及 `Application/World` 的访问、恢复与 projection feature slice；具体行为由[客户端接入规范](client-integration.md)统一说明。
+当前已分别落地 `AppShell/Application` 的启动配置用例、`Session/Application` 的唯一 session/credential owner、`Networking/Application` 的 control/gameplay 窄 contracts/ports，以及 `PersonalWorld/Application` 的访问、恢复与 projection slice；具体行为由[客户端接入规范](client-integration.md)统一说明。
 
-`Application/World` 只共置紧密协作的不可变 model/mapper、`PersonalWorldService`、`VisitSessionService` 与 `WorldAdmissionCoordinator`；三类 owner 的事实和转换职责仍然分离，该目录不得演变为统一 `WorldManager` 或第二套网络 router。尚未出现独立业务需求的 `Account` 及其他 application 目录不得为了目标树完整而创建空壳。
+`PersonalWorld/Application` 只共置紧密协作的不可变 model、`PersonalWorldService`、`VisitSessionService` 与 `WorldAdmissionCoordinator`；三类 owner 的事实和转换职责仍然分离，该目录不得演变为统一 `WorldManager` 或第二套网络 router。尚未出现独立业务需求的模块不得为了目标树完整而创建空壳。
 
-`Application/Session` 同时放置 secure record 契约与一次性 startup restore owner；`Application/World` 中的 `ClientConnectionRecoveryCoordinator` 只保存 generation、阶段和冻结低敏 descriptor，不复制 Session、World 或 Visit 最终事实。
+`Session/Application` 同时放置 secure record 契约与一次性 startup restore owner；`PersonalWorld/Application` 中的 `ClientConnectionRecoveryCoordinator` 只保存 generation、阶段和冻结低敏 descriptor，不复制 Session、World 或 Visit 最终事实。
 
-### `Infrastructure`
-
-HTTP、WSS、TCP、generated protocol 和平台存储 adapters。不得保存第二份业务事实。
-
-当前 `Infrastructure/Http` 放置冻结 operation catalog、JSON codec、共享 transport、result/error projection 与强类型 API；`Infrastructure/WebSocket` 只提供单次连接 adapter、封闭 control route catalog 与 generated Protobuf codec；`Infrastructure/Tcp` 提供 exact stream transport、`IHTP` preface、framing、封闭 gameplay route catalog 与 generated Protobuf codec。`Infrastructure/Security` 独占 Windows DPAPI、ACL、atomic replace、owner-specific path 和 named mutex；非 Windows 明确 Unsupported。以上 adapter 都不保存第二份业务状态。
+当前 `Networking/Infrastructure/Http` 放置冻结 operation catalog、JSON codec、共享 transport、result/error projection 与强类型 API；`WebSocket` 只提供单次连接 adapter、封闭 control route catalog 与 generated Protobuf codec；`Tcp` 提供 exact stream transport、`IHTP` preface、framing、封闭 gameplay route catalog 与 generated Protobuf codec。`Session/Infrastructure/Security` 独占 Windows DPAPI、ACL、atomic replace、owner-specific path 和 named mutex；非 Windows明确 Unsupported。
 
 客户端 C3 manifest/schema、automatic registry 与 diagnostic registry 位于 `shared/contracts/fixtures/client-qualification/`，唯一资格聚合入口及其独立失败回归位于 `tools/client-qualification/`；回归通过 AST 装载入口函数，不复制第二套资格实现。正式运行 build、日志、evidence 与 report 只进入 ignored `.local/client-qualification/<run-id>/`；不构成证据的定向 Development build、启动器与清单只进入 ignored `.local/client-diagnostics/<run-id>/`。真实 Player 服务端进程替换诊断同样位于该工具目录，其低敏日志和信号只进入 ignored `.local/client-recovery-diagnostics/<run-id>/`，不得被正式 `finalize` 读取。具体规则见[客户端 v1 资格验收](client-v1-qualification.md)。
 
-`client/Assets/App/Scripts/Core/Qualification/` 只在 Editor 或 Development Player 中编译低敏资源计数、真实产品 graph soak 与 secure-store owner cleanup 驱动。它不是产品 service locator 或第二套恢复实现；没有显式 qualification mode 时零副作用，Release 必须完全移除该目录内的可执行入口和参数词汇。
+`client/Assets/App/Modules/AppShell/Runtime/Qualification/` 与 `PersonalWorldCombat/Runtime/Qualification/` 只在 Editor 或 Development Player 中编译各自 owner 的低敏诊断和受控产品 action 驱动。它们不是产品 service locator 或第二套恢复实现；没有显式 qualification mode 时零副作用，Release 必须完全移除这些入口和参数词汇。
 
-### `Presentation`
+### Presentation 与 Scene 内容
 
-- `Pure/Navigation`：当前放置纯 C# `ClientUiRegistry`、`ClientUiRouter`、封闭 route id、稳定 layer/input/lifecycle、generation 与不可变 snapshot；不得引用资源路径或 transport。
-- `Pure/PersonalWorld`：放置首期 `ClientPersonalWorldExperience`、不可变页面切片、窄语义 actions 与 production route catalog；不得复制 Session/World/Visit 最终事实。
-- `Hosts`：放置持久 `ClientUiHostRoot`、UI Toolkit `PanelRenderer` adapter 与 uGUI `Canvas/CanvasGroup/EventSystem` adapter；只接受直接引用，不扫描场景、不加载资源、不保存业务事实。
-- `PersonalWorld`：放置依赖 Unity 的 HUD View 与 UI Toolkit 页面 adapter；只消费纯 C# presentation projection。
+- `AppShell/Presentation`：纯 C# `ClientUiRegistry`、`ClientUiRouter`、封闭 route id、稳定 layer/input/lifecycle、generation 与不可变 snapshot；不得引用资源路径或 transport。
+- `PersonalWorld/Presentation`：首期 `ClientPersonalWorldExperience`、不可变页面切片、窄语义 actions 与 production route catalog；不得复制 Session/World/Visit 最终事实。
+- `AppShell/Runtime/Presentation`：持久 `ClientUiHostRoot`、UI Toolkit adapter 与 uGUI adapter；只接受直接引用，不扫描场景、不加载资源、不保存业务事实。
+- `PersonalWorld/Runtime/Presentation` 与 `PersonalWorldCombat/Runtime/Scenes`：依赖 Unity 的页面/HUD/Actor/Camera adapter；只消费纯 C# presentation projection。
 
 当前 production registry 只登记 Login、Shell、WorldVisit、WorldHud 与 ConnectionLost，并保持一个逻辑 route 一个 active owner。产品 UXML/USS、WorldHud Prefab 与 `PersonalWorldScene` 由 Unity Editor 创建并通过 Host 直接引用接线；不得把资源 key、credential 或 generated message 塞回 router。
 
-### `Scenes/PersonalWorld`
-
-`Scenes/PersonalWorld` 放置封闭 scene catalog、唯一 transition Host 与轻量 `PersonalWorldSceneContext`。Context 只持有 camera、lighting、scene root 和低敏表现投影，随场景卸载，不得持有 Session、socket 或 world/visit 权威 snapshot。
+`PersonalWorld/Runtime/Scenes` 放置封闭 scene catalog、唯一 transition Host 与轻量 `PersonalWorldSceneContext`。Context 只持有 camera、lighting、scene root 和低敏表现投影，随场景卸载，不得持有 Session、socket 或 world/visit 权威 snapshot。
 
 个人世界客户端已经在服务端 v1 资格验收后落地 pure C# PersonalWorld、VisitSession 与 WorldAdmission application owner，以及 Infrastructure 下的协议 adapters。多个 owner 可以按已批准 change 共置于窄 feature slice，但不能合并状态所有权。World 场景、Actor 和表现仍归 Scene Scope；不得创建持有 socket、token、world snapshot 与 GameObject 的统一 `WorldManager`。
 
@@ -568,3 +545,13 @@ tools/
 - Scene、Prefab 或 ScriptableObject 对已忽略 Generated code 的序列化引用
 - `docs/` 中可执行但无人维护的临时脚本
 - 没有 owner 的 `Manager`、`Utils`、`Common` 大杂烩目录
+
+## B0.8 production combat 归属
+
+- `shared/contracts/gameplay/battle/packages/personal-world-combat-v1/`：production package、authority、presentation、bindings 与 wire mapping source。
+- `simulation/content/personal-world-combat-v1/`：versioned arena、navigation 与 physics source；不是 Unity 导出目录。
+- `server/internal/gameplaypackage/`：Go production selector/identity owner，不解释 gameplay rules。
+- `simulation/include|src/gameplay/production_encounter.*`：C++ encounter authority；Jolt/Detour adapters继续位于 adapters边界。
+- `tools/personal-world-combat/`：定向开发验收 owner；本机 evidence 只进入 ignored `.local/personal-world-combat/`。
+- `client/Assets/App/` 下的 production Prefab、Animation、VFX、Audio、catalog asset 与 Scene引用必须由锁定 Unity Editor 创建/保存；其 `.meta` 不得由脚本或人工文本生成。
+- `docs/personal-world-combat-runbook.md`：package选择、content制作、定向检查、双Player、cleanup与回滚操作边界。

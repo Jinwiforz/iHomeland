@@ -1,0 +1,14 @@
+{
+  "name": "IHomeland.Client.Foundation",
+  "rootNamespace": "IHomeland.Client",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

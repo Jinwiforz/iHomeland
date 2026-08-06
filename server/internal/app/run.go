@@ -10,6 +10,7 @@ import (
 
 	"github.com/jinwiforz/ihomeland/server/internal/buildinfo"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
+	"github.com/jinwiforz/ihomeland/server/internal/gameplaypackage"
 	"github.com/jinwiforz/ihomeland/server/internal/logging"
 	"github.com/jinwiforz/ihomeland/server/internal/observability"
 	"github.com/jinwiforz/ihomeland/server/internal/secret"
@@ -47,6 +48,21 @@ func Run(ctx context.Context, options Options) Result {
 	}
 	if !settings.SimulationControl.Enabled {
 		return Result{Kind: ResultConfigError, Err: errors.New("simulationControl.enabled is required by the server runtime")}
+	}
+	packageSelection, err := gameplaypackage.Select(gameplaypackage.Request{
+		RootPath:           settings.GameplayPackage.RootPath,
+		ArenaRootPath:      settings.GameplayPackage.ArenaRootPath,
+		PackageID:          settings.GameplayPackage.PackageID,
+		ConfigIdentity:     settings.GameplayPackage.ConfigIdentity,
+		NavigationIdentity: settings.GameplayPackage.NavigationIdentity,
+		PhysicsIdentity:    settings.GameplayPackage.PhysicsIdentity,
+		WireIdentity:       settings.GameplayPackage.WireIdentity,
+		ModelManifest:      settings.SimulationControl.ModelManifest,
+		ProfileManifest:    settings.SimulationControl.ProfileManifest,
+		BattleWireIdentity: settings.PublicAPI.BattleUDP.WireIdentity,
+	})
+	if err != nil {
+		return Result{Kind: ResultConfigError, Err: err}
 	}
 	secretProvider := options.SecretProvider
 	if secretProvider == nil {
@@ -89,6 +105,15 @@ func Run(ctx context.Context, options Options) Result {
 	}
 	logger = logger.With("instance_id", instanceID)
 	runtimeLogger := logger.With("component", "runtime")
+	runtimeLogger.Info(
+		"gameplay package selected",
+		"package_id", packageSelection.PackageID,
+		"config_identity", packageSelection.ConfigIdentity,
+		"navigation_identity", packageSelection.NavigationIdentity,
+		"physics_identity", packageSelection.PhysicsIdentity,
+		"wire_identity", packageSelection.WireIdentity,
+		"mapping_identity", packageSelection.MappingIdentity,
+	)
 	metrics := observability.NewMetrics()
 	readiness := NewReadiness()
 	tasks := NewTaskGroup(metrics)
@@ -148,6 +173,7 @@ func Run(ctx context.Context, options Options) Result {
 	}
 	simulationComponent, err := newSimulationNodeComponent(
 		settings.SimulationControl,
+		packageSelection,
 		settings.PublicAPI.BattleUDP,
 		mysqlComponent,
 		simulationTasks,

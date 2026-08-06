@@ -201,3 +201,7 @@ hit 或 gameplay authority。
 - 禁止因为最新工具暂不支持目标规范而静默降级规范版本。
 - 禁止把产品发布号与技术依赖版本混入同一个字段。
 - 禁止项目脚本把 Go toolchain、module cache 或 build cache 写入用户级目录。
+
+## B0.8 依赖结论
+
+B0.8 不新增浮动技术依赖。权威 collision/navigation 继续使用 `versions.yaml` 已锁定的 Jolt Physics 与 Recast/Detour，网络继续使用 Asio/KCP/libsodium/Protobuf lite，客户端继续使用 Unity `6000.5.2f1`、Input System `1.19.0` 与 Cinemachine `3.1.7`。Animator、Particle System、AudioClip、uGUI 和 ScriptableObject 均使用 Unity 内建模块；引入第三方 content runtime、Addressables、DOTS/ECS 或音频中间件必须另走 OpenSpec 与版本登记。

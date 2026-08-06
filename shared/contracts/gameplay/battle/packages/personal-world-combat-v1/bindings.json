@@ -1,0 +1,12 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "external-bindings",
+  "package_id": "personal-world-combat-v1",
+  "qualification_state": "production",
+  "map_id": "personal-world-combat/map/arena",
+  "map_content_identity": "34bb2d795d9c1bcb94059d184d3d7c9fd2e0e9741f97f670ccccd479afe3e6e8",
+  "navigation_identity": "14165efe5b47caf6c7c8e2f9a4794c4d238aa4badeedc3d5badb41a9c2d5d19f",
+  "physics_identity": "64d53e1803d7cb14f4953ba1978175b162577eeb064716b2630cad0acf4de02e",
+  "collision_layer_ref": "personal-world-combat/collision-layer/world",
+  "navigation_policy_ref": "personal-world-combat/navigation-policy/world"
+}

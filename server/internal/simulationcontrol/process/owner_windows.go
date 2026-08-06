@@ -47,6 +47,20 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	// StderrLineLimit 是单条低敏诊断最大 bytes。
 	StderrLineLimit int
+	// GameplayPackageRoot 是本机只读 production package 绝对目录。
+	GameplayPackageRoot string
+	// GameplayArenaRoot 是本机只读 server arena source 绝对目录。
+	GameplayArenaRoot string
+	// GameplayPackageID 是 operator 明确选择的 production semantic identity。
+	GameplayPackageID string
+	// ConfigIdentity 是 Go 重算的五文档聚合摘要。
+	ConfigIdentity simulationcontrol.Digest
+	// NavigationIdentity 是 Go 冻结的 Detour source 摘要。
+	NavigationIdentity simulationcontrol.Digest
+	// PhysicsIdentity 是 Go 冻结的 Jolt source 摘要。
+	PhysicsIdentity simulationcontrol.Digest
+	// WireIdentity 是 Go 冻结的 battle wire manifest 摘要。
+	WireIdentity simulationcontrol.Digest
 	// BattleUDPEnabled 要求 child 在 hello receipt 前绑定唯一 production listener。
 	BattleUDPEnabled bool
 	// BattleUDPBindHost 是显式数字 bind IP。
@@ -71,6 +85,11 @@ func (config Config) Validate() error {
 		!filepath.IsAbs(config.QualificationReceiptPath) ||
 		!config.BinarySHA256.Valid() ||
 		!config.QualificationReceiptSHA256.Valid() ||
+		!filepath.IsAbs(config.GameplayPackageRoot) ||
+		!filepath.IsAbs(config.GameplayArenaRoot) ||
+		config.GameplayPackageID != "personal-world-combat-v1" ||
+		!config.ConfigIdentity.Valid() || !config.NavigationIdentity.Valid() ||
+		!config.PhysicsIdentity.Valid() || !config.WireIdentity.Valid() ||
 		config.RequestTimeout <= 0 || config.ShutdownTimeout <= 0 ||
 		config.StderrLineLimit < 64 || config.StderrLineLimit > 4096 {
 		return errors.New("simulation process config is invalid")
@@ -174,7 +193,16 @@ func Start(config Config, nonce simulationcontrol.Digest, proposals simulationco
 
 // processArguments 从已验证配置生成唯一 closed child CLI。
 func processArguments(config Config) []string {
-	arguments := []string{"--control-stdio"}
+	arguments := []string{
+		"--control-stdio",
+		"--gameplay-package-root", config.GameplayPackageRoot,
+		"--gameplay-arena-root", config.GameplayArenaRoot,
+		"--gameplay-package-id", config.GameplayPackageID,
+		"--gameplay-config-identity", config.ConfigIdentity.String(),
+		"--gameplay-navigation-identity", config.NavigationIdentity.String(),
+		"--gameplay-physics-identity", config.PhysicsIdentity.String(),
+		"--gameplay-wire-identity", config.WireIdentity.String(),
+	}
 	if config.BattleUDPEnabled {
 		arguments = append(arguments,
 			"--battle-udp-bind-host", config.BattleUDPBindHost,

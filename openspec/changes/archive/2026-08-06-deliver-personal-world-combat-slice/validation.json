@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "deliver-personal-world-combat-slice",
+  "checks": [
+    {
+      "id": "quality-contract",
+      "reason": "跨 package、wire、Go/C++、Unity 的实现必须保持 closed validation plan、catalog 引用与普通 change/最终资格分层"
+    },
+    {
+      "id": "gameplay-config-validate",
+      "reason": "production gameplay package、semantic/numeric mapping、identity、coverage 与三端 consumer parity 属于直接影响面"
+    },
+    {
+      "id": "battle-wire-validate",
+      "reason": "BattleInputKind、entity projection、state mask、canonical fixture 与 profile size binding 将被兼容扩展"
+    },
+    {
+      "id": "simulation-control-validate",
+      "reason": "Go package selector、受监督 C++ child identity 与 SimulationInstance package binding 属于直接影响面"
+    },
+    {
+      "id": "client-battle-runtime-validate",
+      "reason": "Unity feature/layer目录、namespace/asmref/owner架构、pure C# replica、input、content mapping、HUD/Camera 与 generation fencing 属于直接影响面"
+    },
+    {
+      "id": "proto-verify",
+      "reason": "battle.proto 将增加兼容 enum/field，必须重建并验证 Go/C++/C# descriptor、fixture 与 generated parity"
+    },
+    {
+      "id": "client-battle-runtime-unity",
+      "reason": "PersonalWorld Scene、Input Actions、Prefab、ScriptableObject、uGUI HUD、Cinemachine 与 Unity lifecycle 属于直接影响面"
+    },
+    {
+      "id": "personal-world-combat-targeted",
+      "reason": "production encounter 的真实 Go/C++/Unity Player、solo/coop/reconnect 与低敏 evidence 需要统一定向入口"
+    },
+    {
+      "id": "openspec-change-strict",
+      "reason": "proposal、design、五份 delta specs、tasks 与实施期间的 artifact 更新必须持续通过 strict validation"
+    }
+  ]
+}

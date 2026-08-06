@@ -11,6 +11,7 @@ $OutputEncoding = [Console]::OutputEncoding
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ValidatorPath = Join-Path $PSScriptRoot "gameplay-config.ps1"
 $SourceCorpusRoot = Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\gameplay-config"
+$SourceProductionRoot = Join-Path $RepositoryRoot "shared\contracts\gameplay\battle\packages\personal-world-combat-v1"
 $Utf8NoBom = [Text.UTF8Encoding]::new($false)
 $TemporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
 $TestRoot = Join-Path ([IO.Path]::GetTempPath()) (
@@ -74,6 +75,29 @@ function Invoke-Validator {
     }
 }
 
+# Invoke-ProductionValidator 同时验证只读治理 corpus 与隔离 production package。
+function Invoke-ProductionValidator {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = @(
+            & (Get-Command pwsh.exe -ErrorAction Stop).Source `
+                -NoLogo -NoProfile -File $ValidatorPath validate `
+                -CorpusRoot $SourceCorpusRoot -ProductionRoot $Root 2>&1 |
+            ForEach-Object { [string]$_ })
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = $output -join "`n"
+    }
+}
+
 # New-IsolatedCorpusCopy 为每个 mutation 建立独立 source 副本。
 function New-IsolatedCorpusCopy {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -83,6 +107,17 @@ function New-IsolatedCorpusCopy {
     [IO.Directory]::CreateDirectory($caseRoot) | Out-Null
     Copy-Item -LiteralPath $SourceCorpusRoot -Destination $corpusRoot -Recurse
     return $corpusRoot
+}
+
+# New-IsolatedProductionCopy 为每个 production mutation 建立独立 package 副本。
+function New-IsolatedProductionCopy {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $caseRoot = Join-Path $TestRoot $Name
+    $productionRoot = Join-Path $caseRoot "personal-world-combat-v1"
+    [IO.Directory]::CreateDirectory($caseRoot) | Out-Null
+    Copy-Item -LiteralPath $SourceProductionRoot -Destination $productionRoot -Recurse
+    return $productionRoot
 }
 
 # Update-ManifestDigest 让语义 mutation 越过 raw digest 门并抵达目标约束。
@@ -181,8 +216,33 @@ function Invoke-MutationTest {
     }
 }
 
+# Invoke-ProductionMutationTest 在隔离 production package 上验证稳定失败原因。
+function Invoke-ProductionMutationTest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][scriptblock]$Mutation,
+        [Parameter(Mandatory = $true)][string]$ExpectedPattern
+    )
+
+    $root = New-IsolatedProductionCopy $Name
+    try {
+        & $Mutation $root
+        Assert-Fail $Name (Invoke-ProductionValidator $root) $ExpectedPattern
+    }
+    finally {
+        $caseRoot = [IO.Directory]::GetParent($root).FullName
+        $expectedPrefix = [IO.Path]::GetFullPath($TestRoot).TrimEnd('\') + '\'
+        if (-not ([IO.Path]::GetFullPath($caseRoot) + '\').StartsWith(
+                $expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "test cleanup escaped isolated production root"
+        }
+        Remove-Item -LiteralPath $caseRoot -Recurse -Force
+    }
+}
+
 if (-not (Test-Path -LiteralPath $ValidatorPath -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $SourceCorpusRoot -PathType Container)) {
+    -not (Test-Path -LiteralPath $SourceCorpusRoot -PathType Container) -or
+    -not (Test-Path -LiteralPath $SourceProductionRoot -PathType Container)) {
     throw "gameplay config test prerequisites are missing"
 }
 $resolvedTestRoot = [IO.Path]::GetFullPath($TestRoot)
@@ -194,6 +254,7 @@ if (-not ($resolvedTestRoot + '\').StartsWith(
 
 try {
     $sourceDigestBefore = Get-TreeDigest $SourceCorpusRoot
+    $productionDigestBefore = Get-TreeDigest $SourceProductionRoot
     $first = Invoke-Validator $SourceCorpusRoot
     $second = Invoke-Validator $SourceCorpusRoot
     Assert-Pass "baseline-first" $first
@@ -203,6 +264,18 @@ try {
     }
     if ((Get-TreeDigest $SourceCorpusRoot) -cne $sourceDigestBefore) {
         throw "test failed: validator modified source corpus"
+    }
+    $Passed++
+
+    $productionFirst = Invoke-ProductionValidator $SourceProductionRoot
+    $productionSecond = Invoke-ProductionValidator $SourceProductionRoot
+    Assert-Pass "production-baseline-first" $productionFirst
+    Assert-Pass "production-baseline-second" $productionSecond
+    if ($productionFirst.Output -cne $productionSecond.Output) {
+        throw "test failed: consecutive production validation output differs"
+    }
+    if ((Get-TreeDigest $SourceProductionRoot) -cne $productionDigestBefore) {
+        throw "test failed: validator modified production package"
     }
     $Passed++
 
@@ -454,10 +527,73 @@ try {
             "packages/governance-reference-v1/bindings.json"
         )) {
             $document = Get-JsonDocument $root $relative
-            $document.qualification_state = "production-candidate"
+            $document.qualification_state = "production"
             Set-JsonDocument $root $relative $document
         }
+        $relative = "packages/governance-reference-v1/wire-mapping.json"
+        $document = Get-JsonDocument $root $relative
+        $document.qualification_state = "production"
+        Set-JsonDocument $root $relative $document
+    } '\[(?:schema|compatibility)\]'
+
+    Invoke-ProductionMutationTest "production-duplicate-numeric-id" {
+        param($root)
+        $path = Join-Path $root "wire-mapping.json"
+        $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+        $document.mappings[1].numeric_id = $document.mappings[0].numeric_id
+        Write-CanonicalJson $path $document
+    } '\[wire-mapping\]'
+
+    Invoke-ProductionMutationTest "production-missing-projectile-mapping" {
+        param($root)
+        $path = Join-Path $root "wire-mapping.json"
+        $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+        $document.mappings = @($document.mappings | Where-Object { $_.kind -cne "projectile" })
+        Write-CanonicalJson $path $document
+    } '\[wire-mapping\]'
+
+    Invoke-ProductionMutationTest "production-cross-kind-mapping" {
+        param($root)
+        $path = Join-Path $root "wire-mapping.json"
+        $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+        $mapping = @($document.mappings | Where-Object { $_.kind -ceq "weapon" })[0]
+        $mapping.kind = "ability"
+        Write-CanonicalJson $path $document
+    } '\[(?:schema|wire-mapping)\]'
+
+    Invoke-ProductionMutationTest "production-fixture-namespace" {
+        param($root)
+        $path = Join-Path $root "authority.json"
+        $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+        $document.objects[0].id = "fixture/actor/player"
+        Write-CanonicalJson $path $document
+    } '\[reference\]'
+
+    Invoke-ProductionMutationTest "production-presentation-authority-field" {
+        param($root)
+        $path = Join-Path $root "presentation.json"
+        $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+        $document.mappings[0] | Add-Member -NotePropertyName "damage" -NotePropertyValue "1000"
+        Write-CanonicalJson $path $document
+    } '\[schema\]'
+
+    Invoke-ProductionMutationTest "production-governance-classification" {
+        param($root)
+        foreach ($name in @("package.json", "authority.json", "presentation.json", "bindings.json", "wire-mapping.json")) {
+            $path = Join-Path $root $name
+            $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+            $document.qualification_state = "governance-only"
+            Write-CanonicalJson $path $document
+        }
     } '\[compatibility\]'
+
+    Invoke-ProductionMutationTest "production-sensitive-logical-key" {
+        param($root)
+        $path = Join-Path $root "presentation.json"
+        $document = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100
+        $document.resources[0].logical_key = "token-secret"
+        Write-CanonicalJson $path $document
+    } '\[security\]'
 
     Invoke-MutationTest "sensitive-logical-key" {
         param($root)
@@ -477,6 +613,9 @@ try {
 
     if ((Get-TreeDigest $SourceCorpusRoot) -cne $sourceDigestBefore) {
         throw "test failed: regression suite modified source corpus"
+    }
+    if ((Get-TreeDigest $SourceProductionRoot) -cne $productionDigestBefore) {
+        throw "test failed: regression suite modified production package"
     }
 }
 finally {

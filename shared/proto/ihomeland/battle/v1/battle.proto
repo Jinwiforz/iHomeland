@@ -23,6 +23,9 @@ enum BattleInputKind {
   BATTLE_INPUT_KIND_SECONDARY_ABILITY = 5;
   // BATTLE_INPUT_KIND_INTERACT 请求与 simulation 选择的合法目标交互。
   BATTLE_INPUT_KIND_INTERACT = 6;
+  // BATTLE_INPUT_KIND_SWITCH_WEAPON 请求在当前 generation 内切换已授权武器。
+  // 该离散 edge 不携带 weapon、target 或其他权威 payload。
+  BATTLE_INPUT_KIND_SWITCH_WEAPON = 7;
 }
 
 // BattleAbilityPhase 表达 reliable ability event 的封闭生命周期阶段。
@@ -152,6 +155,13 @@ message BattleEntityState {
   uint32 health_milli = 4;
   // state_flags 是 registry 冻结的 bit set，未知 bit 必须拒绝。
   uint32 state_flags = 5;
+  // archetype_id 是 production content mapping 中的非零 actor identity。
+  // 同一 entity generation 内该值不可变。
+  uint32 archetype_id = 6;
+  // equipped_weapon_id 是 player 当前装备的 weapon identity；非 player 必须为 0。
+  uint32 equipped_weapon_id = 7;
+  // max_health_milli 是当前 generation 的正数生命上限，且不可变。
+  uint32 max_health_milli = 8;
 }
 
 // BattleEntityDelta 是相对已确认 baseline 的有界 entity 状态变化。
@@ -161,7 +171,8 @@ message BattleEntityDelta {
   uint64 entity_id = 1;
   // entity_generation 必须与当前 lifecycle generation 精确匹配。
   uint32 entity_generation = 2;
-  // state_mask 的 bit 0、1、2 分别声明 transform、health_milli、state_flags。
+  // state_mask 的 bit 0、1、2、3 分别声明 transform、health_milli、state_flags、
+  // equipped_weapon_id。
   uint32 state_mask = 3;
   // transform 在 state_mask bit 0 设置时提供完整量化姿态。
   QuantizedTransform transform = 4;
@@ -169,6 +180,8 @@ message BattleEntityDelta {
   uint32 health_milli = 5;
   // state_flags 在 state_mask bit 2 设置时提供完整替换 bit set。
   uint32 state_flags = 6;
+  // equipped_weapon_id 在 state_mask bit 3 设置时提供当前 player 武器的完整替换值。
+  uint32 equipped_weapon_id = 7;
 }
 
 // BattleFullSnapshot 建立一个可供后续 delta 引用的完整 raw lane baseline。

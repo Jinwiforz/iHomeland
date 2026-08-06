@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ihomeland/sim/config/gameplay_package.hpp"
 #include "ihomeland/sim/transport/udp_listener.hpp"
 
 #include <iosfwd>
@@ -34,6 +35,7 @@ struct QualificationControlConfig final {
     std::ostream& diagnostics,
     const ControlBuildBinding& build,
     const BattleUdpListenerConfig* battle_listener = nullptr,
-    const QualificationControlConfig* qualification = nullptr);
+    const QualificationControlConfig* qualification = nullptr,
+    const GameplayPackageCatalog* gameplay_package = nullptr);
 
 }  // namespace ihomeland::sim

@@ -17,6 +17,13 @@ void Require(
     }
 }
 
+/// ActiveActors 返回双 player fixture 的规范参战集合。
+[[nodiscard]] const std::vector<std::uint64_t>&
+ActiveActors() {
+    static const std::vector<std::uint64_t> actors{1, 2};
+    return actors;
+}
+
 /// Config 返回 current 50 ms server/client movement contract。
 [[nodiscard]]
 ihomeland::sim::BattleMovementReplicationConfig
@@ -121,7 +128,8 @@ void TestMovementJumpAndActorProjection() {
     store.Commit(
         1,
         first_resolutions,
-        first_acknowledgements);
+        first_acknowledgements,
+        ActiveActors());
 
     const auto owner = store.Freeze(1, 11);
     const auto visitor = store.Freeze(2, 11);
@@ -187,7 +195,8 @@ void TestMovementJumpAndActorProjection() {
     store.Commit(
         2,
         second_resolutions,
-        second_acknowledgements);
+        second_acknowledgements,
+        ActiveActors());
     const auto airborne = store.Freeze(1, 11);
     Require(
         airborne.has_value() &&
@@ -239,13 +248,15 @@ void TestFailedCommitDoesNotPublish() {
     store.Commit(
         1,
         resolutions,
-        acknowledgements);
+        acknowledgements,
+        ActiveActors());
     acknowledgements[1].mapping_generation = 12;
     try {
         store.Commit(
             2,
             resolutions,
-            acknowledgements);
+            acknowledgements,
+            ActiveActors());
         throw std::runtime_error(
             "invalid movement acknowledgement was committed");
     } catch (
@@ -269,6 +280,97 @@ void TestFailedCommitDoesNotPublish() {
         "movement freeze accepted stale generation or actor");
 }
 
+/// TestDeferredCommitPublishesOnlyAuthoritativeState 验证 production overlay 不暴露中间 movement projection。
+void TestDeferredCommitPublishesOnlyAuthoritativeState() {
+    auto physics = std::make_shared<
+        ihomeland::sim::
+            FlatGroundPhysicsWorld>();
+    ihomeland::sim::
+        BattleMovementReplicationStore store(
+            Config(),
+            {1, 2},
+            100'000,
+            physics);
+    const std::vector<
+        ihomeland::sim::ActorInputResolution>
+        resolutions{
+            Resolution(1, 0, 0, false, std::nullopt, 0),
+            Resolution(2, 0, 0, false, std::nullopt, 0),
+        };
+    const std::vector<
+        ihomeland::sim::InputAcknowledgementProjection>
+        acknowledgements{
+            Acknowledgement(1, 0),
+            Acknowledgement(2, 0),
+        };
+    auto states = store.Commit(
+        1,
+        resolutions,
+        acknowledgements,
+        ActiveActors(),
+        false);
+    Require(
+        !store.Freeze(1, 11).has_value(),
+        "deferred movement commit exposed an intermediate projection");
+    for (auto& state : states) {
+        state.max_health_scaled = 100'000;
+    }
+    store.PublishAuthoritative(
+        1,
+        states,
+        acknowledgements,
+        {},
+        {},
+        false);
+    const auto snapshot = store.Freeze(1, 11);
+    Require(
+        snapshot.has_value() &&
+            snapshot->server_tick == 1 &&
+            snapshot->states.size() == 2 &&
+            snapshot->states[0].max_health_scaled == 100'000 &&
+            snapshot->states[1].max_health_scaled == 100'000,
+        "authoritative overlay was not published atomically");
+}
+
+/// TestInactiveActorStopsAtBarrier 验证 session 撤销后不保留输入或运动惯性。
+void TestInactiveActorStopsAtBarrier() {
+    auto physics = std::make_shared<
+        ihomeland::sim::FlatGroundPhysicsWorld>();
+    ihomeland::sim::BattleMovementReplicationStore store(
+        Config(),
+        {1},
+        100'000,
+        physics);
+    const std::vector<ihomeland::sim::ActorInputResolution>
+        resolutions{
+            Resolution(1, 1'000, 0, false, std::nullopt, 0),
+        };
+    const std::vector<
+        ihomeland::sim::InputAcknowledgementProjection>
+        acknowledgements{
+            Acknowledgement(1, 0),
+        };
+    const std::vector<std::uint64_t> active{1};
+    const std::vector<std::uint64_t> inactive;
+    const auto moving = store.Commit(
+        1,
+        resolutions,
+        acknowledgements,
+        active);
+    const auto stopped = store.Commit(
+        2,
+        resolutions,
+        acknowledgements,
+        inactive);
+    Require(
+        moving[0].x_mm > 0 &&
+            stopped[0].x_mm == moving[0].x_mm &&
+            stopped[0].velocity_x_mm_per_second == 0 &&
+            stopped[0].velocity_y_mm_per_second == 0 &&
+            stopped[0].velocity_z_mm_per_second == 0,
+        "inactive actor retained movement input or velocity");
+}
+
 }  // namespace
 
 /// main 执行权威 movement/physics state 与 acknowledgement原子projection回归。
@@ -276,6 +378,8 @@ int main() {
     try {
         TestMovementJumpAndActorProjection();
         TestFailedCommitDoesNotPublish();
+        TestDeferredCommitPublishesOnlyAuthoritativeState();
+        TestInactiveActorStopsAtBarrier();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

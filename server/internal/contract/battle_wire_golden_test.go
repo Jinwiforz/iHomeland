@@ -123,6 +123,22 @@ type battleWireDecoded struct {
 	AbilityID uint32 `json:"ability_id"`
 	// Phase 是 ability lifecycle phase 数值。
 	Phase int32 `json:"phase"`
+	// EntityID 是 canonical entity state 或 lifecycle 的非零 identity。
+	EntityID uint64 `json:"entity_id"`
+	// EntityGeneration 是 canonical entity 的当前 generation。
+	EntityGeneration uint32 `json:"entity_generation"`
+	// HealthMilli 与 MaxHealthMilli 冻结生命值 cross-field parity。
+	HealthMilli uint32 `json:"health_milli"`
+	// StateFlags 是 canonical entity 的完整 state bit set。
+	StateFlags uint32 `json:"state_flags"`
+	// ArchetypeID 是 production actor wire mapping identity。
+	ArchetypeID uint32 `json:"archetype_id"`
+	// EquippedWeaponID 是 production weapon wire mapping identity。
+	EquippedWeaponID uint32 `json:"equipped_weapon_id"`
+	// MaxHealthMilli 是当前 entity generation 的不可变正数上限。
+	MaxHealthMilli uint32 `json:"max_health_milli"`
+	// LifecycleKind 是 spawn/despawn 的封闭枚举值。
+	LifecycleKind int32 `json:"lifecycle_kind"`
 }
 
 // loadBattleWireGolden 每次从 source corpus 读取 fixture，避免测试 mutation 污染其他用例。
@@ -137,7 +153,7 @@ func loadBattleWireGolden(t *testing.T) battleWireGoldenDocument {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	const canonicalVectorCount = 14
+	const canonicalVectorCount = 17
 	if len(document.Vectors) != canonicalVectorCount {
 		t.Fatalf("canonical battle wire vector count = %d, want %d", len(document.Vectors), canonicalVectorCount)
 	}
@@ -202,6 +218,46 @@ func decodeBattleWireBytes(t *testing.T, vector battleWireVector) []byte {
 		t.Fatalf("%s SHA-256 drifted", vector.VectorID)
 	}
 	return data
+}
+
+// newCanonicalBattleEntityState 显式设置 full state 的全部 scalar presence。
+func newCanonicalBattleEntityState(decoded battleWireDecoded) *battlev1.BattleEntityState {
+	transform := &battlev1.QuantizedTransform{}
+	transform.SetPositionXMm(0)
+	transform.SetPositionYMm(0)
+	transform.SetPositionZMm(0)
+	transform.SetYawMillidegrees(0)
+	transform.SetVelocityXMmPerSecond(0)
+	transform.SetVelocityYMmPerSecond(0)
+	transform.SetVelocityZMmPerSecond(0)
+	state := &battlev1.BattleEntityState{}
+	state.SetEntityId(decoded.EntityID)
+	state.SetEntityGeneration(decoded.EntityGeneration)
+	state.SetTransform(transform)
+	state.SetHealthMilli(decoded.HealthMilli)
+	state.SetStateFlags(decoded.StateFlags)
+	state.SetArchetypeId(decoded.ArchetypeID)
+	state.SetEquippedWeaponId(decoded.EquippedWeaponID)
+	state.SetMaxHealthMilli(decoded.MaxHealthMilli)
+	return state
+}
+
+// assertCanonicalBattleMessage 验证 generated Go codec 与共享 vector byte-exact 一致。
+func assertCanonicalBattleMessage(
+	t *testing.T,
+	options proto.MarshalOptions,
+	vector battleWireVector,
+	message proto.Message,
+) {
+	t.Helper()
+	encoded, err := options.Marshal(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(encoded) != vector.BytesHex {
+		t.Fatalf("%s canonical encode drifted", vector.VectorID)
+	}
+	decodeBattleWireBytes(t, vector)
 }
 
 // TestBattleWireHeaderGoldenParity 验证 Go 对 secure/raw/KCP headers 的双向 endian 与宽度。
@@ -365,6 +421,33 @@ func TestBattleWireProtobufGoldenParity(t *testing.T) {
 	if err := proto.Unmarshal(decodeBattleWireBytes(t, abilityVector), &decodedAbility); err != nil ||
 		!proto.Equal(ability, &decodedAbility) {
 		t.Fatal("BattleAbilityReliableEvent canonical decode drifted")
+	}
+
+	playerVector := findBattleWireVector(t, document, "battle-player-entity-state-protobuf-v1")
+	playerState := newCanonicalBattleEntityState(playerVector.Decoded)
+	assertCanonicalBattleMessage(t, options, playerVector, playerState)
+	var decodedPlayer battlev1.BattleEntityState
+	if err := proto.Unmarshal(decodeBattleWireBytes(t, playerVector), &decodedPlayer); err != nil ||
+		decodedPlayer.GetHealthMilli() > decodedPlayer.GetMaxHealthMilli() ||
+		decodedPlayer.GetArchetypeId() == 0 || decodedPlayer.GetEquippedWeaponId() == 0 {
+		t.Fatal("player content state canonical decode drifted")
+	}
+
+	bossVector := findBattleWireVector(t, document, "battle-boss-entity-state-protobuf-v1")
+	bossState := newCanonicalBattleEntityState(bossVector.Decoded)
+	assertCanonicalBattleMessage(t, options, bossVector, bossState)
+	lifecycleVector := findBattleWireVector(t, document, "battle-boss-lifecycle-protobuf-v1")
+	lifecycle := &battlev1.BattleEntityLifecycle{}
+	lifecycle.SetEventId(lifecycleVector.Decoded.EventID)
+	lifecycle.SetServerTick(lifecycleVector.Decoded.ServerTick)
+	lifecycle.SetEntityId(lifecycleVector.Decoded.EntityID)
+	lifecycle.SetEntityGeneration(lifecycleVector.Decoded.EntityGeneration)
+	lifecycle.SetKind(battlev1.BattleEntityLifecycleKind(lifecycleVector.Decoded.LifecycleKind))
+	lifecycle.SetArchetypeId(lifecycleVector.Decoded.ArchetypeID)
+	lifecycle.SetInitialState(bossState)
+	assertCanonicalBattleMessage(t, options, lifecycleVector, lifecycle)
+	if lifecycle.GetArchetypeId() != lifecycle.GetInitialState().GetArchetypeId() {
+		t.Fatal("lifecycle archetype parity drifted")
 	}
 
 	for _, id := range []string{

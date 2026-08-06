@@ -8,8 +8,11 @@ param(
     [ValidateSet("validate")]
     [string]$Action,
 
-    # CorpusRoot 允许隔离失败回归传入临时副本；默认值始终指向仓库 source corpus。
-    [string]$CorpusRoot = ""
+    # CorpusRoot 允许隔离失败回归传入治理 corpus 临时副本；默认值始终指向仓库 source corpus。
+    [string]$CorpusRoot = "",
+
+    # ProductionRoot 可选指定非 fixture production package 根目录并与治理 corpus 一起验证。
+    [string]$ProductionRoot = ""
 )
 
 Set-StrictMode -Version Latest
@@ -22,6 +25,11 @@ $ResolvedCorpusRoot = if ($CorpusRoot) {
     (Resolve-Path -LiteralPath $CorpusRoot).Path
 } else {
     (Resolve-Path -LiteralPath $DefaultCorpusRoot).Path
+}
+$ResolvedProductionRoot = if ($ProductionRoot) {
+    (Resolve-Path -LiteralPath $ProductionRoot).Path
+} else {
+    ""
 }
 $Utf8Strict = [Text.UTF8Encoding]::new($false, $true)
 $Utf8NoBom = [Text.UTF8Encoding]::new($false)
@@ -290,6 +298,327 @@ function Get-PackageIdentity {
     return Get-Sha256Bytes ($Utf8NoBom.GetBytes($lines.ToString()))
 }
 
+# Get-ProductionPackageIdentity 对 production package 的五份 closed document 重算 ConfigIdentity。
+function Get-ProductionPackageIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$Package,
+        [Parameter(Mandatory = $true)][hashtable]$Documents
+    )
+
+    $lines = [Text.StringBuilder]::new()
+    [void]$lines.Append("ihomeland-gameplay-production-v1`n")
+    [void]$lines.Append([string]$Package.governance_binding.manifest_sha256).Append("`n")
+    foreach ($relative in @($Documents.Keys | Sort-Object -CaseSensitive)) {
+        $entry = $Documents[$relative]
+        [void]$lines.Append($relative).Append([char]0)
+        [void]$lines.Append([string]$entry.Kind).Append([char]0)
+        [void]$lines.Append([string]$entry.Digest).Append("`n")
+    }
+    return Get-Sha256Bytes ($Utf8NoBom.GetBytes($lines.ToString()))
+}
+
+# Invoke-ProductionPackageValidation 使用治理 schema/registry 验证显式非 fixture package。
+function Invoke-ProductionPackageValidation {
+    param(
+        [Parameter(Mandatory = $true)][string]$GovernanceRoot,
+        [Parameter(Mandatory = $true)][string]$PackageRoot
+    )
+
+    $previousRoot = $script:ResolvedCorpusRoot
+    $script:ResolvedCorpusRoot = $PackageRoot
+    try {
+        $expectedFiles = @(
+            "authority.json",
+            "bindings.json",
+            "package.json",
+            "presentation.json",
+            "wire-mapping.json"
+        )
+        $actualFiles = @(
+            Get-ChildItem -LiteralPath $PackageRoot -File -Filter *.json |
+            ForEach-Object { $_.Name } |
+            Sort-Object -CaseSensitive
+        )
+        Assert-StringSetEqual $actualFiles $expectedFiles "digest" "production package inventory"
+
+        $schemaPaths = @{
+            "authority.json" = Join-Path $GovernanceRoot "schema\authority.schema.json"
+            "bindings.json" = Join-Path $GovernanceRoot "schema\bindings.schema.json"
+            "package.json" = Join-Path $GovernanceRoot "schema\package.schema.json"
+            "presentation.json" = Join-Path $GovernanceRoot "schema\presentation.schema.json"
+            "wire-mapping.json" = Join-Path $GovernanceRoot "schema\wire-mapping.schema.json"
+        }
+        foreach ($relative in $expectedFiles) {
+            $path = Resolve-CorpusPath $relative
+            Assert-JsonSchema $path $schemaPaths[$relative]
+            Assert-NoSensitiveData (Read-CanonicalText $path) $relative
+        }
+
+        $package = Read-JsonDocument (Resolve-CorpusPath "package.json")
+        $authority = Read-JsonDocument (Resolve-CorpusPath "authority.json")
+        $presentation = Read-JsonDocument (Resolve-CorpusPath "presentation.json")
+        $bindings = Read-JsonDocument (Resolve-CorpusPath "bindings.json")
+        $wireMapping = Read-JsonDocument (Resolve-CorpusPath "wire-mapping.json")
+        if ([string]$package.qualification_state -cne "production") {
+            Fail-GameplayConfig "compatibility" "production package classification differs"
+        }
+        foreach ($document in @($authority, $presentation, $bindings, $wireMapping)) {
+            if ([string]$document.package_id -cne [string]$package.package_id -or
+                [string]$document.qualification_state -cne "production") {
+                Fail-GameplayConfig "compatibility" "production document identity differs"
+            }
+        }
+
+        $governanceDigest = Get-Sha256File (Join-Path $GovernanceRoot "manifest.json")
+        $modelDigest = Get-Sha256File (Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\model\manifest.json")
+        $profileDigest = Get-Sha256File (Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\network-profile\manifest.json")
+        $wireDigest = Get-Sha256File (Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\wire\manifest.json")
+        if ([string]$package.governance_binding.version -cne "gameplay-config-format-v1" -or
+            [string]$package.governance_binding.manifest_sha256 -cne $governanceDigest -or
+            [string]$package.model_binding.version -cne "battle-model-v1" -or
+            [string]$package.model_binding.manifest_sha256 -cne $modelDigest -or
+            [string]$package.profile_binding.version -cne "battle-network-profile-v2" -or
+            [string]$package.profile_binding.manifest_sha256 -cne $profileDigest -or
+            [string]$package.wire_binding.version -cne "battle-wire-v1" -or
+            [string]$package.wire_binding.manifest_sha256 -cne $wireDigest) {
+            Fail-GameplayConfig "compatibility" "production source binding differs"
+        }
+
+        $semantic = Read-JsonDocument (Join-Path $GovernanceRoot "registries\semantic-types.json")
+        $numeric = Read-JsonDocument (Join-Path $GovernanceRoot "registries\numeric-fields.json")
+        $coverage = Read-JsonDocument (Join-Path $GovernanceRoot "registries\required-coverage.json")
+        $allowedReferences = @{}
+        foreach ($rule in @($semantic.allowed_references)) {
+            $key = "{0}|{1}" -f [string]$rule.from_kind, [string]$rule.field
+            $allowedReferences[$key] = @($rule.to_kinds | ForEach-Object { [string]$_ })
+        }
+        $numericRules = @{}
+        foreach ($rule in @($numeric.entries)) {
+            $key = "{0}|{1}" -f [string]$rule.kind, [string]$rule.field
+            $numericRules[$key] = $rule
+        }
+
+        $packageNamespace = ([string]$package.package_id) -replace '-v[1-9][0-9]*$', ''
+        $objectsById = @{}
+        foreach ($object in @($authority.objects)) {
+            $id = [string]$object.id
+            if ($objectsById.ContainsKey($id) -or
+                -not $id.StartsWith(($packageNamespace + "/"), [StringComparison]::Ordinal) -or
+                $id.StartsWith("fixture/", [StringComparison]::Ordinal)) {
+                Fail-GameplayConfig "reference" "production semantic namespace differs"
+            }
+            $segments = $id.Split('/')
+            if ($segments.Count -ne 3 -or $segments[1] -cne [string]$object.kind -or
+                @($semantic.retired_ids) -ccontains $id) {
+                Fail-GameplayConfig "reference" "production semantic kind differs"
+            }
+            $objectsById[$id] = $object
+        }
+
+        foreach ($object in @($authority.objects)) {
+            $referenceKeys = @()
+            foreach ($reference in @($object.references)) {
+                $referenceKeys += ("{0}|{1}" -f [string]$reference.field, [string]$reference.target_id)
+                $ruleKey = "{0}|{1}" -f [string]$object.kind, [string]$reference.field
+                $targetId = [string]$reference.target_id
+                if (-not $allowedReferences.ContainsKey($ruleKey) -or
+                    $allowedReferences[$ruleKey] -cnotcontains [string]$reference.target_kind -or
+                    -not $objectsById.ContainsKey($targetId) -or
+                    [string]$objectsById[$targetId].kind -cne [string]$reference.target_kind) {
+                    Fail-GameplayConfig "reference" "production reference differs"
+                }
+            }
+            if (@($referenceKeys | Sort-Object -CaseSensitive -Unique).Count -ne $referenceKeys.Count) {
+                Fail-GameplayConfig "reference" "production reference is duplicated"
+            }
+
+            $actualNumeric = @($object.numeric_values | ForEach-Object { [string]$_.field })
+            $expectedNumeric = @(
+                $numeric.entries |
+                Where-Object { [string]$_.kind -ceq [string]$object.kind } |
+                ForEach-Object { [string]$_.field }
+            )
+            Assert-StringSetEqual $actualNumeric $expectedNumeric "range" "$($object.id) numeric field set"
+            foreach ($value in @($object.numeric_values)) {
+                $numericKey = "{0}|{1}" -f [string]$object.kind, [string]$value.field
+                $rule = $numericRules[$numericKey]
+                if ($null -eq $rule -or [string]$value.unit -cne [string]$rule.unit) {
+                    Fail-GameplayConfig "range" "production numeric owner or unit differs"
+                }
+                $checked = ConvertTo-CheckedInteger ([string]$value.value) "$($object.id).$($value.field)"
+                $minimum = ConvertTo-CheckedInteger ([string]$rule.minimum) "$numericKey minimum"
+                $maximum = ConvertTo-CheckedInteger ([string]$rule.maximum) "$numericKey maximum"
+                if ($checked -lt $minimum -or $checked -gt $maximum) {
+                    Fail-GameplayConfig "range" "production numeric value is outside registered range"
+                }
+            }
+        }
+        Test-ReferenceGraphAcyclic $objectsById
+
+        foreach ($ability in @($authority.objects | Where-Object { [string]$_.kind -ceq "ability" })) {
+            $phase = Get-NumericValue $ability "phase-duration"
+            $parts = (Get-NumericValue $ability "windup") +
+                (Get-NumericValue $ability "active") +
+                (Get-NumericValue $ability "recovery")
+            if ($phase -ne $parts) {
+                Fail-GameplayConfig "range" "ability phase duration differs from phase parts"
+            }
+        }
+        foreach ($effect in @($authority.objects | Where-Object { [string]$_.kind -ceq "effect" })) {
+            $product = (Get-NumericValue $effect "magnitude") * (Get-NumericValue $effect "max-stacks")
+            if ($product -lt $Int64Minimum -or $product -gt $Int64Maximum) {
+                Fail-GameplayConfig "range" "production effect checked intermediate overflows"
+            }
+        }
+        foreach ($projectile in @($authority.objects | Where-Object { [string]$_.kind -ceq "projectile" })) {
+            $travelProduct = (Get-NumericValue $projectile "speed") *
+                (Get-NumericValue $projectile "lifetime") * 50
+            if ($travelProduct -lt $Int64Minimum -or $travelProduct -gt $Int64Maximum) {
+                Fail-GameplayConfig "range" "production projectile checked intermediate overflows"
+            }
+        }
+        foreach ($ai in @($authority.objects | Where-Object { [string]$_.kind -ceq "ai" })) {
+            if ((Get-NumericValue $ai "attack-range") -gt (Get-NumericValue $ai "acquire-range")) {
+                Fail-GameplayConfig "range" "AI attack range exceeds acquire range"
+            }
+        }
+
+        $bossPhases = @($authority.objects | Where-Object { [string]$_.kind -ceq "boss-phase" } |
+            Sort-Object { Get-NumericValue $_ "phase-order" })
+        $previousThreshold = $null
+        for ($index = 0; $index -lt $bossPhases.Count; $index++) {
+            $order = Get-NumericValue $bossPhases[$index] "phase-order"
+            $threshold = Get-NumericValue $bossPhases[$index] "health-threshold"
+            if ($order -ne ($index + 1) -or
+                ($null -ne $previousThreshold -and $threshold -ge $previousThreshold)) {
+                Fail-GameplayConfig "range" "production Boss phase differs"
+            }
+            $previousThreshold = $threshold
+        }
+        foreach ($encounter in @($authority.objects | Where-Object { [string]$_.kind -ceq "encounter" })) {
+            if ((Get-NumericValue $encounter "owner-count") -ne 1 -or
+                (Get-NumericValue $encounter "boss-count") -ne 1 -or
+                ((Get-NumericValue $encounter "owner-count") +
+                    (Get-NumericValue $encounter "visitor-count")) -gt 8 -or
+                (Get-NumericValue $encounter "friendly-fire-enabled") -ne 0) {
+                Fail-GameplayConfig "range" "production encounter capacity or team policy differs"
+            }
+        }
+
+        $resourceIds = @($presentation.resources | ForEach-Object { [string]$_.id })
+        $mappingIds = @($presentation.mappings | ForEach-Object { [string]$_.semantic_id })
+        if (@($resourceIds | Sort-Object -CaseSensitive -Unique).Count -ne $resourceIds.Count -or
+            @($mappingIds | Sort-Object -CaseSensitive -Unique).Count -ne $mappingIds.Count -or
+            @($resourceIds | Where-Object { -not $_.StartsWith(($packageNamespace + "/"), [StringComparison]::Ordinal) }).Count -gt 0) {
+            Fail-GameplayConfig "presentation-parity" "production presentation identity differs"
+        }
+        foreach ($mapping in @($presentation.mappings)) {
+            $semanticId = [string]$mapping.semantic_id
+            if (-not $objectsById.ContainsKey($semanticId) -or
+                [string]$objectsById[$semanticId].kind -cne [string]$mapping.semantic_kind) {
+                Fail-GameplayConfig "presentation-parity" "production presentation target differs"
+            }
+            foreach ($resourceRef in @($mapping.resource_refs)) {
+                if ($resourceIds -cnotcontains [string]$resourceRef) {
+                    Fail-GameplayConfig "presentation-parity" "production presentation resource differs"
+                }
+            }
+        }
+        $parityIds = @(
+            $authority.objects |
+            Where-Object { [string]$_.kind -in @("actor", "weapon", "ability", "projectile", "effect", "cue") } |
+            ForEach-Object { [string]$_.id }
+        )
+        Assert-StringSetEqual $mappingIds $parityIds "presentation-parity" "production presentation mapping"
+
+        $coverageRoles = @($coverage.required_roles | ForEach-Object { [string]$_.role })
+        Assert-StringSetEqual `
+            @($package.required_roles | ForEach-Object { [string]$_ }) `
+            $coverageRoles `
+            "coverage" `
+            "production package required roles"
+        foreach ($required in @($coverage.required_roles)) {
+            $matches = @($authority.objects | Where-Object { [string]$_.role -ceq [string]$required.role })
+            if ($matches.Count -ne 1 -or
+                [string]$matches[0].kind -cne [string]$required.authority_kind -or
+                ([bool]$required.presentation_required -and $mappingIds -cnotcontains [string]$matches[0].id)) {
+                Fail-GameplayConfig "coverage" "production required role differs"
+            }
+        }
+        if (-not $objectsById.ContainsKey([string]$bindings.collision_layer_ref) -or
+            [string]$objectsById[[string]$bindings.collision_layer_ref].kind -cne "collision-layer" -or
+            -not $objectsById.ContainsKey([string]$bindings.navigation_policy_ref) -or
+            [string]$objectsById[[string]$bindings.navigation_policy_ref].kind -cne "navigation-policy") {
+            Fail-GameplayConfig "binding" "production map binding differs"
+        }
+
+        $mappedSemanticIds = @($wireMapping.mappings | ForEach-Object { [string]$_.semantic_id })
+        $mappedNumericIds = @($wireMapping.mappings | ForEach-Object { [uint64]$_.numeric_id })
+        if (@($mappedSemanticIds | Sort-Object -CaseSensitive -Unique).Count -ne $mappedSemanticIds.Count -or
+            @($mappedNumericIds | Sort-Object -Unique).Count -ne $mappedNumericIds.Count) {
+            Fail-GameplayConfig "wire-mapping" "production wire mapping is duplicated"
+        }
+        for ($index = 1; $index -lt $mappedNumericIds.Count; $index++) {
+            if ($mappedNumericIds[$index] -le $mappedNumericIds[$index - 1]) {
+                Fail-GameplayConfig "wire-mapping" "production wire mapping is not canonical"
+            }
+        }
+        foreach ($mapping in @($wireMapping.mappings)) {
+            $semanticId = [string]$mapping.semantic_id
+            if (-not $objectsById.ContainsKey($semanticId) -or
+                [string]$objectsById[$semanticId].kind -cne [string]$mapping.kind -or
+                @($wireMapping.retired_semantic_ids) -ccontains $semanticId -or
+                @($wireMapping.retired_numeric_ids) -contains [uint64]$mapping.numeric_id) {
+                Fail-GameplayConfig "wire-mapping" "production wire mapping identity differs"
+            }
+        }
+        $expectedMappedIds = @(
+            $authority.objects |
+            Where-Object { [string]$_.kind -in @("actor", "weapon", "ability", "projectile") } |
+            ForEach-Object { [string]$_.id }
+        )
+        Assert-StringSetEqual $mappedSemanticIds $expectedMappedIds "wire-mapping" "production authority wire mapping"
+
+        $assetRoot = Join-Path $RepositoryRoot ("simulation\content\" + [string]$package.package_id)
+        if (-not (Test-Path -LiteralPath $assetRoot -PathType Container) -or
+            (Get-Sha256File (Join-Path $assetRoot "arena.json")) -cne [string]$bindings.map_content_identity -or
+            (Get-Sha256File (Join-Path $assetRoot "navigation.json")) -cne [string]$bindings.navigation_identity -or
+            (Get-Sha256File (Join-Path $assetRoot "physics.json")) -cne [string]$bindings.physics_identity) {
+            Fail-GameplayConfig "binding" "production arena source identity differs"
+        }
+
+        $documents = @{}
+        foreach ($relative in $expectedFiles) {
+            $document = Read-JsonDocument (Resolve-CorpusPath $relative)
+            $documents[$relative] = [pscustomobject]@{
+                Kind = [string]$document.document_kind
+                Digest = Get-Sha256File (Resolve-CorpusPath $relative)
+            }
+        }
+        $configIdentity = Get-ProductionPackageIdentity $package $documents
+        $identitySet = @(
+            $configIdentity,
+            [string]$bindings.navigation_identity,
+            [string]$bindings.physics_identity,
+            (Get-Sha256File (Resolve-CorpusPath "wire-mapping.json"))
+        )
+        if (@($identitySet | Sort-Object -Unique).Count -ne 4) {
+            Fail-GameplayConfig "binding" "production config navigation physics and mapping identities are not distinct"
+        }
+        return [pscustomobject][ordered]@{
+            PackageId = [string]$package.package_id
+            ConfigIdentity = $configIdentity
+            NavigationIdentity = [string]$bindings.navigation_identity
+            PhysicsIdentity = [string]$bindings.physics_identity
+            MappingIdentity = Get-Sha256File (Resolve-CorpusPath "wire-mapping.json")
+            QualificationState = "production"
+        }
+    }
+    finally {
+        $script:ResolvedCorpusRoot = $previousRoot
+    }
+}
+
 # Assert-NoSensitiveData 拒绝凭据、个人身份、本机路径与 Unity runtime 资产路径形态。
 function Assert-NoSensitiveData {
     param(
@@ -351,6 +680,7 @@ function Invoke-GameplayConfigValidation {
         "authority-catalog" = "schema/authority.schema.json"
         "presentation-catalog" = "schema/presentation.schema.json"
         "external-bindings" = "schema/bindings.schema.json"
+        "wire-mapping" = "schema/wire-mapping.schema.json"
         "semantic-registry" = "schema/typed-reference.schema.json"
         "numeric-registry" = "schema/numeric-range.schema.json"
         "coverage-registry" = "schema/coverage.schema.json"
@@ -423,24 +753,30 @@ function Invoke-GameplayConfigValidation {
 
     $modelDigest = Get-Sha256File (Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\model\manifest.json")
     $profileDigest = Get-Sha256File (Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\network-profile\manifest.json")
+    $wireDigest = Get-Sha256File (Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\wire\manifest.json")
     if ([string]$package.model_binding.version -cne "battle-model-v1" -or
         [string]$package.model_binding.manifest_sha256 -cne $modelDigest -or
         [string]$package.profile_binding.version -cne "battle-network-profile-v2" -or
-        [string]$package.profile_binding.manifest_sha256 -cne $profileDigest) {
-        Fail-GameplayConfig "compatibility" "model or profile binding differs"
+        [string]$package.profile_binding.manifest_sha256 -cne $profileDigest -or
+        [string]$package.wire_binding.version -cne "battle-wire-v1" -or
+        [string]$package.wire_binding.manifest_sha256 -cne $wireDigest) {
+        Fail-GameplayConfig "compatibility" "model profile or wire binding differs"
     }
 
     $packageRoot = [IO.Directory]::GetParent($packagePath).FullName
     $authorityPath = Join-Path $packageRoot ([string]$package.authority_path)
     $presentationPath = Join-Path $packageRoot ([string]$package.presentation_path)
     $bindingsPath = Join-Path $packageRoot ([string]$package.bindings_path)
+    $wireMappingPath = Join-Path $packageRoot ([string]$package.wire_mapping_path)
     $null = Get-CorpusRelativePath $authorityPath
     $null = Get-CorpusRelativePath $presentationPath
     $null = Get-CorpusRelativePath $bindingsPath
+    $null = Get-CorpusRelativePath $wireMappingPath
     $authority = Read-JsonDocument $authorityPath
     $presentation = Read-JsonDocument $presentationPath
     $bindings = Read-JsonDocument $bindingsPath
-    foreach ($document in @($authority, $presentation, $bindings)) {
+    $wireMapping = Read-JsonDocument $wireMappingPath
+    foreach ($document in @($authority, $presentation, $bindings, $wireMapping)) {
         if ([string]$document.package_id -cne [string]$package.package_id -or
             [string]$document.qualification_state -cne [string]$package.qualification_state) {
             Fail-GameplayConfig "compatibility" "package document identity differs"
@@ -514,6 +850,20 @@ function Invoke-GameplayConfigValidation {
     }
     Test-ReferenceGraphAcyclic $objectsById
 
+    foreach ($ability in @($authority.objects | Where-Object { [string]$_.kind -ceq "ability" })) {
+        $phaseDuration = (Get-NumericValue $ability "windup") +
+            (Get-NumericValue $ability "active") +
+            (Get-NumericValue $ability "recovery")
+        if ($phaseDuration -ne (Get-NumericValue $ability "phase-duration")) {
+            Fail-GameplayConfig "range" "ability phase duration sum differs"
+        }
+    }
+    foreach ($ai in @($authority.objects | Where-Object { [string]$_.kind -ceq "ai" })) {
+        if ((Get-NumericValue $ai "attack-range") -gt (Get-NumericValue $ai "acquire-range")) {
+            Fail-GameplayConfig "range" "AI attack range exceeds acquire range"
+        }
+    }
+
     foreach ($effect in @($authority.objects | Where-Object { [string]$_.kind -ceq "effect" })) {
         $product = (Get-NumericValue $effect "magnitude") * (Get-NumericValue $effect "max-stacks")
         if ($product -lt $Int64Minimum -or $product -gt $Int64Maximum) {
@@ -546,8 +896,10 @@ function Invoke-GameplayConfigValidation {
         $ownerCount = Get-NumericValue $encounter "owner-count"
         $visitorCount = Get-NumericValue $encounter "visitor-count"
         $bossCount = Get-NumericValue $encounter "boss-count"
-        if ($ownerCount -ne 1 -or $bossCount -ne 1 -or ($ownerCount + $visitorCount) -gt 8) {
-            Fail-GameplayConfig "range" "encounter player or Boss capacity is invalid"
+        if ($ownerCount -ne 1 -or $bossCount -ne 1 -or
+            ($ownerCount + $visitorCount) -gt 8 -or
+            (Get-NumericValue $encounter "friendly-fire-enabled") -ne 0) {
+            Fail-GameplayConfig "range" "encounter capacity or team policy is invalid"
         }
     }
 
@@ -573,7 +925,7 @@ function Invoke-GameplayConfigValidation {
     }
     $parityIds = @(
         $authority.objects |
-        Where-Object { [string]$_.kind -in @("actor", "ability", "effect", "cue") } |
+        Where-Object { [string]$_.kind -in @("actor", "weapon", "ability", "projectile", "effect", "cue") } |
         ForEach-Object { [string]$_.id }
     )
     Assert-StringSetEqual $mappingIds $parityIds "presentation-parity" "authority presentation mapping"
@@ -596,6 +948,33 @@ function Invoke-GameplayConfigValidation {
         [string]$objectsById[[string]$bindings.navigation_policy_ref].kind -cne "navigation-policy") {
         Fail-GameplayConfig "binding" "map collision or navigation binding differs"
     }
+
+    $mappedSemanticIds = @($wireMapping.mappings | ForEach-Object { [string]$_.semantic_id })
+    $mappedNumericIds = @($wireMapping.mappings | ForEach-Object { [uint64]$_.numeric_id })
+    if (@($mappedSemanticIds | Sort-Object -CaseSensitive -Unique).Count -ne $mappedSemanticIds.Count -or
+        @($mappedNumericIds | Sort-Object -Unique).Count -ne $mappedNumericIds.Count) {
+        Fail-GameplayConfig "wire-mapping" "wire mapping ID is duplicated"
+    }
+    for ($index = 1; $index -lt $mappedNumericIds.Count; $index++) {
+        if ($mappedNumericIds[$index] -le $mappedNumericIds[$index - 1]) {
+            Fail-GameplayConfig "wire-mapping" "wire mapping order is not canonical"
+        }
+    }
+    foreach ($mapping in @($wireMapping.mappings)) {
+        $semanticId = [string]$mapping.semantic_id
+        if (-not $objectsById.ContainsKey($semanticId) -or
+            [string]$objectsById[$semanticId].kind -cne [string]$mapping.kind -or
+            @($wireMapping.retired_semantic_ids) -ccontains $semanticId -or
+            @($wireMapping.retired_numeric_ids) -contains [uint64]$mapping.numeric_id) {
+            Fail-GameplayConfig "wire-mapping" "wire mapping semantic or retired identity differs"
+        }
+    }
+    $expectedMappedIds = @(
+        $authority.objects |
+        Where-Object { [string]$_.kind -in @("actor", "weapon", "ability", "projectile") } |
+        ForEach-Object { [string]$_.id }
+    )
+    Assert-StringSetEqual $mappedSemanticIds $expectedMappedIds "wire-mapping" "authority wire mapping"
 
     if ([string]$package.qualification_state -ceq "governance-only") {
         if (@($objectsById.Keys | Where-Object { -not $_.StartsWith("fixture/", [StringComparison]::Ordinal) }).Count -gt 0 -or
@@ -622,6 +1001,9 @@ function Invoke-GameplayConfigValidation {
     return [pscustomobject][ordered]@{
         PackageId = [string]$package.package_id
         ConfigIdentity = $packageIdentity
+        NavigationIdentity = [string]$bindings.navigation_identity
+        PhysicsIdentity = [string]$bindings.physics_identity
+        MappingIdentity = Get-Sha256File $wireMappingPath
         QualificationState = [string]$package.qualification_state
     }
 }
@@ -630,10 +1012,18 @@ try {
     switch ($Action) {
         "validate" {
             $result = Invoke-GameplayConfigValidation
+            if ($ResolvedProductionRoot) {
+                $result = Invoke-ProductionPackageValidation `
+                    -GovernanceRoot $ResolvedCorpusRoot `
+                    -PackageRoot $ResolvedProductionRoot
+            }
             Write-Output (
-                "GAMEPLAY_CONFIG_VALID package={0} config_identity={1} state={2}" -f
+                "GAMEPLAY_CONFIG_VALID package={0} config_identity={1} navigation_identity={2} physics_identity={3} mapping_identity={4} state={5}" -f
                 $result.PackageId,
                 $result.ConfigIdentity,
+                $result.NavigationIdentity,
+                $result.PhysicsIdentity,
+                $result.MappingIdentity,
                 $result.QualificationState
             )
         }

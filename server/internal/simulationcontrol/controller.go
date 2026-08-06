@@ -48,10 +48,16 @@ type ControllerConfig struct {
 	Capacity NodeCapacity
 	// ConfigIdentity 绑定 control-baseline-v1 runtime config。
 	ConfigIdentity Digest
+	// GameplayPackageID 是 child 实际加载的 production semantic identity。
+	GameplayPackageID string
 	// NavigationIdentity 绑定 nav asset/config。
 	NavigationIdentity Digest
 	// PhysicsIdentity 绑定 physics adapter/config。
 	PhysicsIdentity Digest
+	// WireIdentity 绑定 battle wire manifest。
+	WireIdentity Digest
+	// MappingIdentity 绑定 semantic/numeric mapping source。
+	MappingIdentity Digest
 	// DrainDeadline 是传给 child 的 bounded drain budget。
 	DrainDeadline time.Duration
 	// StopDeadline 是传给 child 的 bounded stop budget。
@@ -66,8 +72,9 @@ type ControllerConfig struct {
 func (config ControllerConfig) Validate() error {
 	if !config.NodeID.Valid() || !config.RuntimeNodeID.Valid() ||
 		config.Build.Validate() != nil || config.Capacity.Validate() != nil ||
-		!config.ConfigIdentity.Valid() || !config.NavigationIdentity.Valid() ||
-		!config.PhysicsIdentity.Valid() || config.DrainDeadline <= 0 ||
+		!config.ConfigIdentity.Valid() || config.GameplayPackageID != "personal-world-combat-v1" ||
+		!config.NavigationIdentity.Valid() || !config.PhysicsIdentity.Valid() ||
+		!config.WireIdentity.Valid() || !config.MappingIdentity.Valid() || config.DrainDeadline <= 0 ||
 		config.StopDeadline <= 0 ||
 		config.QualificationMode !=
 			(config.QualificationRunID != "") ||
@@ -140,16 +147,24 @@ func BootstrapController(ctx context.Context, session ControlSession, config Con
 		struct {
 			ActorCapacity           int    `json:"actorCapacity"`
 			ExpectedBuildIdentity   string `json:"expectedBuildIdentity"`
+			ExpectedConfigIdentity  string `json:"expectedConfigIdentity"`
 			ExpectedModelManifest   string `json:"expectedModelManifest"`
+			ExpectedNavigation      string `json:"expectedNavigationIdentity"`
+			ExpectedPhysics         string `json:"expectedPhysicsIdentity"`
 			ExpectedProfileManifest string `json:"expectedProfileManifest"`
+			ExpectedWireIdentity    string `json:"expectedWireIdentity"`
 			InstanceCapacity        int    `json:"instanceCapacity"`
 			RuntimeNodeID           string `json:"runtimeNodeId"`
 			SimulationNodeID        string `json:"simulationNodeId"`
 		}{
 			ActorCapacity:           config.Capacity.Actors,
 			ExpectedBuildIdentity:   config.Build.BuildIdentity.String(),
+			ExpectedConfigIdentity:  config.ConfigIdentity.String(),
 			ExpectedModelManifest:   config.Build.ModelManifest.String(),
+			ExpectedNavigation:      config.NavigationIdentity.String(),
+			ExpectedPhysics:         config.PhysicsIdentity.String(),
 			ExpectedProfileManifest: config.Build.ProfileManifest.String(),
+			ExpectedWireIdentity:    config.WireIdentity.String(),
 			InstanceCapacity:        config.Capacity.Instances,
 			RuntimeNodeID:           config.RuntimeNodeID.String(),
 			SimulationNodeID:        config.NodeID.String(),
@@ -162,12 +177,18 @@ func BootstrapController(ctx context.Context, session ControlSession, config Con
 	var receipt struct {
 		ActorCapacity         int    `json:"actorCapacity"`
 		BuildIdentity         string `json:"buildIdentity"`
+		ConfigIdentity        string `json:"configIdentity"`
+		GameplayPackageID     string `json:"gameplayPackageId"`
 		InstanceCapacity      int    `json:"instanceCapacity"`
+		MappingIdentity       string `json:"mappingIdentity"`
 		ModelManifest         string `json:"modelManifest"`
+		NavigationIdentity    string `json:"navigationIdentity"`
+		PhysicsIdentity       string `json:"physicsIdentity"`
 		PlatformQualification string `json:"platformQualification"`
 		ProfileManifest       string `json:"profileManifest"`
 		RuntimeNodeID         string `json:"runtimeNodeId"`
 		SimulationNodeID      string `json:"simulationNodeId"`
+		WireIdentity          string `json:"wireIdentity"`
 	}
 	if err := decodeClosedPayload(payload, &receipt); err != nil {
 		return nil, err
@@ -175,11 +196,17 @@ func BootstrapController(ctx context.Context, session ControlSession, config Con
 	if receipt.ActorCapacity < 1 || receipt.ActorCapacity > config.Capacity.Actors ||
 		receipt.InstanceCapacity < 1 || receipt.InstanceCapacity > config.Capacity.Instances ||
 		receipt.BuildIdentity != config.Build.BuildIdentity.String() ||
+		receipt.ConfigIdentity != config.ConfigIdentity.String() ||
+		receipt.GameplayPackageID != config.GameplayPackageID ||
+		receipt.MappingIdentity != config.MappingIdentity.String() ||
 		receipt.ModelManifest != config.Build.ModelManifest.String() ||
+		receipt.NavigationIdentity != config.NavigationIdentity.String() ||
+		receipt.PhysicsIdentity != config.PhysicsIdentity.String() ||
 		receipt.ProfileManifest != config.Build.ProfileManifest.String() ||
 		receipt.PlatformQualification != config.Build.PlatformQualification ||
 		receipt.RuntimeNodeID != config.RuntimeNodeID.String() ||
-		receipt.SimulationNodeID != config.NodeID.String() {
+		receipt.SimulationNodeID != config.NodeID.String() ||
+		receipt.WireIdentity != config.WireIdentity.String() {
 		return nil, errors.New("simulation hello receipt binding drifted")
 	}
 	config.Capacity = NodeCapacity{

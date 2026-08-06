@@ -144,7 +144,8 @@ BattleMovementReplicationStore::
         BattleMovementReplicationConfig config,
         std::vector<std::uint64_t> actor_ids,
         const std::int64_t initial_health_scaled,
-        std::shared_ptr<PhysicsWorld> physics_world)
+        std::shared_ptr<PhysicsWorld> physics_world,
+        std::vector<Vector3Mm> initial_positions)
     : config_(config),
       physics_world_(std::move(physics_world)) {
     ValidateMovementConfig(config_.movement);
@@ -162,6 +163,7 @@ BattleMovementReplicationStore::
             actor_ids.end()) !=
             actor_ids.end() ||
         initial_health_scaled <= 0 ||
+        (!initial_positions.empty() && initial_positions.size() != actor_ids.size()) ||
         !physics_world_) {
         throw BattleMovementReplicationError(
             BattleMovementReplicationErrorCode::InvalidConfig,
@@ -173,15 +175,18 @@ BattleMovementReplicationStore::
     candidate_states_.reserve(actor_ids.size());
     published_acknowledgements_.reserve(
         actor_ids.size());
-    for (const auto actor_id : actor_ids) {
+    player_actor_ids_ = actor_ids;
+    for (std::size_t index = 0; index < actor_ids.size(); ++index) {
+        const auto actor_id = actor_ids[index];
+        const auto initial = initial_positions.empty() ? Vector3Mm{} : initial_positions[index];
         actors_.push_back(
             RuntimeActorState{
                 .actor_id = actor_id,
                 .movement =
                     {
-                        .position_x_mm = 0,
-                        .position_y_mm = 0,
-                        .position_z_mm = 0,
+                        .position_x_mm = initial.x,
+                        .position_y_mm = initial.y,
+                        .position_z_mm = initial.z,
                         .velocity_x_mm_per_second =
                             0,
                         .velocity_y_mm_per_second =
@@ -199,18 +204,37 @@ BattleMovementReplicationStore::
     }
 }
 
-void BattleMovementReplicationStore::Commit(
+std::vector<StateProjectionToken>
+BattleMovementReplicationStore::Commit(
     const std::uint64_t server_tick,
     const std::span<
         const ActorInputResolution> resolutions,
     const std::span<
         const InputAcknowledgementProjection>
-        acknowledgements) {
+        acknowledgements,
+    const std::span<const std::uint64_t>
+        active_actor_ids,
+    const bool publish) {
     if (server_tick == 0 ||
         server_tick != committed_tick_ + 1 ||
         resolutions.size() != actors_.size() ||
         acknowledgements.size() !=
-            actors_.size()) {
+            actors_.size() ||
+        active_actor_ids.size() > actors_.size() ||
+        !std::ranges::is_sorted(active_actor_ids) ||
+        std::adjacent_find(
+            active_actor_ids.begin(),
+            active_actor_ids.end()) !=
+            active_actor_ids.end() ||
+        std::ranges::any_of(
+            active_actor_ids,
+            [&](const std::uint64_t actor_id) {
+                return !std::ranges::binary_search(
+                    actors_,
+                    actor_id,
+                    {},
+                    &RuntimeActorState::actor_id);
+            })) {
         throw BattleMovementReplicationError(
             BattleMovementReplicationErrorCode::InvalidCommit,
             "battle movement commit set is incomplete");
@@ -237,6 +261,18 @@ void BattleMovementReplicationStore::Commit(
                 BattleMovementReplicationErrorCode::
                     InvalidCommit,
                 "battle movement actor projection is not canonical");
+        }
+        if (!std::ranges::binary_search(
+                active_actor_ids,
+                current.actor_id)) {
+            candidate.movement = current.movement;
+            candidate.movement
+                .velocity_x_mm_per_second = 0;
+            candidate.movement
+                .velocity_y_mm_per_second = 0;
+            candidate.movement
+                .velocity_z_mm_per_second = 0;
+            continue;
         }
         const auto movement =
             IntegrateMovement(
@@ -384,7 +420,7 @@ void BattleMovementReplicationStore::Commit(
         candidate_states_.push_back(
             ToProjection(actor));
     }
-    {
+    if (publish) {
         std::scoped_lock lock(snapshot_mutex_);
         published_states_.assign(
             candidate_states_.begin(),
@@ -396,6 +432,56 @@ void BattleMovementReplicationStore::Commit(
     }
     actors_ = candidates_;
     committed_tick_ = server_tick;
+    return candidate_states_;
+}
+
+void BattleMovementReplicationStore::PublishAuthoritative(
+    const std::uint64_t server_tick,
+    const std::span<const StateProjectionToken> states,
+    const std::span<const InputAcknowledgementProjection> acknowledgements,
+    const std::span<const CombatAbilityEvent> ability_events,
+    const std::span<const CombatLifecycleEvent> lifecycle_events,
+    const bool encounter_complete) {
+    if (server_tick == 0 || server_tick != committed_tick_ || states.empty() ||
+        acknowledgements.size() != actors_.size() ||
+        !std::ranges::is_sorted(states, {}, &StateProjectionToken::actor_id) ||
+        std::adjacent_find(states.begin(), states.end(), [](const auto& left, const auto& right) {
+            return left.actor_id == right.actor_id;
+        }) != states.end()) {
+        throw BattleMovementReplicationError(
+            BattleMovementReplicationErrorCode::InvalidCommit,
+            "battle authoritative projection is invalid");
+    }
+    for (const auto& state : states) {
+        if (state.actor_id == 0 || state.archetype_id == 0 ||
+            state.max_health_scaled == 0 || state.health_scaled < 0 ||
+            state.health_scaled > state.max_health_scaled ||
+            (!state.alive && state.health_scaled != 0)) {
+            throw BattleMovementReplicationError(
+                BattleMovementReplicationErrorCode::InvalidCommit,
+                "battle authoritative entity state is invalid");
+        }
+    }
+    std::scoped_lock lock(snapshot_mutex_);
+    published_states_.assign(states.begin(), states.end());
+    published_acknowledgements_.assign(acknowledgements.begin(), acknowledgements.end());
+    published_ability_events_.insert(
+        published_ability_events_.end(), ability_events.begin(), ability_events.end());
+    published_lifecycle_events_.insert(
+        published_lifecycle_events_.end(), lifecycle_events.begin(), lifecycle_events.end());
+    constexpr std::size_t EventJournalLimit = 256;
+    if (published_ability_events_.size() > EventJournalLimit) {
+        published_ability_events_.erase(
+            published_ability_events_.begin(),
+            published_ability_events_.end() - EventJournalLimit);
+    }
+    if (published_lifecycle_events_.size() > EventJournalLimit) {
+        published_lifecycle_events_.erase(
+            published_lifecycle_events_.begin(),
+            published_lifecycle_events_.end() - EventJournalLimit);
+    }
+    published_encounter_complete_ = encounter_complete;
+    published_tick_ = server_tick;
 }
 
 std::optional<BattleMovementReplicationSnapshot>
@@ -430,6 +516,10 @@ BattleMovementReplicationStore::Freeze(
         .acknowledgement =
             *acknowledgement,
         .states = published_states_,
+        .ability_events = published_ability_events_,
+        .lifecycle_events = published_lifecycle_events_,
+        .player_actor_ids = player_actor_ids_,
+        .encounter_complete = published_encounter_complete_,
     };
 }
 

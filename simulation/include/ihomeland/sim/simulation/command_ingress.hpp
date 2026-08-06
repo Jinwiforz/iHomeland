@@ -40,11 +40,9 @@ struct ContinuousIntentPayload final {
 /// JumpPressedPayload 不携带 grounded、velocity 或最终位置。
 struct JumpPressedPayload final {};
 
-/// SwitchWeaponPayload 只携带冻结 content weapon ID。
-struct SwitchWeaponPayload final {
-    /// weapon_id 必须为非零登记 ID。
-    std::uint32_t weapon_id;
-};
+/// SwitchWeaponPayload 是切换当前武器的无字段离散 edge。
+/// 目标 weapon 只能由当前权威装备与 production grants 决定。
+struct SwitchWeaponPayload final {};
 
 /// ActivateAbilityPayload 只携带请求的冻结 Ability ID。
 struct ActivateAbilityPayload final {
@@ -180,12 +178,10 @@ public:
     [[nodiscard]] CommandSubmitResult Submit(GameplayCommand command);
 
 private:
-    /// DedupeEntry 绑定 actor/input/sequence，并保存淘汰所需 target Tick。
+    /// DedupeEntry 绑定 actor/command sequence，并保存淘汰所需 target Tick。
     struct DedupeEntry final {
         /// actor_id 是实例内稳定 ActorID。
         std::uint64_t actor_id;
-        /// input_tick 是 command 采样 identity。
-        std::uint64_t input_tick;
         /// sequence 是同一 actor/session command identity。
         std::uint64_t sequence;
         /// target_tick 用于晚到窗口结束后有界淘汰。

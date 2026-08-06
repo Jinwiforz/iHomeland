@@ -544,6 +544,40 @@ struct BattleTransportRuntime::Impl final {
             bootstrap_metadata.reset();
         }
 
+        /// 析构函数撤销曾成功发布的 exact session generation 参战资格。
+        ~Session() {
+            if (!participation_announced ||
+                !owner.session_lifecycle_observer ||
+                context == nullptr) {
+                return;
+            }
+            try {
+                static_cast<void>(
+                    owner.session_lifecycle_observer(
+                        *context,
+                        false));
+            } catch (...) {
+            }
+        }
+
+        /// AnnounceParticipation 在首个 baseline 前发布唯一 active generation。
+        void AnnounceParticipation() {
+            if (participation_announced) {
+                throw std::runtime_error(
+                    "battle session participation activation failed");
+            }
+            if (!owner.session_lifecycle_observer) {
+                return;
+            }
+            if (!owner.session_lifecycle_observer(
+                    *context,
+                    true)) {
+                throw std::runtime_error(
+                    "battle session participation activation failed");
+            }
+            participation_announced = true;
+        }
+
         /// BindingDiscriminator 截取完整 fingerprint 的前 8 bytes。
         [[nodiscard]] std::array<
             std::uint8_t,
@@ -652,21 +686,40 @@ struct BattleTransportRuntime::Impl final {
                         Instance);
                 return std::nullopt;
             }
+            if (!std::ranges::is_sorted(
+                    projection->player_actor_ids) ||
+                std::ranges::adjacent_find(
+                    projection->player_actor_ids) !=
+                    projection->player_actor_ids.end()) {
+                authority->Invalidate(
+                    BattleSessionInvalidationReason::
+                        Instance);
+                return std::nullopt;
+            }
 
             std::vector<StateProjectionToken>
                 active_states;
-            active_states.reserve(
-                active_actor_ids.size());
+            active_states.reserve(projection->states.size());
             for (const auto& state :
                  projection->states) {
-                if (std::ranges::binary_search(
-                        active_actor_ids,
-                        state.actor_id)) {
+                const auto player_slot =
+                    std::ranges::binary_search(
+                        projection->player_actor_ids,
+                        state.actor_id);
+                if (!player_slot ||
+                    std::ranges::binary_search(
+                        active_actor_ids, state.actor_id)) {
                     active_states.push_back(state);
                 }
             }
-            if (active_states.size() !=
-                active_actor_ids.size()) {
+            if (std::ranges::count_if(
+                    active_states,
+                    [&](const auto& state) {
+                        return std::ranges::binary_search(
+                            active_actor_ids,
+                            state.actor_id);
+                    }) != static_cast<std::ptrdiff_t>(
+                        active_actor_ids.size())) {
                 authority->Invalidate(
                     BattleSessionInvalidationReason::
                         Instance);
@@ -674,7 +727,118 @@ struct BattleTransportRuntime::Impl final {
             }
             projection->states =
                 std::move(active_states);
+
+            projection->ability_events.erase(
+                std::remove_if(
+                    projection->ability_events.begin(),
+                    projection->ability_events.end(),
+                    [&](const auto& event) {
+                        return std::ranges::binary_search(
+                                   projection->player_actor_ids,
+                                   event.source_actor_id) &&
+                            !std::ranges::binary_search(
+                                active_actor_ids,
+                                event.source_actor_id);
+                    }),
+                projection->ability_events.end());
+            for (auto& event : projection->ability_events) {
+                event.target_actor_ids.erase(
+                    std::remove_if(
+                        event.target_actor_ids.begin(),
+                        event.target_actor_ids.end(),
+                        [&](const std::uint64_t target) {
+                            return std::ranges::binary_search(
+                                       projection->player_actor_ids,
+                                       target) &&
+                                !std::ranges::binary_search(
+                                    active_actor_ids,
+                                    target);
+                        }),
+                    event.target_actor_ids.end());
+            }
+            projection->lifecycle_events.erase(
+                std::remove_if(
+                    projection->lifecycle_events.begin(),
+                    projection->lifecycle_events.end(),
+                    [&](const auto& event) {
+                        return std::ranges::binary_search(
+                                   projection->player_actor_ids,
+                                   event.entity_id) &&
+                            !std::ranges::binary_search(
+                                active_actor_ids,
+                                event.entity_id);
+                    }),
+                projection->lifecycle_events.end());
             return projection;
+        }
+
+        /// MaximumEventSequence 返回当前 retained journal 的全局 high-watermark。
+        [[nodiscard]] static std::uint64_t
+        MaximumEventSequence(
+            const BattleReplicationProjection& projection) noexcept {
+            std::uint64_t maximum{};
+            for (const auto& event : projection.ability_events) {
+                maximum = std::max(maximum, event.event_sequence);
+            }
+            for (const auto& event : projection.lifecycle_events) {
+                maximum = std::max(maximum, event.event_sequence);
+            }
+            return maximum;
+        }
+
+        /// QueueReliableEvents 按 instance-global sequence 把未发布事件映射到唯一 KCP lane。
+        [[nodiscard]] bool QueueReliableEvents(
+            const BattleReplicationProjection& projection) {
+            /// OrderedEvent 保存 ability/lifecycle 共用 sequence 的局部排序视图。
+            struct OrderedEvent final {
+                /// sequence 是 instance generation 内严格递增的 event identity。
+                std::uint64_t sequence;
+                /// ability 标识 index 引用 ability 或 lifecycle 集合。
+                bool ability;
+                /// index 是对应 projection 集合中的稳定位置。
+                std::size_t index;
+            };
+            std::vector<OrderedEvent> events;
+            events.reserve(
+                projection.ability_events.size() +
+                projection.lifecycle_events.size());
+            for (std::size_t index = 0;
+                 index < projection.ability_events.size();
+                 ++index) {
+                events.push_back({
+                    projection.ability_events[index].event_sequence,
+                    true,
+                    index});
+            }
+            for (std::size_t index = 0;
+                 index < projection.lifecycle_events.size();
+                 ++index) {
+                events.push_back({
+                    projection.lifecycle_events[index].event_sequence,
+                    false,
+                    index});
+            }
+            std::ranges::sort(events, {}, &OrderedEvent::sequence);
+            for (const auto& ordered : events) {
+                if (ordered.sequence <= last_event_sequence) {
+                    continue;
+                }
+                const auto queued = ordered.ability
+                    ? replication->QueueAbilityEvent(
+                          projection.ability_events[ordered.index],
+                          operation_now_unix_ms)
+                    : replication->QueueEntityLifecycle(
+                          projection.lifecycle_events[ordered.index],
+                          operation_now_unix_ms);
+                if (!queued) {
+                    authority->Invalidate(
+                        BattleSessionInvalidationReason::
+                            Backpressure);
+                    return false;
+                }
+                last_event_sequence = ordered.sequence;
+            }
+            return true;
         }
 
         /// ActorSetChanged 判断当前 projection 是否改变已公开 entity membership。
@@ -692,7 +856,9 @@ struct BattleTransportRuntime::Impl final {
                  index < projection.states.size();
                  ++index) {
                 if (projection.states[index].actor_id !=
-                    published_actor_ids[index]) {
+                        published_actor_ids[index] ||
+                    projection.states[index].entity_generation !=
+                        published_entity_generations[index]) {
                     return true;
                 }
             }
@@ -705,6 +871,12 @@ struct BattleTransportRuntime::Impl final {
             const auto projection =
                 ActiveProjection();
             if (!projection.has_value()) {
+                return;
+            }
+            const auto bootstrap =
+                force_full && published_actor_ids.empty();
+            if (!bootstrap &&
+                !QueueReliableEvents(*projection)) {
                 return;
             }
             const auto publication =
@@ -721,6 +893,10 @@ struct BattleTransportRuntime::Impl final {
                 return;
             }
             QueueProjection(*projection, *publication);
+            if (bootstrap && authority->Active()) {
+                last_event_sequence =
+                    MaximumEventSequence(*projection);
+            }
             if (authority->Active() &&
                 !snapshot_cadence.BeginRecovery(
                     projection->server_tick)) {
@@ -761,12 +937,17 @@ struct BattleTransportRuntime::Impl final {
                 return;
             }
             published_actor_ids.clear();
+            published_entity_generations.clear();
             published_actor_ids.reserve(
+                projection.states.size());
+            published_entity_generations.reserve(
                 projection.states.size());
             for (const auto& state :
                  projection.states) {
                 published_actor_ids.push_back(
                     state.actor_id);
+                published_entity_generations.push_back(
+                    state.entity_generation);
             }
         }
 
@@ -932,9 +1113,16 @@ struct BattleTransportRuntime::Impl final {
         /// published_actor_ids 保存最近成功排队的 canonical entity membership。
         std::vector<std::uint64_t>
             published_actor_ids;
+        /// published_entity_generations 与 actor ID 同索引组成最近公开的 exact generation set。
+        std::vector<std::uint32_t>
+            published_entity_generations;
+        /// last_event_sequence 是已进入该 session KCP queue 的 instance event high-watermark。
+        std::uint64_t last_event_sequence{};
         /// close_reason 只为已确认的 authenticated client close 覆盖 Protocol 分类。
         std::optional<BattleCloseReasonCategory>
             close_reason;
+        /// participation_announced 保证析构只撤销已成功发布的 exact generation。
+        bool participation_announced{false};
     };
 
     /// 构造函数验证 callbacks 并预留固定 active registry。
@@ -950,7 +1138,9 @@ struct BattleTransportRuntime::Impl final {
         KcpMessageHandler kcp_handler_value,
         AuthorityValidator authority_validator_value,
         const std::uint64_t initial_unix_ms,
-        BattleRuntimeMetrics* metrics)
+        BattleRuntimeMetrics* metrics,
+        SessionLifecycleObserver
+            session_lifecycle_observer_value)
         : config(std::move(config_value)),
           sender(std::move(sender_value)),
           raw_context_provider(
@@ -963,7 +1153,10 @@ struct BattleTransportRuntime::Impl final {
                   replication_projection_provider_value)),
           kcp_handler(std::move(kcp_handler_value)),
           authority_validator(
-              std::move(authority_validator_value)),
+               std::move(authority_validator_value)),
+          session_lifecycle_observer(
+              std::move(
+                  session_lifecycle_observer_value)),
           runtime_metrics(metrics),
           cookie_keys(crypto, initial_unix_ms),
           cookie_gate(
@@ -1061,6 +1254,9 @@ struct BattleTransportRuntime::Impl final {
     KcpMessageHandler kcp_handler;
     /// authority_validator 查询 current control facts。
     AuthorityValidator authority_validator;
+    /// session_lifecycle_observer 把 exact active generation 生灭提交给 simulation owner。
+    SessionLifecycleObserver
+        session_lifecycle_observer;
     /// runtime_metrics 是可选 node-global低敏 metrics owner。
     BattleRuntimeMetrics* runtime_metrics;
     /// crypto 是 runtime 内全部 handshake/session primitive owner。
@@ -1102,7 +1298,9 @@ BattleTransportRuntime::BattleTransportRuntime(
     KcpMessageHandler kcp_handler,
     AuthorityValidator authority_validator,
     const std::uint64_t initial_unix_ms,
-    BattleRuntimeMetrics* runtime_metrics)
+    BattleRuntimeMetrics* runtime_metrics,
+    SessionLifecycleObserver
+        session_lifecycle_observer)
     : impl_(std::make_unique<Impl>(
           std::move(config),
           ticket_authenticator,
@@ -1114,7 +1312,9 @@ BattleTransportRuntime::BattleTransportRuntime(
           std::move(kcp_handler),
           std::move(authority_validator),
           initial_unix_ms,
-          runtime_metrics)) {
+          runtime_metrics,
+          std::move(
+              session_lifecycle_observer))) {
     impl_->worker = std::thread([this] {
         auto next_update =
             std::chrono::steady_clock::now() +
@@ -1306,6 +1506,11 @@ BattleTransportRuntime::HandleDatagram(
                     .first(result.response_bytes),
                 remote) !=
                 BattleUdpSendDisposition::Queued) {
+            return BattleTransportRuntimeDisposition::Dropped;
+        }
+        try {
+            session->AnnounceParticipation();
+        } catch (...) {
             return BattleTransportRuntimeDisposition::Dropped;
         }
         impl_->RetireActorPredecessor(*session);

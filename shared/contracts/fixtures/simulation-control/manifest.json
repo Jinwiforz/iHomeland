@@ -59,7 +59,7 @@
       "caseId": "hello-compatible-node",
       "path": "cases/hello.json",
       "category": "hello",
-      "sha256": "c80191e2df0961c4bca89aaa343e50b3f73b64ca8de9e5710a2f01dcbfea9e6a"
+      "sha256": "df26d962430d6ae7a7289fd843e91e8c64604aa84baad5ae85bc7221b5cae784"
     },
     {
       "caseId": "instance-lifecycle-replay",

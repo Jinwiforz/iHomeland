@@ -1,0 +1,20 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "wire-mapping",
+  "package_id": "personal-world-combat-v1",
+  "qualification_state": "production",
+  "mappings": [
+    { "kind": "actor", "semantic_id": "personal-world-combat/actor/player", "numeric_id": 1 },
+    { "kind": "actor", "semantic_id": "personal-world-combat/actor/ordinary-monster", "numeric_id": 2 },
+    { "kind": "actor", "semantic_id": "personal-world-combat/actor/boss", "numeric_id": 3 },
+    { "kind": "weapon", "semantic_id": "personal-world-combat/weapon/sword", "numeric_id": 101 },
+    { "kind": "weapon", "semantic_id": "personal-world-combat/weapon/fan", "numeric_id": 102 },
+    { "kind": "ability", "semantic_id": "personal-world-combat/ability/sword-primary", "numeric_id": 201 },
+    { "kind": "ability", "semantic_id": "personal-world-combat/ability/fan-primary", "numeric_id": 202 },
+    { "kind": "ability", "semantic_id": "personal-world-combat/ability/monster-strike", "numeric_id": 203 },
+    { "kind": "ability", "semantic_id": "personal-world-combat/ability/boss-slam", "numeric_id": 204 },
+    { "kind": "projectile", "semantic_id": "personal-world-combat/projectile/fan-blade", "numeric_id": 301 }
+  ],
+  "retired_numeric_ids": [],
+  "retired_semantic_ids": []
+}

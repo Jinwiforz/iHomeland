@@ -394,9 +394,16 @@ PlayerID与role稳定标识。Go admission复用既有slot，C++安装successor�
 binding；不同actor、role或slot组合按容量冲突拒绝，旧reservation释放也不得清除仍由
 successor持有的slot。
 
+预留actor slot只表达容量和稳定identity，不代表玩家当前参战。唯一
+`BattleTransportRuntime`在authenticated session建立、接管和全部终结路径上发布exact
+BattleSessionGeneration；`SimulationNode`以generation-safe注册表跨线程传递，simulation
+worker在每个Tick barrier冻结一次active actor set。Movement、Ability、AI target与Damage
+共同消费这份资格：inactive slot保留health/death等权威事实，但速度归零、忽略intent且
+不可被AI攻击。断线或重连不回血、不复活；只有assignment replacement创建新的S0。
+
 ### B0.7 Unity gameplay consumer
 
-Unity 的 `GameplayPrediction` 只消费 semantic input 与权威 snapshot，按 25 ms input cadence、50 ms simulation mapping、16-Tick history 预测本地最小 movement/jump；`GameplayReplica` 原子组装 full/delta、推进 field 7 acknowledgement 并触发 single-flight resync；`GameplayInterpolation` 为远端 entity 维护有界 sample。客户端不能提交最终 Transform、grounded、hit、damage、effect、death、reward 或 AI 结果。
+Unity 的 `GameplayPrediction` 只消费semantic input与权威snapshot，按25 ms input cadence、50 ms simulation mapping、16-Tick history预测本地最小movement/jump；10 Hz snapshot跨过的无frame中间SimulationTick必须按C++相同的4-Tick continuous hold逐Tick重演，send pacing等待只保留一个InputTick credit且不得在publication放行帧burst。Prediction-owned表现时钟从current visible pose连接完整future horizon，Scene不得建立第二个movement timeline。`GameplayReplica`原子组装full/delta、推进field 7 acknowledgement并触发single-flight resync；`GameplayInterpolation`为远端entity维护有界sample。客户端不能提交最终Transform、grounded、hit、damage、effect、death、reward或AI结果。
 
 Current `SimulationNode` 的 battle runtime binding 已把 typed move/aim/jump resolution
 交给每 instance 唯一 `BattleMovementReplicationStore`，用 50 ms 整数 movement
@@ -423,3 +430,9 @@ plane、Transform Y 或 phase bit 补齐服务端事实。
 7. evidence 可把一次异常关联到 build/config/assignment/tick/input/result，但不能自行结算。
 
 详细变更顺序、进入条件与验收产出见 `docs/roadmap.md`。
+
+## B0.8 production encounter 实现
+
+`ProductionEncounter` 从 `personal-world-combat-v1` immutable catalog 与 versioned arena 构建 S0。Player 默认 sword，可用离散 `SWITCH_WEAPON` edge 在 sword/fan grants 间原子切换；sword 使用一次权威 shape sweep，fan 创建下一 Tick 才移动的 deferred projectile。Effect/Attribute/Death 使用 checked `int64`、health clamp、friendly-fire policy、唯一 death cause、corpse deadline 与 deferred despawn。
+
+ordinary monster 的 `idle/acquire/chase/attack/recover/dead` 与 Boss phase progression 只提交 Movement/Ability intent。Target 选择按 threat、distance、ActorID 稳定排序，PRNG stream 独立；Boss threshold 在下一 Tick 提交且 death 优先。Jolt query 与 Detour result 按 Collider/Subshape/Actor identity 排序，保证同 seed、input 与 package identity 得到连续一致的 canonical digest。

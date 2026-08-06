@@ -60,12 +60,23 @@
       { "name": "velocity_y_mm_per_second", "field_number": 6, "range": "sint32" },
       { "name": "velocity_z_mm_per_second", "field_number": 7, "range": "sint32" }
     ],
+    "required_content_fields": [
+      { "name": "archetype_id", "field_number": 6, "range": "mapped-nonzero-actor", "mutability": "immutable-per-entity-generation" },
+      { "name": "equipped_weapon_id", "field_number": 7, "range": "mapped-weapon-or-zero-for-non-player", "mutability": "delta-replaceable" },
+      { "name": "max_health_milli", "field_number": 8, "range": "positive-uint32", "mutability": "immutable-per-entity-generation" }
+    ],
     "scalar_presence": "explicit-required-in-full-delta-and-spawn-state",
+    "cross_field_invariants": [
+      "health-milli-not-greater-than-max-health-milli",
+      "lifecycle-archetype-equals-initial-state-archetype",
+      "player-weapon-mapped-nonzero-and-non-player-weapon-zero"
+    ],
     "delta_state_mask": {
       "transform": 1,
       "health_milli": 2,
       "state_flags": 4,
-      "known_mask": 7,
+      "equipped_weapon_id": 8,
+      "known_mask": 15,
       "presence_policy": "exact-match"
     },
     "state_flags": {
@@ -75,7 +86,24 @@
       "known_mask": 2147483679,
       "unknown_policy": "reject",
       "compatibility": "bits-0-through-3-remain-phase-bit-4-is-grounded-bit-31-is-dead"
+    },
+    "partition_projection": {
+      "maximum_encoded_entity_state_bytes": 91,
+      "maximum_full_entity_entry_bytes": 93,
+      "maximum_encoded_entity_delta_bytes": 85,
+      "maximum_delta_entity_entry_bytes": 87,
+      "minimum_entities_per_full_partition": 8,
+      "minimum_entities_per_delta_partition": 8,
+      "maximum_datagram_bytes": 1200
     }
+  },
+  "content_mapping": {
+    "source_path": "../../../gameplay/battle/packages/personal-world-combat-v1/wire-mapping.json",
+    "mapping_sha256": "9e78652d1d05524c2a67668b208f703120a214bfb45f053c94f6c3dc79595e3b",
+    "numeric_type": "uint32",
+    "nonzero_required": true,
+    "retired_policy": "never-reuse",
+    "kinds": ["actor", "weapon", "ability", "projectile"]
   },
   "kcp_segment_header": {
     "size_bytes": 24,

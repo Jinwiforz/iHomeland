@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ihomeland/sim/config/gameplay_package.hpp"
 #include "ihomeland/sim/observability/battle_runtime_metrics.hpp"
 #include "ihomeland/sim/transport/battle_ticket_authenticator.hpp"
 #include "ihomeland/sim/transport/battle_session.hpp"
@@ -36,6 +37,8 @@ struct SimulationNodeConfig final {
     std::size_t instance_capacity;
     /// actor_capacity 是每个 instance 已资格 actor hard cap。
     std::size_t actor_capacity;
+    /// gameplay_catalog 是 node/instance 共享且不热更新的 production snapshot。
+    std::shared_ptr<const GameplayPackageCatalog> gameplay_catalog;
 };
 
 /// ControlAssignment 是 Go placement AssignmentStamp 的私有 control 投影。
@@ -300,6 +303,13 @@ public:
     /// BattleSessionCurrent 验证 session、consumed ticket 与 actor_slot+1 identity 仍 current。
     [[nodiscard]] bool BattleSessionCurrent(
         const BattleSessionContext& context) const noexcept;
+
+    /// SetBattleSessionParticipation 提交 exact session generation 的参战资格生灭。
+    ///
+    /// active 通知必须命中 current instance/actor；inactive 对已被 successor 接管的旧 generation 幂等无效。
+    [[nodiscard]] bool SetBattleSessionParticipation(
+        const BattleSessionContext& context,
+        bool active) noexcept;
 
     /// StartBattleUdpListener 创建并启动本 node 生命周期内唯一 UDP listener。
     ///

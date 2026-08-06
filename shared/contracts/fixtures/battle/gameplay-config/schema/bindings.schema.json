@@ -18,7 +18,7 @@
     "format_version": { "const": "gameplay-config-format-v1" },
     "document_kind": { "const": "external-bindings" },
     "package_id": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
-    "qualification_state": { "enum": ["governance-only", "production-candidate"] },
+    "qualification_state": { "enum": ["governance-only", "production"] },
     "map_id": { "pattern": "^(?:fixture|[a-z0-9]+(?:-[a-z0-9]+)*)/map/[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
     "map_content_identity": { "pattern": "^[0-9a-f]{64}$", "type": "string" },
     "navigation_identity": { "pattern": "^[0-9a-f]{64}$", "type": "string" },

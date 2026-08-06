@@ -133,7 +133,7 @@ Unity 生成的 `.csproj` 不是源事实，不手工提交修改。
 
 ## Input Actions 接线
 
-打开 `Assets/InputSystem_Actions.inputactions`，保留唯一 `Player` 与 `UI` map owner。
+打开 `Assets/App/Modules/Core/Content/Input/InputSystem_Actions.inputactions`，保留唯一 `Player` 与 `UI` map owner。
 
 在 `Player` map 中建立以下 exact actions：
 
@@ -201,8 +201,8 @@ Camera 只消费 presentation target。不得从 Camera Transform、屏幕中心
 完成 Package、`.meta` 与 InputActions 刷新后，在 Unity Test Runner 先运行：
 
 ```text
-IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests
-IHomeland.Client.Tests.EditMode.ClientBattleInputContractTests
+IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests
+IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleInputContractTests
 ```
 
 也可关闭交互式 Editor 后执行：

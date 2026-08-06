@@ -166,9 +166,9 @@ try {
     $diagnosticRegistry = Read-DiagnosticRegistry $automaticRegistry
     $ownerRecovery = Resolve-DiagnosticScenario $diagnosticRegistry "owner-gameplay-recovery"
     $ownerSelectors = @(Get-DiagnosticUnitySelectors $ownerRecovery $automaticRegistry "unity-editmode")
-    Assert-True ($ownerSelectors -contains "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests") "owner recovery diagnostic lost admission fixture"
-    Assert-True ($ownerSelectors -contains "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests") "owner recovery diagnostic lost projection fixture"
-    Assert-True ($ownerSelectors -contains "IHomeland.Client.Tests.EditMode.ClientPersonalWorldExperienceTests") "owner recovery diagnostic lost presentation fixture"
+    Assert-True ($ownerSelectors -contains "IHomeland.Client.PersonalWorld.Tests.EditMode.WorldAdmissionCoordinatorTests") "owner recovery diagnostic lost admission fixture"
+    Assert-True ($ownerSelectors -contains "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientWorldServiceTests") "owner recovery diagnostic lost projection fixture"
+    Assert-True ($ownerSelectors -contains "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientPersonalWorldExperienceTests") "owner recovery diagnostic lost presentation fixture"
     Assert-Throws {
         Resolve-DiagnosticScenario $diagnosticRegistry "unknown-diagnostic"
     } "unknown diagnostic scenario was accepted"
@@ -176,13 +176,13 @@ try {
     $diagnosticResult = Join-Path $TestRoot "diagnostic.xml"
     [System.IO.File]::WriteAllText(
         $diagnosticResult,
-        '<test-run result="Passed" failed="0" skipped="0" inconclusive="0"><test-suite><test-case fullname="IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests.OwnerRecovery" result="Passed" /></test-suite></test-run>',
+        '<test-run result="Passed" failed="0" skipped="0" inconclusive="0"><test-suite><test-case fullname="IHomeland.Client.PersonalWorld.Tests.EditMode.WorldAdmissionCoordinatorTests.OwnerRecovery" result="Passed" /></test-suite></test-run>',
         [System.Text.UTF8Encoding]::new($false))
     Assert-DiagnosticUnitySelectorsPassed $diagnosticResult @(
-        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests")
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.WorldAdmissionCoordinatorTests")
     Assert-Throws {
         Assert-DiagnosticUnitySelectorsPassed $diagnosticResult @(
-            "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests")
+            "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientWorldServiceTests")
     } "missing diagnostic fixture was accepted"
 
     $windowsPowerShellScript = Join-Path $TestRoot "windows-powershell-utf8.ps1"

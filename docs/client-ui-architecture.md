@@ -109,7 +109,7 @@ ClientUiRouter
 Runtime Hosts / Views / Scene adapters
 ```
 
-Router 和 Experience 位于无 Unity 的 `IHomeland.Client.Presentation`。Router 只提交 route/navigation 事实；Host transaction 执行 initialize、bind、show、focus、rollback 与 dispose。Experience 只订阅 Application owner、派生不可变 View State 并暴露语义 action；它不能访问 HTTP、socket、generated message 或 credential。
+Router 位于无 Unity 的 `IHomeland.Client.AppShell.Presentation.Navigation`，Experience 位于 `IHomeland.Client.PersonalWorld.Presentation`。Router 只提交 route/navigation 事实；Host transaction 执行 initialize、bind、show、focus、rollback 与 dispose。Experience 只订阅 Application owner、派生不可变 View State 并暴露语义 action；它不能访问 HTTP、socket、generated message 或 credential。
 
 `ClientPersonalWorldUiToolkitView` 是 Runtime 中唯一产品根 View owner，但 Login、Shell、WorldVisit、ConnectionLost 的节点校验与渲染分别交给页面 adapter。页面 adapter 可以保存选择高亮等页面局部状态，不得复制 Session、PersonalWorld、VisitSession 或连接状态。uGUI HUD 仍由独立 Host 绑定，同一逻辑 screen 不允许出现第二个 active owner。
 
@@ -146,7 +146,7 @@ Host 只获得当前 route binding、页面 cancellation、focus 与必要 Unity
 
 ## 输入与层级
 
-客户端统一使用 Input System。持久 `ClientUiHostRoot` clone 项目 Input System 资产并成为 `Player`/`UI` action map 与 cursor 的唯一 owner；原资产保持只读。Router/Host 共同协调：
+客户端统一使用 Input System。持久 `ClientUiHostRoot` clone 项目 Input System 资产并成为 `Player`/`UI` action map、device pairing 与 cursor 的唯一 owner；原资产保持只读。Gameplay 默认只给 Player map 配对当前 Keyboard 与 Mouse，只有某个具体 Gamepad 的显式按键才允许切换到该实例；未配对虚拟设备的轴输入不得成为 fallback。设备筛选不能以清空 binding group 实现，因为一个 `<Pointer>/delta` 可以同时属于 `Keyboard&Mouse;Touch`，清空 Touch 会错误破坏 Mouse Aim。Router/Host 共同协调：
 
 - modal 独占
 - text input 与 keyboard focus
@@ -201,7 +201,7 @@ Network Receive
 
 UI Toolkit 继续拥有 Login、Shell、WorldVisit、ConnectionLost 等 logical screen/overlay；既有 uGUI WorldHud 继续属于唯一 route owner。B0.7 新增的 `ClientBattleHudHost` 只是 `PersonalWorldScene` 内的 scene-bound overlay，用于低敏 battle availability、authority health 与 correction 提示，不创建第二个 screen、Router、EventSystem 或 input action owner。
 
-`ClientActorViewRegistry` 按 battle/entity generation 创建 generic Actor Prefab；local view 读取 prediction presentation，remote view 读取 interpolation presentation。`CinemachineCameraHost` 只把 Exploration、MeleeCombat、RangedAim、Cinematic intent 映射到登记 rig 与 follow proxy；Camera、Animator、HUD 与 cue 都没有 hit/damage/authority command API。
+`ClientActorViewRegistry` 按 battle/entity generation 创建 generic Actor Prefab；local view逐帧精确提交`GameplayPrediction`按current 50 ms SimulationTick相位发布的`PresentationTransform`，自身不保存计时器、不积分raw Move、不按本地velocity外推，remote view读取带authority delay的interpolation presentation。`CinemachineCameraHost` 跟随该同帧local Transform，并只把 Exploration、MeleeCombat、RangedAim、Cinematic intent 映射到登记 rig 与 follow proxy；Camera、Animator、HUD 与 cue 都没有 hit/damage/authority command API。
 
 当 UI Toolkit 页面或 modal 捕获输入时，唯一 `ClientUiHostRoot` 切换 Player/UI action map、cursor 与 focus，Scene battle host 随即停止采样。Scene replacement 先使 SceneLifetime 不可提交，再解绑 Actor/HUD/Camera/Input；销毁后的 callback 只能被 generation gate 丢弃。
 
@@ -230,3 +230,9 @@ UI Toolkit 继续拥有 Login、Shell、WorldVisit、ConnectionLost 等 logical 
 - 页面销毁后不回写
 - loading、disabled、retry 和 error 状态
 - PlayMode 与截图/视觉回归（具备 CI 条件后）
+
+## B0.8 战斗 HUD 与内容资源
+
+Scene-bound battle HUD 消费 local health/max-health、current sword/fan、skill availability，以及 Boss health/max-health/phase/dead；这些值只能来自 current presentation state。`ClientCombatResourceCatalog` 只把 production semantic/numeric mapping 绑定到 Prefab、Animator、VFX、Audio、HUD 与 camera资源，build-time completeness gate 必须拒绝缺失、重复或 mapping漂移。
+
+Player、ordinary monster、Boss 与 projectile Prefab 不得用 Collider、Animation Event、VFX collision 或 HUD callback 提交 hit/damage/death。Modal 或窗口失焦时，唯一 `ClientUiHostRoot` 同时屏蔽 Primary 与 SwitchWeapon；Scene teardown、safe-return 或 successor replacement 后，旧 generation 的动画、音频、cue 和 HUD callback 都必须被丢弃。

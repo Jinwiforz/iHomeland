@@ -50,6 +50,7 @@ void TestConcurrentMonotonicSnapshot() {
                 metrics.ObserveKcpQueue(53);
                 metrics.ObserveTick(2'500'000, 4);
                 metrics.ObserveMemory(65'536, 8'192);
+                metrics.ObserveCombat(12, 7, 3, 2, false);
             }
         });
     }
@@ -59,6 +60,7 @@ void TestConcurrentMonotonicSnapshot() {
     metrics.RecordRebind();
     metrics.RecordRekey();
     metrics.RecordClose(BattleCloseReasonCategory::Lifecycle);
+    metrics.ObserveCombat(10, 4, 0, 0, true);
 
     const auto expected_samples =
         worker_count * samples_per_worker;
@@ -86,6 +88,13 @@ void TestConcurrentMonotonicSnapshot() {
             first.instance_memory_bytes == 65'536 &&
             first.history_memory_bytes == 8'192,
         "runtime metric high-watermark drifted");
+    Require(
+        first.combat_actor_high_watermark == 12 &&
+            first.combat_projectile_high_watermark == 7 &&
+            first.combat_ability_events == expected_samples * 3 &&
+            first.combat_lifecycle_events == expected_samples * 2 &&
+            first.encounter_completions == 1,
+        "runtime combat metric accounting drifted");
     Require(
         first.rebinds == 1 && first.rekeys == 1 &&
             first.close_lifecycle == 1,

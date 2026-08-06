@@ -285,6 +285,25 @@ public:
         hits.reserve(query.maximum_hits);
         const auto start = ToJoltPosition(query.start_mm, config_);
         const auto direction = ToJoltDirection(query.start_mm, query.end_mm, config_);
+        const auto cast_capsule = [&](const auto& cast_start) {
+            const JPH::RefConst<JPH::Shape> shape = new JPH::CapsuleShape(
+                ToJoltCoordinate(config_.query_capsule_half_height_mm, config_),
+                ToJoltCoordinate(config_.query_capsule_radius_mm, config_));
+            const auto cast = JPH::RShapeCast::sFromWorldTransform(
+                shape,
+                JPH::Vec3::sOne(),
+                JPH::RMat44::sTranslation(cast_start),
+                direction);
+            JPH::AllHitCollisionCollector<JPH::CastShapeCollector> collector;
+            physics_.GetNarrowPhaseQuery().CastShape(
+                cast,
+                JPH::ShapeCastSettings{},
+                JPH::RVec3::sZero(),
+                collector);
+            for (const auto& hit : collector.mHits) {
+                AppendHit(hits, hit.mFraction, hit.mBodyID2);
+            }
+        };
         switch (query.kind) {
             case PhysicsQueryKind::GroundProbe:
             case PhysicsQueryKind::RayCast: {
@@ -298,26 +317,26 @@ public:
                 }
                 break;
             }
-            case PhysicsQueryKind::MoveCapsule:
+            case PhysicsQueryKind::MoveCapsule: {
+                const auto center_offset =
+                    static_cast<std::int64_t>(
+                        config_.query_capsule_half_height_mm) +
+                    config_.query_capsule_radius_mm;
+                if (query.start_mm.y >
+                    std::numeric_limits<std::int64_t>::max() -
+                        center_offset) {
+                    throw JoltPhysicsError(
+                        JoltPhysicsErrorCode::Capacity,
+                        "Jolt movement capsule center overflow");
+                }
+                auto center = query.start_mm;
+                center.y += center_offset;
+                cast_capsule(ToJoltPosition(center, config_));
+                break;
+            }
             case PhysicsQueryKind::ShapeCast:
             case PhysicsQueryKind::ProjectileSweep: {
-                const JPH::RefConst<JPH::Shape> shape = new JPH::CapsuleShape(
-                    ToJoltCoordinate(config_.query_capsule_half_height_mm, config_),
-                    ToJoltCoordinate(config_.query_capsule_radius_mm, config_));
-                const auto cast = JPH::RShapeCast::sFromWorldTransform(
-                    shape,
-                    JPH::Vec3::sOne(),
-                    JPH::RMat44::sTranslation(start),
-                    direction);
-                JPH::AllHitCollisionCollector<JPH::CastShapeCollector> collector;
-                physics_.GetNarrowPhaseQuery().CastShape(
-                    cast,
-                    JPH::ShapeCastSettings{},
-                    JPH::RVec3::sZero(),
-                    collector);
-                for (const auto& hit : collector.mHits) {
-                    AppendHit(hits, hit.mFraction, hit.mBodyID2);
-                }
+                cast_capsule(start);
                 break;
             }
             case PhysicsQueryKind::Overlap: {

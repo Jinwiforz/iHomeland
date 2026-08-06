@@ -214,6 +214,8 @@ func processSimulationControl(t *testing.T) string {
 	binaryPath := filepath.Join(buildRoot, "ihomeland-sim-server.exe")
 	receiptPath := filepath.Join(buildRoot, "qualification-gate-receipt.json")
 	identityPath := filepath.Join(buildRoot, "ihomeland-build-identity.json")
+	packageRoot := filepath.Join(repositoryRoot, "shared", "contracts", "gameplay", "battle", "packages", "personal-world-combat-v1")
+	arenaRoot := filepath.Join(repositoryRoot, "simulation", "content", "personal-world-combat-v1")
 	return fmt.Sprintf(`simulationControl:
   enabled: true
   binaryPath: '%s'
@@ -223,9 +225,9 @@ func processSimulationControl(t *testing.T) string {
   buildIdentity: %s
   modelManifest: 65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1
   profileManifest: c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424
-  configIdentity: da4e34bb3c12a0f0e953fdf9e0c5cc5dc5bd3421a7ec54a8f0bd5fc42b84d381
-  navigationIdentity: 3673d4c38f6a2f285eafd015f0d1b1169041553967a393a82f866d73e4305bbd
-  physicsIdentity: ed46bed0ab9b95ced44719827fbc74074d56d9909eec90b062cce6b72b461b98
+  configIdentity: d6e3f016e4c29f4ad3916759e5ea059443fe37145dbe51621704180e50bc555b
+  navigationIdentity: 14165efe5b47caf6c7c8e2f9a4794c4d238aa4badeedc3d5badb41a9c2d5d19f
+  physicsIdentity: 64d53e1803d7cb14f4953ba1978175b162577eeb064716b2630cad0acf4de02e
   instanceCapacity: 2
   actorCapacity: 8
   frameBytes: 65536
@@ -236,7 +238,15 @@ func processSimulationControl(t *testing.T) string {
   drainTimeout: 2s
   shutdownTimeout: 3s
   stderrLineBytes: 1024
-`, binaryPath, processArtifactDigest(t, binaryPath), receiptPath, processArtifactDigest(t, receiptPath), processBuildIdentity(t, identityPath))
+gameplayPackage:
+  rootPath: '%s'
+  arenaRootPath: '%s'
+  packageId: personal-world-combat-v1
+  configIdentity: d6e3f016e4c29f4ad3916759e5ea059443fe37145dbe51621704180e50bc555b
+  navigationIdentity: 14165efe5b47caf6c7c8e2f9a4794c4d238aa4badeedc3d5badb41a9c2d5d19f
+  physicsIdentity: 64d53e1803d7cb14f4953ba1978175b162577eeb064716b2630cad0acf4de02e
+  wireIdentity: 9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432
+`, binaryPath, processArtifactDigest(t, binaryPath), receiptPath, processArtifactDigest(t, receiptPath), processBuildIdentity(t, identityPath), strings.ReplaceAll(packageRoot, "'", "''"), strings.ReplaceAll(arenaRoot, "'", "''"))
 }
 
 // processArtifactDigest 返回当前真实 child artifact 的小写 SHA-256。

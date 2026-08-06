@@ -49,24 +49,24 @@
     {
       "vector_id": "secure-kcp-aad-v1",
       "layer": "secure-header",
-      "bytes_hex": "494842540102000000010203040506070000000901020304010203040506070900340000000210111213141516170000",
+      "bytes_hex": "494842540102000000010203040506070000000901020304010203040506070900350000000210111213141516170000",
       "byte_count": 48,
-      "sha256": "b471ee3e8cb287168981fb27f0afd02232779ec5dad78386abea6dfcf94de31e",
+      "sha256": "f1563b22a9b061888664c99150930651863550c077ebcb89d8c05d6fddb9b486",
       "decoded": {
         "packet_kind": 2,
         "battle_session_generation": 9,
         "key_epoch": 16909060,
         "packet_sequence": 72623859790382857,
-        "protected_payload_length": 52,
+        "protected_payload_length": 53,
         "endpoint_generation": 2
       }
     },
     {
       "vector_id": "kcp-push-segment-v1",
       "layer": "kcp-segment-header",
-      "bytes_hex": "04030201510040000d0c0b0a01000000000000001c000000",
+      "bytes_hex": "04030201510040000d0c0b0a01000000000000001d000000",
       "byte_count": 24,
-      "sha256": "46258d5e136bc39aa652d5f8374f0cb0d8b55d51a5403340d7c6b34b573bd913",
+      "sha256": "adff28edde1acd4226a159e967657799d13ebedcf7d1f880ee28ccbda9a117d5",
       "decoded": {
         "conv": 16909060,
         "cmd": 81,
@@ -75,18 +75,18 @@
         "ts": 168496141,
         "sn": 1,
         "una": 0,
-        "len": 28
+        "len": 29
       }
     },
     {
       "vector_id": "kcp-ability-route-v1",
       "layer": "kcp-route-envelope",
-      "bytes_hex": "00000bbc000c00002122232425262728",
+      "bytes_hex": "00000bbc000d00002122232425262728",
       "byte_count": 16,
-      "sha256": "c9d570d49da5a06575f844adebee1bcc72be4ee6099b9c4c38c6fa0fa72e3561",
+      "sha256": "d95ce8f30a5b9a1f0131f3d51061f2e1b7392c9ac2bd78b1a981155b9352470f",
       "decoded": {
         "message_id": 3004,
-        "payload_length": 12,
+        "payload_length": 13,
         "route_flags": 0,
         "application_sequence": 2387509390608836392
       }
@@ -95,16 +95,70 @@
       "vector_id": "battle-ability-event-protobuf-v1",
       "layer": "protobuf",
       "protobuf": "ihomeland.battle.v1.BattleAbilityReliableEvent",
-      "bytes_hex": "080110021803200128073001",
-      "byte_count": 12,
-      "sha256": "68177896a4ad3831050972284c590b4664bb1366e07909b1750d87aeee79b88f",
+      "bytes_hex": "080110021803200128ca013001",
+      "byte_count": 13,
+      "sha256": "a8d34af1e9ad4e0da2c59e1b31e65f470727dd1b85cae07d64a7e80af2cad73c",
       "decoded": {
         "event_id": 1,
         "server_tick": 2,
         "source_entity_id": 3,
         "source_entity_generation": 1,
-        "ability_id": 7,
+        "ability_id": 202,
         "phase": 1
+      }
+    },
+    {
+      "vector_id": "battle-player-entity-state-protobuf-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleEntityState",
+      "bytes_hex": "080110011a0e080010001800200028003000380020a08d0628103001386540a08d06",
+      "byte_count": 34,
+      "sha256": "fff1c7515fb825cb1a99b220de700a3cc78baec3b279c8ca4c4990ab7ac97b24",
+      "decoded": {
+        "entity_id": 1,
+        "entity_generation": 1,
+        "health_milli": 100000,
+        "state_flags": 16,
+        "archetype_id": 1,
+        "equipped_weapon_id": 101,
+        "max_health_milli": 100000
+      }
+    },
+    {
+      "vector_id": "battle-boss-entity-state-protobuf-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleEntityState",
+      "bytes_hex": "080910011a0e080010001800200028003000380020e0a71228013003380040e0a712",
+      "byte_count": 34,
+      "sha256": "9ceb916a731a95be643b1a71ac29f7f0de6c7ed8e270f41713b3a4683cfb2d40",
+      "decoded": {
+        "entity_id": 9,
+        "entity_generation": 1,
+        "health_milli": 300000,
+        "state_flags": 1,
+        "archetype_id": 3,
+        "equipped_weapon_id": 0,
+        "max_health_milli": 300000
+      }
+    },
+    {
+      "vector_id": "battle-boss-lifecycle-protobuf-v1",
+      "layer": "protobuf",
+      "protobuf": "ihomeland.battle.v1.BattleEntityLifecycle",
+      "bytes_hex": "0801100a18092001280130033a22080910011a0e080010001800200028003000380020e0a71228013003380040e0a712",
+      "byte_count": 48,
+      "sha256": "8ceb492dbd16b70f5261103f0d0b7150f88236d50c13908f6d0db5430d2cc1d4",
+      "decoded": {
+        "event_id": 1,
+        "server_tick": 10,
+        "entity_id": 9,
+        "entity_generation": 1,
+        "lifecycle_kind": 1,
+        "archetype_id": 3,
+        "health_milli": 300000,
+        "state_flags": 1,
+        "equipped_weapon_id": 0,
+        "max_health_milli": 300000
       }
     },
     {

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace ihomeland::sim {
 
@@ -13,6 +15,8 @@ struct StateProjectionToken final {
 
     /// actor_id 是规范状态顺序的唯一主键。
     std::uint64_t actor_id;
+    /// entity_generation 是同一 actor_id 当前不可回退的 lifecycle generation。
+    std::uint32_t entity_generation{1};
     /// x_mm 是整数 world X。
     std::int64_t x_mm;
     /// y_mm 是整数 world Y。
@@ -35,6 +39,12 @@ struct StateProjectionToken final {
     bool alive;
     /// grounded 是 Movement/Physics stage 已提交的权威接地事实。
     bool grounded{false};
+    /// archetype_id 是 production actor mapping；同 generation 内不可变。
+    std::uint32_t archetype_id{1};
+    /// equipped_weapon_id 是 player 当前武器；非 player 必须为零。
+    std::uint32_t equipped_weapon_id{101};
+    /// max_health_scaled 是当前 generation 的不可变正数生命上限。
+    std::uint32_t max_health_scaled{0xffffffffU};
 };
 
 /// BattleEntityStateFlags 冻结 battle-wire-v1 snapshot state_flags registry。
@@ -64,6 +74,64 @@ struct EventProjectionToken final {
     std::uint64_t activation_id;
     /// value_scaled 是 event 的 signed 64-bit scaled 数值。
     std::int64_t value_scaled;
+};
+
+/// CombatAbilityEventPhase 是 reliable ability projection 的稳定阶段。
+enum class CombatAbilityEventPhase : std::uint8_t {
+    /// Started 表示 activation 已被权威 Ability stage 接受。
+    Started = 1,
+    /// Committed 表示 activation 已提交结构变化或规范 target 集合。
+    Committed = 2,
+    /// Completed 表示 activation 已在权威 timeline 结束。
+    Completed = 3,
+    /// Cancelled 表示 activation 被登记规则原子取消。
+    Cancelled = 4,
+};
+
+/// CombatAbilityEvent 是 transport mapping 前的权威有界事件。
+struct CombatAbilityEvent final {
+    /// event_sequence 是 instance timeline 内跨事件类型唯一且单调的 identity。
+    std::uint64_t event_sequence;
+    /// tick 是事件所属的 committed SimulationTick。
+    std::uint64_t tick;
+    /// source_actor_id 是触发 ability 的非零权威实体。
+    std::uint64_t source_actor_id;
+    /// source_generation 防止迟到 cue 命中 successor entity generation。
+    std::uint32_t source_generation;
+    /// ability_id 是 production wire mapping 提供的非零 numeric ID。
+    std::uint32_t ability_id;
+    /// activation_id 关联同一次 ability activation 的多个 phase。
+    std::uint64_t activation_id;
+    /// phase 是 closed started/committed/completed/cancelled 阶段。
+    CombatAbilityEventPhase phase;
+    /// target_actor_ids 是已排序且去重的公开目标集合。
+    std::vector<std::uint64_t> target_actor_ids;
+};
+
+/// CombatLifecycleKind 是 entity generation 的可靠生命周期动作。
+enum class CombatLifecycleKind : std::uint8_t {
+    /// Spawn 建立一个新 entity generation。
+    Spawn = 1,
+    /// Despawn 终止 exact entity generation。
+    Despawn = 2,
+};
+
+/// CombatLifecycleEvent 是 current encounter entity 的可靠 spawn/despawn 投影。
+struct CombatLifecycleEvent final {
+    /// event_sequence 是 instance timeline 内跨事件类型唯一且单调的 identity。
+    std::uint64_t event_sequence;
+    /// tick 是 lifecycle transition 所属的 committed SimulationTick。
+    std::uint64_t tick;
+    /// kind 是 spawn 或 despawn 的 closed action。
+    CombatLifecycleKind kind;
+    /// entity_id 是 transition 对应的非零 entity identity。
+    std::uint64_t entity_id;
+    /// archetype_id 是 spawn 的 production mapping；despawn 编码时必须清零。
+    std::uint32_t archetype_id;
+    /// entity_generation 防止 predecessor lifecycle 影响 successor View。
+    std::uint32_t entity_generation;
+    /// initial_state 仅由 spawn 携带，并与外层 identity/archetype 完全一致。
+    std::optional<StateProjectionToken> initial_state;
 };
 
 /// RejectionProjectionToken 是 command/gameplay 拒绝的稳定规范值。

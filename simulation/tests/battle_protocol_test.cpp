@@ -291,6 +291,80 @@ bool VerifyProtobuf(const nlohmann::json& golden) {
         ability_decoded.phase() == ability.phase();
 }
 
+/// PopulateContentState 从 canonical decoded 投影设置 full state 的全部显式字段。
+void PopulateContentState(
+    ihomeland::battle::v1::BattleEntityState& state,
+    const nlohmann::json& decoded) {
+    state.set_entity_id(decoded["entity_id"].get<std::uint64_t>());
+    state.set_entity_generation(decoded["entity_generation"].get<std::uint32_t>());
+    auto* transform = state.mutable_transform();
+    transform->set_position_x_mm(0);
+    transform->set_position_y_mm(0);
+    transform->set_position_z_mm(0);
+    transform->set_yaw_millidegrees(0);
+    transform->set_velocity_x_mm_per_second(0);
+    transform->set_velocity_y_mm_per_second(0);
+    transform->set_velocity_z_mm_per_second(0);
+    state.set_health_milli(decoded["health_milli"].get<std::uint32_t>());
+    state.set_state_flags(decoded["state_flags"].get<std::uint32_t>());
+    state.set_archetype_id(decoded["archetype_id"].get<std::uint32_t>());
+    state.set_equipped_weapon_id(
+        decoded["equipped_weapon_id"].get<std::uint32_t>());
+    state.set_max_health_milli(decoded["max_health_milli"].get<std::uint32_t>());
+}
+
+/// VerifyContentProjection 验证 player/Boss full state 与 Boss lifecycle 的 canonical parity。
+bool VerifyContentProjection(const nlohmann::json& golden) {
+    const auto& player_vector = FindVector(
+        golden,
+        "battle-player-entity-state-protobuf-v1");
+    const auto& boss_vector = FindVector(
+        golden,
+        "battle-boss-entity-state-protobuf-v1");
+    const auto& lifecycle_vector = FindVector(
+        golden,
+        "battle-boss-lifecycle-protobuf-v1");
+    if (player_vector.is_null() || boss_vector.is_null() || lifecycle_vector.is_null()) {
+        return false;
+    }
+
+    ihomeland::battle::v1::BattleEntityState player;
+    PopulateContentState(player, player_vector["decoded"]);
+    std::string player_encoded;
+    if (!player.SerializeToString(&player_encoded) ||
+        ByteVector(player_encoded.begin(), player_encoded.end()) !=
+            DecodeHex(player_vector.value("bytes_hex", "")) ||
+        player.health_milli() > player.max_health_milli() ||
+        player.archetype_id() == 0U || player.equipped_weapon_id() == 0U) {
+        return false;
+    }
+
+    ihomeland::battle::v1::BattleEntityState boss;
+    PopulateContentState(boss, boss_vector["decoded"]);
+    std::string boss_encoded;
+    if (!boss.SerializeToString(&boss_encoded) ||
+        ByteVector(boss_encoded.begin(), boss_encoded.end()) !=
+            DecodeHex(boss_vector.value("bytes_hex", ""))) {
+        return false;
+    }
+
+    const auto& decoded = lifecycle_vector["decoded"];
+    ihomeland::battle::v1::BattleEntityLifecycle lifecycle;
+    lifecycle.set_event_id(decoded["event_id"].get<std::uint64_t>());
+    lifecycle.set_server_tick(decoded["server_tick"].get<std::uint64_t>());
+    lifecycle.set_entity_id(decoded["entity_id"].get<std::uint64_t>());
+    lifecycle.set_entity_generation(decoded["entity_generation"].get<std::uint32_t>());
+    lifecycle.set_kind(static_cast<ihomeland::battle::v1::BattleEntityLifecycleKind>(
+        decoded["lifecycle_kind"].get<std::int32_t>()));
+    lifecycle.set_archetype_id(decoded["archetype_id"].get<std::uint32_t>());
+    *lifecycle.mutable_initial_state() = boss;
+    std::string lifecycle_encoded;
+    return lifecycle.SerializeToString(&lifecycle_encoded) &&
+        ByteVector(lifecycle_encoded.begin(), lifecycle_encoded.end()) ==
+            DecodeHex(lifecycle_vector.value("bytes_hex", "")) &&
+        lifecycle.archetype_id() == lifecycle.initial_state().archetype_id();
+}
+
 }  // namespace
 
 /// main 验证 C++ 对共享 secure/raw/KCP/Protobuf golden 的双向 byte-exact parity。
@@ -312,6 +386,9 @@ int main() {
     }
     if (!VerifySnapshotAcknowledgements(golden)) {
         return 5;
+    }
+    if (!VerifyContentProjection(golden)) {
+        return 6;
     }
     return 0;
 }

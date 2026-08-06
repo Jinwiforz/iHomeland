@@ -14,7 +14,12 @@
         { "field": "cue-ref", "target_id": "fixture/cue/player-state", "target_kind": "cue" }
       ],
       "numeric_values": [
-        { "field": "health", "value": "100000", "unit": "attribute-milli" }
+        { "field": "health", "value": "100000", "unit": "attribute-milli" },
+        { "field": "team", "value": "1", "unit": "team-id" },
+        { "field": "move-speed", "value": "5000", "unit": "millimeters-per-second" },
+        { "field": "capsule-radius", "value": "400", "unit": "millimeters" },
+        { "field": "capsule-height", "value": "1800", "unit": "millimeters" },
+        { "field": "corpse-lifetime", "value": "0", "unit": "simulation-ticks" }
       ]
     },
     {
@@ -26,7 +31,12 @@
         { "field": "cue-ref", "target_id": "fixture/cue/ordinary-monster-state", "target_kind": "cue" }
       ],
       "numeric_values": [
-        { "field": "health", "value": "50000", "unit": "attribute-milli" }
+        { "field": "health", "value": "50000", "unit": "attribute-milli" },
+        { "field": "team", "value": "2", "unit": "team-id" },
+        { "field": "move-speed", "value": "3000", "unit": "millimeters-per-second" },
+        { "field": "capsule-radius", "value": "450", "unit": "millimeters" },
+        { "field": "capsule-height", "value": "1600", "unit": "millimeters" },
+        { "field": "corpse-lifetime", "value": "40", "unit": "simulation-ticks" }
       ]
     },
     {
@@ -40,7 +50,12 @@
         { "field": "cue-ref", "target_id": "fixture/cue/boss-state", "target_kind": "cue" }
       ],
       "numeric_values": [
-        { "field": "health", "value": "500000", "unit": "attribute-milli" }
+        { "field": "health", "value": "500000", "unit": "attribute-milli" },
+        { "field": "team", "value": "2", "unit": "team-id" },
+        { "field": "move-speed", "value": "2500", "unit": "millimeters-per-second" },
+        { "field": "capsule-radius", "value": "900", "unit": "millimeters" },
+        { "field": "capsule-height", "value": "3200", "unit": "millimeters" },
+        { "field": "corpse-lifetime", "value": "80", "unit": "simulation-ticks" }
       ]
     },
     {
@@ -51,7 +66,9 @@
         { "field": "grant-ref", "target_id": "fixture/ability-grant/sword", "target_kind": "ability-grant" },
         { "field": "cue-ref", "target_id": "fixture/cue/sword-equipped", "target_kind": "cue" }
       ],
-      "numeric_values": []
+      "numeric_values": [
+        { "field": "switch-order", "value": "1", "unit": "ordinal" }
+      ]
     },
     {
       "id": "fixture/weapon/fan",
@@ -61,7 +78,9 @@
         { "field": "grant-ref", "target_id": "fixture/ability-grant/fan", "target_kind": "ability-grant" },
         { "field": "cue-ref", "target_id": "fixture/cue/fan-equipped", "target_kind": "cue" }
       ],
-      "numeric_values": []
+      "numeric_values": [
+        { "field": "switch-order", "value": "2", "unit": "ordinal" }
+      ]
     },
     {
       "id": "fixture/ability-grant/sword",
@@ -92,7 +111,12 @@
       "numeric_values": [
         { "field": "phase-duration", "value": "4", "unit": "simulation-ticks" },
         { "field": "cost", "value": "0", "unit": "attribute-milli" },
-        { "field": "cooldown", "value": "10", "unit": "simulation-ticks" }
+        { "field": "cooldown", "value": "10", "unit": "simulation-ticks" },
+        { "field": "windup", "value": "1", "unit": "simulation-ticks" },
+        { "field": "active", "value": "1", "unit": "simulation-ticks" },
+        { "field": "recovery", "value": "2", "unit": "simulation-ticks" },
+        { "field": "melee-range", "value": "2500", "unit": "millimeters" },
+        { "field": "melee-radius", "value": "800", "unit": "millimeters" }
       ]
     },
     {
@@ -106,7 +130,12 @@
       "numeric_values": [
         { "field": "phase-duration", "value": "5", "unit": "simulation-ticks" },
         { "field": "cost", "value": "0", "unit": "attribute-milli" },
-        { "field": "cooldown", "value": "12", "unit": "simulation-ticks" }
+        { "field": "cooldown", "value": "12", "unit": "simulation-ticks" },
+        { "field": "windup", "value": "1", "unit": "simulation-ticks" },
+        { "field": "active", "value": "1", "unit": "simulation-ticks" },
+        { "field": "recovery", "value": "3", "unit": "simulation-ticks" },
+        { "field": "melee-range", "value": "0", "unit": "millimeters" },
+        { "field": "melee-radius", "value": "0", "unit": "millimeters" }
       ]
     },
     {
@@ -120,7 +149,8 @@
       ],
       "numeric_values": [
         { "field": "speed", "value": "12000", "unit": "millimeters-per-second" },
-        { "field": "lifetime", "value": "20", "unit": "simulation-ticks" }
+        { "field": "lifetime", "value": "20", "unit": "simulation-ticks" },
+        { "field": "radius", "value": "250", "unit": "millimeters" }
       ]
     },
     {
@@ -155,7 +185,11 @@
         { "field": "ability-ref", "target_id": "fixture/ability/sword-primary", "target_kind": "ability" },
         { "field": "navigation-policy-ref", "target_id": "fixture/navigation-policy/world", "target_kind": "navigation-policy" }
       ],
-      "numeric_values": []
+      "numeric_values": [
+        { "field": "acquire-range", "value": "20000", "unit": "millimeters" },
+        { "field": "attack-range", "value": "2500", "unit": "millimeters" },
+        { "field": "recovery", "value": "20", "unit": "simulation-ticks" }
+      ]
     },
     {
       "id": "fixture/ai/boss",
@@ -165,7 +199,11 @@
         { "field": "ability-ref", "target_id": "fixture/ability/fan-primary", "target_kind": "ability" },
         { "field": "navigation-policy-ref", "target_id": "fixture/navigation-policy/world", "target_kind": "navigation-policy" }
       ],
-      "numeric_values": []
+      "numeric_values": [
+        { "field": "acquire-range", "value": "30000", "unit": "millimeters" },
+        { "field": "attack-range", "value": "12000", "unit": "millimeters" },
+        { "field": "recovery", "value": "16", "unit": "simulation-ticks" }
+      ]
     },
     {
       "id": "fixture/boss-phase/enraged",
@@ -214,7 +252,8 @@
         { "field": "peak-projectiles", "value": "64", "unit": "projectiles" },
         { "field": "peak-effects", "value": "96", "unit": "effects" },
         { "field": "peak-physics-queries", "value": "128", "unit": "queries-per-tick" },
-        { "field": "peak-navigation-queries", "value": "24", "unit": "queries-per-tick" }
+        { "field": "peak-navigation-queries", "value": "24", "unit": "queries-per-tick" },
+        { "field": "friendly-fire-enabled", "value": "0", "unit": "boolean-int" }
       ]
     },
     {
@@ -233,7 +272,9 @@
       "references": [
         { "field": "collision-layer-ref", "target_id": "fixture/collision-layer/world", "target_kind": "collision-layer" }
       ],
-      "numeric_values": []
+      "numeric_values": [
+        { "field": "query-radius", "value": "30000", "unit": "millimeters" }
+      ]
     },
     { "id": "fixture/cue/player-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
     { "id": "fixture/cue/ordinary-monster-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },

@@ -56,6 +56,8 @@ type Config struct {
 	Storage Storage `yaml:"storage"`
 	// SimulationControl 定义必需本机 C++ child 的精确 artifact 与有界 control policy。
 	SimulationControl SimulationControl `yaml:"simulationControl"`
+	// GameplayPackage 定义 Go 在启动期冻结的 production package 与预期摘要。
+	GameplayPackage GameplayPackage `yaml:"gameplayPackage"`
 }
 
 // Runtime 保存所有组件共享的启动与关闭总预算。
@@ -142,6 +144,26 @@ type SimulationControl struct {
 	QualificationSampleInterval time.Duration `yaml:"qualificationSampleInterval"`
 }
 
+// GameplayPackage 定义 production package 的本机选择输入与跨边界预期身份。
+//
+// RootPath 只可传给本机 loader 与受监督 child，禁止写入日志、control frame 或 evidence。
+type GameplayPackage struct {
+	// RootPath 是包含五份 closed production document 的绝对目录。
+	RootPath string `yaml:"rootPath"`
+	// ArenaRootPath 是包含 arena/navigation/physics 三份 server authority source 的绝对目录。
+	ArenaRootPath string `yaml:"arenaRootPath"`
+	// PackageID 是部署明确选择的 production package semantic identity。
+	PackageID string `yaml:"packageId"`
+	// ConfigIdentity 是五份 source 与 governance binding 的聚合摘要。
+	ConfigIdentity string `yaml:"configIdentity"`
+	// NavigationIdentity 是 bindings 声明的 Detour source 摘要。
+	NavigationIdentity string `yaml:"navigationIdentity"`
+	// PhysicsIdentity 是 bindings 声明的 Jolt source 摘要。
+	PhysicsIdentity string `yaml:"physicsIdentity"`
+	// WireIdentity 是 package 绑定的 battle wire manifest 摘要。
+	WireIdentity string `yaml:"wireIdentity"`
+}
+
 // Default 返回只适合本地启动且默认不暴露到外部网卡的安全配置。
 func Default() Config {
 	return Config{
@@ -161,6 +183,7 @@ func Default() Config {
 		SimulationControl: SimulationControl{
 			Enabled: false,
 		},
+		GameplayPackage: GameplayPackage{},
 	}
 }
 
@@ -244,6 +267,44 @@ func (config Config) Validate() error {
 	}
 	if err := config.SimulationControl.validate(config.Environment); err != nil {
 		return err
+	}
+	if err := config.GameplayPackage.validate(config.SimulationControl.Enabled); err != nil {
+		return err
+	}
+	if config.SimulationControl.Enabled &&
+		(config.GameplayPackage.ConfigIdentity != config.SimulationControl.ConfigIdentity ||
+			config.GameplayPackage.NavigationIdentity != config.SimulationControl.NavigationIdentity ||
+			config.GameplayPackage.PhysicsIdentity != config.SimulationControl.PhysicsIdentity ||
+			config.GameplayPackage.WireIdentity != config.PublicAPI.BattleUDP.WireIdentity) {
+		return errors.New("gameplayPackage identity binding differs from simulation or battle configuration")
+	}
+	return nil
+}
+
+// validate 只校验部署选择形态；source bytes 与跨配置摘要由 selector 在副作用前验证。
+func (config GameplayPackage) validate(required bool) error {
+	if !required && config == (GameplayPackage{}) {
+		return nil
+	}
+	if !filepath.IsAbs(config.RootPath) || filepath.Clean(config.RootPath) != config.RootPath {
+		return errors.New("gameplayPackage.rootPath must be a clean absolute path")
+	}
+	if !filepath.IsAbs(config.ArenaRootPath) || filepath.Clean(config.ArenaRootPath) != config.ArenaRootPath {
+		return errors.New("gameplayPackage.arenaRootPath must be a clean absolute path")
+	}
+	if config.PackageID != "personal-world-combat-v1" {
+		return errors.New("gameplayPackage.packageId is not an allowed production package")
+	}
+	digestPattern := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	for key, value := range map[string]string{
+		"configIdentity":     config.ConfigIdentity,
+		"navigationIdentity": config.NavigationIdentity,
+		"physicsIdentity":    config.PhysicsIdentity,
+		"wireIdentity":       config.WireIdentity,
+	} {
+		if !digestPattern.MatchString(value) {
+			return fmt.Errorf("gameplayPackage.%s must be lowercase SHA-256", key)
+		}
 	}
 	return nil
 }

@@ -75,7 +75,7 @@ publicApi:
     bindAddress: 127.0.0.1:58445
     advertised: { host: 127.0.0.1, port: 58445 }
     derivationKeySecret: env:IHOMELAND_BATTLE_DERIVATION_KEY
-    wireIdentity: 3d0505f82dcfacec3b296e0a089ce58db2338a59b45e65c87ae6f1dddf47c2b1
+    wireIdentity: 9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432
     maximumTicketLifetime: 30s
     replayRetention: 5m
     cookieRotation: 30s

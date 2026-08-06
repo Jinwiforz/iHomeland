@@ -1,0 +1,28 @@
+{
+  "format_version": "personal-world-arena-v1",
+  "map_id": "personal-world-combat/map/arena",
+  "bounds_mm": {
+    "minimum": [-30000, 0, -30000],
+    "maximum": [30000, 8000, 30000]
+  },
+  "floor": {
+    "height_mm": 0,
+    "half_extent_x_mm": 30000,
+    "half_extent_z_mm": 30000
+  },
+  "static_blockers": [
+    { "collider_id": 1001, "center_mm": [0, 1000, 0], "half_extent_mm": [2500, 1000, 1000] },
+    { "collider_id": 1002, "center_mm": [-9000, 1500, 6500], "half_extent_mm": [1500, 1500, 1500] },
+    { "collider_id": 1003, "center_mm": [9000, 1500, -6500], "half_extent_mm": [1500, 1500, 1500] }
+  ],
+  "spawn_points": [
+    { "id": "owner", "position_mm": [-12000, 0, -12000], "yaw_millidegrees": 45000 },
+    { "id": "visitor-1", "position_mm": [-10000, 0, -12000], "yaw_millidegrees": 45000 },
+    { "id": "visitor-2", "position_mm": [-12000, 0, -10000], "yaw_millidegrees": 45000 },
+    { "id": "visitor-3", "position_mm": [-10000, 0, -10000], "yaw_millidegrees": 45000 },
+    { "id": "monster-1", "position_mm": [6000, 0, 4000], "yaw_millidegrees": -135000 },
+    { "id": "monster-2", "position_mm": [9000, 0, 7000], "yaw_millidegrees": -135000 },
+    { "id": "monster-3", "position_mm": [4000, 0, 9000], "yaw_millidegrees": -135000 },
+    { "id": "boss", "position_mm": [15000, 0, 15000], "yaw_millidegrees": -135000 }
+  ]
+}

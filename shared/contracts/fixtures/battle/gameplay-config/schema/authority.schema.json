@@ -7,7 +7,7 @@
     "format_version": { "const": "gameplay-config-format-v1" },
     "document_kind": { "const": "authority-catalog" },
     "package_id": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "type": "string" },
-    "qualification_state": { "enum": ["governance-only", "production-candidate"] },
+    "qualification_state": { "enum": ["governance-only", "production"] },
     "objects": {
       "type": "array",
       "minItems": 1,

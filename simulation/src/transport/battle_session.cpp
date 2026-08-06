@@ -19,8 +19,7 @@ constexpr std::int32_t MaximumMovePermille = 1'000;
 constexpr std::uint32_t PrimaryAbilityId = 1;
 constexpr std::uint32_t SecondaryAbilityId = 2;
 constexpr std::uint32_t MaximumInteractionSlot = 16;
-constexpr std::uint32_t InitialEntityGeneration = 1;
-constexpr std::uint32_t CompleteEntityStateMask = 7;
+constexpr std::uint32_t CompleteEntityStateMask = 15;
 
 /// NonEmpty 验证authority string不为空。
 [[nodiscard]] bool NonEmpty(
@@ -68,6 +67,7 @@ template <typename Message>
         case BATTLE_INPUT_KIND_JUMP:
         case BATTLE_INPUT_KIND_PRIMARY_ABILITY:
         case BATTLE_INPUT_KIND_SECONDARY_ABILITY:
+        case BATTLE_INPUT_KIND_SWITCH_WEAPON:
             return move || aim || interact;
         case BATTLE_INPUT_KIND_INTERACT:
             return move || aim || !interact;
@@ -153,6 +153,10 @@ ToGameplayCommand(
             command.payload = ActivateAbilityPayload{
                 .ability_id = SecondaryAbilityId};
             break;
+        case BATTLE_INPUT_KIND_SWITCH_WEAPON:
+            command.kind = GameplayCommandKind::SwitchWeapon;
+            command.payload = SwitchWeaponPayload{};
+            break;
         case BATTLE_INPUT_KIND_INTERACT:
             if (input.interaction_slot() == 0 ||
                 input.interaction_slot() >
@@ -178,7 +182,7 @@ void FillState(
     const StateProjectionToken& state) {
     output.set_entity_id(state.actor_id);
     output.set_entity_generation(
-        InitialEntityGeneration);
+        state.entity_generation);
     auto* transform = output.mutable_transform();
     transform->set_position_x_mm(
         static_cast<std::int32_t>(std::clamp(
@@ -238,6 +242,11 @@ void FillState(
         (state.alive
              ? 0U
              : BattleEntityStateFlags::Dead));
+    output.set_archetype_id(state.archetype_id);
+    output.set_equipped_weapon_id(
+        state.equipped_weapon_id);
+    output.set_max_health_milli(
+        state.max_health_scaled);
 }
 
 /// FillDelta 将只读 simulation state 转为完整替换语义的 delta projection。
@@ -246,7 +255,7 @@ void FillDelta(
     const StateProjectionToken& state) {
     output.set_entity_id(state.actor_id);
     output.set_entity_generation(
-        InitialEntityGeneration);
+        state.entity_generation);
     output.set_state_mask(CompleteEntityStateMask);
     auto* transform = output.mutable_transform();
     transform->set_position_x_mm(
@@ -307,6 +316,29 @@ void FillDelta(
         (state.alive
              ? 0U
              : BattleEntityStateFlags::Dead));
+    output.set_equipped_weapon_id(
+        state.equipped_weapon_id);
+}
+
+/// ContentProjectionValid 验证 production actor/weapon mapping 与 health invariant。
+[[nodiscard]] bool ContentProjectionValid(
+    const StateProjectionToken& state) noexcept {
+    const auto player = state.archetype_id == 1U;
+    const auto known_archetype =
+        state.archetype_id == 1U ||
+        state.archetype_id == 2U ||
+        state.archetype_id == 3U ||
+        state.archetype_id == 301U;
+    return state.entity_generation > 0U &&
+        known_archetype &&
+        state.max_health_scaled > 0U &&
+        state.health_scaled >= 0 &&
+        static_cast<std::uint64_t>(state.health_scaled) <=
+            state.max_health_scaled &&
+        (player
+             ? state.equipped_weapon_id == 101U ||
+                   state.equipped_weapon_id == 102U
+             : state.equipped_weapon_id == 0U);
 }
 
 }  // namespace
@@ -563,6 +595,13 @@ struct BattleReplicationQueue::Impl final {
             ++metrics.rejected;
             return false;
         }
+        if (item.lane == BattleReplicationLane::Kcp &&
+            next_kcp_application_sequence == 0) {
+            ++metrics.rejected;
+            context->Authority()->Invalidate(
+                BattleSessionInvalidationReason::Protocol);
+            return false;
+        }
         if (replace_snapshot) {
             for (auto iterator = queue.begin();
                  iterator != queue.end();) {
@@ -595,6 +634,15 @@ struct BattleReplicationQueue::Impl final {
                 BattleSessionInvalidationReason::
                     Backpressure);
             return false;
+        }
+        if (item.lane == BattleReplicationLane::Kcp) {
+            item.application_sequence =
+                next_kcp_application_sequence;
+            next_kcp_application_sequence =
+                next_kcp_application_sequence ==
+                        std::numeric_limits<std::uint64_t>::max()
+                    ? 0
+                    : next_kcp_application_sequence + 1;
         }
         queue.push_back(std::move(item));
         metrics.queued = queue.size();
@@ -698,6 +746,8 @@ struct BattleReplicationQueue::Impl final {
     std::deque<BattleReplicationItem> queue;
     /// metrics 保存低敏累计与current usage。
     BattleReplicationMetrics metrics{};
+    /// next_kcp_application_sequence 是可靠lane envelope的唯一严格递增owner。
+    std::uint64_t next_kcp_application_sequence{1};
     /// mutex 串行化producer与network consumer。
     mutable std::mutex mutex;
 };
@@ -887,6 +937,7 @@ bool BattleReplicationQueue::QueueFullSnapshot(
             states,
             [](const StateProjectionToken& state) {
                 return state.actor_id == 0 ||
+                    !ContentProjectionValid(state) ||
                     state.yaw_millidegrees <
                         -180'000 ||
                     state.yaw_millidegrees >=
@@ -986,6 +1037,7 @@ bool BattleReplicationQueue::QueueDeltaSnapshot(
             states,
             [](const StateProjectionToken& state) {
                 return state.actor_id == 0 ||
+                    !ContentProjectionValid(state) ||
                     state.yaw_millidegrees <
                         -180'000 ||
                     state.yaw_millidegrees >=
@@ -1062,45 +1114,55 @@ bool BattleReplicationQueue::QueueDeltaSnapshot(
 }
 
 bool BattleReplicationQueue::QueueAbilityEvent(
-    const EventProjectionToken& event,
-    const std::uint32_t source_generation,
-    const std::uint32_t ability_id,
-    const std::uint32_t phase,
+    const CombatAbilityEvent& event,
     const std::uint64_t now_unix_ms) {
     const auto deadline =
         KcpReplicationDeadline(
             AbilityEventMessageID,
             event.tick,
-            event.activation_id,
+            event.event_sequence,
             now_unix_ms);
     if (!deadline.has_value() ||
+        event.event_sequence == 0 ||
         event.source_actor_id == 0 ||
-        source_generation == 0 ||
-        ability_id == 0 || phase < 1 || phase > 4) {
+        event.source_generation == 0 ||
+        event.ability_id == 0 ||
+        event.activation_id == 0 ||
+        event.phase < CombatAbilityEventPhase::Started ||
+        event.phase > CombatAbilityEventPhase::Cancelled ||
+        !std::ranges::is_sorted(event.target_actor_ids) ||
+        std::ranges::adjacent_find(event.target_actor_ids) !=
+            event.target_actor_ids.end() ||
+        std::ranges::any_of(
+            event.target_actor_ids,
+            [](const std::uint64_t target) {
+                return target == 0;
+            })) {
         return false;
     }
     ihomeland::battle::v1::
         BattleAbilityReliableEvent message;
-    message.set_event_id(event.activation_id);
+    message.set_event_id(event.event_sequence);
     message.set_server_tick(event.tick);
     message.set_source_entity_id(
         event.source_actor_id);
     message.set_source_entity_generation(
-        source_generation);
-    message.set_ability_id(ability_id);
+        event.source_generation);
+    message.set_ability_id(event.ability_id);
     message.set_phase(
         static_cast<ihomeland::battle::v1::
-            BattleAbilityPhase>(phase));
-    if (event.target_actor_id != 0) {
+            BattleAbilityPhase>(event.phase));
+    for (const auto target_actor_id :
+         event.target_actor_ids) {
         message.add_target_entity_ids(
-            event.target_actor_id);
+            target_actor_id);
     }
     return impl_->Enqueue(
         {
             .lane = BattleReplicationLane::Kcp,
             .message_id = AbilityEventMessageID,
             .application_sequence =
-                event.activation_id,
+                event.event_sequence,
             .application_tick = event.tick,
             .expires_at_unix_ms = *deadline,
             .payload = Serialize(message),
@@ -1109,42 +1171,52 @@ bool BattleReplicationQueue::QueueAbilityEvent(
 }
 
 bool BattleReplicationQueue::QueueEntityLifecycle(
-    const EventProjectionToken& event,
-    const std::uint32_t entity_generation,
-    const std::uint32_t kind,
-    const std::uint32_t archetype_id,
+    const CombatLifecycleEvent& event,
     const std::uint64_t now_unix_ms) {
     const auto deadline =
         KcpReplicationDeadline(
             EntityLifecycleMessageID,
             event.tick,
-            event.activation_id,
+            event.event_sequence,
             now_unix_ms);
+    const auto kind = static_cast<std::uint32_t>(event.kind);
     if (!deadline.has_value() ||
-        event.source_actor_id == 0 ||
-        entity_generation == 0 ||
+        event.event_sequence == 0 ||
+        event.entity_id == 0 ||
+        event.entity_generation == 0 ||
         kind < 1 || kind > 2 ||
-        (kind == 1 && archetype_id == 0) ||
-        (kind == 2 && archetype_id != 0)) {
+        (kind == 1 &&
+         (event.archetype_id == 0 ||
+          !event.initial_state.has_value() ||
+          event.initial_state->actor_id != event.entity_id ||
+          event.initial_state->archetype_id != event.archetype_id ||
+          !ContentProjectionValid(*event.initial_state))) ||
+        (kind == 2 && event.initial_state.has_value())) {
         return false;
     }
     ihomeland::battle::v1::
         BattleEntityLifecycle message;
-    message.set_event_id(event.activation_id);
+    message.set_event_id(event.event_sequence);
     message.set_server_tick(event.tick);
-    message.set_entity_id(event.source_actor_id);
+    message.set_entity_id(event.entity_id);
     message.set_entity_generation(
-        entity_generation);
+        event.entity_generation);
     message.set_kind(
         static_cast<ihomeland::battle::v1::
             BattleEntityLifecycleKind>(kind));
-    message.set_archetype_id(archetype_id);
+    message.set_archetype_id(
+        kind == 1 ? event.archetype_id : 0);
+    if (kind == 1) {
+        FillState(
+            *message.mutable_initial_state(),
+            *event.initial_state);
+    }
     return impl_->Enqueue(
         {
             .lane = BattleReplicationLane::Kcp,
             .message_id = EntityLifecycleMessageID,
             .application_sequence =
-                event.activation_id,
+                event.event_sequence,
             .application_tick = event.tick,
             .expires_at_unix_ms = *deadline,
             .payload = Serialize(message),
@@ -1180,6 +1252,7 @@ bool BattleReplicationQueue::QueueResyncResponse(
             BattleResyncDisposition>(disposition));
     message.set_scheduled_baseline_id(
         scheduled_baseline_id);
+    message.set_retry_after_ms(0);
     return impl_->Enqueue(
         {
             .lane = BattleReplicationLane::Kcp,

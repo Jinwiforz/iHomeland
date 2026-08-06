@@ -6,11 +6,11 @@
       "stateKinds": [
         "client-configuration"
       ],
-      "ownerType": "IHomeland.Client.Application.Configuration.ClientConfigurationStore",
-      "facadeType": "IHomeland.Client.Application.Configuration.ClientConfigurationStore",
-      "snapshotType": "IHomeland.Client.Application.Configuration.ClientConfigurationSnapshot",
+      "ownerType": "IHomeland.Client.AppShell.Application.Configuration.ClientConfigurationStore",
+      "facadeType": "IHomeland.Client.AppShell.Application.Configuration.ClientConfigurationStore",
+      "snapshotType": "IHomeland.Client.AppShell.Application.Configuration.ClientConfigurationSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/Configuration/ClientConfigurationStore.cs",
+      "source": "client/Assets/App/Modules/AppShell/Application/Configuration/ClientConfigurationStore.cs",
       "commands": [
         "InitializeAsync",
         "Publish",
@@ -21,8 +21,8 @@
         "bootstrap"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.BaselineConfigurationTests",
-        "IHomeland.Client.Tests.EditMode.ClientSessionCoordinatorTests"
+        "IHomeland.Client.AppShell.Tests.EditMode.BaselineConfigurationTests",
+        "IHomeland.Client.Session.Tests.EditMode.ClientSessionCoordinatorTests"
       ]
     },
     {
@@ -30,11 +30,11 @@
       "stateKinds": [
         "session-authority"
       ],
-      "ownerType": "IHomeland.Client.Application.Session.SessionCoordinator",
-      "facadeType": "IHomeland.Client.Application.Session.SessionCoordinator",
-      "snapshotType": "IHomeland.Client.Application.Session.ClientSessionSnapshot",
+      "ownerType": "IHomeland.Client.Session.Application.SessionCoordinator",
+      "facadeType": "IHomeland.Client.Session.Application.SessionCoordinator",
+      "snapshotType": "IHomeland.Client.Session.Application.ClientSessionSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/Session/SessionCoordinator.cs",
+      "source": "client/Assets/App/Modules/Session/Application/Session/SessionCoordinator.cs",
       "commands": [
         "RegisterAsync",
         "LoginAsync",
@@ -52,8 +52,8 @@
         "clock"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientSessionCoordinatorTests",
-        "IHomeland.Client.Tests.EditMode.ClientSessionRestoreCoordinatorTests"
+        "IHomeland.Client.Session.Tests.EditMode.ClientSessionCoordinatorTests",
+        "IHomeland.Client.Session.Tests.EditMode.ClientSessionRestoreCoordinatorTests"
       ]
     },
     {
@@ -61,11 +61,11 @@
       "stateKinds": [
         "control-connection"
       ],
-      "ownerType": "IHomeland.Client.Infrastructure.WebSocket.ClientControlChannel",
-      "facadeType": "IHomeland.Client.Infrastructure.WebSocket.ClientControlChannel",
-      "snapshotType": "IHomeland.Client.Infrastructure.WebSocket.ClientControlChannelSnapshot",
+      "ownerType": "IHomeland.Client.Networking.Infrastructure.WebSocket.ClientControlChannel",
+      "facadeType": "IHomeland.Client.Networking.Infrastructure.WebSocket.ClientControlChannel",
+      "snapshotType": "IHomeland.Client.Networking.Infrastructure.WebSocket.ClientControlChannelSnapshot",
       "module": "Infrastructure",
-      "source": "client/Assets/App/Scripts/Infrastructure/WebSocket/ClientControlChannel.cs",
+      "source": "client/Assets/App/Modules/Networking/Infrastructure/WebSocket/ClientControlChannel.cs",
       "commands": [
         "RunAsync",
         "WaitUntilConnectedAsync",
@@ -79,8 +79,8 @@
         "gameplay"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientControlChannelTests",
-        "IHomeland.Client.Tests.EditMode.ClientControlCodecTests"
+        "IHomeland.Client.Networking.Tests.EditMode.ClientControlChannelTests",
+        "IHomeland.Client.Networking.Tests.EditMode.ClientControlCodecTests"
       ]
     },
     {
@@ -88,11 +88,11 @@
       "stateKinds": [
         "gameplay-connection"
       ],
-      "ownerType": "IHomeland.Client.Infrastructure.Tcp.ClientGameplayChannel",
-      "facadeType": "IHomeland.Client.Infrastructure.Tcp.ClientGameplayChannel",
-      "snapshotType": "IHomeland.Client.Application.Gameplay.ClientGameplayChannelSnapshot",
+      "ownerType": "IHomeland.Client.Networking.Infrastructure.Tcp.ClientGameplayChannel",
+      "facadeType": "IHomeland.Client.Networking.Infrastructure.Tcp.ClientGameplayChannel",
+      "snapshotType": "IHomeland.Client.Networking.Application.Gameplay.ClientGameplayChannelSnapshot",
       "module": "Infrastructure",
-      "source": "client/Assets/App/Scripts/Infrastructure/Tcp/ClientGameplayChannel.cs",
+      "source": "client/Assets/App/Modules/Networking/Infrastructure/Tcp/ClientGameplayChannel.cs",
       "commands": [
         "ConnectAsync",
         "JoinPendingVisitAsync",
@@ -108,8 +108,8 @@
         "main-thread-dispatcher"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientGameplayChannelTests",
-        "IHomeland.Client.Tests.EditMode.ClientGameplayProtocolTests"
+        "IHomeland.Client.Networking.Tests.EditMode.ClientGameplayChannelTests",
+        "IHomeland.Client.Networking.Tests.EditMode.ClientGameplayProtocolTests"
       ]
     },
     {
@@ -118,11 +118,11 @@
         "personal-world-projection",
         "world-assignment-projection"
       ],
-      "ownerType": "IHomeland.Client.Application.World.PersonalWorldService",
-      "facadeType": "IHomeland.Client.Application.World.PersonalWorldService",
-      "snapshotType": "IHomeland.Client.Application.World.ClientPersonalWorldServiceSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorld.Application.PersonalWorldService",
+      "facadeType": "IHomeland.Client.PersonalWorld.Application.PersonalWorldService",
+      "snapshotType": "IHomeland.Client.PersonalWorld.Application.ClientPersonalWorldServiceSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/World/PersonalWorldService.cs",
+      "source": "client/Assets/App/Modules/PersonalWorld/Application/PersonalWorldService.cs",
       "commands": [
         "ApplyBootstrap",
         "ApplyWorldSnapshot",
@@ -136,8 +136,8 @@
         "gameplay"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests",
-        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientWorldServiceTests",
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.WorldAdmissionCoordinatorTests"
       ]
     },
     {
@@ -146,11 +146,11 @@
         "visit-session-projection",
         "visit-invite-inbox"
       ],
-      "ownerType": "IHomeland.Client.Application.World.VisitSessionService",
-      "facadeType": "IHomeland.Client.Application.World.VisitSessionService",
-      "snapshotType": "IHomeland.Client.Application.World.ClientVisitSessionServiceSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorld.Application.VisitSessionService",
+      "facadeType": "IHomeland.Client.PersonalWorld.Application.VisitSessionService",
+      "snapshotType": "IHomeland.Client.PersonalWorld.Application.ClientVisitSessionServiceSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/World/VisitSessionService.cs",
+      "source": "client/Assets/App/Modules/PersonalWorld/Application/VisitSessionService.cs",
       "commands": [
         "OpenAsync",
         "CreateInviteAsync",
@@ -167,8 +167,8 @@
         "clock"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientWorldServiceTests",
-        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientWorldServiceTests",
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.WorldAdmissionCoordinatorTests"
       ]
     },
     {
@@ -177,11 +177,11 @@
         "world-target",
         "world-target-generation"
       ],
-      "ownerType": "IHomeland.Client.Application.World.WorldAdmissionCoordinator",
-      "facadeType": "IHomeland.Client.Application.World.WorldAdmissionCoordinator",
-      "snapshotType": "IHomeland.Client.Application.World.ClientWorldFlowSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorld.Application.WorldAdmissionCoordinator",
+      "facadeType": "IHomeland.Client.PersonalWorld.Application.WorldAdmissionCoordinator",
+      "snapshotType": "IHomeland.Client.PersonalWorld.Application.ClientWorldFlowSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/World/WorldAdmissionCoordinator.cs",
+      "source": "client/Assets/App/Modules/PersonalWorld/Application/WorldAdmissionCoordinator.cs",
       "commands": [
         "EnterOwnWorldAsync",
         "JoinVisitAsync",
@@ -198,7 +198,7 @@
         "clock"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.WorldAdmissionCoordinatorTests"
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.WorldAdmissionCoordinatorTests"
       ]
     },
     {
@@ -206,11 +206,11 @@
       "stateKinds": [
         "connection-recovery-intent"
       ],
-      "ownerType": "IHomeland.Client.Application.World.ClientConnectionRecoveryCoordinator",
-      "facadeType": "IHomeland.Client.Application.World.ClientConnectionRecoveryCoordinator",
-      "snapshotType": "IHomeland.Client.Application.World.ClientConnectionRecoverySnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorld.Application.ClientConnectionRecoveryCoordinator",
+      "facadeType": "IHomeland.Client.PersonalWorld.Application.ClientConnectionRecoveryCoordinator",
+      "snapshotType": "IHomeland.Client.PersonalWorld.Application.ClientConnectionRecoverySnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/World/ClientConnectionRecoveryCoordinator.cs",
+      "source": "client/Assets/App/Modules/PersonalWorld/Application/ClientConnectionRecoveryCoordinator.cs",
       "commands": [
         "BeginControlRecovery",
         "CompleteControlRecoveryAsync",
@@ -229,8 +229,8 @@
         "scene"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientConnectionRecoveryCoordinatorTests",
-        "IHomeland.Client.Tests.EditMode.ClientPersonalWorldExperienceTests"
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientConnectionRecoveryCoordinatorTests",
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientPersonalWorldExperienceTests"
       ]
     },
     {
@@ -240,11 +240,11 @@
         "battle-traffic-epoch",
         "battle-endpoint-generation"
       ],
-      "ownerType": "IHomeland.Client.Infrastructure.Battle.BattleNetworkClient",
-      "facadeType": "IHomeland.Client.Application.Battle.IClientBattleConnectionPort",
-      "snapshotType": "IHomeland.Client.Application.Battle.ClientBattleConnectionSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorldCombat.Infrastructure.BattleNetworkClient",
+      "facadeType": "IHomeland.Client.PersonalWorldCombat.Application.IClientBattleConnectionPort",
+      "snapshotType": "IHomeland.Client.PersonalWorldCombat.Application.ClientBattleConnectionSnapshot",
       "module": "Infrastructure",
-      "source": "client/Assets/App/Scripts/Infrastructure/Battle/BattleNetworkClient.cs",
+      "source": "client/Assets/App/Modules/PersonalWorldCombat/Infrastructure/BattleNetworkClient.cs",
       "commands": [
         "ActivateAsync",
         "TryStartTraffic",
@@ -259,7 +259,7 @@
         "client-battle-native"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+        "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests"
       ]
     },
     {
@@ -269,11 +269,11 @@
         "battle-input-gate",
         "battle-presentation-availability"
       ],
-      "ownerType": "IHomeland.Client.Application.Battle.ClientBattleRuntimeCoordinator",
-      "facadeType": "IHomeland.Client.Application.Battle.ClientBattleRuntimeCoordinator",
-      "snapshotType": "IHomeland.Client.Application.Battle.ClientBattleRuntimeSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorldCombat.Application.ClientBattleRuntimeCoordinator",
+      "facadeType": "IHomeland.Client.PersonalWorldCombat.Application.ClientBattleRuntimeCoordinator",
+      "snapshotType": "IHomeland.Client.PersonalWorldCombat.Application.ClientBattleRuntimeSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/Battle/ClientBattleRuntimeCoordinator.cs",
+      "source": "client/Assets/App/Modules/PersonalWorldCombat/Application/ClientBattleRuntimeCoordinator.cs",
       "commands": [
         "TrySetInput",
         "TrySetCameraMode",
@@ -289,7 +289,7 @@
         "gameplay-interpolation"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+        "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests"
       ]
     },
     {
@@ -298,11 +298,11 @@
         "battle-authority-replica",
         "battle-resync-intent"
       ],
-      "ownerType": "IHomeland.Client.Application.Battle.GameplayReplica",
-      "facadeType": "IHomeland.Client.Application.Battle.IClientBattleInboundSink",
-      "snapshotType": "IHomeland.Client.Application.Battle.ClientGameplayReplicaSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorldCombat.Application.GameplayReplica",
+      "facadeType": "IHomeland.Client.PersonalWorldCombat.Application.IClientBattleInboundSink",
+      "snapshotType": "IHomeland.Client.PersonalWorldCombat.Application.ClientGameplayReplicaSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/Battle/GameplayReplica.cs",
+      "source": "client/Assets/App/Modules/PersonalWorldCombat/Application/GameplayReplica.cs",
       "commands": [
         "Activate",
         "AcceptSnapshot",
@@ -316,7 +316,7 @@
         "battle-connection"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+        "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests"
       ]
     },
     {
@@ -326,11 +326,11 @@
         "battle-local-prediction",
         "battle-input-acknowledgement"
       ],
-      "ownerType": "IHomeland.Client.Application.Battle.GameplayPrediction",
-      "facadeType": "IHomeland.Client.Application.Battle.GameplayPrediction",
-      "snapshotType": "IHomeland.Client.Application.Battle.ClientGameplayPredictionSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorldCombat.Application.GameplayPrediction",
+      "facadeType": "IHomeland.Client.PersonalWorldCombat.Application.GameplayPrediction",
+      "snapshotType": "IHomeland.Client.PersonalWorldCombat.Application.ClientGameplayPredictionSnapshot",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/Battle/GameplayPrediction.cs",
+      "source": "client/Assets/App/Modules/PersonalWorldCombat/Application/GameplayPrediction.cs",
       "commands": [
         "Activate",
         "TrySetInput",
@@ -343,7 +343,7 @@
         "battle-connection"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+        "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests"
       ]
     },
     {
@@ -352,11 +352,11 @@
         "battle-remote-samples",
         "battle-render-timeline"
       ],
-      "ownerType": "IHomeland.Client.Application.Battle.GameplayInterpolation",
-      "facadeType": "IHomeland.Client.Application.Battle.GameplayInterpolation",
-      "snapshotType": "IHomeland.Client.Application.Battle.ClientBattleInterpolatedState",
+      "ownerType": "IHomeland.Client.PersonalWorldCombat.Application.GameplayInterpolation",
+      "facadeType": "IHomeland.Client.PersonalWorldCombat.Application.GameplayInterpolation",
+      "snapshotType": "IHomeland.Client.PersonalWorldCombat.Application.ClientBattleInterpolatedState",
       "module": "Application",
-      "source": "client/Assets/App/Scripts/Application/Battle/GameplayInterpolation.cs",
+      "source": "client/Assets/App/Modules/PersonalWorldCombat/Application/GameplayInterpolation.cs",
       "commands": [
         "Activate",
         "AddSample",
@@ -370,7 +370,7 @@
         "gameplay-replica"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests"
+        "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests"
       ]
     },
     {
@@ -378,11 +378,11 @@
       "stateKinds": [
         "ui-route"
       ],
-      "ownerType": "IHomeland.Client.Presentation.Navigation.ClientUiRouter",
-      "facadeType": "IHomeland.Client.Presentation.Navigation.ClientUiRouter",
-      "snapshotType": "IHomeland.Client.Presentation.Navigation.ClientUiRouteSnapshot",
+      "ownerType": "IHomeland.Client.AppShell.Presentation.Navigation.ClientUiRouter",
+      "facadeType": "IHomeland.Client.AppShell.Presentation.Navigation.ClientUiRouter",
+      "snapshotType": "IHomeland.Client.AppShell.Presentation.Navigation.ClientUiRouteSnapshot",
       "module": "Presentation",
-      "source": "client/Assets/App/Scripts/Presentation/Pure/Navigation/ClientUiRouter.cs",
+      "source": "client/Assets/App/Modules/AppShell/Presentation/Navigation/ClientUiRouter.cs",
       "commands": [
         "OpenAsync",
         "CloseAsync",
@@ -395,8 +395,8 @@
         "input-focus-host"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientUiRouterTests",
-        "IHomeland.Client.Tests.PlayMode.ClientUiHostPlayModeTests"
+        "IHomeland.Client.AppShell.Tests.EditMode.ClientUiRouterTests",
+        "IHomeland.Client.AppShell.Tests.PlayMode.ClientUiHostPlayModeTests"
       ]
     },
     {
@@ -405,11 +405,11 @@
         "personal-world-presentation",
         "presentation-intent"
       ],
-      "ownerType": "IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldExperience",
-      "facadeType": "IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldExperience",
-      "snapshotType": "IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldViewState",
+      "ownerType": "IHomeland.Client.PersonalWorld.Presentation.ClientPersonalWorldExperience",
+      "facadeType": "IHomeland.Client.PersonalWorld.Presentation.ClientPersonalWorldExperience",
+      "snapshotType": "IHomeland.Client.PersonalWorld.Presentation.ClientPersonalWorldViewState",
       "module": "Presentation",
-      "source": "client/Assets/App/Scripts/Presentation/Pure/PersonalWorld/ClientPersonalWorldExperience.cs",
+      "source": "client/Assets/App/Modules/PersonalWorld/Presentation/ClientPersonalWorldExperience.cs",
       "commands": [
         "RegisterAsync",
         "LoginAsync",
@@ -439,9 +439,9 @@
         "main-thread-dispatcher"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.ClientPersonalWorldExperienceTests",
-        "IHomeland.Client.Tests.EditMode.ClientPersonalWorldPresentationTests",
-        "IHomeland.Client.Tests.PlayMode.ClientProductHostPlayModeTests"
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientPersonalWorldExperienceTests",
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.ClientPersonalWorldPresentationTests",
+        "IHomeland.Client.PersonalWorld.Tests.PlayMode.ClientProductHostPlayModeTests"
       ]
     },
     {
@@ -450,11 +450,11 @@
         "scene-transition",
         "scene-generation"
       ],
-      "ownerType": "IHomeland.Client.Scenes.PersonalWorld.ClientWorldSceneTransitionHost",
-      "facadeType": "IHomeland.Client.Scenes.PersonalWorld.IClientWorldSceneTransition",
-      "snapshotType": "IHomeland.Client.Scenes.PersonalWorld.ClientWorldSceneSnapshot",
+      "ownerType": "IHomeland.Client.PersonalWorld.Runtime.Scenes.ClientWorldSceneTransitionHost",
+      "facadeType": "IHomeland.Client.PersonalWorld.Runtime.Scenes.IClientWorldSceneTransition",
+      "snapshotType": "IHomeland.Client.PersonalWorld.Runtime.Scenes.ClientWorldSceneSnapshot",
       "module": "Runtime",
-      "source": "client/Assets/App/Scripts/Scenes/PersonalWorld/ClientWorldSceneTransitionHost.cs",
+      "source": "client/Assets/App/Modules/PersonalWorld/Runtime/Scenes/ClientWorldSceneTransitionHost.cs",
       "commands": [
         "LoadAsync",
         "UnloadAsync",
@@ -466,9 +466,9 @@
         "personal-world-scene-context"
       ],
       "tests": [
-        "IHomeland.Client.Tests.EditMode.SceneLifetimeOwnerTests",
-        "IHomeland.Client.Tests.PlayMode.PersonalWorldSceneContextPlayModeTests",
-        "IHomeland.Client.Tests.PlayMode.ClientProductHostPlayModeTests"
+        "IHomeland.Client.PersonalWorld.Tests.EditMode.SceneLifetimeOwnerTests",
+        "IHomeland.Client.PersonalWorldCombat.Tests.PlayMode.PersonalWorldSceneContextPlayModeTests",
+        "IHomeland.Client.PersonalWorld.Tests.PlayMode.ClientProductHostPlayModeTests"
       ]
     }
   ]

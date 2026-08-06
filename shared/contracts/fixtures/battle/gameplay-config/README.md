@@ -16,16 +16,18 @@ presentation mapper 必须消费同一 format，不得从任一运行时实现�
   `path + NUL + document_kind + NUL + file_sha256 + LF`。
 - `ConfigIdentity` 使用上述 package identity；`NavigationIdentity` 与 `PhysicsIdentity` 由
   `bindings.json` 独立提供。三者必须互不相同，不能使用重复字符或无 source 的占位摘要。
-- package 必须精确绑定 `battle-model-v1` 与 `battle-network-profile-v2` 的 current manifest
-  SHA-256。任一 source 漂移都会关闭后续 consumer 进入门。
+- package 必须精确绑定 `battle-model-v1`、`battle-network-profile-v2` 与 `battle-wire-v1`
+  的 current manifest SHA-256。任一 source 漂移都会关闭后续 consumer 进入门。
 
 ## Owner 与消费边界
 
 - `authority.json` 只描述 C++ 权威 actor、weapon、Ability、projectile、Effect、AI、Boss
   phase、encounter、collision/navigation policy 与 cue semantic key。
-- `presentation.json` 只把 actor/Ability/Effect/cue semantic ID 映射为显示、Animator、VFX、
-  Audio、HUD、camera 或 prediction 逻辑资源键。它不能重复伤害、Cost、Cooldown、AI、命中、
-  spawn、死亡或权威 lifetime。
+- `presentation.json` 只把 actor/weapon/Ability/projectile/Effect/cue semantic ID 映射为显示、
+  Animator、VFX、Audio、HUD、camera 或 prediction 逻辑资源键。它不能重复伤害、Cost、
+  Cooldown、AI、命中、spawn、死亡或权威 lifetime。
+- `wire-mapping.json` 是 actor、weapon、Ability 与 projectile semantic ID 到 `uint32` wire ID
+  的唯一治理映射；条目按 numeric ID 严格递增，已退役 ID 不得复用。
 - `bindings.json` 只保存 map、navigation 与 physics 的逻辑 identity 和 digest，不包含二进制
   map/navmesh/physics material，也不把 Unity GUID/path 暴露给服务端。
 - Go 是 production package 选择 owner；C++ 在 SimulationInstance 启动前独立重验 source；
@@ -37,13 +39,16 @@ presentation mapper 必须消费同一 format，不得从任一运行时实现�
 `packages/governance-reference-v1/` 使用保留的 `fixture/` semantic namespace，并标记为
 `governance-only`。它只证明 schema、引用、单位、范围、coverage 与 presentation parity 可
 表达，不能被 Go Composition Root、C++ child 或 Unity Player 当作 production content。
-B0.8 必须创建非 fixture production package，并通过同一 validator 后才可实现剑、扇子、
-怪物、Boss、地图 collision/navigation 与表现内容。
+B0.8 的 production package 位于
+`shared/contracts/gameplay/battle/packages/personal-world-combat-v1/`，地图、navigation 与
+physics source 位于 `simulation/content/personal-world-combat-v1/`。production package 不得
+使用 `fixture/` namespace，并必须独立绑定 governance、model、network profile 与 wire source。
 
 ## 安全与验证
 
-唯一验证入口是 `tools/gameplay-config/gameplay-config.ps1 validate`。工具只读取 JSON，
-不得启动 Go/C++/Unity、listener、Docker、CMake、网络或 gameplay evaluator，也不得重写
-manifest/digest。诊断只包含稳定 reason、document kind、semantic ID 和 corpus-relative
-path；禁止 credential、PlayerID、个人资料、奖励/资产事实、本机绝对路径、Unity Library
-路径、完整 package dump 与 secret。
+唯一验证入口是 `tools/gameplay-config/gameplay-config.ps1 validate`；production package 使用
+`-ProductionRoot shared/contracts/gameplay/battle/packages/personal-world-combat-v1` 显式加入
+验证。工具只读取 JSON，不得启动 Go/C++/Unity、listener、Docker、CMake、网络或 gameplay
+evaluator，也不得重写 manifest/digest。诊断只包含稳定 reason、document kind、semantic ID
+和 corpus-relative path；禁止 credential、PlayerID、个人资料、奖励/资产事实、本机绝对路径、
+Unity Library 路径、完整 package dump 与 secret。

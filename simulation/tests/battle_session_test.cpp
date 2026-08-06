@@ -199,6 +199,11 @@ void TestContextAndIngress() {
         ihomeland::battle::v1::
             BATTLE_INPUT_KIND_INTERACT);
     interact->set_interaction_slot(2);
+    auto* switch_weapon = bundle.add_commands();
+    switch_weapon->set_command_sequence(4);
+    switch_weapon->set_kind(
+        ihomeland::battle::v1::
+            BATTLE_INPUT_KIND_SWITCH_WEAPON);
     const auto payload = Bytes(bundle);
     const auto* policy =
         ihomeland::sim::FindBattleRawRoutePolicy(3000);
@@ -217,8 +222,28 @@ void TestContextAndIngress() {
         accepted.disposition ==
                 ihomeland::sim::
                     BattleIngressDisposition::Accepted &&
-            accepted.accepted_commands == 3,
+            accepted.accepted_commands == 4,
         "valid intent bundle did not enter inbox");
+
+    auto redundant = bundle;
+    redundant.set_newest_input_tick(2);
+    const auto redundant_payload = Bytes(redundant);
+    auto redundant_frame = frame;
+    redundant_frame.application_sequence = 2;
+    redundant_frame.application_tick = 2;
+    redundant_frame.payload = redundant_payload;
+    const auto redundant_result = ingress.Handle(
+        redundant_frame,
+        NowUnixMs + 50);
+    Require(
+        redundant_result.disposition ==
+                ihomeland::sim::BattleIngressDisposition::
+                    SimulationRejected &&
+            redundant_result.accepted_commands == 0 &&
+            redundant_result.rejected_commands == 4 &&
+            redundant_result.last_rejection ==
+                ihomeland::sim::CommandRejection::Duplicate,
+        "redundant bundle replayed command sequence at a newer input tick");
 
     auto unsafe = bundle;
     unsafe.mutable_commands(0)->
@@ -234,6 +259,23 @@ void TestContextAndIngress() {
                 BattleIngressDisposition::
                     InvalidPayload,
         "mixed unsafe input fields reached simulation");
+
+    auto unsafe_switch = bundle;
+    unsafe_switch.mutable_commands(3)->
+        set_interaction_slot(1);
+    auto unsafe_switch_frame = frame;
+    const auto unsafe_switch_payload =
+        Bytes(unsafe_switch);
+    unsafe_switch_frame.payload =
+        unsafe_switch_payload;
+    Require(
+        ingress.Handle(
+            unsafe_switch_frame,
+            NowUnixMs + 150).disposition ==
+            ihomeland::sim::
+                BattleIngressDisposition::
+                    InvalidPayload,
+        "switch weapon accepted nonzero payload");
 
     authority->Invalidate(
         ihomeland::sim::
@@ -264,7 +306,7 @@ void TestContextAndIngress() {
                 lock,
                 InstanceTransitionDeadline,
                 [&] {
-                    return observed.size() == 3;
+                    return observed.size() == 4;
                 }) &&
             std::ranges::all_of(
                 observed,
@@ -281,6 +323,15 @@ void TestContextAndIngress() {
                                            AimIntent) &&
                         command.aim_yaw_millidegrees ==
                             -45'000;
+                }) &&
+            std::ranges::any_of(
+                observed,
+                [](const auto& command) {
+                    return command.kind ==
+                        static_cast<std::uint8_t>(
+                            ihomeland::sim::
+                                GameplayCommandKind::
+                                    SwitchWeapon);
                 });
     }
     instance.BeginDrain();
@@ -384,27 +435,33 @@ void TestReplication() {
                 states,
                 NowUnixMs),
         "snapshot projection failed");
-    const auto event =
-        ihomeland::sim::EventProjectionToken{
+    const auto ability_event =
+        ihomeland::sim::CombatAbilityEvent{
+            .event_sequence = 9,
             .tick = 12,
-            .kind = 1,
             .source_actor_id = 42,
-            .target_actor_id = 43,
+            .source_generation = 1,
+            .ability_id = 201,
             .activation_id = 9,
-            .value_scaled = 0,
+            .phase = ihomeland::sim::CombatAbilityEventPhase::Started,
+            .target_actor_ids = {43},
+        };
+    const auto lifecycle_event =
+        ihomeland::sim::CombatLifecycleEvent{
+            .event_sequence = 10,
+            .tick = 12,
+            .kind = ihomeland::sim::CombatLifecycleKind::Spawn,
+            .entity_id = 42,
+            .archetype_id = states.front().archetype_id,
+            .entity_generation = states.front().entity_generation,
+            .initial_state = states.front(),
         };
     Require(
         replication.QueueAbilityEvent(
-            event,
-            1,
-            7,
-            1,
+            ability_event,
             NowUnixMs) &&
             replication.QueueEntityLifecycle(
-                event,
-                1,
-                1,
-                5,
+                lifecycle_event,
                 NowUnixMs) &&
             replication.QueueResyncResponse(
                 10,
@@ -422,10 +479,18 @@ void TestReplication() {
     auto full = replication.Pop(NowUnixMs + 1);
     auto delta = replication.Pop(NowUnixMs + 1);
     auto ability = replication.Pop(NowUnixMs + 1);
+    auto lifecycle = replication.Pop(NowUnixMs + 1);
+    auto resync = replication.Pop(NowUnixMs + 1);
     ihomeland::battle::v1::BattleFullSnapshot
         full_message;
     ihomeland::battle::v1::BattleDeltaSnapshot
         delta_message;
+    ihomeland::battle::v1::BattleAbilityReliableEvent
+        ability_message;
+    ihomeland::battle::v1::BattleEntityLifecycle
+        lifecycle_message;
+    ihomeland::battle::v1::BattleResyncResponse
+        resync_message;
     Require(
         full.has_value() &&
             full->message_id == 3002 &&
@@ -440,6 +505,13 @@ void TestReplication() {
             ability->lane ==
                 ihomeland::sim::
                     BattleReplicationLane::Kcp &&
+            ability->application_sequence == 1 &&
+            lifecycle.has_value() &&
+            lifecycle->message_id == 3005 &&
+            lifecycle->application_sequence == 2 &&
+            resync.has_value() &&
+            resync->message_id == 3007 &&
+            resync->application_sequence == 3 &&
             full_message.ParseFromArray(
                 full->payload.data(),
                 static_cast<int>(
@@ -476,7 +548,34 @@ void TestReplication() {
                 .has_last_processed_input_tick() &&
             delta_message
                     .last_processed_input_tick() ==
-                0,
+                0 &&
+            ability_message.ParseFromArray(
+                ability->payload.data(),
+                static_cast<int>(ability->payload.size())) &&
+            ability_message.event_id() == 9 &&
+            ability_message.ability_id() == 201 &&
+            ability_message.target_entity_ids_size() == 1 &&
+            ability_message.target_entity_ids(0) == 43 &&
+            lifecycle_message.ParseFromArray(
+                lifecycle->payload.data(),
+                static_cast<int>(lifecycle->payload.size())) &&
+            lifecycle_message.event_id() == 10 &&
+            lifecycle_message.archetype_id() ==
+                states.front().archetype_id &&
+            lifecycle_message.has_initial_state() &&
+            lifecycle_message.initial_state().entity_id() ==
+                lifecycle_message.entity_id() &&
+            lifecycle_message.initial_state().archetype_id() ==
+                lifecycle_message.archetype_id() &&
+            resync_message.ParseFromArray(
+                resync->payload.data(),
+                static_cast<int>(resync->payload.size())) &&
+            resync_message.has_request_sequence() &&
+            resync_message.request_sequence() == 10 &&
+            resync_message.has_scheduled_baseline_id() &&
+            resync_message.scheduled_baseline_id() == 8 &&
+            resync_message.has_retry_after_ms() &&
+            resync_message.retry_after_ms() == 0,
         "replication violated unique lane or latest snapshot");
 
     auto expiring =
@@ -485,10 +584,7 @@ void TestReplication() {
             session_resources);
     Require(
         expiring.QueueAbilityEvent(
-            event,
-            1,
-            7,
-            1,
+            ability_event,
             NowUnixMs) &&
             !expiring.Pop(
                 NowUnixMs + 500).has_value() &&

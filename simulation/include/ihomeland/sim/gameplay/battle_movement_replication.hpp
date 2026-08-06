@@ -60,6 +60,14 @@ struct BattleMovementReplicationSnapshot final {
     InputAcknowledgementProjection acknowledgement;
     /// states 是同 Tick 全部公开 actor state，按 ActorID 排序。
     std::vector<StateProjectionToken> states;
+    /// ability_events 是尚在有界 journal 内的 instance-global 有序事件。
+    std::vector<CombatAbilityEvent> ability_events;
+    /// lifecycle_events 是尚在有界 journal 内的 instance-global 有序事件。
+    std::vector<CombatLifecycleEvent> lifecycle_events;
+    /// player_actor_ids 标识预留 player slots，transport 据 active session 过滤空 slot。
+    std::vector<std::uint64_t> player_actor_ids;
+    /// encounter_complete 是不可结算的暂态 Boss defeat projection。
+    bool encounter_complete;
 };
 
 /// BattleMovementReplicationStore 是 live runtime 唯一 movement state 与复制冻结 owner。
@@ -73,15 +81,28 @@ public:
         BattleMovementReplicationConfig config,
         std::vector<std::uint64_t> actor_ids,
         std::int64_t initial_health_scaled,
-        std::shared_ptr<PhysicsWorld> physics_world);
+        std::shared_ptr<PhysicsWorld> physics_world,
+        std::vector<Vector3Mm> initial_positions = {});
 
-    /// Commit 原子推进完整 actor set；任一失败时不发布半 Tick projection。
-    void Commit(
+    /// Commit 原子推进完整 actor set并返回 worker-owned movement projection。
+    /// publish 为 false 时，调用方必须在同一 Tick 用 PublishAuthoritative 一次发布完整状态。
+    std::vector<StateProjectionToken> Commit(
         std::uint64_t server_tick,
         std::span<const ActorInputResolution> resolutions,
         std::span<
             const InputAcknowledgementProjection>
-            acknowledgements);
+            acknowledgements,
+        std::span<const std::uint64_t> active_actor_ids,
+        bool publish = true);
+
+    /// PublishAuthoritative 在同一 committed Tick 原子发布 combat pipeline 的完整 entity set。
+    void PublishAuthoritative(
+        std::uint64_t server_tick,
+        std::span<const StateProjectionToken> states,
+        std::span<const InputAcknowledgementProjection> acknowledgements,
+        std::span<const CombatAbilityEvent> ability_events,
+        std::span<const CombatLifecycleEvent> lifecycle_events,
+        bool encounter_complete);
 
     /// Freeze 返回 exact actor/generation 的同 Tick state 与 acknowledgement。
     [[nodiscard]] std::optional<
@@ -128,6 +149,14 @@ private:
     /// published_acknowledgements_ 按 actor identity排序并固定长度。
     std::vector<InputAcknowledgementProjection>
         published_acknowledgements_;
+    /// published_ability_events_ 是跨 Tick 保留的有界 reliable journal。
+    std::vector<CombatAbilityEvent> published_ability_events_;
+    /// published_lifecycle_events_ 是跨 Tick 保留的有界 reliable journal。
+    std::vector<CombatLifecycleEvent> published_lifecycle_events_;
+    /// player_actor_ids_ 是构造时冻结的预留 slot identity。
+    std::vector<std::uint64_t> player_actor_ids_;
+    /// published_encounter_complete_ 只作为诊断/表现的暂态状态。
+    bool published_encounter_complete_{false};
 };
 
 }  // namespace ihomeland::sim

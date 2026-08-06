@@ -1,0 +1,23 @@
+{
+  "format_version": "personal-world-navigation-v1",
+  "map_id": "personal-world-combat/map/arena",
+  "coordinate_unit": "millimeters",
+  "agent": {
+    "radius_mm": 900,
+    "height_mm": 3200,
+    "maximum_slope_millidegrees": 45000,
+    "maximum_step_mm": 400
+  },
+  "walkable_polygons": [
+    { "polygon_id": 1, "vertices_mm": [[-28000, 0, -28000], [28000, 0, -28000], [28000, 0, -2500], [-28000, 0, -2500]] },
+    { "polygon_id": 2, "vertices_mm": [[-28000, 0, 2500], [28000, 0, 2500], [28000, 0, 28000], [-28000, 0, 28000]] },
+    { "polygon_id": 3, "vertices_mm": [[-28000, 0, -2500], [-2500, 0, -2500], [-2500, 0, 2500], [-28000, 0, 2500]] },
+    { "polygon_id": 4, "vertices_mm": [[2500, 0, -2500], [28000, 0, -2500], [28000, 0, 2500], [2500, 0, 2500]] }
+  ],
+  "links": [
+    { "from_polygon_id": 1, "to_polygon_id": 3 },
+    { "from_polygon_id": 1, "to_polygon_id": 4 },
+    { "from_polygon_id": 2, "to_polygon_id": 3 },
+    { "from_polygon_id": 2, "to_polygon_id": 4 }
+  ]
+}

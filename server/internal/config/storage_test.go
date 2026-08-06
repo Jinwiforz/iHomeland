@@ -68,6 +68,15 @@ func TestProductionStorageRequiresVerifiedTLS(t *testing.T) {
 	config.Storage.Redis.TLS = StorageTLS{Enabled: true, ServerName: "redis.internal", CAFile: `C:\certs\redis-ca.pem`}
 	config.PublicAPI.TLS = PublicTLS{Enabled: true, CertificateFile: `C:\certs\public.pem`, PrivateKeySecret: "env:PUBLIC_KEY"}
 	config.SimulationControl = validProductionSimulationControl()
+	config.GameplayPackage = GameplayPackage{
+		RootPath:           `C:\ihomeland\content\personal-world-combat-v1`,
+		ArenaRootPath:      `C:\ihomeland\simulation-content\personal-world-combat-v1`,
+		PackageID:          "personal-world-combat-v1",
+		ConfigIdentity:     config.SimulationControl.ConfigIdentity,
+		NavigationIdentity: config.SimulationControl.NavigationIdentity,
+		PhysicsIdentity:    config.SimulationControl.PhysicsIdentity,
+		WireIdentity:       config.PublicAPI.BattleUDP.WireIdentity,
+	}
 	if err := config.Validate(); err != nil {
 		t.Fatalf("production verified TLS 配置应有效：%v", err)
 	}

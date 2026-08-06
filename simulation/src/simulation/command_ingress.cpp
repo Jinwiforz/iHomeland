@@ -109,7 +109,6 @@ CommandSubmitResult CommandIngress::Submit(GameplayCommand command) {
         });
         const auto duplicate = std::find_if(entries_.begin(), entries_.end(), [&](const auto& entry) {
             return entry.actor_id == command.actor_id &&
-                   entry.input_tick == command.input_tick &&
                    entry.sequence == command.sequence;
         });
         if (duplicate != entries_.end()) {
@@ -159,7 +158,6 @@ CommandSubmitResult CommandIngress::Submit(GameplayCommand command) {
         }
         entries_.push_back({
             .actor_id = command.actor_id,
-            .input_tick = command.input_tick,
             .sequence = command.sequence,
             .target_tick = target_tick});
     }
@@ -177,10 +175,7 @@ bool CommandIngress::ValidatePayload(const GameplayCommand& command) {
         case GameplayCommandKind::JumpPressed:
             return std::holds_alternative<JumpPressedPayload>(command.payload);
         case GameplayCommandKind::SwitchWeapon:
-            if (const auto* payload = std::get_if<SwitchWeaponPayload>(&command.payload)) {
-                return payload->weapon_id != 0;
-            }
-            return false;
+            return std::holds_alternative<SwitchWeaponPayload>(command.payload);
         case GameplayCommandKind::ActivateAbility:
             if (const auto* payload = std::get_if<ActivateAbilityPayload>(&command.payload)) {
                 return payload->ability_id != 0;
@@ -225,8 +220,6 @@ std::string CommandIngress::CanonicalPayload(const GameplayCommand& command) {
             if constexpr (std::is_same_v<Payload, ContinuousIntentPayload>) {
                 token += "|" + std::to_string(payload.move_x_permille) +
                          "|" + std::to_string(payload.move_y_permille);
-            } else if constexpr (std::is_same_v<Payload, SwitchWeaponPayload>) {
-                token += "|" + std::to_string(payload.weapon_id);
             } else if constexpr (std::is_same_v<Payload, ActivateAbilityPayload>) {
                 token += "|" + std::to_string(payload.ability_id);
             } else if constexpr (std::is_same_v<Payload, LifecycleDirectivePayload>) {

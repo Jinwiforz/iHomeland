@@ -85,6 +85,16 @@ struct BattleRuntimeMetricsSnapshot final {
     std::uint64_t rebinds;
     /// rekeys 是成功提交 key epoch 的累计次数。
     std::uint64_t rekeys;
+    /// combat_actor_high_watermark 是公开 player/monster/Boss entity 峰值。
+    std::uint64_t combat_actor_high_watermark;
+    /// combat_projectile_high_watermark 是公开 projectile entity 峰值。
+    std::uint64_t combat_projectile_high_watermark;
+    /// combat_ability_events 是已提交 ability reliable events 累计。
+    std::uint64_t combat_ability_events;
+    /// combat_lifecycle_events 是已提交 lifecycle reliable events 累计。
+    std::uint64_t combat_lifecycle_events;
+    /// encounter_completions 是 Boss defeat 暂态首次提交累计，不代表 settlement。
+    std::uint64_t encounter_completions;
     /// close_normal 是 normal 分类终结累计。
     std::uint64_t close_normal;
     /// close_authentication 是 authentication 分类终结累计。
@@ -202,6 +212,30 @@ public:
         AddSaturated(rekeys_, 1);
     }
 
+    /// ObserveCombat 更新低敏 entity 峰值与本 Tick event outcome。
+    void ObserveCombat(
+        const std::size_t actor_entities,
+        const std::size_t projectile_entities,
+        const std::size_t ability_events,
+        const std::size_t lifecycle_events,
+        const bool encounter_completed_now) noexcept {
+        ObserveMaximum(
+            combat_actor_high_watermark_,
+            static_cast<std::uint64_t>(actor_entities));
+        ObserveMaximum(
+            combat_projectile_high_watermark_,
+            static_cast<std::uint64_t>(projectile_entities));
+        AddSaturated(
+            combat_ability_events_,
+            static_cast<std::uint64_t>(ability_events));
+        AddSaturated(
+            combat_lifecycle_events_,
+            static_cast<std::uint64_t>(lifecycle_events));
+        if (encounter_completed_now) {
+            AddSaturated(encounter_completions_, 1);
+        }
+    }
+
     /// RecordClose 累计一个闭合的低敏终结分类。
     void RecordClose(const BattleCloseReasonCategory reason) noexcept {
         switch (reason) {
@@ -255,6 +289,13 @@ public:
             .history_memory_bytes = history_memory_bytes_.load(),
             .rebinds = rebinds_.load(),
             .rekeys = rekeys_.load(),
+            .combat_actor_high_watermark =
+                combat_actor_high_watermark_.load(),
+            .combat_projectile_high_watermark =
+                combat_projectile_high_watermark_.load(),
+            .combat_ability_events = combat_ability_events_.load(),
+            .combat_lifecycle_events = combat_lifecycle_events_.load(),
+            .encounter_completions = encounter_completions_.load(),
             .close_normal = close_normal_.load(),
             .close_authentication = close_authentication_.load(),
             .close_timeout = close_timeout_.load(),
@@ -336,6 +377,16 @@ private:
     std::atomic<std::uint64_t> rebinds_{};
     /// rekeys_ 保存成功 key epoch 切换累计。
     std::atomic<std::uint64_t> rekeys_{};
+    /// combat_actor_high_watermark_ 保存公开 non-projectile entity 峰值。
+    std::atomic<std::uint64_t> combat_actor_high_watermark_{};
+    /// combat_projectile_high_watermark_ 保存公开 projectile entity 峰值。
+    std::atomic<std::uint64_t> combat_projectile_high_watermark_{};
+    /// combat_ability_events_ 保存 committed reliable ability event 累计。
+    std::atomic<std::uint64_t> combat_ability_events_{};
+    /// combat_lifecycle_events_ 保存 committed reliable lifecycle event 累计。
+    std::atomic<std::uint64_t> combat_lifecycle_events_{};
+    /// encounter_completions_ 保存 encounter-complete 首次 transition 累计。
+    std::atomic<std::uint64_t> encounter_completions_{};
     /// close_normal_ 保存 normal 终结累计。
     std::atomic<std::uint64_t> close_normal_{};
     /// close_authentication_ 保存 authentication 终结累计。

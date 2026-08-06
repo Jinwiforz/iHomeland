@@ -29,7 +29,7 @@ const (
 	// maximumQualifiedActors 与冻结的单 instance actor capacity 一致。
 	maximumQualifiedActors = 8
 	// maximumBattleInputKind 与 BattleInputKind registry 的最后一个有效编号一致。
-	maximumBattleInputKind = 6
+	maximumBattleInputKind = 7
 	// committedTransitionFlag 是 transition receipt 唯一允许的成功标记。
 	committedTransitionFlag = 1
 	// maximumPollWait 限制 child 阻塞收取真实 UDP output 的时长。

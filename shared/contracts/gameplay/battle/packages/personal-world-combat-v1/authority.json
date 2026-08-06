@@ -1,0 +1,358 @@
+{
+  "format_version": "gameplay-config-format-v1",
+  "document_kind": "authority-catalog",
+  "package_id": "personal-world-combat-v1",
+  "qualification_state": "production",
+  "objects": [
+    {
+      "id": "personal-world-combat/actor/player",
+      "kind": "actor",
+      "role": "owner-visitor-player",
+      "references": [
+        { "field": "weapon-ref", "target_id": "personal-world-combat/weapon/fan", "target_kind": "weapon" },
+        { "field": "weapon-ref", "target_id": "personal-world-combat/weapon/sword", "target_kind": "weapon" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/player-state", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "health", "value": "100000", "unit": "attribute-milli" },
+        { "field": "team", "value": "1", "unit": "team-id" },
+        { "field": "move-speed", "value": "5000", "unit": "millimeters-per-second" },
+        { "field": "capsule-radius", "value": "400", "unit": "millimeters" },
+        { "field": "capsule-height", "value": "1800", "unit": "millimeters" },
+        { "field": "corpse-lifetime", "value": "0", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/actor/ordinary-monster",
+      "kind": "actor",
+      "role": "ordinary-monster",
+      "references": [
+        { "field": "ai-ref", "target_id": "personal-world-combat/ai/ordinary-monster", "target_kind": "ai" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/ordinary-monster-state", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "health", "value": "30000", "unit": "attribute-milli" },
+        { "field": "team", "value": "2", "unit": "team-id" },
+        { "field": "move-speed", "value": "3000", "unit": "millimeters-per-second" },
+        { "field": "capsule-radius", "value": "450", "unit": "millimeters" },
+        { "field": "capsule-height", "value": "1600", "unit": "millimeters" },
+        { "field": "corpse-lifetime", "value": "40", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/actor/boss",
+      "kind": "actor",
+      "role": "boss",
+      "references": [
+        { "field": "ai-ref", "target_id": "personal-world-combat/ai/boss", "target_kind": "ai" },
+        { "field": "boss-phase-ref", "target_id": "personal-world-combat/boss-phase/enraged", "target_kind": "boss-phase" },
+        { "field": "boss-phase-ref", "target_id": "personal-world-combat/boss-phase/desperate", "target_kind": "boss-phase" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/boss-state", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "health", "value": "300000", "unit": "attribute-milli" },
+        { "field": "team", "value": "2", "unit": "team-id" },
+        { "field": "move-speed", "value": "2500", "unit": "millimeters-per-second" },
+        { "field": "capsule-radius", "value": "900", "unit": "millimeters" },
+        { "field": "capsule-height", "value": "3200", "unit": "millimeters" },
+        { "field": "corpse-lifetime", "value": "80", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/weapon/sword",
+      "kind": "weapon",
+      "role": "sword",
+      "references": [
+        { "field": "grant-ref", "target_id": "personal-world-combat/ability-grant/sword", "target_kind": "ability-grant" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/sword-equipped", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "switch-order", "value": "1", "unit": "ordinal" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/weapon/fan",
+      "kind": "weapon",
+      "role": "fan",
+      "references": [
+        { "field": "grant-ref", "target_id": "personal-world-combat/ability-grant/fan", "target_kind": "ability-grant" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/fan-equipped", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "switch-order", "value": "2", "unit": "ordinal" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/ability-grant/sword",
+      "kind": "ability-grant",
+      "role": "sword-grant",
+      "references": [
+        { "field": "ability-ref", "target_id": "personal-world-combat/ability/sword-primary", "target_kind": "ability" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "personal-world-combat/ability-grant/fan",
+      "kind": "ability-grant",
+      "role": "fan-grant",
+      "references": [
+        { "field": "ability-ref", "target_id": "personal-world-combat/ability/fan-primary", "target_kind": "ability" }
+      ],
+      "numeric_values": []
+    },
+    {
+      "id": "personal-world-combat/ability/sword-primary",
+      "kind": "ability",
+      "role": "sword-primary",
+      "references": [
+        { "field": "effect-ref", "target_id": "personal-world-combat/effect/sword-damage", "target_kind": "effect" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/sword-primary", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-duration", "value": "8", "unit": "simulation-ticks" },
+        { "field": "cost", "value": "0", "unit": "attribute-milli" },
+        { "field": "cooldown", "value": "10", "unit": "simulation-ticks" },
+        { "field": "windup", "value": "2", "unit": "simulation-ticks" },
+        { "field": "active", "value": "1", "unit": "simulation-ticks" },
+        { "field": "recovery", "value": "5", "unit": "simulation-ticks" },
+        { "field": "melee-range", "value": "2600", "unit": "millimeters" },
+        { "field": "melee-radius", "value": "850", "unit": "millimeters" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/ability/fan-primary",
+      "kind": "ability",
+      "role": "fan-primary",
+      "references": [
+        { "field": "projectile-ref", "target_id": "personal-world-combat/projectile/fan-blade", "target_kind": "projectile" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/fan-primary", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-duration", "value": "10", "unit": "simulation-ticks" },
+        { "field": "cost", "value": "0", "unit": "attribute-milli" },
+        { "field": "cooldown", "value": "14", "unit": "simulation-ticks" },
+        { "field": "windup", "value": "2", "unit": "simulation-ticks" },
+        { "field": "active", "value": "1", "unit": "simulation-ticks" },
+        { "field": "recovery", "value": "7", "unit": "simulation-ticks" },
+        { "field": "melee-range", "value": "0", "unit": "millimeters" },
+        { "field": "melee-radius", "value": "0", "unit": "millimeters" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/ability/monster-strike",
+      "kind": "ability",
+      "role": "none",
+      "references": [
+        { "field": "effect-ref", "target_id": "personal-world-combat/effect/monster-damage", "target_kind": "effect" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/monster-strike", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-duration", "value": "12", "unit": "simulation-ticks" },
+        { "field": "cost", "value": "0", "unit": "attribute-milli" },
+        { "field": "cooldown", "value": "24", "unit": "simulation-ticks" },
+        { "field": "windup", "value": "4", "unit": "simulation-ticks" },
+        { "field": "active", "value": "1", "unit": "simulation-ticks" },
+        { "field": "recovery", "value": "7", "unit": "simulation-ticks" },
+        { "field": "melee-range", "value": "2200", "unit": "millimeters" },
+        { "field": "melee-radius", "value": "700", "unit": "millimeters" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/ability/boss-slam",
+      "kind": "ability",
+      "role": "none",
+      "references": [
+        { "field": "effect-ref", "target_id": "personal-world-combat/effect/boss-damage", "target_kind": "effect" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/boss-slam", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-duration", "value": "20", "unit": "simulation-ticks" },
+        { "field": "cost", "value": "0", "unit": "attribute-milli" },
+        { "field": "cooldown", "value": "36", "unit": "simulation-ticks" },
+        { "field": "windup", "value": "8", "unit": "simulation-ticks" },
+        { "field": "active", "value": "2", "unit": "simulation-ticks" },
+        { "field": "recovery", "value": "10", "unit": "simulation-ticks" },
+        { "field": "melee-range", "value": "4500", "unit": "millimeters" },
+        { "field": "melee-radius", "value": "2500", "unit": "millimeters" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/projectile/fan-blade",
+      "kind": "projectile",
+      "role": "none",
+      "references": [
+        { "field": "effect-ref", "target_id": "personal-world-combat/effect/fan-damage", "target_kind": "effect" },
+        { "field": "collision-layer-ref", "target_id": "personal-world-combat/collision-layer/world", "target_kind": "collision-layer" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/fan-projectile", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "speed", "value": "14000", "unit": "millimeters-per-second" },
+        { "field": "lifetime", "value": "30", "unit": "simulation-ticks" },
+        { "field": "radius", "value": "250", "unit": "millimeters" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/effect/sword-damage",
+      "kind": "effect",
+      "role": "none",
+      "references": [
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/sword-hit", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "magnitude", "value": "-18000", "unit": "attribute-milli" },
+        { "field": "max-stacks", "value": "1", "unit": "stacks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/effect/fan-damage",
+      "kind": "effect",
+      "role": "none",
+      "references": [
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/fan-hit", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "magnitude", "value": "-12000", "unit": "attribute-milli" },
+        { "field": "max-stacks", "value": "1", "unit": "stacks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/effect/monster-damage",
+      "kind": "effect",
+      "role": "none",
+      "references": [
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/monster-hit", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "magnitude", "value": "-4000", "unit": "attribute-milli" },
+        { "field": "max-stacks", "value": "1", "unit": "stacks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/effect/boss-damage",
+      "kind": "effect",
+      "role": "none",
+      "references": [
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/boss-hit", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "magnitude", "value": "-8000", "unit": "attribute-milli" },
+        { "field": "max-stacks", "value": "1", "unit": "stacks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/ai/ordinary-monster",
+      "kind": "ai",
+      "role": "none",
+      "references": [
+        { "field": "ability-ref", "target_id": "personal-world-combat/ability/monster-strike", "target_kind": "ability" },
+        { "field": "navigation-policy-ref", "target_id": "personal-world-combat/navigation-policy/world", "target_kind": "navigation-policy" }
+      ],
+      "numeric_values": [
+        { "field": "acquire-range", "value": "18000", "unit": "millimeters" },
+        { "field": "attack-range", "value": "2200", "unit": "millimeters" },
+        { "field": "recovery", "value": "20", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/ai/boss",
+      "kind": "ai",
+      "role": "none",
+      "references": [
+        { "field": "ability-ref", "target_id": "personal-world-combat/ability/boss-slam", "target_kind": "ability" },
+        { "field": "navigation-policy-ref", "target_id": "personal-world-combat/navigation-policy/world", "target_kind": "navigation-policy" }
+      ],
+      "numeric_values": [
+        { "field": "acquire-range", "value": "28000", "unit": "millimeters" },
+        { "field": "attack-range", "value": "4500", "unit": "millimeters" },
+        { "field": "recovery", "value": "16", "unit": "simulation-ticks" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/boss-phase/enraged",
+      "kind": "boss-phase",
+      "role": "boss-phase",
+      "references": [
+        { "field": "ai-ref", "target_id": "personal-world-combat/ai/boss", "target_kind": "ai" },
+        { "field": "ability-ref", "target_id": "personal-world-combat/ability/boss-slam", "target_kind": "ability" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/boss-enraged", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-order", "value": "1", "unit": "ordinal" },
+        { "field": "health-threshold", "value": "650000", "unit": "ratio-millionths" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/boss-phase/desperate",
+      "kind": "boss-phase",
+      "role": "none",
+      "references": [
+        { "field": "ai-ref", "target_id": "personal-world-combat/ai/boss", "target_kind": "ai" },
+        { "field": "ability-ref", "target_id": "personal-world-combat/ability/boss-slam", "target_kind": "ability" },
+        { "field": "cue-ref", "target_id": "personal-world-combat/cue/boss-desperate", "target_kind": "cue" }
+      ],
+      "numeric_values": [
+        { "field": "phase-order", "value": "2", "unit": "ordinal" },
+        { "field": "health-threshold", "value": "300000", "unit": "ratio-millionths" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/encounter/personal-world",
+      "kind": "encounter",
+      "role": "personal-world-encounter",
+      "references": [
+        { "field": "player-ref", "target_id": "personal-world-combat/actor/player", "target_kind": "actor" },
+        { "field": "monster-ref", "target_id": "personal-world-combat/actor/ordinary-monster", "target_kind": "actor" },
+        { "field": "boss-ref", "target_id": "personal-world-combat/actor/boss", "target_kind": "actor" },
+        { "field": "collision-layer-ref", "target_id": "personal-world-combat/collision-layer/world", "target_kind": "collision-layer" },
+        { "field": "navigation-policy-ref", "target_id": "personal-world-combat/navigation-policy/world", "target_kind": "navigation-policy" }
+      ],
+      "numeric_values": [
+        { "field": "owner-count", "value": "1", "unit": "actors" },
+        { "field": "visitor-count", "value": "3", "unit": "actors" },
+        { "field": "ordinary-monster-count", "value": "3", "unit": "actors" },
+        { "field": "boss-count", "value": "1", "unit": "actors" },
+        { "field": "peak-projectiles", "value": "32", "unit": "projectiles" },
+        { "field": "peak-effects", "value": "64", "unit": "effects" },
+        { "field": "peak-physics-queries", "value": "96", "unit": "queries-per-tick" },
+        { "field": "peak-navigation-queries", "value": "16", "unit": "queries-per-tick" },
+        { "field": "friendly-fire-enabled", "value": "0", "unit": "boolean-int" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/collision-layer/world",
+      "kind": "collision-layer",
+      "role": "world-collision",
+      "references": [],
+      "numeric_values": [
+        { "field": "mask", "value": "15", "unit": "bit-mask" }
+      ]
+    },
+    {
+      "id": "personal-world-combat/navigation-policy/world",
+      "kind": "navigation-policy",
+      "role": "world-navigation",
+      "references": [
+        { "field": "collision-layer-ref", "target_id": "personal-world-combat/collision-layer/world", "target_kind": "collision-layer" }
+      ],
+      "numeric_values": [
+        { "field": "query-radius", "value": "30000", "unit": "millimeters" }
+      ]
+    },
+    { "id": "personal-world-combat/cue/player-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/ordinary-monster-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/boss-state", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/sword-equipped", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/fan-equipped", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/sword-primary", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/fan-primary", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/fan-projectile", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/sword-hit", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/fan-hit", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/monster-strike", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/monster-hit", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/boss-slam", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/boss-hit", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/boss-enraged", "kind": "cue", "role": "none", "references": [], "numeric_values": [] },
+    { "id": "personal-world-combat/cue/boss-desperate", "kind": "cue", "role": "none", "references": [], "numeric_values": [] }
+  ]
+}

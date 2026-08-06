@@ -34,6 +34,7 @@ $supported = @(
     "battle-qualification-representative",
     "client-battle-runtime-targeted",
     "client-battle-runtime-unity",
+    "personal-world-combat-targeted",
     "openspec-change-strict",
     "final-product-qualification"
 )
@@ -81,6 +82,16 @@ if ($gameplayConfigCheck.Count -ne 1 -or
     throw "gameplay config check metadata 未按中央 catalog 登记"
 }
 
+$combatCheck = @($catalog.checks | Where-Object {
+        $_.id -ceq "personal-world-combat-targeted"
+    })
+if ($combatCheck.Count -ne 1 -or
+    [string]$combatCheck[0].class -cne "targeted-expensive" -or
+    [string]$combatCheck[0].owner -cne "personal-world-combat" -or
+    [int]$combatCheck[0].order -ne 230) {
+    throw "PersonalWorld combat targeted check metadata 未按中央 catalog 登记"
+}
+
 $entryText = Get-Content `
     -LiteralPath (Join-Path $PSScriptRoot "quality.ps1") `
     -Raw -Encoding utf8
@@ -108,6 +119,10 @@ try {
             change = "sample-change"
             checks = @(
                 @{
+                    id = "personal-world-combat-targeted"
+                    reason = "PersonalWorld production combat 定向验收只预览，不执行真实环境"
+                },
+                @{
                     id = "gameplay-config-validate"
                     reason = "gameplay config contract 发生变化，需要验证 closed corpus"
                 },
@@ -124,7 +139,9 @@ try {
         -SchemaPath $PlanSchemaPath `
         -ExpectedChange "sample-change"
     $resolved = Resolve-QualityPlanChecks -Catalog $catalog -Plan $validPlan
-    if ($resolved.Count -ne 2 -or $resolved[0].Id -cne "gameplay-config-validate") {
+    if ($resolved.Count -ne 3 -or
+        $resolved[0].Id -cne "gameplay-config-validate" -or
+        $resolved[1].Id -cne "personal-world-combat-targeted") {
         throw "valid plan 未按中央顺序解析"
     }
 

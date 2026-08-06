@@ -447,3 +447,9 @@ KCP 与裸 UDP 使用同一底层网络，因此 KCP 不是 UDP 被阻断时的 
 所有网络模拟必须可重复并记录参数。
 
 当前统一真实存储入口为 `tools/storage/storage.ps1 -Action verify`。它覆盖 11 个公开 HTTP operation、真实 Redis WSS/TCP/BattleTicket 一次性状态、TCP world admission，以及真实 wire `OWN_WORLD` snapshot 与 VisitSession `OPEN`/`CREATE_INVITE`/HTTP `ACCEPT`/`JOIN`/断线 `RECONNECT`/`LEAVE`/`KICK`/`CLOSE`。同一 harness 还验证 response/push 顺序、精确 safe-return 后关闭、stale admission、assignment replacement、Redis flush、进程重建、跨通道 logout 失效和资源清理。通过表示真实 storage graph 可支持既有个人世界竖切与 B0.5 ticket issuance；完整 battle wire、安全 UDP/KCP 与网络 fault 资格分别由 B0.5/B0.6 专属入口裁决。
+
+## B0.8 combat replication
+
+Full/delta、acknowledgement 与 lifecycle initial state 必须来自同一次 committed Tick。Player slot filter 只隐藏未激活的预留 player；ordinary monster、Boss 与 live projectile 始终按 current instance entity set 发布。Ability/lifecycle 共用 instance-global 单调 event sequence，每个 session 独立追赶有界 journal；只走 KCP `3004/3005`，expiry、backpressure 或 sequence gap 不回退到 raw、WSS 或 TLS/TCP。
+
+新 session、重连或 assignment successor 的首包是 current players/monsters/Boss/projectiles 的原子 full baseline。它建立 current weapon、health/max-health、phase/dead 与 entity generation，并把历史 event cursor推进到 journal high-watermark，避免重放旧 cue。真实 socket C++ 组合测试覆盖 cookie/auth/AEAD、switch/primary raw ingress 与 shutdown；双 session、takeover、MTU、event expiry 和 damage/death由同一 targeted test group裁决。

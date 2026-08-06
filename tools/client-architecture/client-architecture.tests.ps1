@@ -46,7 +46,7 @@ try {
         "Foundation assembly acquired a production assembly dependency"
     $foundationText = @(
         Get-ChildItem -LiteralPath (
-            Join-Path $RepositoryRoot "client\Assets\App\Scripts\Foundation") `
+            Join-Path $RepositoryRoot "client\Assets\App\Modules\Core\Foundation") `
             -Filter "*.cs" -File -Recurse |
         ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) }) -join "`n"
     Assert-True (

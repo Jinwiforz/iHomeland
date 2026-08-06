@@ -14,8 +14,7 @@ $OutputEncoding = [Console]::OutputEncoding
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ClientRoot = Join-Path $RepositoryRoot "client"
 $AssetsRoot = Join-Path $ClientRoot "Assets"
-$ScriptsRoot = Join-Path $AssetsRoot "App\Scripts"
-$TestsRoot = Join-Path $AssetsRoot "App\Tests"
+$ModulesRoot = Join-Path $AssetsRoot "App\Modules"
 $RegistryPath = Join-Path $ClientRoot "Architecture\owner-registry.json"
 
 # Assert-ClosedProperties拒绝registry和asmdef中未声明字段造成的静默语义漂移。
@@ -174,16 +173,17 @@ function Read-AssemblyGraph {
 function Find-ForbiddenImports {
     param([object[]]$SourceDocuments)
     $rules = @(
-        [ordered]@{ path = "/Application/"; pattern = '^using IHomeland\.Client\.Infrastructure'; id = "application-to-infrastructure" },
+        [ordered]@{ path = "/Application/"; pattern = '^using IHomeland\.Client\.[A-Za-z0-9]+\.(Infrastructure|Runtime)'; id = "application-to-concrete-layer" },
         [ordered]@{ path = "/Application/"; pattern = '^using (IHomeland\.Protocol|Google\.Protobuf)'; id = "application-to-protocol" },
-        [ordered]@{ path = "/Presentation/"; pattern = '^using IHomeland\.Client\.Infrastructure'; id = "presentation-to-infrastructure" },
-        [ordered]@{ path = "/Presentation/"; pattern = '^using IHomeland\.Client\.Scenes'; id = "presentation-to-runtime-scene" },
-        [ordered]@{ path = "/Foundation/"; pattern = '^using IHomeland\.Client\.Infrastructure'; id = "foundation-to-infrastructure" }
+        [ordered]@{ path = "/Presentation/"; pattern = '^using IHomeland\.Client\.[A-Za-z0-9]+\.(Infrastructure|Runtime)'; id = "presentation-to-concrete-layer" },
+        [ordered]@{ path = "/Foundation/"; pattern = '^using IHomeland\.Client\.[A-Za-z0-9]+\.(Application|Infrastructure|Presentation|Runtime)'; id = "foundation-to-upper-layer" }
     )
     $findings = [System.Collections.Generic.List[object]]::new()
     foreach ($document in $SourceDocuments) {
         foreach ($rule in $rules) {
-            if ($document.Path -notlike "*$($rule.path)*") {
+            $layerPathPattern =
+                '/Modules/[^/]+' + [regex]::Escape([string]$rule.path)
+            if ($document.Path -notmatch $layerPathPattern) {
                 continue
             }
             foreach ($line in @($document.Text -split "`r?`n")) {
@@ -198,6 +198,49 @@ function Find-ForbiddenImports {
         }
     }
     return @($findings)
+}
+
+# Find-NamespaceViolations保证物理owner模块与C#类型身份同构，AssemblyInfo可保持无namespace。
+function Find-NamespaceViolations {
+    $violations = [System.Collections.Generic.List[object]]::new()
+    foreach ($file in @(Get-ChildItem -LiteralPath $ModulesRoot -Filter "*.cs" -File -Recurse |
+            Where-Object { $_.FullName -notmatch '[\\/]Content[\\/]' } |
+            Sort-Object FullName)) {
+        if ($file.Name -ceq "AssemblyInfo.cs") {
+            continue
+        }
+
+        $relative = Get-RelativePath $file.FullName
+        $moduleRelative = $file.FullName.Substring($ModulesRoot.Length + 1)
+        $segments = @($moduleRelative -split '[\\/]')
+        if ($segments.Count -lt 3) {
+            $violations.Add([ordered]@{ path = $relative; expected = "module-and-layer"; actual = "" })
+            continue
+        }
+
+        $expectedPrefix = "IHomeland.Client.$($segments[0]).$($segments[1])"
+        $text = [System.IO.File]::ReadAllText($file.FullName)
+        $namespaceMatch = [regex]::Match(
+            $text,
+            '(?m)^namespace\s+([A-Za-z_][A-Za-z0-9_.]*)\s*$')
+        $actual = if ($namespaceMatch.Success) {
+            $namespaceMatch.Groups[1].Value
+        }
+        else {
+            ""
+        }
+        if ($actual -cne $expectedPrefix -and
+            -not $actual.StartsWith(
+                $expectedPrefix + ".",
+                [System.StringComparison]::Ordinal)) {
+            $violations.Add([ordered]@{
+                path = $relative
+                expected = $expectedPrefix
+                actual = $actual
+            })
+        }
+    }
+    return @($violations)
 }
 
 # Find-CompositionResultReferences列出顶层装配结果向feature、Host或资格代码的扩散。
@@ -253,7 +296,10 @@ function Read-SerializationIntegrity {
     $scriptGuidOwners = @{}
     $duplicateGuids = [System.Collections.Generic.List[string]]::new()
     $missingMetas = [System.Collections.Generic.List[string]]::new()
-    foreach ($source in @(Get-ChildItem -LiteralPath $ScriptsRoot -Filter "*.cs" -File -Recurse)) {
+    foreach ($source in @(Get-ChildItem -LiteralPath $ModulesRoot -Filter "*.cs" -File -Recurse |
+            Where-Object {
+                $_.FullName -notmatch '[\\/](Editor|Tests|Content)[\\/]'
+            })) {
         $metaPath = $source.FullName + ".meta"
         if (-not (Test-Path -LiteralPath $metaPath -PathType Leaf)) {
             $missingMetas.Add((Get-RelativePath $source.FullName))
@@ -277,11 +323,20 @@ function Read-SerializationIntegrity {
     }
 
     $missingScripts = [System.Collections.Generic.List[object]]::new()
+    $legacyTypeIdentities = [System.Collections.Generic.List[object]]::new()
     $serializedAppRoot = Join-Path $AssetsRoot "App"
     foreach ($asset in @(Get-ChildItem -LiteralPath $serializedAppRoot -File -Recurse |
             Where-Object { $_.Extension -in @(".unity", ".prefab", ".asset") } |
             Sort-Object FullName)) {
         $text = [System.IO.File]::ReadAllText($asset.FullName)
+        foreach ($identity in [regex]::Matches(
+                $text,
+                '(?m)^  m_EditorClassIdentifier:\s*IHomeland\.Client\.[^:]+::(IHomeland\.Client\.(?:Application|Infrastructure|Foundation|Presentation|Scenes|Core\.(?:Bootstrap|Configuration))\.[^\r\n]+)$')) {
+            $legacyTypeIdentities.Add([ordered]@{
+                asset = Get-RelativePath $asset.FullName
+                type = $identity.Groups[1].Value
+            })
+        }
         foreach ($match in [regex]::Matches(
                 $text,
                 'm_Script:\s*\{fileID:\s*-?\d+,\s*guid:\s*([0-9a-f]{32}),\s*type:\s*3\}')) {
@@ -308,6 +363,8 @@ function Read-SerializationIntegrity {
         missingMetas = @($missingMetas | Sort-Object -Unique)
         duplicateScriptGuids = @($duplicateGuids | Sort-Object -Unique)
         missingSerializedScripts = @($missingScripts | Sort-Object asset, guid -Unique)
+        legacySerializedTypeIdentities = @(
+            $legacyTypeIdentities | Sort-Object asset, type -Unique)
     }
 }
 
@@ -404,11 +461,21 @@ function Read-ModularityInventory {
 }
 
 function New-SourceDocuments {
-    param([string]$Root)
+    param(
+        [string]$Root,
+        [ValidateSet("Production", "Tests")]
+        [string]$Kind)
     $documents = [System.Collections.Generic.List[object]]::new()
     foreach ($file in @(Get-ChildItem -LiteralPath $Root -Filter "*.cs" -File -Recurse |
             Where-Object { $_.FullName -notmatch '[\\/]Generated[\\/]' } |
             Sort-Object FullName)) {
+        $isTest = $file.FullName -match '[\\/]Tests[\\/]'
+        $isProduction = -not $isTest -and
+            $file.FullName -notmatch '[\\/](Editor|Content)[\\/]'
+        if (($Kind -eq "Production" -and -not $isProduction) -or
+            ($Kind -eq "Tests" -and -not $isTest)) {
+            continue
+        }
         $documents.Add([pscustomobject]@{
             Path = $file.FullName.Replace('\', '/')
             RelativePath = Get-RelativePath $file.FullName
@@ -418,15 +485,27 @@ function New-SourceDocuments {
     return @($documents)
 }
 
-$sourceDocuments = @(New-SourceDocuments $ScriptsRoot)
-$testDocuments = @(New-SourceDocuments $TestsRoot)
+$sourceDocuments = @(New-SourceDocuments $ModulesRoot "Production")
+$testDocuments = @(New-SourceDocuments $ModulesRoot "Tests")
 $ownerAudit = Read-OwnerRegistry $sourceDocuments $testDocuments
 $ownerDifferences = @($ownerAudit.owners | Where-Object { $_.status -ne "matched" })
 $assemblies = @(Read-AssemblyGraph)
 $forbiddenImports = @(Find-ForbiddenImports $sourceDocuments)
+$namespaceViolations = @(Find-NamespaceViolations)
 $serializationIntegrity = Read-SerializationIntegrity
 $assemblyViolations = @(Test-ProductionAssemblyGraph $assemblies)
 $legacyPaths = @(
+    "client/Assets/App/Scripts",
+    "client/Assets/App/Editor",
+    "client/Assets/App/Tests",
+    "client/Assets/App/Scenes",
+    "client/Assets/App/UI",
+    "client/Assets/App/Config",
+    "client/Assets/App/Content",
+    "client/Assets/Settings",
+    "client/Assets/TextMesh Pro",
+    "client/Assets/UI Toolkit",
+    "client/Assets/InputSystem_Actions.inputactions",
     "client/Assets/App/Scripts/Core/Lifetime",
     "client/Assets/App/Scripts/Application/Control/ClientControlChannel.cs",
     "client/Assets/App/Scripts/Application/Gameplay/ClientGameplayChannel.cs"
@@ -438,10 +517,14 @@ $hardGateViolations = @(
     @($ownerDifferences | ForEach-Object { "owner-registry-difference:$($_.id)" })
     $assemblyViolations
     @($forbiddenImports | ForEach-Object { "forbidden-import:$($_.rule):$($_.path)" })
+    @($namespaceViolations | ForEach-Object { "namespace-path-mismatch:$($_.path)" })
     @($serializationIntegrity.missingMetas | ForEach-Object { "missing-meta:$_" })
     @($serializationIntegrity.duplicateScriptGuids | ForEach-Object { "duplicate-script-guid:$_" })
     @($serializationIntegrity.missingSerializedScripts | ForEach-Object {
             "missing-serialized-script:$($_.asset):$($_.guid)"
+        })
+    @($serializationIntegrity.legacySerializedTypeIdentities | ForEach-Object {
+            "legacy-serialized-type:$($_.asset):$($_.type)"
         })
     @($legacyPathViolations | ForEach-Object { "legacy-path:$_" })
 )
@@ -459,6 +542,7 @@ $report = [ordered]@{
     }
     assemblies = $assemblies
     forbiddenImports = $forbiddenImports
+    namespaceViolations = $namespaceViolations
     compositionResultReferences = @(Find-CompositionResultReferences $sourceDocuments)
     serializedScriptReferences = @(Read-SerializedScriptReferences)
     serializationIntegrity = $serializationIntegrity

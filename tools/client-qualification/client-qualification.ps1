@@ -942,7 +942,7 @@ try {
         Write-Stage "diagnostic-build" "构建单个Windows Development Player"
         $developmentRoot = Join-Path $RunDirectory "development"
         Invoke-Unity @(
-            "-executeMethod", "IHomeland.Client.Editor.ClientDevelopmentBuild.BuildWindowsDevelopment",
+            "-executeMethod", "IHomeland.Client.AppShell.Editor.ClientDevelopmentBuild.BuildWindowsDevelopment",
             "-ihomelandBuildOutput", $developmentRoot) $UnityBuildStageBudgetMilliseconds "diagnostic-build"
         $developmentDigest = Get-BuildDigest $developmentRoot
         Write-DiagnosticArtifacts $scenarioContract $contractDigest $developmentDigest
@@ -970,9 +970,9 @@ try {
         foreach ($entry in @($registry.entries | Where-Object { $_.runner -eq "unity-playmode" })) { $records += New-EvidenceRecord $entry.scenarioId "unity-test" }
         $developmentRoot = Join-Path $RunDirectory "development"
         $releaseRoot = Join-Path $RunDirectory "release"
-        Invoke-Unity @("-executeMethod", "IHomeland.Client.Editor.ClientDevelopmentBuild.BuildWindowsDevelopment", "-ihomelandBuildOutput", $developmentRoot) $UnityBuildStageBudgetMilliseconds "development-build"
+        Invoke-Unity @("-executeMethod", "IHomeland.Client.AppShell.Editor.ClientDevelopmentBuild.BuildWindowsDevelopment", "-ihomelandBuildOutput", $developmentRoot) $UnityBuildStageBudgetMilliseconds "development-build"
         $records += New-EvidenceRecord "windows-development-build" "tool"
-        Invoke-Unity @("-executeMethod", "IHomeland.Client.Editor.ClientDevelopmentBuild.BuildWindowsRelease", "-ihomelandBuildOutput", $releaseRoot) $UnityBuildStageBudgetMilliseconds "release-build"
+        Invoke-Unity @("-executeMethod", "IHomeland.Client.AppShell.Editor.ClientDevelopmentBuild.BuildWindowsRelease", "-ihomelandBuildOutput", $releaseRoot) $UnityBuildStageBudgetMilliseconds "release-build"
         $records += New-EvidenceRecord "windows-release-build" "tool"
         $developmentDigest = Get-BuildDigest $developmentRoot
         $releaseDigest = Get-BuildDigest $releaseRoot

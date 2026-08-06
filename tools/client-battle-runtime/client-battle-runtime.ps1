@@ -470,6 +470,8 @@ function Assert-ProfilePolicy {
             ([int64]$Policy.inputCadenceMilliseconds * 1000000)
         "input-early-window-ticks" =
             [int]$Policy.inputLeadSimulationTicks
+        "input-gap-expiry-ticks" =
+            [int]$Policy.inputGapExpirySimulationTicks
         "snapshot-interval-ticks" =
             [int](1000 / (
                 [int]$Policy.snapshotCadenceHertz *
@@ -607,9 +609,12 @@ function Assert-SnapshotEntityStateParity {
         "message_ids",
         "transform_message",
         "required_scalar_fields",
+        "required_content_fields",
         "scalar_presence",
+        "cross_field_invariants",
         "delta_state_mask",
-        "state_flags") "snapshot entity state"
+        "state_flags",
+        "partition_projection") "snapshot entity state"
     $fieldNames = @($state.required_scalar_fields | ForEach-Object {
             [string]$_.name
         })
@@ -625,7 +630,13 @@ function Assert-SnapshotEntityStateParity {
         [int]$state.delta_state_mask.transform -ne 1 -or
         [int]$state.delta_state_mask.health_milli -ne 2 -or
         [int]$state.delta_state_mask.state_flags -ne 4 -or
-        [int]$state.delta_state_mask.known_mask -ne 7 -or
+        [int]$state.delta_state_mask.equipped_weapon_id -ne 8 -or
+        [int]$state.delta_state_mask.known_mask -ne 15 -or
+        (@($state.required_content_fields.name) -join ",") -cne
+            "archetype_id,equipped_weapon_id,max_health_milli" -or
+        [int]$state.partition_projection.maximum_encoded_entity_state_bytes -ne 91 -or
+        [int]$state.partition_projection.maximum_encoded_entity_delta_bytes -ne 85 -or
+        [int]$state.partition_projection.maximum_datagram_bytes -ne 1200 -or
         [uint32]$state.state_flags.phase_mask -ne 0x0000000f -or
         [uint32]$state.state_flags.grounded_flag -ne 0x00000010 -or
         [uint64]$state.state_flags.dead_flag -ne 2147483648 -or
@@ -645,6 +656,21 @@ function Assert-SnapshotEntityStateParity {
         if ($transformBlock -notmatch $pattern) {
             throw "snapshot transform field drifted: $($expectedFields[$index])"
         }
+    }
+    $entityBlock = Get-MessageBlock $protoText "BattleEntityState"
+    foreach ($field in @(
+            @("archetype_id", 6),
+            @("equipped_weapon_id", 7),
+            @("max_health_milli", 8))) {
+        if ($entityBlock -notmatch
+            "(?m)^\s*uint32\s+$($field[0])\s*=\s*$($field[1])\s*;\s*$") {
+            throw "snapshot content field drifted: $($field[0])"
+        }
+    }
+    $deltaBlock = Get-MessageBlock $protoText "BattleEntityDelta"
+    if ($deltaBlock -notmatch
+        '(?m)^\s*uint32\s+equipped_weapon_id\s*=\s*7\s*;\s*$') {
+        throw "snapshot weapon delta field drifted"
     }
 
     $projectionHeader = Get-Content -LiteralPath (
@@ -673,6 +699,10 @@ function Assert-SnapshotEntityStateParity {
             "set_velocity_x_mm_per_second",
             "set_velocity_y_mm_per_second",
             "set_velocity_z_mm_per_second",
+            "set_archetype_id",
+            "set_equipped_weapon_id",
+            "set_max_health_milli",
+            "CompleteEntityStateMask = 15",
             "Grounded",
             "PhaseMask")) {
         if ($producer -notmatch [regex]::Escape($token)) {
@@ -692,6 +722,9 @@ function Assert-SnapshotEntityStateParity {
             "has_velocity_x_mm_per_second",
             "has_velocity_y_mm_per_second",
             "has_velocity_z_mm_per_second",
+            "has_archetype_id",
+            "has_equipped_weapon_id",
+            "has_max_health_milli",
             "KnownMask")) {
         if ($protocolClient -notmatch [regex]::Escape($token)) {
             throw "C++ protocol client snapshot parity is missing: $token"
@@ -700,13 +733,19 @@ function Assert-SnapshotEntityStateParity {
 
     $clientModel = Get-Content -LiteralPath (
         Join-Path $RepositoryRoot (
-            "client\Assets\App\Scripts\Application\Battle\" +
+            "client\Assets\App\Modules\PersonalWorldCombat\Application\" +
             "ClientBattleGameplayModels.cs")) -Raw -Encoding UTF8
     foreach ($pattern in @(
             'PhaseStateMask\s*=\s*0x0000000f\s*;',
             'GroundedStateFlag\s*=\s*0x00000010\s*;',
             'DeadStateFlag\s*=\s*0x80000000\s*;',
             'KnownStateFlags\s*=\s*[\r\n\s]*PhaseStateMask\s*\|\s*GroundedStateFlag\s*\|\s*DeadStateFlag\s*;',
+            'PlayerArchetype\s*=\s*1\s*;',
+            'MonsterArchetype\s*=\s*2\s*;',
+            'BossArchetype\s*=\s*3\s*;',
+            'SwordWeapon\s*=\s*101\s*;',
+            'FanWeapon\s*=\s*102\s*;',
+            'EquippedWeaponMask\s*=\s*8\s*;',
             'Grounded\s*=>\s*[\r\n\s]*\(StateFlags\s*&\s*GroundedStateFlag\)\s*!=\s*0\s*;')) {
         if ($clientModel -notmatch $pattern) {
             throw "C# snapshot state flag registry drifted"
@@ -715,7 +754,7 @@ function Assert-SnapshotEntityStateParity {
 
     $clientAdapter = Get-Content -LiteralPath (
         Join-Path $RepositoryRoot (
-            "client\Assets\App\Scripts\Infrastructure\Battle\" +
+            "client\Assets\App\Modules\PersonalWorldCombat\Infrastructure\" +
             "ClientBattleProtocolAdapter.cs")) -Raw -Encoding UTF8
     foreach ($token in @(
             "HasPositionXMm",
@@ -725,6 +764,10 @@ function Assert-SnapshotEntityStateParity {
             "HasVelocityXMmPerSecond",
             "HasVelocityYMmPerSecond",
             "HasVelocityZMmPerSecond",
+            "HasArchetypeId",
+            "HasEquippedWeaponId",
+            "HasMaxHealthMilli",
+            "ClientBattleEntityDelta.EquippedWeaponMask",
             "ClientBattleEntityState.KnownStateFlags")) {
         if ($clientAdapter -notmatch [regex]::Escape($token)) {
             throw "C# snapshot consumer parity is missing: $token"
@@ -733,7 +776,7 @@ function Assert-SnapshotEntityStateParity {
 
     $runtimeCoordinator = Get-Content -LiteralPath (
         Join-Path $RepositoryRoot (
-            "client\Assets\App\Scripts\Application\Battle\" +
+            "client\Assets\App\Modules\PersonalWorldCombat\Application\" +
             "ClientBattleRuntimeCoordinator.cs")) -Raw -Encoding UTF8
     if ($runtimeCoordinator -notmatch
         'var\s+grounded\s*=\s*local\.Grounded\s*;' -or
@@ -863,6 +906,25 @@ function Assert-BaselineCharacterization {
         throw "client battle runtime baseline characterization drifted"
     }
 
+    # 历史 characterization 保留旧提交路径；当前路径映射只证明同一资产仍被迁移后工程持有。
+    $currentAssetPaths = @{
+        "client/Assets/App/Scenes/BootstrapScene.unity" = "client/Assets/App/Modules/AppShell/Content/Scenes/BootstrapScene.unity"
+        "client/Assets/App/Scenes/PersonalWorldScene.unity" = "client/Assets/App/Modules/PersonalWorld/Content/Scenes/PersonalWorldScene.unity"
+        "client/Assets/App/UI/PersonalWorld/Prefabs/WorldHud.prefab" = "client/Assets/App/Modules/PersonalWorld/Content/UI/Prefabs/WorldHud.prefab"
+        "client/Assets/App/UI/PersonalWorld/LoginView.uxml" = "client/Assets/App/Modules/PersonalWorld/Content/UI/LoginView.uxml"
+        "client/Assets/App/UI/PersonalWorld/ShellView.uxml" = "client/Assets/App/Modules/PersonalWorld/Content/UI/ShellView.uxml"
+        "client/Assets/App/UI/PersonalWorld/WorldVisitView.uxml" = "client/Assets/App/Modules/PersonalWorld/Content/UI/WorldVisitView.uxml"
+        "client/Assets/App/UI/PersonalWorld/ConnectionLostView.uxml" = "client/Assets/App/Modules/PersonalWorld/Content/UI/ConnectionLostView.uxml"
+        "client/Assets/App/UI/PersonalWorld/PersonalWorldTheme.uss" = "client/Assets/App/Modules/PersonalWorld/Content/UI/PersonalWorldTheme.uss"
+        "client/Assets/App/Scripts/IHomeland.Client.Runtime.asmdef" = "client/Assets/App/Assemblies/Runtime/IHomeland.Client.Runtime.asmdef"
+        "client/Assets/App/Scripts/Application/IHomeland.Client.Application.asmdef" = "client/Assets/App/Assemblies/Application/IHomeland.Client.Application.asmdef"
+        "client/Assets/App/Scripts/Infrastructure/IHomeland.Client.Infrastructure.asmdef" = "client/Assets/App/Assemblies/Infrastructure/IHomeland.Client.Infrastructure.asmdef"
+        "client/Assets/App/Scripts/Presentation/Pure/IHomeland.Client.Presentation.asmdef" = "client/Assets/App/Assemblies/Presentation/IHomeland.Client.Presentation.asmdef"
+        "client/Assets/App/Tests/EditMode/IHomeland.Client.Runtime.EditModeTests.asmdef" = "client/Assets/App/Assemblies/Tests/EditMode/IHomeland.Client.Runtime.EditModeTests.asmdef"
+        "client/Assets/App/Tests/PlayMode/IHomeland.Client.Runtime.PlayModeTests.asmdef" = "client/Assets/App/Assemblies/Tests/PlayMode/IHomeland.Client.Runtime.PlayModeTests.asmdef"
+        "client/Architecture/owner-registry.json" = "client/Architecture/owner-registry.json"
+    }
+
     $assetPaths = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
     foreach ($asset in @($characterization.assets)) {
@@ -878,7 +940,11 @@ function Assert-BaselineCharacterization {
             throw "baseline characterized asset is invalid"
         }
 
-        Resolve-RepositoryFile ([string]$asset.path) | Out-Null
+        if (-not $currentAssetPaths.ContainsKey([string]$asset.path)) {
+            throw "baseline characterized asset lacks current path mapping: $($asset.path)"
+        }
+        Resolve-RepositoryFile ([string]$currentAssetPaths[[string]$asset.path]) |
+            Out-Null
         $actualBlob = & git -C $RepositoryRoot rev-parse (
             "$($characterization.sourceCommit):$($asset.path)") 2>$null
         if ($LASTEXITCODE -ne 0 -or
@@ -937,10 +1003,37 @@ function Assert-BaselineCharacterization {
     foreach ($asset in @($characterization.assets | Where-Object {
                 [string]$_.kind -cmatch '^product-'
             })) {
-        $currentBlob = & git -C $RepositoryRoot hash-object -- (
-            [string]$asset.path)
-        if ($LASTEXITCODE -ne 0 -or
-            [string]$currentBlob -cne [string]$asset.gitBlob) {
+        $currentPath = [string]$currentAssetPaths[[string]$asset.path]
+        $matchesBaseline = $false
+        if ([string]$asset.kind -in @("product-uxml", "product-prefab")) {
+            $baselineText = (& git -C $RepositoryRoot show (
+                    "$($characterization.sourceCommit):$($asset.path)")) -join "`n"
+            if ($LASTEXITCODE -eq 0) {
+                $currentText = Get-Content -LiteralPath (
+                    Join-Path $RepositoryRoot $currentPath) -Raw -Encoding UTF8
+                $currentText = $currentText.Replace("`r`n", "`n").TrimEnd("`n")
+                if ([string]$asset.kind -ceq "product-uxml") {
+                    $currentText = $currentText.Replace(
+                        "Assets/App/Modules/PersonalWorld/Content/UI/PersonalWorldTheme.uss",
+                        "Assets/App/UI/PersonalWorld/PersonalWorldTheme.uss")
+                }
+                else {
+                    $currentText = $currentText.Replace(
+                        "IHomeland.Client.Runtime::IHomeland.Client.PersonalWorld.Runtime.Presentation.ClientPersonalWorldHudView",
+                        "IHomeland.Client.Runtime::IHomeland.Client.Presentation.PersonalWorld.ClientPersonalWorldHudView")
+                    $currentText = $currentText.Replace(
+                        "IHomeland.Client.Runtime::IHomeland.Client.AppShell.Runtime.Presentation.Hosts.UGUI.ClientUguiHost",
+                        "IHomeland.Client.Runtime::IHomeland.Client.Presentation.Hosts.UGUI.ClientUguiHost")
+                }
+                $matchesBaseline = $currentText -ceq $baselineText
+            }
+        }
+        else {
+            $currentBlob = & git -C $RepositoryRoot hash-object -- $currentPath
+            $matchesBaseline = $LASTEXITCODE -eq 0 -and
+                [string]$currentBlob -ceq [string]$asset.gitBlob
+        }
+        if (-not $matchesBaseline) {
             throw "B0.7 changed an existing product UI asset: $($asset.path)"
         }
     }
@@ -955,15 +1048,15 @@ function Assert-ClientSourcePolicy {
         ConvertFrom-Json
     $expectedOwners = [ordered]@{
         "battle-connection" =
-            "client/Assets/App/Scripts/Infrastructure/Battle/BattleNetworkClient.cs"
+            "client/Assets/App/Modules/PersonalWorldCombat/Infrastructure/BattleNetworkClient.cs"
         "battle-runtime" =
-            "client/Assets/App/Scripts/Application/Battle/ClientBattleRuntimeCoordinator.cs"
+            "client/Assets/App/Modules/PersonalWorldCombat/Application/ClientBattleRuntimeCoordinator.cs"
         "gameplay-replica" =
-            "client/Assets/App/Scripts/Application/Battle/GameplayReplica.cs"
+            "client/Assets/App/Modules/PersonalWorldCombat/Application/GameplayReplica.cs"
         "gameplay-prediction" =
-            "client/Assets/App/Scripts/Application/Battle/GameplayPrediction.cs"
+            "client/Assets/App/Modules/PersonalWorldCombat/Application/GameplayPrediction.cs"
         "gameplay-interpolation" =
-            "client/Assets/App/Scripts/Application/Battle/GameplayInterpolation.cs"
+            "client/Assets/App/Modules/PersonalWorldCombat/Application/GameplayInterpolation.cs"
     }
     foreach ($entry in $expectedOwners.GetEnumerator()) {
         $matches = @($ownerRegistry.owners | Where-Object {
@@ -977,7 +1070,7 @@ function Assert-ClientSourcePolicy {
     }
 
     $applicationAsmdefPath = Join-Path $RepositoryRoot (
-        "client\Assets\App\Scripts\Application\" +
+        "client\Assets\App\Assemblies\Application\" +
         "IHomeland.Client.Application.asmdef")
     $applicationAsmdef = Get-Content -LiteralPath $applicationAsmdefPath `
         -Raw -Encoding UTF8 |
@@ -991,7 +1084,7 @@ function Assert-ClientSourcePolicy {
     }
 
     $infrastructureAsmdefPath = Join-Path $RepositoryRoot (
-        "client\Assets\App\Scripts\Infrastructure\" +
+        "client\Assets\App\Assemblies\Infrastructure\" +
         "IHomeland.Client.Infrastructure.asmdef")
     $infrastructureAsmdef = Get-Content -LiteralPath $infrastructureAsmdefPath `
         -Raw -Encoding UTF8 |
@@ -1008,7 +1101,7 @@ function Assert-ClientSourcePolicy {
     }
 
     $applicationBattlePath = Join-Path $RepositoryRoot (
-        "client\Assets\App\Scripts\Application\Battle")
+        "client\Assets\App\Modules\PersonalWorldCombat\Application")
     foreach ($source in Get-ChildItem -LiteralPath $applicationBattlePath `
                  -Filter *.cs -File) {
         $text = Get-Content -LiteralPath $source.FullName -Raw -Encoding UTF8
@@ -1019,8 +1112,8 @@ function Assert-ClientSourcePolicy {
     }
 
     $sourceRoots = @(
-        (Join-Path $RepositoryRoot "client\Assets\App\Scripts\Application\Battle"),
-        (Join-Path $RepositoryRoot "client\Assets\App\Scripts\Infrastructure\Battle"))
+        (Join-Path $RepositoryRoot "client\Assets\App\Modules\PersonalWorldCombat\Application"),
+        (Join-Path $RepositoryRoot "client\Assets\App\Modules\PersonalWorldCombat\Infrastructure"))
     foreach ($root in $sourceRoots) {
         foreach ($source in Get-ChildItem -LiteralPath $root -Filter *.cs -File) {
             $text = Get-Content -LiteralPath $source.FullName -Raw -Encoding UTF8
@@ -1068,7 +1161,7 @@ function Assert-UnityMaterializedPolicy {
     }
 
     $inputPath = Join-Path $RepositoryRoot (
-        "client\Assets\InputSystem_Actions.inputactions")
+        "client\Assets\App\Modules\Core\Content\Input\InputSystem_Actions.inputactions")
     $inputAsset = Get-Content -LiteralPath $inputPath -Raw -Encoding UTF8 |
         ConvertFrom-Json
     $playerMaps = @($inputAsset.maps | Where-Object {
@@ -1084,6 +1177,7 @@ function Assert-UnityMaterializedPolicy {
         "Primary" = @("Button", "Button")
         "Secondary" = @("Button", "Button")
         "Interact" = @("Button", "Button")
+        "SwitchWeapon" = @("Button", "Button")
     }
     foreach ($entry in $requiredActions.GetEnumerator()) {
         $matches = @($playerMaps[0].actions | Where-Object {
@@ -1107,19 +1201,37 @@ function Assert-UnityMaterializedPolicy {
                 "$($entry.Key)/$($entry.Value[0])/$($entry.Value[1])")
         }
     }
+    foreach ($actionName in @("Primary", "SwitchWeapon")) {
+        $bindings = @($playerMaps[0].bindings | Where-Object {
+                [string]$_.action -ceq $actionName
+            })
+        $hasKeyboardOrMouse = @($bindings | Where-Object {
+                [string]$_.path -cmatch '^<(Keyboard|Mouse)>/'
+            }).Count -gt 0
+        $hasGamepad = @($bindings | Where-Object {
+                [string]$_.path -cmatch '^<Gamepad>/'
+            }).Count -gt 0
+        if (-not $hasKeyboardOrMouse -or -not $hasGamepad) {
+            throw (
+                "Unity battle input bindings drifted: " +
+                "$actionName requires keyboard/mouse and gamepad")
+        }
+    }
 
     $unityOwnedSources = @(
-        "client\Assets\App\Scripts\Application\Battle",
-        "client\Assets\App\Scripts\Infrastructure\Battle",
-        "client\Assets\App\Scripts\Application\World\ClientBattleWorldTargetSource.cs",
-        "client\Assets\App\Scripts\Core\Composition\BattleComposition.cs",
-        "client\Assets\App\Scripts\Presentation\Hosts\ClientBattleInputContracts.cs",
-        "client\Assets\App\Scripts\Scenes\PersonalWorld\ClientActorViewRegistry.cs",
-        "client\Assets\App\Scripts\Scenes\PersonalWorld\ClientBattleHudHost.cs",
-        "client\Assets\App\Scripts\Scenes\PersonalWorld\ClientBattleSceneHost.cs",
-        "client\Assets\App\Scripts\Scenes\PersonalWorld\CinemachineCameraHost.cs",
-        "client\Assets\App\Tests\EditMode\ClientBattleInputContractTests.cs",
-        "client\Assets\App\Tests\EditMode\ClientBattleRuntimeTests.cs"
+        "client\Assets\App\Modules\PersonalWorldCombat\Application",
+        "client\Assets\App\Modules\PersonalWorldCombat\Infrastructure",
+        "client\Assets\App\Modules\PersonalWorldCombat\Application\WorldIntegration\ClientBattleWorldTargetSource.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Composition\BattleComposition.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Input\ClientBattleInputContracts.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Scenes\ClientActorViewRegistry.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Scenes\ClientCombatActorView.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Scenes\ClientCombatResourceCatalog.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Scenes\ClientBattleHudHost.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Scenes\ClientBattleSceneHost.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Runtime\Scenes\CinemachineCameraHost.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Tests\EditMode\ClientBattleInputContractTests.cs",
+        "client\Assets\App\Modules\PersonalWorldCombat\Tests\EditMode\ClientBattleRuntimeTests.cs"
     )
     $sourcePaths = [System.Collections.Generic.List[string]]::new()
     foreach ($relative in $unityOwnedSources) {
@@ -1145,7 +1257,7 @@ function Assert-UnityMaterializedPolicy {
     }
 
     $scenePath = Join-Path $RepositoryRoot (
-        "client\Assets\App\Scenes\PersonalWorldScene.unity")
+        "client\Assets\App\Modules\PersonalWorld\Content\Scenes\PersonalWorldScene.unity")
     $sceneText = Get-Content -LiteralPath $scenePath -Raw -Encoding UTF8
     foreach ($hostName in @(
             "ClientBattleSceneHost",
@@ -1176,11 +1288,16 @@ function Assert-UnityMaterializedPolicy {
             "_actors",
             "_hud",
             "_camera",
+            "_resourceCatalog",
             "_actorPrefab",
             "_actorRoot",
             "_root",
             "_statusText",
             "_healthText",
+            "_weaponText",
+            "_skillText",
+            "_bossHealthText",
+            "_bossStateText",
             "_explorationRig",
             "_meleeRig",
             "_rangedAimRig",
@@ -1194,11 +1311,69 @@ function Assert-UnityMaterializedPolicy {
         }
     }
 
+    $combatContentRoot = Join-Path $RepositoryRoot (
+        "client\Assets\App\Modules\PersonalWorldCombat\Content")
+    $requiredCombatAssets = @(
+        "Config\ClientCombatResourceCatalog.asset",
+        "Prefabs\Actors\PlayerCombatView.prefab",
+        "Prefabs\Actors\OrdinaryMonsterCombatView.prefab",
+        "Prefabs\Actors\BossCombatView.prefab",
+        "Prefabs\Projectiles\FanBladeProjectileView.prefab",
+        "Prefabs\Weapons\SwordDisplay.prefab",
+        "Prefabs\Weapons\FanDisplay.prefab",
+        "Prefabs\VFX\DamageImpactVfx.prefab",
+        "Prefabs\Camera\MeleeCombatRig.prefab",
+        "Prefabs\Camera\RangedAimRig.prefab",
+        "Animations\SwordPrimary.controller",
+        "Animations\FanPrimary.controller",
+        "Animations\MonsterStrike.controller",
+        "Animations\BossSlam.controller",
+        "Audio\CombatCue.wav",
+        "UI\PlayerStateHud.prefab",
+        "UI\BossStateHud.prefab"
+    )
+    foreach ($relativeAsset in $requiredCombatAssets) {
+        $assetPath = Join-Path $combatContentRoot $relativeAsset
+        if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath "$assetPath.meta" -PathType Leaf)) {
+            throw "Unity combat asset is not materialized: $relativeAsset"
+        }
+    }
+
+    $catalogAssetPath = Join-Path $combatContentRoot (
+        "Config\ClientCombatResourceCatalog.asset")
+    $catalogText = Get-Content -LiteralPath $catalogAssetPath `
+        -Raw -Encoding UTF8
+    foreach ($field in @(
+            "_playerDisplay",
+            "_monsterDisplay",
+            "_bossDisplay",
+            "_fanProjectileDisplay",
+            "_swordDisplay",
+            "_fanDisplay",
+            "_swordAnimator",
+            "_fanAnimator",
+            "_monsterAnimator",
+            "_bossAnimator",
+            "_damageVfx",
+            "_combatAudio",
+            "_playerHud",
+            "_bossHud",
+            "_meleeCamera",
+            "_rangedCamera")) {
+        if ($catalogText -notmatch (
+                '(?m)^\s*' + [regex]::Escape($field) +
+                ':\s*\{fileID:\s*(?!0(?:[,}]))-?\d+')) {
+            throw "Unity combat catalog reference is missing: $field"
+        }
+    }
+
     $bootstrapPath = Join-Path $RepositoryRoot (
-        "client\Assets\App\Scenes\BootstrapScene.unity")
+        "client\Assets\App\Modules\AppShell\Content\Scenes\BootstrapScene.unity")
     $bootstrapText = Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8
     $actorPrefabPath = Join-Path $RepositoryRoot (
-        "client\Assets\App\Prefabs\Battle\GenericActor.prefab")
+        "client\Assets\App\Modules\PersonalWorldCombat\Content\" +
+        "Prefabs\Actors\GenericActor.prefab")
     $actorPrefabText = Get-Content -LiteralPath $actorPrefabPath -Raw -Encoding UTF8
     foreach ($asset in @(
             [pscustomobject]@{
@@ -1237,15 +1412,15 @@ function Assert-UnityMaterializedPolicy {
 
     foreach ($bootstrapOwner in @(
             [pscustomobject]@{
-                Source = "client\Assets\App\Scripts\Core\Bootstrap\AppBootstrap.cs"
+                Source = "client\Assets\App\Modules\AppShell\Runtime\Bootstrap\AppBootstrap.cs"
                 Name = "AppBootstrap"
             },
             [pscustomobject]@{
-                Source = "client\Assets\App\Scripts\Core\Bootstrap\AppRoot.cs"
+                Source = "client\Assets\App\Modules\AppShell\Runtime\Bootstrap\AppRoot.cs"
                 Name = "AppRoot"
             },
             [pscustomobject]@{
-                Source = "client\Assets\App\Scripts\Presentation\Hosts\ClientUiHostRoot.cs"
+                Source = "client\Assets\App\Modules\AppShell\Runtime\Presentation\Hosts\ClientUiHostRoot.cs"
                 Name = "ClientUiHostRoot"
             })) {
         $ownerMeta = Get-Content -LiteralPath (
@@ -1288,6 +1463,7 @@ Assert-ExactProperties $manifest.entryPolicy @(
     "simulationTickMilliseconds",
     "inputCadenceMilliseconds",
     "inputLeadSimulationTicks",
+    "inputGapExpirySimulationTicks",
     "snapshotCadenceHertz",
     "mtuBytes",
     "sessionQueueItems",
@@ -1304,6 +1480,13 @@ Assert-DevelopmentReadiness $manifest.entryPolicy.developmentReadiness
 Assert-DependencyPolicy
 Assert-BaselineCharacterization
 Assert-ClientSourcePolicy
+$clientArchitecture = Join-Path $RepositoryRoot (
+    "tools\client-architecture\client-architecture.ps1")
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $clientArchitecture `
+    -Action verify | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "client feature/layer architecture hard gate failed"
+}
 if ($Action -eq "validate") {
     Write-Host "[PASS] client battle runtime entry validated."
     return
@@ -1327,8 +1510,9 @@ if ($Action -eq "unity-tests") {
         "-testPlatform", "EditMode",
         "-testFilter",
         (
-            "IHomeland.Client.Tests.EditMode.ClientBattleRuntimeTests;" +
-            "IHomeland.Client.Tests.EditMode.ClientBattleInputContractTests"
+            "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleRuntimeTests;" +
+            "IHomeland.Client.PersonalWorldCombat.Tests.EditMode.ClientBattleInputContractTests;" +
+            "IHomeland.Client.PersonalWorldCombat.Tests.Protocol.BattleWireGoldenTests"
         ),
         "-testResults", $resultsPath,
         "-logFile", $logPath)
@@ -1361,7 +1545,8 @@ if ($Action -eq "unity-tests") {
         "-runTests",
         "-testPlatform", "PlayMode",
         "-testFilter",
-        "IHomeland.Client.Tests.PlayMode.PersonalWorldSceneContextPlayModeTests",
+        ("IHomeland.Client.PersonalWorldCombat.Tests.PlayMode.PersonalWorldSceneContextPlayModeTests;" +
+         "IHomeland.Client.AppShell.Tests.PlayMode.ClientUiHostPlayModeTests"),
         "-testResults", $playModeResultsPath,
         "-logFile", $playModeLogPath)
     $playModeProcess = Start-Process `
@@ -1491,7 +1676,7 @@ $remaining = [int][Math]::Min(
 Invoke-UnityBuild `
     -EditorPath $resolvedUnityEditor `
     -Method (
-        "IHomeland.Client.Editor.ClientDevelopmentBuild." +
+        "IHomeland.Client.AppShell.Editor.ClientDevelopmentBuild." +
         "BuildWindowsDevelopment") `
     -OutputRoot $developmentRoot `
     -LogPath (Join-Path $playerRunDirectory "development-build.unity.log") `
@@ -1505,7 +1690,7 @@ $remaining = [int][Math]::Min(
 Invoke-UnityBuild `
     -EditorPath $resolvedUnityEditor `
     -Method (
-        "IHomeland.Client.Editor.ClientDevelopmentBuild." +
+        "IHomeland.Client.AppShell.Editor.ClientDevelopmentBuild." +
         "BuildWindowsRelease") `
     -OutputRoot $releaseRoot `
     -LogPath (Join-Path $playerRunDirectory "release-build.unity.log") `

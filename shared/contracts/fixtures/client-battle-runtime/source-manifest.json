@@ -26,7 +26,7 @@
     {
       "id": "battle-wire",
       "path": "shared/contracts/fixtures/battle/wire/manifest.json",
-      "sha256": "c4838f0efce9fffb852355de734d67ab9d78aaff55dea0dee2c9af672a3cbb5e",
+      "sha256": "9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432",
       "requiredConclusion": "battle-wire-v1"
     },
     {
@@ -38,13 +38,13 @@
     {
       "id": "battle-protobuf",
       "path": "shared/proto/ihomeland/battle/v1/battle.proto",
-      "sha256": "3b59d879c3b7e98e2ba475423636d371ba03bc0d6fd4a7b5024c3add0bfe3b18",
+      "sha256": "5c96ce5f2b01fdfff45691cb66ff23f583a4ae6ea943ef30b7b7440076225bd5",
       "requiredConclusion": "generated-parity-source"
     },
     {
       "id": "battle-network-qualification",
       "path": "shared/contracts/fixtures/battle/qualification/manifest.json",
-      "sha256": "7532dd639c3734666f6b511c6a86d80deb437639816380ebaff0c89d4a55ebaa",
+      "sha256": "6db25502f9e6503b8920ef97235e0fb3c5bc2eda226d50c3849795a28df7decd",
       "requiredConclusion": "development-readiness-corpus"
     },
     {
@@ -59,6 +59,7 @@
     "simulationTickMilliseconds": 50,
     "inputCadenceMilliseconds": 25,
     "inputLeadSimulationTicks": 2,
+    "inputGapExpirySimulationTicks": 6,
     "snapshotCadenceHertz": 10,
     "mtuBytes": 1200,
     "sessionQueueItems": 256,

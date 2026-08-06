@@ -122,6 +122,12 @@
       "order": 220
     },
     {
+      "id": "personal-world-combat-targeted",
+      "class": "targeted-expensive",
+      "owner": "personal-world-combat",
+      "order": 230
+    },
+    {
       "id": "openspec-change-strict",
       "class": "incremental",
       "owner": "openspec",

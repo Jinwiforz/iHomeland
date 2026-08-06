@@ -1,0 +1,27 @@
+{
+  "name": "IHomeland.Client.Runtime.PlayModeTests",
+  "rootNamespace": "IHomeland.Client",
+  "references": [
+    "IHomeland.Client.Foundation",
+    "IHomeland.Client.Application",
+    "IHomeland.Client.Infrastructure",
+    "IHomeland.Client.Presentation",
+    "IHomeland.Client.Runtime",
+    "Unity.Cinemachine",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

@@ -49,21 +49,33 @@ func (session *fakeControlSession) Call(_ context.Context, requestID RequestID, 
 		return json.Marshal(struct {
 			ActorCapacity         int    `json:"actorCapacity"`
 			BuildIdentity         string `json:"buildIdentity"`
+			ConfigIdentity        string `json:"configIdentity"`
+			GameplayPackageID     string `json:"gameplayPackageId"`
 			InstanceCapacity      int    `json:"instanceCapacity"`
+			MappingIdentity       string `json:"mappingIdentity"`
 			ModelManifest         string `json:"modelManifest"`
+			NavigationIdentity    string `json:"navigationIdentity"`
+			PhysicsIdentity       string `json:"physicsIdentity"`
 			PlatformQualification string `json:"platformQualification"`
 			ProfileManifest       string `json:"profileManifest"`
 			RuntimeNodeID         string `json:"runtimeNodeId"`
 			SimulationNodeID      string `json:"simulationNodeId"`
+			WireIdentity          string `json:"wireIdentity"`
 		}{
 			ActorCapacity:         8,
 			BuildIdentity:         strings.Repeat("a", 64),
+			ConfigIdentity:        strings.Repeat("d", 64),
+			GameplayPackageID:     "personal-world-combat-v1",
 			InstanceCapacity:      2,
+			MappingIdentity:       strings.Repeat("0", 64),
 			ModelManifest:         strings.Repeat("b", 64),
+			NavigationIdentity:    strings.Repeat("e", 64),
+			PhysicsIdentity:       strings.Repeat("f", 64),
 			PlatformQualification: "implementation-qualified-windows-x64",
 			ProfileManifest:       strings.Repeat("c", 64),
 			RuntimeNodeID:         "rnode_controltest",
 			SimulationNodeID:      "snode_controltest",
+			WireIdentity:          strings.Repeat("1", 64),
 		})
 	case "instance.start":
 		if session.startEntered != nil {
@@ -386,8 +398,11 @@ func testControllerConfig(t *testing.T) ControllerConfig {
 		},
 		Capacity:           NodeCapacity{Instances: 2, Actors: 8},
 		ConfigIdentity:     digest("d"),
+		GameplayPackageID:  "personal-world-combat-v1",
 		NavigationIdentity: digest("e"),
 		PhysicsIdentity:    digest("f"),
+		WireIdentity:       digest("1"),
+		MappingIdentity:    digest("0"),
 		DrainDeadline:      time.Second,
 		StopDeadline:       time.Second,
 	}

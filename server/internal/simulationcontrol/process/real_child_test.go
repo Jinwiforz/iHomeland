@@ -33,6 +33,14 @@ import (
 	"github.com/jinwiforz/ihomeland/server/internal/visitsession"
 )
 
+const (
+	realGameplayConfigIdentity     = "d6e3f016e4c29f4ad3916759e5ea059443fe37145dbe51621704180e50bc555b"
+	realGameplayNavigationIdentity = "14165efe5b47caf6c7c8e2f9a4794c4d238aa4badeedc3d5badb41a9c2d5d19f"
+	realGameplayPhysicsIdentity    = "64d53e1803d7cb14f4953ba1978175b162577eeb064716b2630cad0acf4de02e"
+	realGameplayWireIdentity       = "9a40facbb23aafc556d38b403c8f8b1e264e0f2d9414e32da434b11d07554432"
+	realGameplayMappingIdentity    = "9e78652d1d05524c2a67668b208f703120a214bfb45f053c94f6c3dc79595e3b"
+)
+
 // TestRealChildBattleUDPReadyBeforeHello 验证真实 Go parent 只有在 child 已绑定唯一 UDP socket 后才收到 hello。
 func TestRealChildBattleUDPReadyBeforeHello(t *testing.T) {
 	if os.Getenv("IHOMELAND_SIMULATION_REAL_CHILD") != "1" {
@@ -49,14 +57,14 @@ func TestRealChildBattleUDPReadyBeforeHello(t *testing.T) {
 	_ = probe.Close()
 	nonce, _ := simulationcontrol.NewSessionNonce()
 	diagnostics := &diagnosticCollector{}
-	owner, err := Start(Config{
+	owner, err := Start(realProcessConfig(t, Config{
 		BinaryPath: binaryPath, BinarySHA256: fileDigest(t, binaryPath),
 		QualificationReceiptPath: receiptPath, QualificationReceiptSHA256: fileDigest(t, receiptPath),
 		RequestTimeout: 3 * time.Second, ShutdownTimeout: 3 * time.Second, StderrLineLimit: 1024,
 		BattleUDPEnabled: true, BattleUDPBindHost: "127.0.0.1", BattleUDPBindPort: uint16(port),
 		BattleUDPAdvertisedHost: "127.0.0.1", BattleUDPAdvertisedPort: uint16(port),
 		BattleListenerIdentity: "0123456789abcdef0123456789abcdef",
-	}, nonce, simulationcontrol.NewProposalInbox(), diagnostics)
+	}), nonce, simulationcontrol.NewProposalInbox(), diagnostics)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +111,7 @@ func TestRealChildProtocolClientSessionStart(t *testing.T) {
 	}
 	diagnostics := &diagnosticCollector{}
 	owner, err := Start(
-		Config{
+		realProcessConfig(t, Config{
 			BinaryPath:                 binaryPath,
 			BinarySHA256:               fileDigest(t, binaryPath),
 			QualificationReceiptPath:   receiptPath,
@@ -119,7 +127,7 @@ func TestRealChildProtocolClientSessionStart(t *testing.T) {
 			BattleListenerIdentity:     "0123456789abcdef0123456789abcdef",
 			QualificationRunID:         qualificationRunID,
 			QualificationMode:          true,
-		},
+		}),
 		nonce,
 		simulationcontrol.NewProposalInbox(),
 		diagnostics,
@@ -858,7 +866,7 @@ func TestRealChildLifecycle(t *testing.T) {
 	inbox := simulationcontrol.NewProposalInbox()
 	diagnostics := &diagnosticCollector{}
 	owner, err := Start(
-		Config{
+		realProcessConfig(t, Config{
 			BinaryPath:                 binaryPath,
 			BinarySHA256:               binaryDigest,
 			QualificationReceiptPath:   receiptPath,
@@ -866,7 +874,7 @@ func TestRealChildLifecycle(t *testing.T) {
 			RequestTimeout:             3 * time.Second,
 			ShutdownTimeout:            3 * time.Second,
 			StderrLineLimit:            1024,
-		},
+		}),
 		nonce,
 		inbox,
 		diagnostics,
@@ -962,7 +970,7 @@ func TestRealChildArtifactDriftFailsBeforeSpawn(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			owner, startErr := Start(
-				Config{
+				realProcessConfig(t, Config{
 					BinaryPath:                 binaryPath,
 					BinarySHA256:               testCase.binaryDigest,
 					QualificationReceiptPath:   receiptPath,
@@ -970,7 +978,7 @@ func TestRealChildArtifactDriftFailsBeforeSpawn(t *testing.T) {
 					RequestTimeout:             time.Second,
 					ShutdownTimeout:            time.Second,
 					StderrLineLimit:            256,
-				},
+				}),
 				nonce,
 				simulationcontrol.NewProposalInbox(),
 				&diagnosticCollector{},
@@ -993,7 +1001,7 @@ func TestRealChildTerminalExitClosesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner, err := Start(
-		Config{
+		realProcessConfig(t, Config{
 			BinaryPath:                 binaryPath,
 			BinarySHA256:               fileDigest(t, binaryPath),
 			QualificationReceiptPath:   receiptPath,
@@ -1001,7 +1009,7 @@ func TestRealChildTerminalExitClosesSession(t *testing.T) {
 			RequestTimeout:             time.Second,
 			ShutdownTimeout:            time.Second,
 			StderrLineLimit:            256,
-		},
+		}),
 		nonce,
 		simulationcontrol.NewProposalInbox(),
 		&diagnosticCollector{},
@@ -1037,7 +1045,7 @@ func TestRealSessionMultipleStarts(t *testing.T) {
 	}
 	diagnostics := &diagnosticCollector{}
 	owner, err := Start(
-		Config{
+		realProcessConfig(t, Config{
 			BinaryPath:                 binaryPath,
 			BinarySHA256:               fileDigest(t, binaryPath),
 			QualificationReceiptPath:   receiptPath,
@@ -1045,7 +1053,7 @@ func TestRealSessionMultipleStarts(t *testing.T) {
 			RequestTimeout:             3 * time.Second,
 			ShutdownTimeout:            3 * time.Second,
 			StderrLineLimit:            1024,
-		},
+		}),
 		nonce,
 		simulationcontrol.NewProposalInbox(),
 		diagnostics,
@@ -1060,13 +1068,17 @@ func TestRealSessionMultipleStarts(t *testing.T) {
 		helloID,
 		"node.hello.challenge",
 		map[string]any{
-			"actorCapacity":           8,
-			"expectedBuildIdentity":   realBuildIdentity(t),
-			"expectedModelManifest":   "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
-			"expectedProfileManifest": "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
-			"instanceCapacity":        8,
-			"runtimeNodeId":           "rnode_realchildtest",
-			"simulationNodeId":        "snode_session",
+			"actorCapacity":              8,
+			"expectedBuildIdentity":      realBuildIdentity(t),
+			"expectedConfigIdentity":     realGameplayConfigIdentity,
+			"expectedModelManifest":      "65e136d20dfa244db4ce42007cfe1c0411b7f807b635209704b6ef51e93d08b1",
+			"expectedNavigationIdentity": realGameplayNavigationIdentity,
+			"expectedPhysicsIdentity":    realGameplayPhysicsIdentity,
+			"expectedProfileManifest":    "c7ff3d1f582625d18028c4ce20fb808b2e56e10084c4ccf61790b0c5f486c424",
+			"expectedWireIdentity":       realGameplayWireIdentity,
+			"instanceCapacity":           8,
+			"runtimeNodeId":              "rnode_realchildtest",
+			"simulationNodeId":           "snode_session",
 		},
 		"node.hello.receipt",
 	); err != nil {
@@ -1333,12 +1345,55 @@ func realControllerConfig(t *testing.T) simulationcontrol.ControllerConfig {
 			PlatformQualification: "implementation-qualified-windows-x64",
 		},
 		Capacity:           simulationcontrol.NodeCapacity{Instances: 8, Actors: 8},
-		ConfigIdentity:     digest(strings.Repeat("d", 64)),
-		NavigationIdentity: digest(strings.Repeat("e", 64)),
-		PhysicsIdentity:    digest(strings.Repeat("f", 64)),
+		ConfigIdentity:     digest(realGameplayConfigIdentity),
+		GameplayPackageID:  "personal-world-combat-v1",
+		NavigationIdentity: digest(realGameplayNavigationIdentity),
+		PhysicsIdentity:    digest(realGameplayPhysicsIdentity),
+		WireIdentity:       digest(realGameplayWireIdentity),
+		MappingIdentity:    digest(realGameplayMappingIdentity),
 		DrainDeadline:      time.Second,
 		StopDeadline:       time.Second,
 	}
+}
+
+// realProcessConfig 为真实 child 注入同一 production package 本机选择。
+func realProcessConfig(t *testing.T, config Config) Config {
+	t.Helper()
+	config.GameplayPackageRoot = realGameplayPackageRoot(t)
+	config.GameplayArenaRoot = realGameplayArenaRoot(t)
+	config.GameplayPackageID = "personal-world-combat-v1"
+	digest := func(value string) simulationcontrol.Digest {
+		result, err := simulationcontrol.NewDigest(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	config.ConfigIdentity = digest(realGameplayConfigIdentity)
+	config.NavigationIdentity = digest(realGameplayNavigationIdentity)
+	config.PhysicsIdentity = digest(realGameplayPhysicsIdentity)
+	config.WireIdentity = digest(realGameplayWireIdentity)
+	return config
+}
+
+// realGameplayPackageRoot 返回仓库内 production package 的绝对目录。
+func realGameplayPackageRoot(t *testing.T) string {
+	t.Helper()
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(repositoryRoot, "shared", "contracts", "gameplay", "battle", "packages", "personal-world-combat-v1")
+}
+
+// realGameplayArenaRoot 返回仓库内 production arena source 的绝对目录。
+func realGameplayArenaRoot(t *testing.T) string {
+	t.Helper()
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(repositoryRoot, "simulation", "content", "personal-world-combat-v1")
 }
 
 // realBuildIdentity 从当前 CI build identity 读取已嵌入 qualified child 的 exact target identity。

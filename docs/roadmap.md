@@ -568,6 +568,25 @@ evidence 仅解锁 B0.8 提案，不代表可玩内容或最终资格；回滚�
 再由使用者显式运行包含完整 battle 网络矩阵、1/5/8 actor、安全/生命周期、连续 verify、
 长时 soak 与 finalize 的当前产品资格。
 
+**当前状态（2026-08-06）：**B0.8 定向开发验收、主 specs 同步和归档前审计完成，
+`deliver-personal-world-combat-slice` 已归档。production package、Go selector、
+C++ Jolt/Detour arena、deterministic encounter、combat wire/replication、Unity pure C#
+input/replica/projector、Prefab、Scene、Animator、VFX、Audio、Input Actions、16 项非空
+resource catalog、HUD 与 Cinemachine 接线均已落地。当前
+`ConfigIdentity=d6e3f016e4c29f4ad3916759e5ea059443fe37145dbe51621704180e50bc555b`；
+Unity EditMode 63 项、PlayMode 16 项通过，Development/Release Windows Player build smoke
+通过，双 Player 定向运行 `3afb3466377d48d584242e1c2841c5ff` 与 PersonalWorld combat
+targeted 运行 `606588b4ac924d30ac16cd37d165e7ab` 均通过，closed validation 的 9 项
+`quality.ps1 check-change` 全部成功且 cleanup 无残留。
+
+该 evidence 只证明 `deliver-personal-world-combat-slice` 的定向 development-ready，不代表
+完整 battle network、产品 combat 或发布候选已 qualified；本次未运行 `quality.ps1 qualify`、
+12 场景全矩阵、连续 verify、长时 soak 或 finalize。回滚提交边界以本 change 的实现提交为
+原子单位：production package及其 ConfigIdentity、三端 consumer/wire mapping、C++ encounter、
+Unity content/runtime 与对应验证和文档必须一并回退，不允许只回退平衡数据、Prefab、wire字段
+或任一消费端；已运行实例仍按不可变 identity 终结，回滚后的 package 只能通过更高 assignment
+generation 建立新 SimulationInstance。
+
 ## 条件路线
 
 额外 gateway、Go 微服务拆分、gRPC、跨地域运行路由、Addressables 和 Unity DOTS/ECS 没有固定排期，只在扩缩容、故障隔离、资源分发、profile 或团队 ownership 证据成立后进入独立 OpenSpec change。独立 C++ Game Simulation Server 已由 B0 路线确定，但它不自动证明还需要 gRPC、匹配服、Room、Party 或其他服务拆分。

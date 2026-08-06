@@ -371,3 +371,9 @@ qualification-only 私有 control snapshot 和 OS process sampler 交叉核对�
 `DeliveredAt - ReceivedAt`，intentional loss 与客户端 snapshot receipt gap 分别由
 disposition、cadence 和 baseline recovery 证据解释。唯一操作流程见
 `docs/battle-network-qualification.md`。
+
+## B0.8 PersonalWorld production combat
+
+`personal-world-combat-v1` 是首个非 fixture gameplay package。Go Composition Root 只选择 package root 并校验 Config/Nav/Physics/Wire identity；每个 C++ `SimulationInstance` 在 start 前加载 immutable authority catalog、Jolt collision 与 Detour navigation，active timeline 不 hot reload。S0 创建最多 8 个稳定 player slots、3 个 ordinary monsters 和 1 个 Boss；只有 current session 对应的 player slot 对该 session 可见，怪物、Boss 与 projectile 属于共享 instance authority。
+
+战斗管线以 committed Tick 发布 actor generation、archetype、weapon、health/max-health、phase/dead、transform、acknowledgement 和可靠 ability/lifecycle journal。MySQL/Redis、Go handler、Unity Scene、Animator、VFX 和 HUD 均不拥有 damage、death、AI 或 encounter-complete 最终事实；`encounter-complete` 只是 C++ 暂态 projection，不代表奖励或结算。

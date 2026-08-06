@@ -14,8 +14,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UnityEditorPath,
 
-    # TimeoutSeconds 覆盖 server build、环境启动与既有五分钟 soak。
-    [ValidateRange(600, 1800)]
+    # TimeoutSeconds 覆盖 server build、环境启动、既有五分钟 soak 与 battle 双 Player 场景。
+    [ValidateRange(600, 2400)]
     [int]$TimeoutSeconds = 1200
 )
 
@@ -34,6 +34,13 @@ $PowerShell7Path = ""
 $ServerConfig = Join-Path $RepositoryRoot "server\config\local.yaml"
 $ServerRuntimeConfig = Join-Path $RunDirectory "local-qualification-server.yaml"
 $ServerBinary = Join-Path $RunDirectory "server.exe"
+$GameplayPackageRoot = Join-Path $RepositoryRoot (
+    "shared\contracts\gameplay\battle\packages\personal-world-combat-v1")
+$GameplayArenaRoot = Join-Path $RepositoryRoot (
+    "simulation\content\personal-world-combat-v1")
+# ConfigIdentity 是五份 closed production document 的冻结聚合摘要；selector 会从 bytes 独立重算。
+$GameplayConfigIdentity =
+    "d6e3f016e4c29f4ad3916759e5ea059443fe37145dbe51621704180e50bc555b"
 $PublicApiPort = 8080
 $DiagnosticPort = 8081
 $GameplayPort = 8444
@@ -222,24 +229,24 @@ function Write-RunLocalServerConfig {
         Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\model\manifest.json"
     $profileManifest =
         Join-Path $RepositoryRoot "shared\contracts\fixtures\battle\network-profile\manifest.json"
-    $controlConfig =
-        Join-Path $RepositoryRoot "shared\contracts\fixtures\simulation-control\runtime\config\control-baseline-v1.json"
-    $controlNavigation =
-        Join-Path $RepositoryRoot "shared\contracts\fixtures\simulation-control\runtime\navigation\control-baseline-v1.json"
-    $controlPhysics =
-        Join-Path $RepositoryRoot "shared\contracts\fixtures\simulation-control\runtime\physics\control-baseline-v1.json"
+    $packagePath = Join-Path $GameplayPackageRoot "package.json"
+    $bindingsPath = Join-Path $GameplayPackageRoot "bindings.json"
     foreach ($path in @(
         $simulationBinary,
         $simulationReceipt,
         $simulationIdentityPath,
         $modelManifest,
         $profileManifest,
-        $controlConfig,
-        $controlNavigation,
-        $controlPhysics
+        $packagePath,
+        $bindingsPath
     )) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "client-v1 local soak simulation prerequisite is missing"
+        }
+    }
+    foreach ($root in @($GameplayPackageRoot, $GameplayArenaRoot)) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            throw "client-v1 local production gameplay root is missing"
         }
     }
     $source = (
@@ -289,8 +296,8 @@ function Write-RunLocalServerConfig {
             -Replacement (
                 "  gameplayTcp:`n    address: 127.0.0.1:$GameplayPort")
     }
-    if ($source -match '(?m)^simulationControl:\s*$') {
-        throw "client-v1 local config already owns simulationControl"
+    if ($source -match '(?m)^(simulationControl|gameplayPackage):\s*$') {
+        throw "client-v1 local config already owns production simulation configuration"
     }
     $identity =
         Get-Content -LiteralPath $simulationIdentityPath -Raw -Encoding utf8 |
@@ -298,7 +305,21 @@ function Write-RunLocalServerConfig {
     if ([string]$identity.target_identity -notmatch '^[0-9a-f]{64}$') {
         throw "client-v1 local soak simulation identity is invalid"
     }
-    $control = @"
+    $package = Get-Content -LiteralPath $packagePath -Raw -Encoding utf8 |
+        ConvertFrom-Json
+    $bindings = Get-Content -LiteralPath $bindingsPath -Raw -Encoding utf8 |
+        ConvertFrom-Json
+    $navigationIdentity = [string]$bindings.navigation_identity
+    $physicsIdentity = [string]$bindings.physics_identity
+    $wireIdentity = [string]$package.wire_binding.manifest_sha256
+    if ([string]$package.package_id -cne "personal-world-combat-v1" -or
+        [string]$package.qualification_state -cne "production" -or
+        $navigationIdentity -cnotmatch '^[0-9a-f]{64}$' -or
+        $physicsIdentity -cnotmatch '^[0-9a-f]{64}$' -or
+        $wireIdentity -cnotmatch '^[0-9a-f]{64}$') {
+        throw "client-v1 local production gameplay package identity is invalid"
+    }
+    $production = @"
 simulationControl:
   enabled: true
   binaryPath: $(Quote-YamlSingle $simulationBinary)
@@ -308,9 +329,9 @@ simulationControl:
   buildIdentity: $([string]$identity.target_identity)
   modelManifest: $(Get-LowerSha256 $modelManifest)
   profileManifest: $(Get-LowerSha256 $profileManifest)
-  configIdentity: $(Get-LowerSha256 $controlConfig)
-  navigationIdentity: $(Get-LowerSha256 $controlNavigation)
-  physicsIdentity: $(Get-LowerSha256 $controlPhysics)
+  configIdentity: $GameplayConfigIdentity
+  navigationIdentity: $navigationIdentity
+  physicsIdentity: $physicsIdentity
   instanceCapacity: $SimulationInstanceCapacity
   actorCapacity: $SimulationActorCapacity
   frameBytes: $SimulationFrameBytes
@@ -324,10 +345,18 @@ simulationControl:
   qualificationMode: true
   qualificationRunId: bqrun_$RunId
   qualificationSampleInterval: $SimulationQualificationSampleInterval
+gameplayPackage:
+  rootPath: $(Quote-YamlSingle $GameplayPackageRoot)
+  arenaRootPath: $(Quote-YamlSingle $GameplayArenaRoot)
+  packageId: personal-world-combat-v1
+  configIdentity: $GameplayConfigIdentity
+  navigationIdentity: $navigationIdentity
+  physicsIdentity: $physicsIdentity
+  wireIdentity: $wireIdentity
 "@
     [IO.File]::WriteAllText(
         $ServerRuntimeConfig,
-        $source.TrimEnd() + "`n" + $control,
+        $source.TrimEnd() + "`n" + $production,
         [Text.UTF8Encoding]::new($false)
     )
 }

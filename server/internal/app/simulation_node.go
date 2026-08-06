@@ -15,6 +15,7 @@ import (
 
 	"github.com/jinwiforz/ihomeland/server/internal/battlequalification/processmetrics"
 	"github.com/jinwiforz/ihomeland/server/internal/config"
+	"github.com/jinwiforz/ihomeland/server/internal/gameplaypackage"
 	"github.com/jinwiforz/ihomeland/server/internal/personalworld"
 	"github.com/jinwiforz/ihomeland/server/internal/placement"
 	"github.com/jinwiforz/ihomeland/server/internal/simulationcontrol"
@@ -76,9 +77,10 @@ type simulationNodeComponent struct {
 }
 
 // newSimulationNodeComponent 解析配置并生成不可复活 node identities，不启动进程。
-func newSimulationNodeComponent(settings config.SimulationControl, battle config.BattleUDPPolicy, mysql *storagemysql.Component, tasks *TaskOwner, clock Clock, ids IDGenerator, metrics simulationNodeObserver, logger *slog.Logger) (*simulationNodeComponent, error) {
+func newSimulationNodeComponent(settings config.SimulationControl, selected gameplaypackage.Selection, battle config.BattleUDPPolicy, mysql *storagemysql.Component, tasks *TaskOwner, clock Clock, ids IDGenerator, metrics simulationNodeObserver, logger *slog.Logger) (*simulationNodeComponent, error) {
 	if !settings.Enabled || mysql == nil || tasks == nil || clock == nil ||
-		ids == nil || metrics == nil || logger == nil {
+		ids == nil || metrics == nil || logger == nil || selected.RootPath == "" ||
+		selected.PackageID == "" {
 		return nil, errors.New("simulation node component dependencies are invalid")
 	}
 	nodeMaterial, err := ids.NewID()
@@ -112,15 +114,23 @@ func newSimulationNodeComponent(settings config.SimulationControl, battle config
 	if err != nil {
 		return nil, err
 	}
-	configIdentity, err := digest(settings.ConfigIdentity)
+	configIdentity, err := digest(selected.ConfigIdentity)
 	if err != nil {
 		return nil, err
 	}
-	navigationIdentity, err := digest(settings.NavigationIdentity)
+	navigationIdentity, err := digest(selected.NavigationIdentity)
 	if err != nil {
 		return nil, err
 	}
-	physicsIdentity, err := digest(settings.PhysicsIdentity)
+	physicsIdentity, err := digest(selected.PhysicsIdentity)
+	if err != nil {
+		return nil, err
+	}
+	wireIdentity, err := digest(selected.WireIdentity)
+	if err != nil {
+		return nil, err
+	}
+	mappingIdentity, err := digest(selected.MappingIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -171,8 +181,11 @@ func newSimulationNodeComponent(settings config.SimulationControl, battle config
 				Actors:    settings.ActorCapacity,
 			},
 			ConfigIdentity:     configIdentity,
+			GameplayPackageID:  selected.PackageID,
 			NavigationIdentity: navigationIdentity,
 			PhysicsIdentity:    physicsIdentity,
+			WireIdentity:       wireIdentity,
+			MappingIdentity:    mappingIdentity,
 			DrainDeadline:      settings.DrainTimeout,
 			StopDeadline:       settings.ShutdownTimeout,
 			QualificationMode:  settings.QualificationMode,
@@ -186,6 +199,13 @@ func newSimulationNodeComponent(settings config.SimulationControl, battle config
 			RequestTimeout:             settings.RequestTimeout,
 			ShutdownTimeout:            settings.ShutdownTimeout,
 			StderrLineLimit:            settings.StderrLineBytes,
+			GameplayPackageRoot:        selected.RootPath,
+			GameplayArenaRoot:          selected.ArenaRootPath,
+			GameplayPackageID:          selected.PackageID,
+			ConfigIdentity:             configIdentity,
+			NavigationIdentity:         navigationIdentity,
+			PhysicsIdentity:            physicsIdentity,
+			WireIdentity:               wireIdentity,
 			BattleUDPEnabled:           true,
 			BattleUDPBindHost:          bindHost,
 			BattleUDPBindPort:          uint16(bindPort),
