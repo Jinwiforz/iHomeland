@@ -1,20 +1,21 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  iHomeland 是一款面向 PC 的开放世界在线动作角色扮演游戏。
+  产品方向以 README.md 为准。
+  文档和 OpenSpec artifacts 默认使用中文，代码标识符、协议字段和外部 API 使用英文。
+  当前行为采用能够手写和验证的最简单结构，避免为未来需求预建抽象。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - 一个 change 只解决一个明确问题，并说明进入条件、产出和完成条件
+    - 使用玩家可见行为说明价值，明确不在本次 change 中处理的内容
+  design:
+    - 记录关键边界、失败方式、验证方法和无法轻易回滚的决策
+    - 只有具体问题和证据成立时才引入设计模式或新抽象
+  specs:
+    - 每个 requirement 至少包含一个可验收 scenario
+    - 区分已确认事实、设计决策和仍待验证的假设
+  tasks:
+    - 每个 task 产生一个可检查的结果，并写明对应验证方式
+    - 任务应保持边界清晰，并避免混入无关改动

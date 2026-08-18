@@ -544,6 +544,7 @@ playground.xcworkspace
 ### iHomeland workspace
 /.agents/
 /.codex/
+/.local/
 /client/[Ll]ibrary/
 /client/[Tt]emp/
 /client/[Oo]bj/
